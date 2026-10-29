@@ -1,0 +1,30 @@
+{
+  "name": "@athya-hq/process-rules",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Work rules for repos that track work in GitHub Issues: setup, agent identity, push and PR checks.",
+  "license": "MIT",
+  "type": "module",
+  "packageManager": "pnpm@12.9.0",
+  "engines": {
+    "node": ">=24.15"
+  },
+  "bin": {
+    "process-rules": "dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "node --test --experimental-test-coverage --test-coverage-lines=95 --test-coverage-functions=95 --test-coverage-branches=90 --test-coverage-exclude=src/**/*.test.ts src/**/*.test.ts",
+    "smoke": "node dist/cli.js --version",
+    "scan:secrets": "gitleaks dir --no-banner --redact --config=.gitleaks.toml . && trufflehog filesystem . --no-update --fail --results=verified,unknown --exclude-paths=.trufflehog-exclude",
+    "check": "pnpm typecheck && pnpm test && pnpm build && pnpm smoke"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.6",
+    "typescript": "5.9.3"
+  }
+}
