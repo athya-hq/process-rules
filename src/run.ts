@@ -9,12 +9,13 @@ export type { Output } from './types.ts';
 export const USAGE = `Usage: process-rules <command>
 
 Commands:
-  machine    Set up this machine so agent sessions work as the agent account
-  doctor     Check agent sessions here can work as the agent account
-  help       Show this text
-  version    Print the installed version
+  machine [agent]  Set up this machine so agent sessions work as the agent account
+  doctor [agent]   Check agent sessions here can work as the agent account
+  help             Show this text
+  version          Print the installed version
 
-Both read the agent account from .github/process-rules.json in the repo.
+Without [agent], both use the agent account .github/process-rules.json names
+in the repo around the working directory.
 More commands arrive as they are built: onboard.`;
 
 /** The version in this package's package.json, from src/ or dist/ alike. */
@@ -44,8 +45,10 @@ export async function run(
   sys: () => Sys | Promise<Sys>,
 ): Promise<number> {
   const [command, ...rest] = args;
-  if (rest.length > 0) {
-    io.err(`process-rules: unexpected argument "${rest[0]}"`);
+  const takesAgent = command === 'machine' || command === 'doctor';
+  const extra = rest[takesAgent ? 1 : 0];
+  if (extra !== undefined) {
+    io.err(`process-rules: unexpected argument "${extra}"`);
     io.err(USAGE);
     return 2;
   }
@@ -64,7 +67,7 @@ export async function run(
     case 'machine':
     case 'doctor':
       try {
-        return await (command === 'machine' ? machine : doctor)(await sys(), io);
+        return await (command === 'machine' ? machine : doctor)(await sys(), io, rest[0]);
       } catch (error) {
         io.err(`process-rules ${command}: ${error instanceof Error ? error.message : String(error)}`);
         return 1;

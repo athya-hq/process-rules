@@ -72,7 +72,9 @@ describe('run', () => {
       assert.deepEqual(await capture([command], () => sys), {
         code: 1,
         out: [],
-        err: [`process-rules ${command}: not inside a git repository`],
+        err: [
+          `process-rules ${command}: name the agent account after the command, or run it in a repo whose .github/process-rules.json names one`,
+        ],
       });
     });
   }
@@ -81,6 +83,19 @@ describe('run', () => {
     const { code, err } = await capture(['doctor'], () => new FakeSys());
     assert.equal(code, 1);
     assert.match(err.at(-1) ?? '', /must not push as ExampleBot/);
+  });
+
+  it('passes the named agent on', async () => {
+    const { err } = await capture(['doctor', 'OtherBot'], () => new FakeSys());
+    assert.match(err.at(-1) ?? '', /must not push as OtherBot/);
+  });
+
+  it('refuses a second argument after the agent', async () => {
+    assert.deepEqual(await capture(['machine', 'OtherBot', 'now']), {
+      code: 2,
+      out: [],
+      err: ['process-rules: unexpected argument "now"', USAGE],
+    });
   });
 
   it('reports a thrown non-error', async () => {

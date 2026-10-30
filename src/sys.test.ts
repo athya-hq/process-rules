@@ -60,17 +60,17 @@ describe('realSys', () => {
       req.on('end', () => {
         seen.push({ ...(req.headers.authorization ? { auth: req.headers.authorization } : {}), body, ...(req.method ? { method: req.method } : {}) });
         res.statusCode = req.url === '/empty' ? 204 : 201;
+        res.setHeader('X-OAuth-Scopes', 'repo, workflow');
         res.end(req.url === '/empty' ? '' : '{"ok":true}');
       });
     });
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
     const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     try {
-      assert.deepEqual(await sys.http(`${base}/x`, { method: 'POST', token: 't', body: { a: 1 } }), {
-        status: 201,
-        json: { ok: true },
-      });
-      assert.deepEqual(await sys.http(`${base}/empty`), { status: 204, json: null });
+      const posted = await sys.http(`${base}/x`, { method: 'POST', token: 't', body: { a: 1 } });
+      assert.deepEqual([posted.status, posted.json, posted.headers?.['x-oauth-scopes']], [201, { ok: true }, 'repo, workflow']);
+      const empty = await sys.http(`${base}/empty`);
+      assert.deepEqual([empty.status, empty.json], [204, null]);
       assert.deepEqual(seen, [
         { auth: 'Bearer t', body: '{"a":1}', method: 'POST' },
         { body: '', method: 'GET' },

@@ -49,7 +49,11 @@ export function realSys(): Sys {
         ...(options.body ? { body: JSON.stringify(options.body) } : {}),
       });
       const text = await response.text();
-      return { status: response.status, json: text ? JSON.parse(text) : null };
+      return {
+        status: response.status,
+        json: text ? JSON.parse(text) : null,
+        headers: Object.fromEntries(response.headers),
+      };
     },
     async ask(question) {
       const rl = createInterface({ input: process.stdin, output: process.stdout });

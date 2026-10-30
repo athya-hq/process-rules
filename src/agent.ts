@@ -1,6 +1,6 @@
 import type { Sys } from './types.ts';
 
-/** The adopting repo's settings file, written by `setup`. */
+/** The adopting repo's settings file, written by `onboard`. */
 export const SETTINGS_PATH = '.github/process-rules.json';
 /** The keychain item holding the agent account's token: service, account = login. */
 export const KEYCHAIN_SERVICE = 'process-rules';
@@ -9,9 +9,16 @@ export const NO_TOKEN = 'process-rules-no-agent-token';
 const SECURITY = '/usr/bin/security';
 export const API = 'https://api.github.com';
 const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/;
-/** The GitHub remotes `repoAt` accepts: HTTPS, scp-like SSH, or SSH URLs, on github.com only. */
-const GITHUB_REMOTE =
-  /^(?:https:\/\/(?:[^@/\s]+@)?github\.com\/|git@github\.com:|ssh:\/\/git@(?:ssh\.)?github\.com(?::\d+)?\/)([^/\s]+\/[^/\s]+?)(?:\.git)?\/?$/;
+/** The classic-token scopes an agent account needs (docs/decisions.md). */
+export const TOKEN_SCOPES = ['repo', 'workflow', 'read:org', 'project', 'write:ssh_signing_key'];
+/** Broader scopes that include a needed one. */
+const INCLUDED_BY: Record<string, string[]> = {
+  'read:org': ['write:org', 'admin:org'],
+  'write:ssh_signing_key': ['admin:ssh_signing_key'],
+};
+/** Days before a token ends that `doctor` warns and `machine` offers a new one. */
+export const EXPIRY_WARNING_DAYS = 14;
+const DAY_MS = 86_400_000;
 /** What a session runs instead of ssh: GitHub goes over HTTPS, so no SSH key of the owner's is used. */
 export const NO_SSH = `echo 'process-rules: SSH is off in agent sessions; GitHub goes over HTTPS' >&2; false`;
 
@@ -29,7 +36,7 @@ export interface Settings {
 export function loadSettings(sys: Sys, root: string): Settings {
   const path = `${root}/${SETTINGS_PATH}`;
   if (!sys.exists(path)) {
-    throw new Error(`${SETTINGS_PATH} not found in ${root}; run process-rules setup`);
+    throw new Error(`${SETTINGS_PATH} not found in ${root}; name the agent account after the command`);
   }
   const raw: unknown = JSON.parse(sys.read(path));
   const owner = field(raw, 'owner');
@@ -51,15 +58,20 @@ function field(raw: unknown, name: string): string {
   return value;
 }
 
-/** The git repository containing the working directory, and its GitHub slug. */
-export function repoAt(sys: Sys): { root: string; slug: string } {
+/**
+ * The agent account a command acts for: the login named after it, else the
+ * one the settings file of the repo around the working directory names.
+ */
+export function agentFrom(sys: Sys, named: string | undefined): string {
+  if (named !== undefined) {
+    if (!LOGIN.test(named)) throw new Error(`"${named}" is not a GitHub login`);
+    return named;
+  }
   const top = sys.exec('git', ['rev-parse', '--show-toplevel'], { cwd: sys.cwd });
-  if (top.code !== 0) throw new Error('not inside a git repository');
-  const root = top.stdout.trim();
-  const url = sys.exec('git', ['remote', 'get-url', 'origin'], { cwd: root }).stdout.trim();
-  const match = GITHUB_REMOTE.exec(url);
-  if (!match?.[1]) throw new Error(`origin is not a GitHub repository: "${url}"`);
-  return { root, slug: match[1] };
+  if (top.code !== 0) {
+    throw new Error(`name the agent account after the command, or run it in a repo whose ${SETTINGS_PATH} names one`);
+  }
+  return loadSettings(sys, top.stdout.trim()).agent;
 }
 
 export interface Paths {
@@ -69,9 +81,9 @@ export interface Paths {
   gh: string;
 }
 
-/** Where `machine` keeps the agent's files on this machine. */
+/** Where `machine` keeps an agent account's files on this machine: one folder per account. */
 export function pathsFor(home: string, agent: string): Paths {
-  const dir = `${home}/.config/process-rules`;
+  const dir = `${home}/.config/process-rules/${agent.toLowerCase()}`;
   return {
     key: `${home}/.ssh/${agent.toLowerCase()}_signing`,
     dir,
@@ -190,11 +202,46 @@ export async function accountId(sys: Sys, login: string): Promise<number> {
   return id;
 }
 
-/** The login a token acts as, or undefined when GitHub refuses it. */
-export async function tokenLogin(sys: Sys, token: string): Promise<string | undefined> {
-  const { status, json } = await sys.http(`${API}/user`, { token });
+export interface TokenInfo {
+  login: string;
+  /** Undefined when GitHub reports none: not a classic token. */
+  scopes: readonly string[] | undefined;
+  /** Undefined when the token never expires. */
+  expires: Date | undefined;
+}
+
+/** What GitHub says about a token, or undefined when it refuses it. */
+export async function tokenInfo(sys: Sys, token: string): Promise<TokenInfo | undefined> {
+  const { status, json, headers = {} } = await sys.http(`${API}/user`, { token });
   const login = (json as { login?: unknown } | null)?.login;
-  return status === 200 && typeof login === 'string' ? login : undefined;
+  if (status !== 200 || typeof login !== 'string') return undefined;
+  const scopes = headers['x-oauth-scopes'];
+  const expiry = headers['github-authentication-token-expiration'];
+  const expires = expiry === undefined ? undefined : new Date(expiry);
+  return {
+    login,
+    scopes: scopes === undefined ? undefined : scopes.split(',').map((scope) => scope.trim()).filter(Boolean),
+    expires: expires && !Number.isNaN(expires.getTime()) ? expires : undefined,
+  };
+}
+
+/** Why a token cannot be the agent's, or undefined when it can. */
+export function tokenProblem(token: string, info: TokenInfo | undefined, agent: string): string | undefined {
+  if (!info) return 'GitHub refuses the token (expired or revoked?)';
+  if (!sameLogin(info.login, agent)) return `the token acts as ${info.login}, not ${agent}`;
+  if (!token.startsWith('ghp_') || !info.scopes) {
+    return 'it is not a classic token, which process-rules needs (see its docs/decisions.md)';
+  }
+  const { scopes } = info;
+  const missing = TOKEN_SCOPES.filter(
+    (scope) => !scopes.includes(scope) && !(INCLUDED_BY[scope] ?? []).some((wider) => scopes.includes(wider)),
+  );
+  return missing.length > 0 ? `the token lacks the scopes ${missing.join(', ')}` : undefined;
+}
+
+/** Whole days until `expires`, rounded down; undefined for a token that never expires. */
+export function daysLeft(expires: Date | undefined, now: Date): number | undefined {
+  return expires && Math.floor((expires.getTime() - now.getTime()) / DAY_MS);
 }
 
 /** The signing keys GitHub lists publicly for an account, as "type body". */

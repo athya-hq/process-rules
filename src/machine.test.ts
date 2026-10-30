@@ -2,19 +2,15 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { pathsFor, sessionScript } from './agent.ts';
-import { AGENT, AGENT_ID, FakeSys, HOME, KEY, PRIVATE_KEY, PUBLIC_KEY, TOKEN, capture } from './fake.test.ts';
-import { machine, tokenInstructions } from './machine.ts';
+import { AGENT, AGENT_ID, CLASSIC, FakeSys, HOME, KEY, PRIVATE_KEY, PUBLIC_KEY, TOKEN, capture } from './fake.test.ts';
+import { TOKEN_PAGE, machine, tokenInstructions } from './machine.ts';
 
-const SESSION = `${HOME}/.config/process-rules/session.sh`;
-const VERIFIED = {
-  status: 200,
-  json: { committer: { login: AGENT }, commit: { verification: { verified: true, reason: 'valid' } } },
-};
+const SESSION = `${HOME}/.config/process-rules/examplebot/session.sh`;
 
 /** A machine with nothing set up, answering yes to everything. */
 function fresh(): FakeSys {
   const sys = new FakeSys();
-  sys.answers = ['y', 'y', 'y', 'y', 'y'];
+  sys.answers = ['y', 'y', 'y', 'y'];
   sys.secrets = [TOKEN];
   sys.acceptToken(TOKEN, AGENT);
   let registered = false;
@@ -26,60 +22,55 @@ function fresh(): FakeSys {
     status: 200,
     json: registered ? [{ key: 'ssh-ed25519 AAAAkey' }] : [],
   }));
-  sys.route('GET', '/repos/example-org/example-app/commits/abc123', VERIFIED);
   return sys;
 }
 
-async function setUp(sys: FakeSys): Promise<{ code: number; out: string[]; err: string[] }> {
+async function setUp(sys: FakeSys, named?: string): Promise<{ code: number; out: string[]; err: string[] }> {
   const { io, out, err } = capture();
-  return { code: await machine(sys, io), out, err };
+  return { code: await machine(sys, io, named), out, err };
 }
 
 describe('machine', () => {
-  it('sets up a fresh machine and proves a Verified commit', async () => {
+  it('sets up a fresh machine', async () => {
     const sys = fresh();
     const { code, out, err } = await setUp(sys);
     assert.deepEqual(err, []);
     assert.equal(code, 0);
     assert.equal(sys.token(AGENT), TOKEN);
     assert.equal(sys.files.get(SESSION), sessionScript(AGENT, AGENT_ID, pathsFor(HOME, AGENT)));
-    assert.deepEqual(sys.opened, ['https://github.com/settings/personal-access-tokens/new']);
-    assert.ok(out.includes('✓ GitHub shows the test commit Verified by ExampleBot'));
+    assert.deepEqual(sys.opened, [TOKEN_PAGE]);
     assert.ok(!out.join('\n').includes(TOKEN), 'the token is never printed');
+    assert.equal(out.at(-1), `machine: done. Agent sessions act as ExampleBot once they source ${SESSION}.`);
 
     const register = sys.requests.find((r) => r.method === 'POST');
     assert.deepEqual(register, {
       url: 'https://api.github.com/user/ssh_signing_keys',
       method: 'POST',
       token: TOKEN,
-      body: { title: 'process-rules example-org/example-app', key: PUBLIC_KEY },
+      body: { title: 'process-rules signing', key: PUBLIC_KEY },
     });
     assert.equal(sys.modes.get(SESSION), 0o600);
-    assert.ok(sys.dirs.indexOf(`${HOME}/.ssh`) >= 0);
-    assert.ok(out.includes('Deleted the throwaway branch process-rules/verify-examplebot-1000.'));
+    assert.ok(sys.dirs.includes(`${HOME}/.ssh`));
+    assert.ok(sys.dirs.includes(`${HOME}/.config/process-rules/examplebot/gh`));
     const keygen = sys.calls.find((c) => c.command === 'ssh-keygen');
     assert.deepEqual(keygen?.args, ['-q', '-t', 'ed25519', '-C', 'ExampleBot signing', '-N', '', '-f', KEY]);
+    assert.ok(!sys.calls.some((c) => c.command === 'git' && c.args[0] !== 'rev-parse'), 'touches no repository');
+  });
 
-    const git = sys.calls.filter((c) => c.command === 'git' && c.env);
-    assert.deepEqual(
-      git.map((c) => c.args.slice(0, 2).join(' ')),
-      ['init -q', 'fetch -q', 'commit-tree -S', 'push -q', 'push -q'],
-    );
-    assert.equal(git[0]?.env?.GH_TOKEN, TOKEN);
-    assert.equal(git[0]?.env?.GIT_COMMITTER_EMAIL, '42+ExampleBot@users.noreply.github.com');
-    assert.equal(git.at(-1)?.args[3], ':refs/heads/process-rules/verify-examplebot-1000');
-    assert.deepEqual(sys.calls.at(-1)?.args, ['-rf', '/tmp/verify']);
+  it('needs no repository when the agent is named', async () => {
+    const sys = fresh();
+    sys.inRepo = false;
+    sys.files.clear();
+    assert.equal((await setUp(sys, AGENT)).code, 0);
+    assert.ok(!sys.calls.some((c) => c.command === 'git'));
   });
 
   it('skips what is already done', async () => {
     const sys = new FakeSys().ready();
     sys.files.set(SESSION, sessionScript(AGENT, AGENT_ID, pathsFor(HOME, AGENT)));
-    sys.route('GET', '/repos/example-org/example-app/commits/abc123', VERIFIED);
-    sys.answers = ['y'];
     const { code } = await setUp(sys);
     assert.equal(code, 0);
-    assert.equal(sys.asked.length, 1);
-    assert.match(sys.asked[0] ?? '', /Push one signed test commit/);
+    assert.deepEqual(sys.asked, []);
     assert.ok(!sys.calls.some((c) => c.command === 'ssh-keygen' && c.args[0] !== '-y'));
   });
 
@@ -96,7 +87,7 @@ describe('machine', () => {
       if (question.startsWith('Press Enter')) added = true;
       return ask(question);
     };
-    sys.answers = ['y', 'y', 'y', '', 'y', 'y'];
+    sys.answers = ['y', 'y', 'y', '', 'y'];
     const { code, out } = await setUp(sys);
     assert.equal(code, 0);
     assert.ok(out.includes("GitHub's API refused (HTTP 403). Add it in the browser, signed in as ExampleBot:"));
@@ -146,51 +137,60 @@ describe('machine', () => {
   it('accepts logins that differ only in case', async () => {
     const sys = fresh();
     sys.acceptToken(TOKEN, 'examplebot');
-    sys.route('GET', '/repos/example-org/example-app/commits/abc123', {
-      status: 200,
-      json: { committer: { login: 'examplebot' }, commit: { verification: { verified: true, reason: 'valid' } } },
-    });
     assert.equal((await setUp(sys)).code, 0);
   });
 
-  it('deletes the branch even when GitHub cannot be asked', async () => {
-    const sys = fresh();
-    sys.route('GET', '/repos/example-org/example-app/commits/abc123', () => {
-      throw new Error('down');
-    });
-    const { io, out } = capture();
-    await assert.rejects(machine(sys, io), /down/);
-    assert.ok(out.includes('Deleted the throwaway branch process-rules/verify-examplebot-1000.'));
-    assert.equal(sys.calls.at(-1)?.command, 'rm');
-  });
-
-  it('says so when the branch cannot be deleted', async () => {
-    const sys = fresh();
-    sys.execOverride = (call) =>
-      call.command === 'git' && call.args[3]?.startsWith(':') ? { code: 1, stdout: '', stderr: 'protected\n' } : undefined;
-    const { code, err } = await setUp(sys);
-    assert.equal(code, 0);
-    assert.deepEqual(err, ['machine: could not delete process-rules/verify-examplebot-1000; delete it on GitHub: protected']);
-  });
-
-  it('replaces a stored token GitHub refuses', async () => {
+  it('replaces a stored token that cannot stay', async () => {
     const sys = fresh();
     sys.setToken(AGENT, 'stale');
     const { code, out } = await setUp(sys);
     assert.equal(code, 0);
-    assert.ok(out.includes("The stored token is refused or is not ExampleBot's; replacing it."));
+    assert.ok(out.includes('The stored token cannot stay: GitHub refuses the token (expired or revoked?). Replacing it.'));
     assert.equal(sys.token(AGENT), TOKEN);
   });
 
-  for (const [secret, login, message] of [
-    ['', undefined, 'machine: GitHub refuses that token'],
-    ['bad', undefined, 'machine: GitHub refuses that token'],
-    ['owners', 'example-owner', 'machine: that token acts as example-owner; create it signed in as ExampleBot'],
+  it('offers to replace a stored token near its end', async () => {
+    const sys = fresh();
+    const old = 'ghp_old';
+    sys.setToken(AGENT, old);
+    sys.acceptToken(old, AGENT, { ...CLASSIC, 'github-authentication-token-expiration': '2026-11-05 12:00:00 UTC' });
+    sys.answers = ['y', 'y', 'y', 'y', 'y'];
+    const { code } = await setUp(sys);
+    assert.equal(code, 0);
+    assert.ok(sys.asked.includes('The stored token ends in 6 days. Replace it with a new one? [y/N] '));
+    assert.equal(sys.token(AGENT), TOKEN);
+  });
+
+  it('keeps a stored token near its end when told to', async () => {
+    const sys = fresh();
+    const old = 'ghp_old';
+    sys.setToken(AGENT, old);
+    sys.acceptToken(old, AGENT, { ...CLASSIC, 'github-authentication-token-expiration': '2026-11-05 12:00:00 UTC' });
+    sys.answers = ['y', 'n', 'y', 'y'];
+    assert.equal((await setUp(sys)).code, 0);
+    assert.equal(sys.token(AGENT), old);
+    assert.deepEqual(sys.opened, []);
+  });
+
+  it('says so when a pasted token never expires', async () => {
+    const sys = fresh();
+    sys.acceptToken(TOKEN, AGENT, { 'x-oauth-scopes': CLASSIC['x-oauth-scopes'] });
+    const { code, out } = await setUp(sys);
+    assert.equal(code, 0);
+    assert.ok(out.includes('This token never expires. A 90-day token limits what a leak can do; consider replacing it.'));
+  });
+
+  for (const [name, secret, login, headers, message] of [
+    ['an empty paste', '', undefined, CLASSIC, 'machine: GitHub refuses the token (expired or revoked?)'],
+    ['a refused token', 'ghp_bad', undefined, CLASSIC, 'machine: GitHub refuses the token (expired or revoked?)'],
+    ["the owner's token", 'ghp_owner', 'example-owner', CLASSIC, 'machine: the token acts as example-owner, not ExampleBot'],
+    ['a fine-grained token', 'github_pat_x', AGENT, {}, 'machine: it is not a classic token, which process-rules needs (see its docs/decisions.md)'],
+    ['a token short of scopes', 'ghp_thin', AGENT, { 'x-oauth-scopes': 'repo' }, 'machine: the token lacks the scopes workflow, read:org, project, write:ssh_signing_key'],
   ] as const) {
-    it(`refuses the pasted token "${secret}"`, async () => {
+    it(`refuses ${name}`, async () => {
       const sys = fresh();
       sys.secrets = [secret];
-      if (login) sys.acceptToken(secret, login);
+      if (login) sys.acceptToken(secret, login, headers);
       const { code, err } = await setUp(sys);
       assert.deepEqual({ code, err }, { code: 1, err: [message] });
       assert.equal(sys.keychain.size, 0);
@@ -211,54 +211,30 @@ describe('machine', () => {
     assert.deepEqual({ code, err }, { code: 1, err: ['machine: ssh-keygen failed: no space'] });
   });
 
-  for (const [index, step] of ['signing key', 'token', 'register key', 'session file', 'test commit'].entries()) {
+  for (const [index, step] of ['signing key', 'token', 'register key', 'session file'].entries()) {
     it(`stops without changing anything more when "${step}" is declined`, async () => {
       const sys = fresh();
       sys.answers = [...Array<string>(index).fill('y'), 'n'];
       const { code, err } = await setUp(sys);
       assert.deepEqual({ code, err }, { code: 1, err: [`machine: stopped at "${step}"; nothing after it was changed`] });
-      assert.equal(sys.files.has(SESSION), index > 3);
-    });
-  }
-
-  for (const [args, message] of [
-    ['init', 'machine: git init failed: boom'],
-    ['fetch', 'machine: git fetch failed: boom'],
-    ['commit-tree', 'machine: signing the test commit failed: boom'],
-    ['push', 'machine: pushing as ExampleBot failed: boom'],
-  ] as const) {
-    it(`reports a failed git ${args} and cleans up`, async () => {
-      const sys = fresh();
-      sys.execOverride = (call) =>
-        call.command === 'git' && call.args[0] === args ? { code: 1, stdout: '', stderr: 'boom\n' } : undefined;
-      const { code, err } = await setUp(sys);
-      assert.deepEqual({ code, err }, { code: 1, err: [message] });
-      assert.equal(sys.calls.at(-1)?.command, 'rm');
-    });
-  }
-
-  for (const [name, json, shown] of [
-    ['unverified', { committer: { login: AGENT }, commit: { verification: { verified: false, reason: 'unknown_key' } } }, `committer: ${AGENT}; verified: false (unknown_key)`],
-    ['committed by someone else', { committer: { login: 'example-owner' }, commit: { verification: { verified: true, reason: 'valid' } } }, 'committer: example-owner; verified: true (valid)'],
-    ['unreadable', null, 'committer: none; verified: undefined (no reason)'],
-  ] as const) {
-    it(`fails a test commit that is ${name}`, async () => {
-      const sys = fresh();
-      sys.route('GET', '/repos/example-org/example-app/commits/abc123', { status: 200, json });
-      const { code, out, err } = await setUp(sys);
-      assert.equal(code, 1);
-      assert.ok(out.includes(`  ${shown}`), out.join('\n'));
-      assert.deepEqual(err, ['machine: GitHub does not show the commit Verified by ExampleBot']);
+      assert.equal(sys.files.has(SESSION), false);
     });
   }
 });
 
 describe('tokenInstructions', () => {
-  it('names the repo, owner and permissions', () => {
-    const text = tokenInstructions(AGENT, 'example-org/example-app').join('\n');
-    assert.match(text, /signed in as ExampleBot/);
-    assert.match(text, /Name: example-app agent · Resource owner: example-org/);
-    assert.match(text, /Only select repositories → example-org\/example-app/);
-    assert.match(text, /Projects: Read and write/);
+  it('names the account, the scopes and the expiry', () => {
+    const text = tokenInstructions(AGENT).join('\n');
+    assert.match(text, /classic token\. In a private window signed in as ExampleBot/);
+    assert.match(text, /repo, workflow, read:org, project, write:ssh_signing_key\. Tick nothing else/);
+    assert.match(text, /Expiration: 90 days\. doctor warns 14 days before it ends/);
+    assert.match(text, /Configure SSO → Authorize/);
+  });
+
+  it('opens a page with the scopes filled in', () => {
+    assert.equal(
+      TOKEN_PAGE,
+      'https://github.com/settings/tokens/new?description=process-rules%20agent&scopes=repo,workflow,read:org,project,write:ssh_signing_key',
+    );
   });
 });

@@ -8,7 +8,14 @@ export const KEY = `${HOME}/.ssh/examplebot_signing`;
 export const PUBLIC_KEY = 'ssh-ed25519 AAAAkey ExampleBot signing';
 /** The fake's private key file: `ssh-keygen -y` derives the public half from it. */
 export const PRIVATE_KEY = 'private:ssh-ed25519 AAAAkey';
-export const TOKEN = 'github_pat_good';
+export const TOKEN = 'ghp_good';
+/** What GitHub answers about a classic token with every needed scope. */
+export const CLASSIC = {
+  'x-oauth-scopes': 'repo, workflow, read:org, project, write:ssh_signing_key',
+  'github-authentication-token-expiration': '2027-01-28 12:00:00 UTC',
+};
+/** The fake's clock: 2026-10-30, 90 days before CLASSIC's token ends. */
+export const NOW = new Date('2026-10-30T12:00:00Z');
 export const SETTINGS = JSON.stringify({ owner: 'example-owner', agent: AGENT });
 
 export interface Call {
@@ -27,7 +34,6 @@ export class FakeSys implements Sys {
   /** Keychain items by "service/account". */
   keychain = new Map<string, string>();
   modes = new Map<string, number>();
-  origin = 'https://github.com/example-org/example-app.git';
   inRepo = true;
   /** Overrides for exec, by "command firstArg"; return undefined to fall through. */
   execOverride: (call: Call) => ExecResult | undefined = () => undefined;
@@ -73,11 +79,11 @@ export class FakeSys implements Sys {
     return this.keychain.get(`process-rules/${account}`);
   }
 
-  acceptToken(token: string, login: string): this {
+  acceptToken(token: string, login: string, headers: Record<string, string> = CLASSIC): this {
     const previous = this.routes.get('GET https://api.github.com/user');
     this.routes.set('GET https://api.github.com/user', () => {
       const last = this.requests.at(-1);
-      if (last?.token === token) return { status: 200, json: { login } };
+      if (last?.token === token) return { status: 200, json: { login }, headers };
       return typeof previous === 'function' ? previous() : previous ?? { status: 401, json: null };
     });
     return this;
@@ -95,11 +101,6 @@ export class FakeSys implements Sys {
     const ok = (stdout = ''): ExecResult => ({ code: 0, stdout, stderr: '' });
     const fail = (stderr = 'failed'): ExecResult => ({ code: 1, stdout: '', stderr });
     if (command === 'git' && args[0] === 'rev-parse') return this.inRepo ? ok(`${ROOT}\n`) : fail();
-    if (command === 'git' && args[0] === 'remote') return ok(`${this.origin}\n`);
-    if (command === 'git' && args[0] === 'commit-tree') return ok('abc123\n');
-    if (command === 'git') return ok();
-    if (command === 'mktemp') return ok('/tmp/verify\n');
-    if (command === 'rm') return ok();
     if (command === 'ssh-keygen' && args[0] === '-y') {
       const body = /^private:(.*)$/.exec(this.files.get(args[2] ?? '') ?? '')?.[1];
       return body ? ok(`${body}\n`) : fail('invalid format');
@@ -165,7 +166,7 @@ export class FakeSys implements Sys {
   }
 
   now(): Date {
-    return new Date(1_000);
+    return NOW;
   }
 }
 

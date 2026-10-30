@@ -1,15 +1,16 @@
 import {
+  EXPIRY_WARNING_DAYS,
   accountId,
+  agentFrom,
+  daysLeft,
   keyBody,
   keyPairProblem,
-  loadSettings,
   pathsFor,
   readToken,
-  repoAt,
-  sameLogin,
   sessionScript,
   signingKeys,
-  tokenLogin,
+  tokenInfo,
+  tokenProblem,
 } from './agent.ts';
 import type { Output, Sys } from './types.ts';
 
@@ -32,14 +33,14 @@ async function remote(
 }
 
 /**
- * Checks that agent sessions in this repo can work as its agent account:
- * signing key, token, key registered on GitHub, session file. Exit 1 names
- * the `machine` step to re-run.
+ * Checks that agent sessions on this machine can work as an agent account:
+ * signing key, classic token, key registered on GitHub, session file. Exit 1
+ * names the `machine` step to re-run; a token near its end is a warning.
  */
-export async function doctor(sys: Sys, io: Output): Promise<number> {
-  const { root } = repoAt(sys);
-  const { agent } = loadSettings(sys, root);
+export async function doctor(sys: Sys, io: Output, named?: string): Promise<number> {
+  const agent = agentFrom(sys, named);
   const paths = pathsFor(sys.home, agent);
+  const warnings: string[] = [];
 
   const keyProblem = keyPairProblem(sys, paths.key);
   const checks: Check[] = [{ name: 'signing key', problem: keyProblem }];
@@ -48,9 +49,13 @@ export async function doctor(sys: Sys, io: Output): Promise<number> {
   checks.push(
     await remote('token', async () => {
       if (!token) return `no ${agent} token in this machine's keychain`;
-      const login = await tokenLogin(sys, token);
-      if (login === undefined) return 'GitHub refuses the stored token (expired or revoked?)';
-      return sameLogin(login, agent) ? undefined : `the stored token acts as ${login}, not ${agent}`;
+      const info = await tokenInfo(sys, token);
+      const problem = tokenProblem(token, info, agent);
+      const days = daysLeft(info?.expires, sys.now());
+      if (!problem && days !== undefined && days <= EXPIRY_WARNING_DAYS) {
+        warnings.push(`the token ends in ${days} days; run process-rules machine to replace it`);
+      }
+      return problem;
     }),
     await remote('key registered', async () => {
       const registered =
@@ -69,6 +74,7 @@ export async function doctor(sys: Sys, io: Output): Promise<number> {
     if (problem) io.err(`✗ ${name}: ${problem}`);
     else io.out(`✓ ${name}`);
   }
+  for (const warning of warnings) io.err(`! ${warning}`);
   if (checks.some((check) => check.problem)) {
     io.err(`doctor: agent sessions must not push as ${agent} until fixed; run process-rules machine`);
     return 1;

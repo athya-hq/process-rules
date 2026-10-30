@@ -13,6 +13,8 @@ export interface ExecResult {
 export interface HttpResult {
   status: number;
   json: unknown;
+  /** Response headers, names lowercased. */
+  headers?: Record<string, string>;
 }
 
 /** Everything a command touches outside its own memory; tests pass a fake. */

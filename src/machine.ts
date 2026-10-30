@@ -1,51 +1,48 @@
 import {
   API,
+  EXPIRY_WARNING_DAYS,
+  TOKEN_SCOPES,
   accountId,
+  agentFrom,
+  daysLeft,
   keyBody,
   keyPairProblem,
-  loadSettings,
   pathsFor,
   readToken,
-  repoAt,
-  sameLogin,
-  sessionEnv,
   sessionScript,
   signingKeys,
   storeToken,
-  tokenLogin,
-  type Paths,
+  tokenInfo,
+  tokenProblem,
 } from './agent.ts';
 import type { Output, Sys } from './types.ts';
 
-const TOKEN_PAGE = 'https://github.com/settings/personal-access-tokens/new';
+/** GitHub's classic-token page, with the note and scopes filled in. */
+export const TOKEN_PAGE = `https://github.com/settings/tokens/new?description=process-rules%20agent&scopes=${TOKEN_SCOPES.join(',')}`;
 const KEY_PAGE = 'https://github.com/settings/ssh/new';
 
-/** The token settings to tick: GitHub's token page cannot be filled from a link. */
-export function tokenInstructions(agent: string, slug: string): string[] {
-  const [org, repo] = slug.split('/');
+/** What to do on the token page; the expiry is the one field a link cannot fill. */
+export function tokenInstructions(agent: string): string[] {
   return [
-    `Create ${agent}'s token. In a private window signed in as ${agent}, on the page this opens:`,
-    `  Name: ${repo} agent · Resource owner: ${org} · Expiration: up to a year`,
-    `  Repository access: Only select repositories → ${slug}`,
-    '  Repository permissions: Contents, Issues, Pull requests, Workflows, Actions: Read and write;',
-    '    Checks, Commit statuses, Metadata: Read',
-    '  Organization permissions: Projects: Read and write',
-    `If GitHub says it needs approval, approve it as an ${org} owner (${org} → Settings → Personal access tokens → Pending requests).`,
+    `Create ${agent}'s classic token. In a private window signed in as ${agent}, on the page this opens:`,
+    `  Note and scopes are filled in: ${TOKEN_SCOPES.join(', ')}. Tick nothing else.`,
+    `  Expiration: 90 days. doctor warns ${EXPIRY_WARNING_DAYS} days before it ends; run machine again then.`,
+    '  Generate token, and copy it.',
+    'Where an organisation uses SAML single sign-on, choose Configure SSO → Authorize next to the token for it.',
   ];
 }
 
 /**
- * Sets up this machine so agent sessions work as the agent account: its
- * signing key, its token in the keychain, the key registered on GitHub, the
- * session file, and one signed test commit GitHub must show as Verified.
- * Every change waits for a yes.
+ * Sets up this machine for one agent account: its signing key, its classic
+ * token in the keychain, the key registered on GitHub, and the session file
+ * agent sessions source. Needs no client repository; whether the agent can
+ * push to one is `onboard`'s check. Every change waits for a yes.
  */
-export async function machine(sys: Sys, io: Output): Promise<number> {
-  const { root, slug } = repoAt(sys);
-  const { agent } = loadSettings(sys, root);
+export async function machine(sys: Sys, io: Output, named?: string): Promise<number> {
+  const agent = agentFrom(sys, named);
   const paths = pathsFor(sys.home, agent);
   const id = await accountId(sys, agent);
-  io.out(`Setting up this machine so agent sessions in ${slug} work as ${agent}. Each change asks first.`);
+  io.out(`Setting up this machine so agent sessions work as ${agent}. Each change asks first.`);
 
   const confirm = async (question: string): Promise<boolean> =>
     /^y(es)?$/i.test((await sys.ask(`${question} [y/N] `)).trim());
@@ -79,22 +76,29 @@ export async function machine(sys: Sys, io: Output): Promise<number> {
   io.out(`✓ signing key ${paths.key}`);
 
   let token = readToken(sys, agent);
-  if (token && !sameLogin(await tokenLogin(sys, token), agent)) {
-    io.out(`The stored token is refused or is not ${agent}'s; replacing it.`);
-    token = undefined;
+  if (token) {
+    const info = await tokenInfo(sys, token);
+    const problem = tokenProblem(token, info, agent);
+    const days = daysLeft(info?.expires, sys.now());
+    if (problem) {
+      io.out(`The stored token cannot stay: ${problem}. Replacing it.`);
+      token = undefined;
+    } else if (days !== undefined && days <= EXPIRY_WARNING_DAYS) {
+      if (await confirm(`The stored token ends in ${days} days. Replace it with a new one?`)) token = undefined;
+    }
   }
   if (!token) {
-    for (const line of tokenInstructions(agent, slug)) io.out(line);
+    for (const line of tokenInstructions(agent)) io.out(line);
     sys.open(TOKEN_PAGE);
     const entered = (await sys.askSecret(`Paste ${agent}'s new token (hidden): `)).trim();
-    const login = entered ? await tokenLogin(sys, entered) : undefined;
-    if (!sameLogin(login, agent)) {
-      io.err(
-        login === undefined
-          ? 'machine: GitHub refuses that token'
-          : `machine: that token acts as ${login}; create it signed in as ${agent}`,
-      );
+    const info = entered ? await tokenInfo(sys, entered) : undefined;
+    const problem = tokenProblem(entered, info, agent);
+    if (problem) {
+      io.err(`machine: ${problem}`);
       return 1;
+    }
+    if (info?.expires === undefined) {
+      io.out('This token never expires. A 90-day token limits what a leak can do; consider replacing it.');
     }
     if (!(await confirm(`Store it in this machine's keychain (service process-rules, account ${agent})?`))) {
       return stop('token');
@@ -105,7 +109,7 @@ export async function machine(sys: Sys, io: Output): Promise<number> {
     }
     token = entered;
   }
-  io.out(`✓ token for ${agent} in the keychain`);
+  io.out(`✓ classic token for ${agent} in the keychain`);
 
   const publicKey = sys.read(`${paths.key}.pub`).trim();
   if (!(await signingKeys(sys, agent)).includes(keyBody(publicKey))) {
@@ -115,10 +119,9 @@ export async function machine(sys: Sys, io: Output): Promise<number> {
     const posted = await sys.http(`${API}/user/ssh_signing_keys`, {
       method: 'POST',
       token,
-      body: { title: `process-rules ${slug}`, key: publicKey },
+      body: { title: 'process-rules signing', key: publicKey },
     });
     if (posted.status !== 201) {
-      // A token whose resource owner is an organization cannot touch the account's keys.
       io.out(`GitHub's API refused (HTTP ${posted.status}). Add it in the browser, signed in as ${agent}:`);
       io.out('  New SSH key → Key type: Signing Key, and paste:');
       io.out(`  ${publicKey}`);
@@ -142,75 +145,6 @@ export async function machine(sys: Sys, io: Output): Promise<number> {
   }
   io.out(`✓ session file ${paths.session}`);
 
-  if (!(await confirm(`Push one signed test commit to a throwaway branch of ${slug}, check it is Verified, then delete the branch?`))) {
-    return stop('test commit');
-  }
-  return testCommit(sys, io, { agent, id, token, paths, slug });
-}
-
-interface Target {
-  agent: string;
-  id: number;
-  token: string;
-  paths: Paths;
-  slug: string;
-}
-
-/** Signs an empty commit on the repo's tip as the agent, pushes it, and asks GitHub whether it is Verified. */
-async function testCommit(sys: Sys, io: Output, target: Target): Promise<number> {
-  const { agent, id, token, paths, slug } = target;
-  const dir = sys.exec('mktemp', ['-d']).stdout.trim();
-  const env = sessionEnv(sys.env, agent, id, token, paths);
-  const git = (...args: string[]) => sys.exec('git', args, { cwd: dir, env });
-  const url = `https://github.com/${slug}.git`;
-  const branch = `process-rules/verify-${agent.toLowerCase()}-${sys.now().getTime()}`;
-  let pushed = false;
-  try {
-    for (const args of [
-      ['init', '-q'],
-      ['fetch', '-q', '--depth=1', '--filter=blob:none', url, 'HEAD'],
-    ]) {
-      const step = git(...args);
-      if (step.code !== 0) {
-        io.err(`machine: git ${args[0]} failed: ${step.stderr.trim()}`);
-        return 1;
-      }
-    }
-    const made = git('commit-tree', '-S', 'FETCH_HEAD^{tree}', '-p', 'FETCH_HEAD', '-m', `process-rules: signing check for ${agent}`);
-    const sha = made.stdout.trim();
-    if (made.code !== 0 || !sha) {
-      io.err(`machine: signing the test commit failed: ${made.stderr.trim()}`);
-      return 1;
-    }
-    const push = git('push', '-q', url, `${sha}:refs/heads/${branch}`);
-    if (push.code !== 0) {
-      io.err(`machine: pushing as ${agent} failed: ${push.stderr.trim()}`);
-      return 1;
-    }
-    pushed = true;
-    const { json } = await sys.http(`${API}/repos/${slug}/commits/${sha}`, { token });
-    const commit = json as {
-      committer?: { login?: string } | null;
-      commit?: { verification?: { verified?: boolean; reason?: string } };
-    } | null;
-    const verification = commit?.commit?.verification;
-    const committer = commit?.committer?.login;
-    io.out(`Test commit https://github.com/${slug}/commit/${sha}`);
-    io.out(`  committer: ${committer ?? 'none'}; verified: ${String(verification?.verified)} (${verification?.reason ?? 'no reason'})`);
-    if (verification?.verified !== true || !sameLogin(committer, agent)) {
-      io.err(`machine: GitHub does not show the commit Verified by ${agent}`);
-      return 1;
-    }
-    io.out(`✓ GitHub shows the test commit Verified by ${agent}`);
-    io.out(`machine: done. Agent sessions act as ${agent} once they source ${paths.session}.`);
-    return 0;
-  } finally {
-    // Runs on every path after the push, the API failing included; says so when the branch stays.
-    if (pushed) {
-      const removed = git('push', '-q', url, `:refs/heads/${branch}`);
-      if (removed.code === 0) io.out(`Deleted the throwaway branch ${branch}.`);
-      else io.err(`machine: could not delete ${branch}; delete it on GitHub: ${removed.stderr.trim()}`);
-    }
-    sys.exec('rm', ['-rf', dir]);
-  }
+  io.out(`machine: done. Agent sessions act as ${agent} once they source ${paths.session}.`);
+  return 0;
 }

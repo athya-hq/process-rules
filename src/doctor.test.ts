@@ -3,9 +3,9 @@ import { describe, it } from 'node:test';
 
 import { pathsFor, sessionScript } from './agent.ts';
 import { doctor } from './doctor.ts';
-import { AGENT, AGENT_ID, FakeSys, HOME, KEY, TOKEN, capture } from './fake.test.ts';
+import { AGENT, AGENT_ID, CLASSIC, FakeSys, HOME, KEY, TOKEN, capture } from './fake.test.ts';
 
-const SESSION = `${HOME}/.config/process-rules/session.sh`;
+const SESSION = `${HOME}/.config/process-rules/examplebot/session.sh`;
 
 function healthy(): FakeSys {
   const sys = new FakeSys().ready();
@@ -13,9 +13,9 @@ function healthy(): FakeSys {
   return sys;
 }
 
-async function check(sys: FakeSys): Promise<{ code: number; out: string[]; err: string[] }> {
+async function check(sys: FakeSys, named?: string): Promise<{ code: number; out: string[]; err: string[] }> {
   const { io, out, err } = capture();
-  return { code: await doctor(sys, io), out, err };
+  return { code: await doctor(sys, io, named), out, err };
 }
 
 describe('doctor', () => {
@@ -44,15 +44,38 @@ describe('doctor', () => {
     sys.setToken(AGENT, 'revoked');
     const { code, err } = await check(sys);
     assert.equal(code, 1);
-    assert.equal(err[0], '✗ token: GitHub refuses the stored token (expired or revoked?)');
+    assert.equal(err[0], '✗ token: GitHub refuses the token (expired or revoked?)');
   });
 
   it("refuses a token that is someone else's", async () => {
     const sys = healthy();
-    sys.setToken(AGENT, 'owners');
-    sys.acceptToken('owners', 'example-owner');
+    sys.setToken(AGENT, 'ghp_owners');
+    sys.acceptToken('ghp_owners', 'example-owner');
     const { err } = await check(sys);
-    assert.equal(err[0], '✗ token: the stored token acts as example-owner, not ExampleBot');
+    assert.equal(err[0], '✗ token: the token acts as example-owner, not ExampleBot');
+  });
+
+  it('refuses a fine-grained token', async () => {
+    const sys = healthy();
+    sys.setToken(AGENT, 'github_pat_x');
+    sys.acceptToken('github_pat_x', AGENT, {});
+    const { err } = await check(sys);
+    assert.equal(err[0], '✗ token: it is not a classic token, which process-rules needs (see its docs/decisions.md)');
+  });
+
+  it('warns about a token near its end, and still passes', async () => {
+    const sys = healthy();
+    sys.acceptToken(TOKEN, AGENT, { ...CLASSIC, 'github-authentication-token-expiration': '2026-11-10 12:00:00 UTC' });
+    const { code, err } = await check(sys);
+    assert.equal(code, 0);
+    assert.deepEqual(err, ['! the token ends in 11 days; run process-rules machine to replace it']);
+  });
+
+  it('checks a named agent outside any repository', async () => {
+    const sys = healthy();
+    sys.inRepo = false;
+    sys.files.delete('/repo/.github/process-rules.json');
+    assert.equal((await check(sys, AGENT)).code, 0);
   });
 
   it('refuses a key GitHub does not list', async () => {

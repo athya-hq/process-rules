@@ -8,31 +8,33 @@ import { after, describe, it } from 'node:test';
 import {
   NO_TOKEN,
   accountId,
+  agentFrom,
+  daysLeft,
   keyBody,
   keyPairProblem,
   loadSettings,
   noreplyEmail,
   pathsFor,
   readToken,
-  repoAt,
   sameLogin,
   sessionEnv,
   sessionScript,
   signingKeys,
   storeToken,
-  tokenLogin,
+  tokenInfo,
+  tokenProblem,
 } from './agent.ts';
-import { AGENT, AGENT_ID, FakeSys, HOME, KEY, PRIVATE_KEY, PUBLIC_KEY, ROOT, TOKEN } from './fake.test.ts';
+import { AGENT, AGENT_ID, CLASSIC, FakeSys, HOME, KEY, NOW, PRIVATE_KEY, PUBLIC_KEY, ROOT, TOKEN } from './fake.test.ts';
 
 describe('loadSettings', () => {
   it('reads owner and agent', () => {
     assert.deepEqual(loadSettings(new FakeSys(), ROOT), { owner: 'example-owner', agent: AGENT });
   });
 
-  it('asks for setup when the file is missing', () => {
+  it('asks for the agent when the file is missing', () => {
     const sys = new FakeSys();
     sys.files.clear();
-    assert.throws(() => loadSettings(sys, ROOT), /not found in \/repo; run process-rules setup/);
+    assert.throws(() => loadSettings(sys, ROOT), /not found in \/repo; name the agent account after the command/);
   });
 
   for (const [raw, message] of [
@@ -51,49 +53,35 @@ describe('loadSettings', () => {
   }
 });
 
-describe('repoAt', () => {
-  for (const origin of [
-    'https://github.com/example-org/example-app.git',
-    'git@github.com:example-org/example-app.git',
-    'https://github.com/example-org/example-app',
-    'https://x-access-token@github.com/example-org/example-app.git',
-    'ssh://git@github.com/example-org/example-app.git',
-    'ssh://git@ssh.github.com:443/example-org/example-app.git',
-  ]) {
-    it(`reads the slug from ${origin}`, () => {
-      const sys = new FakeSys();
-      sys.origin = origin;
-      assert.deepEqual(repoAt(sys), { root: ROOT, slug: 'example-org/example-app' });
-    });
-  }
-
-  it('refuses outside a repository', () => {
+describe('agentFrom', () => {
+  it('takes the login named after the command, in or out of a repo', () => {
     const sys = new FakeSys();
     sys.inRepo = false;
-    assert.throws(() => repoAt(sys), /not inside a git repository/);
+    assert.equal(agentFrom(sys, 'OtherBot'), 'OtherBot');
   });
 
-  for (const origin of [
-    'https://gitlab.com/a/b.git',
-    'https://evilgithub.com/a/b.git',
-    'https://github.com.evil.io/a/b.git',
-    'git@evilgithub.com:a/b.git',
-  ]) {
-    it(`refuses the non-GitHub origin ${origin}`, () => {
-      const sys = new FakeSys();
-      sys.origin = origin;
-      assert.throws(() => repoAt(sys), /origin is not a GitHub repository/);
-    });
-  }
+  it('refuses a name that is not a login', () => {
+    assert.throws(() => agentFrom(new FakeSys(), '-bot'), /"-bot" is not a GitHub login/);
+  });
+
+  it("falls back to the repo's settings", () => {
+    assert.equal(agentFrom(new FakeSys(), undefined), AGENT);
+  });
+
+  it('asks for a name outside a repo', () => {
+    const sys = new FakeSys();
+    sys.inRepo = false;
+    assert.throws(() => agentFrom(sys, undefined), /name the agent account after the command, or run it in a repo/);
+  });
 });
 
 describe('pathsFor and noreplyEmail', () => {
-  it('keeps the key in ~/.ssh and the rest in ~/.config/process-rules', () => {
+  it('keeps the key in ~/.ssh and the rest in a folder per agent account', () => {
     assert.deepEqual(pathsFor(HOME, AGENT), {
       key: `${HOME}/.ssh/examplebot_signing`,
-      dir: `${HOME}/.config/process-rules`,
-      session: `${HOME}/.config/process-rules/session.sh`,
-      gh: `${HOME}/.config/process-rules/gh`,
+      dir: `${HOME}/.config/process-rules/examplebot`,
+      session: `${HOME}/.config/process-rules/examplebot/session.sh`,
+      gh: `${HOME}/.config/process-rules/examplebot/gh`,
     });
     assert.equal(noreplyEmail(AGENT_ID, AGENT), '42+ExampleBot@users.noreply.github.com');
   });
@@ -241,10 +229,44 @@ describe('GitHub reads', () => {
     await assert.rejects(accountId(new FakeSys(), 'Nobody'), /no account "Nobody" \(HTTP 404\)/);
   });
 
-  it('names the login a token acts as', async () => {
+  it("reads a token's login, scopes and end", async () => {
     const sys = new FakeSys().acceptToken(TOKEN, AGENT);
-    assert.equal(await tokenLogin(sys, TOKEN), AGENT);
-    assert.equal(await tokenLogin(sys, 'bad'), undefined);
+    assert.deepEqual(await tokenInfo(sys, TOKEN), {
+      login: AGENT,
+      scopes: ['repo', 'workflow', 'read:org', 'project', 'write:ssh_signing_key'],
+      expires: new Date('2027-01-28T12:00:00Z'),
+    });
+    assert.equal(await tokenInfo(sys, 'bad'), undefined);
+  });
+
+  it('reads a fine-grained or never-ending token as having no scopes or no end', async () => {
+    const sys = new FakeSys().acceptToken(TOKEN, AGENT, { 'github-authentication-token-expiration': 'soon' });
+    assert.deepEqual(await tokenInfo(sys, TOKEN), { login: AGENT, scopes: undefined, expires: undefined });
+  });
+
+
+  describe('tokenProblem', () => {
+    const info = { login: AGENT, scopes: CLASSIC['x-oauth-scopes'].split(', '), expires: undefined };
+    for (const [name, token, given, problem] of [
+      ['a classic token with every scope', TOKEN, info, undefined],
+      ['wider scopes that include the needed ones', TOKEN, { ...info, scopes: ['repo', 'workflow', 'admin:org', 'project', 'admin:ssh_signing_key'] }, undefined],
+      ['a login differing only in case', TOKEN, { ...info, login: 'examplebot' }, undefined],
+      ['a refused token', TOKEN, undefined, 'GitHub refuses the token (expired or revoked?)'],
+      ["someone else's token", TOKEN, { ...info, login: 'example-owner' }, 'the token acts as example-owner, not ExampleBot'],
+      ['a fine-grained token', 'github_pat_x', { ...info, scopes: undefined }, 'it is not a classic token, which process-rules needs (see its docs/decisions.md)'],
+      ['a token GitHub reports no scopes for', TOKEN, { ...info, scopes: undefined }, 'it is not a classic token, which process-rules needs (see its docs/decisions.md)'],
+      ['missing scopes', TOKEN, { ...info, scopes: ['repo', 'read:project'] }, 'the token lacks the scopes workflow, read:org, project, write:ssh_signing_key'],
+    ] as const) {
+      it(`judges ${name}`, () => {
+        assert.equal(tokenProblem(token, given, AGENT), problem);
+      });
+    }
+  });
+
+  it('counts whole days left', () => {
+    assert.equal(daysLeft(new Date('2027-01-28T12:00:00Z'), NOW), 90);
+    assert.equal(daysLeft(new Date('2026-10-31T11:00:00Z'), NOW), 0);
+    assert.equal(daysLeft(undefined, NOW), undefined);
   });
 
   it('lists signing keys without comments', async () => {
