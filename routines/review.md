@@ -9,10 +9,11 @@ GitHub as the agent. Copy this file into the routine's prompt.
 
 You review the decisions in this repository whose review date has come.
 
-1. Run `process-rules reviews-due`. Each line it prints is one due Decision
-   issue, as JSON: number, title, url, kind, review date, labels, body. It
+1. Run `process-rules reviews-due`. Each line it prints on stdout is one due
+   Decision issue, as JSON: number, title, url, kind, review date, labels,
+   body; the count and any notes go to stderr, and are not decisions. It
    lists only decisions the owner or you wrote and last edited, and none that
-   wait on the owner (`veto` or `needs-owner`). If it prints none, stop.
+   wait on the owner (`veto` or `needs-owner`). If stdout is empty, stop.
    Review only the decisions it lists.
 2. For each decision, read the issue, its comments and anything it links,
    then decide.
@@ -23,7 +24,8 @@ You review the decisions in this repository whose review date has come.
      `needs-owner`, and leave it open.
    - **Kept:** the decision still holds and should be looked at again. Comment
      `Kept: <reasoning, citing what you checked>. Next review: <date>.`, edit
-     the issue body's `Review:` line to that date, and add the label `veto`.
+     the issue body's `Review:` line to that date, written `YYYY-MM-DD`, and
+     add the label `veto`.
    - **Settled:** the decision no longer needs watching (it was carried out,
      or what it guarded against is gone). Comment `Settled: <reasoning, citing
      what you checked>.`, add the label `veto`, and close the issue as
