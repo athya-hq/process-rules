@@ -85,6 +85,9 @@ export function noreplyEmail(id: number, login: string): string {
   return `${id}+${login}@users.noreply.github.com`;
 }
 
+/** What an agent session must not inherit from the owner's shell. */
+const UNSET = ['GITHUB_TOKEN', 'GIT_CONFIG', 'GIT_CONFIG_PARAMETERS', 'GIT_ASKPASS', 'SSH_ASKPASS'];
+
 /** The variables an agent session gets, except GH_TOKEN. */
 function identityVars(agent: string, id: number, paths: Paths): [string, string][] {
   const email = noreplyEmail(id, agent);
@@ -132,7 +135,8 @@ export function sessionScript(agent: string, id: number, paths: Paths): string {
     `# Written by process-rules machine. Makes this shell act as ${agent} on GitHub.`,
     `export GH_TOKEN="$(${SECURITY} find-generic-password -s ${KEYCHAIN_SERVICE} -a ${agent} -w 2>/dev/null)"`,
     `[ -n "$GH_TOKEN" ] || export GH_TOKEN=${NO_TOKEN}`,
-    'unset GITHUB_TOKEN',
+    // Inherited `git -c` and config-file injection could bring back a helper; askpass could prompt.
+    `unset ${UNSET.join(' ')}`,
     ...identityVars(agent, id, paths).map(([name, value]) => `export ${name}=${quote(value)}`),
     '',
   ].join('\n');
@@ -149,8 +153,8 @@ export function sessionEnv(
   return {
     ...base,
     ...Object.fromEntries(identityVars(agent, id, paths)),
+    ...Object.fromEntries(UNSET.map((name) => [name, undefined])),
     GH_TOKEN: token,
-    GITHUB_TOKEN: undefined,
   };
 }
 

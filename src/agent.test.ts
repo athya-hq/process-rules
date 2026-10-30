@@ -134,6 +134,21 @@ describe('sessionScript, sourced by a real shell', () => {
     );
   });
 
+  it('drops inherited git-config injection and askpass', () => {
+    assert.equal(
+      shell('printf %s "${GIT_CONFIG_PARAMETERS-unset}|${GIT_CONFIG-unset}|${GIT_ASKPASS-unset}|${SSH_ASKPASS-unset}"', {
+        GIT_CONFIG_PARAMETERS: "'credential.helper'='!leak'",
+        GIT_CONFIG: '/owner.gitconfig',
+        GIT_ASKPASS: '/owner-askpass',
+        SSH_ASKPASS: '/owner-askpass',
+      }),
+      'unset|unset|unset|unset',
+    );
+    const env = sessionEnv({ GIT_CONFIG_PARAMETERS: 'x', SSH_ASKPASS: 'y' }, 'a', 1, 't', paths);
+    assert.equal(env.GIT_CONFIG_PARAMETERS, undefined);
+    assert.equal(env.SSH_ASKPASS, undefined);
+  });
+
   it('gives git only the agent token, whatever helpers were set before', () => {
     // A global config whose helpers would hand out the owner's login.
     const global = join(dir, 'owner.gitconfig');
@@ -184,7 +199,7 @@ describe('sessionScript, sourced by a real shell', () => {
     assert.equal(env.GH_TOKEN, 'tok');
     assert.equal(env.GITHUB_TOKEN, undefined);
     assert.equal(env.KEEP, '1');
-    const names = Object.keys(env).filter((name) => /^(GIT_|GH_CONFIG|PROCESS_RULES)/.test(name));
+    const names = Object.keys(env).filter((name) => /^(GIT_|GH_CONFIG|PROCESS_RULES)/.test(name) && env[name] !== undefined);
     for (const name of names) {
       assert.equal(shell(`printf %s "$${name}"`), env[name], name);
     }
