@@ -96,6 +96,17 @@ describe('run', () => {
     assert.match(err.at(-1) ?? '', /must not push as OtherBot/);
   });
 
+  it('runs pr-work-rules and pre-push, which takes git\'s two arguments and no third', async () => {
+    assert.match((await capture(['pr-work-rules'], () => new FakeSys())).err[0] ?? '', /pr-work-rules runs in GitHub Actions/);
+    const agent = new FakeSys();
+    agent.env = { PROCESS_RULES_AGENT: 'ExampleBot' };
+    agent.stdin = `refs/heads/work ${'a'.repeat(40)} refs/heads/work ${'b'.repeat(40)}\n`;
+    const refused = await capture(['pre-push', 'origin', 'https://github.com/a/b.git'], () => agent);
+    assert.equal(refused.code, 1);
+    assert.match(refused.err[0] ?? '', /this agent session has no token/);
+    assert.equal((await capture(['pre-push', 'origin', 'url', 'extra'])).code, 2);
+  });
+
   it('refuses a second argument after the agent', async () => {
     assert.deepEqual(await capture(['machine', 'OtherBot', 'now']), {
       code: 2,

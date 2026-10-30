@@ -5,6 +5,7 @@ import { prIdentity } from './identity.ts';
 import { machine } from './machine.ts';
 import { onboard } from './onboard.ts';
 import { sessionStart } from './session-start.ts';
+import { prePush, prWorkRules } from './work.ts';
 import type { Output, Sys } from './types.ts';
 
 export type { Output } from './types.ts';
@@ -18,6 +19,8 @@ Commands:
                    Set up the client repo here: settings, hook, workflow, agent access, a Verified commit
   session-start    Run by a client's SessionStart hook: the agent identity, or GitHub locked out
   pr-identity      Run by the shared workflow: agent commits Verified and pushed by the agent
+  pr-work-rules    Run by the shared workflow: an agent pull request builds one slice it may build
+  pre-push         Run by the pre-push git hook: the same rules before an agent session pushes
   help             Show this text
   version          Print the installed version
 
@@ -52,7 +55,7 @@ export async function run(
   sys: () => Sys | Promise<Sys>,
 ): Promise<number> {
   const [command, ...rest] = args;
-  const allowed = command === 'onboard' ? 2 : command === 'machine' || command === 'doctor' ? 1 : 0;
+  const allowed = command === 'onboard' || command === 'pre-push' ? 2 : command === 'machine' || command === 'doctor' ? 1 : 0;
   const extra = rest[allowed];
   if (extra !== undefined) {
     io.err(`process-rules: unexpected argument "${extra}"`);
@@ -77,8 +80,15 @@ export async function run(
     case 'doctor':
     case 'onboard':
     case 'pr-identity':
+    case 'pr-work-rules':
+    case 'pre-push':
       try {
         if (command === 'pr-identity') return await prIdentity(await sys(), io);
+        if (command === 'pr-work-rules') return await prWorkRules(await sys(), io);
+        if (command === 'pre-push') {
+          const real = await sys();
+          return await prePush(real, io, real.readStdin());
+        }
         if (command === 'onboard') return await onboard(await sys(), io, rest);
         return await (command === 'machine' ? machine : doctor)(await sys(), io, rest[0]);
       } catch (error) {

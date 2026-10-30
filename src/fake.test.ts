@@ -110,6 +110,8 @@ export class FakeSys implements Sys {
     if (override) return override;
     const ok = (stdout = ''): ExecResult => ({ code: 0, stdout, stderr: '' });
     const fail = (stderr = 'failed'): ExecResult => ({ code: 1, stdout: '', stderr });
+    if (command === 'git' && args[1] === '--git-path') return this.inRepo ? ok(`.git/${args[2]}\n`) : fail('not a git repository');
+    if (command === 'git' && args.includes('--git-common-dir')) return this.inRepo ? ok(`${ROOT}/.git\n`) : fail('not a git repository');
     if (command === 'git' && args[0] === 'rev-parse') return this.inRepo ? ok(`${ROOT}\n`) : fail();
     if (command === 'gh' && args.slice(0, 2).join(' ') === 'auth logout') {
       const login = args[args.indexOf('-u') + 1];
@@ -207,6 +209,11 @@ export class FakeSys implements Sys {
         : undefined);
     const result = typeof route === 'function' ? route() : route ?? { status: 404, json: { message: 'Not Found' } };
     return Promise.resolve(result);
+  }
+
+  stdin = '';
+  readStdin(): string {
+    return this.stdin;
   }
 
   ask(question: string): Promise<string> {

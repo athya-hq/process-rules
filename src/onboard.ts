@@ -20,6 +20,19 @@ import type { Output, Sys } from './types.ts';
 export const PRODUCT = 'athya-hq/process-rules';
 export const HOOKS_PATH = '.claude/settings.json';
 export const WORKFLOW_PATH = '.github/workflows/process-rules.yml';
+/** The pre-push git hook: the work rules before an agent session pushes. */
+export const PRE_PUSH_HOOK = [
+  '#!/bin/sh',
+  '# Written by process-rules onboard: the work rules before an agent session pushes.',
+  '# Without the CLI nothing can check an agent session\'s push, so it is refused; anyone else\'s goes ahead.',
+  'if ! command -v process-rules >/dev/null 2>&1; then',
+  '  [ -z "$PROCESS_RULES_AGENT" ] && exit 0',
+  '  echo "process-rules: the CLI is not installed, so this agent push cannot be checked against the work rules" >&2',
+  '  exit 1',
+  'fi',
+  'exec process-rules pre-push "$@"',
+  '',
+].join('\n');
 /**
  * What the client's SessionStart hook runs. Without the CLI on the machine,
  * nothing can lock GitHub, so the session is told to stop instead.
@@ -37,11 +50,14 @@ export function workflow(branch: string): string {
     '',
     'on:',
     '  pull_request:',
+    '    # edited: a changed "Slice: #N" line is checked again.',
+    '    types: [opened, synchronize, reopened, edited]',
     '  push:',
     `    branches: [${JSON.stringify(branch)}]`,
     '',
     'permissions:',
     '  contents: read',
+    '  issues: read',
     '  pull-requests: read',
     '',
     'jobs:',
@@ -242,6 +258,25 @@ export async function onboard(sys: Sys, io: Output, named: readonly string[] = [
     sys.write(workflowFile, wanted);
   }
   io.out(`✓ ${WORKFLOW_PATH}`);
+
+  const hookPath = sys.exec('git', ['rev-parse', '--git-path', 'hooks/pre-push'], { cwd: root }).stdout.trim();
+  const hookFile = hookPath.startsWith('/') ? hookPath : `${root}/${hookPath}`;
+  const gitDir = sys.exec('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd: root }).stdout.trim();
+  const line = 'process-rules pre-push "$@"';
+  if (!hookFile.startsWith(`${root}/`) && !hookFile.startsWith(`${gitDir}/`)) {
+    // A hooks folder shared by other repositories (a global core.hooksPath) is the owner's to change.
+    io.out(`! git runs hooks from ${hookPath}, outside this repository; add this line to its pre-push hook: ${line}`);
+  } else if (!sys.exists(hookFile)) {
+    if (!(await confirm(`Write the pre-push git hook ${hookPath}, which runs the work rules before an agent session pushes?`))) {
+      return stop('pre-push hook');
+    }
+    sys.write(hookFile, PRE_PUSH_HOOK, 0o755);
+    io.out(`✓ pre-push hook ${hookPath}`);
+  } else if (/^\s*(?:exec\s+)?process-rules\s+pre-push\b/m.test(sys.read(hookFile))) {
+    io.out(`✓ pre-push hook ${hookPath}`);
+  } else {
+    io.out(`! ${hookPath} is your own; add this line to it: ${line}`);
+  }
 
   if (!(await setUpBoard(sys, io, confirm, slug, owner))) return 1;
 
