@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
+import { FakeSys } from './fake.test.ts';
 import { USAGE, packageVersion, run, versionOf } from './run.ts';
 
 const manifest: unknown = JSON.parse(
@@ -14,30 +15,41 @@ const expectedVersion =
     ? manifest.version
     : undefined;
 
-function capture(args: readonly string[]): {
+const noSys = (): never => {
+  throw new Error('this command must not touch the machine');
+};
+
+async function capture(
+  args: readonly string[],
+  sys: () => FakeSys = noSys,
+): Promise<{
   code: number;
   out: string[];
   err: string[];
-} {
+}> {
   const out: string[] = [];
   const err: string[] = [];
-  const code = run(args, {
-    out: (line) => out.push(line),
-    err: (line) => err.push(line),
-  });
+  const code = await run(
+    args,
+    {
+      out: (line) => out.push(line),
+      err: (line) => err.push(line),
+    },
+    sys,
+  );
   return { code, out, err };
 }
 
 describe('run', () => {
   for (const args of [[], ['help'], ['--help'], ['-h']]) {
-    it(`prints usage for ${JSON.stringify(args)}`, () => {
-      assert.deepEqual(capture(args), { code: 0, out: [USAGE], err: [] });
+    it(`prints usage for ${JSON.stringify(args)}`, async () => {
+      assert.deepEqual(await capture(args), { code: 0, out: [USAGE], err: [] });
     });
   }
 
   for (const flag of ['version', '--version', '-v']) {
-    it(`prints the package version for ${flag}`, () => {
-      assert.deepEqual(capture([flag]), {
+    it(`prints the package version for ${flag}`, async () => {
+      assert.deepEqual(await capture([flag]), {
         code: 0,
         out: [expectedVersion],
         err: [],
@@ -45,16 +57,46 @@ describe('run', () => {
     });
   }
 
-  it('refuses an unknown command with usage on stderr', () => {
-    assert.deepEqual(capture(['deploy']), {
+  it('refuses an unknown command with usage on stderr', async () => {
+    assert.deepEqual(await capture(['deploy']), {
       code: 2,
       out: [],
       err: ['process-rules: unknown command "deploy"', USAGE],
     });
   });
 
-  it('refuses an extra argument', () => {
-    assert.deepEqual(capture(['version', 'now']), {
+  for (const command of ['machine', 'doctor']) {
+    it(`reports a ${command} failure with exit 1`, async () => {
+      const sys = new FakeSys();
+      sys.inRepo = false;
+      assert.deepEqual(await capture([command], () => sys), {
+        code: 1,
+        out: [],
+        err: [`process-rules ${command}: not inside a git repository`],
+      });
+    });
+  }
+
+  it('runs doctor', async () => {
+    const { code, err } = await capture(['doctor'], () => new FakeSys());
+    assert.equal(code, 1);
+    assert.match(err.at(-1) ?? '', /must not push as AthyaBot/);
+  });
+
+  it('reports a thrown non-error', async () => {
+    const sys = new FakeSys();
+    sys.exec = () => {
+      throw 'odd';
+    };
+    assert.deepEqual(await capture(['machine'], () => sys), {
+      code: 1,
+      out: [],
+      err: ['process-rules machine: odd'],
+    });
+  });
+
+  it('refuses an extra argument', async () => {
+    assert.deepEqual(await capture(['version', 'now']), {
       code: 2,
       out: [],
       err: ['process-rules: unexpected argument "now"', USAGE],

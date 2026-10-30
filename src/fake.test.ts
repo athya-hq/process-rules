@@ -1,0 +1,154 @@
+import type { ExecResult, HttpResult, Sys } from './types.ts';
+
+export const HOME = '/home/u';
+export const ROOT = '/repo';
+export const AGENT = 'AthyaBot';
+export const AGENT_ID = 42;
+export const KEY = `${HOME}/.ssh/athyabot_signing`;
+export const PUBLIC_KEY = 'ssh-ed25519 AAAAkey AthyaBot signing';
+export const TOKEN = 'github_pat_good';
+export const SETTINGS = JSON.stringify({ owner: 'AlokBansal8', agent: AGENT });
+
+export interface Call {
+  command: string;
+  args: readonly string[];
+  env?: Record<string, string | undefined>;
+  input?: string;
+}
+
+/** A Sys whose world is plain data; each test changes what it needs. */
+export class FakeSys implements Sys {
+  env: Record<string, string | undefined> = {};
+  home = HOME;
+  cwd = ROOT;
+  files = new Map<string, string>([[`${ROOT}/.github/process-rules.json`, SETTINGS]]);
+  keychain = new Map<string, string>();
+  origin = 'https://github.com/athya-hq/athya_mono.git';
+  inRepo = true;
+  /** Overrides for exec, by "command firstArg"; return undefined to fall through. */
+  execOverride: (call: Call) => ExecResult | undefined = () => undefined;
+  routes = new Map<string, HttpResult | (() => HttpResult)>();
+  answers: string[] = [];
+  secrets: string[] = [];
+  calls: Call[] = [];
+  requests: { url: string; method: string; token?: string; body?: unknown }[] = [];
+  opened: string[] = [];
+  asked: string[] = [];
+
+  constructor() {
+    this.route('GET', '/users/AthyaBot', { status: 200, json: { id: AGENT_ID } });
+    this.route('GET', '/user', { status: 401, json: null });
+    this.route('GET', '/users/AthyaBot/ssh_signing_keys', { status: 200, json: [] });
+  }
+
+  route(method: string, path: string, result: HttpResult | (() => HttpResult)): this {
+    this.routes.set(`${method} https://api.github.com${path}`, result);
+    return this;
+  }
+
+  /** The machine as `machine` leaves it: key, token, registered key. */
+  ready(): this {
+    this.files.set(KEY, 'private');
+    this.files.set(`${KEY}.pub`, `${PUBLIC_KEY}\n`);
+    this.keychain.set(AGENT, TOKEN);
+    this.acceptToken(TOKEN, AGENT);
+    this.route('GET', '/users/AthyaBot/ssh_signing_keys', {
+      status: 200,
+      json: [{ key: 'ssh-ed25519 AAAAkey' }],
+    });
+    return this;
+  }
+
+  acceptToken(token: string, login: string): this {
+    const previous = this.routes.get('GET https://api.github.com/user');
+    this.routes.set('GET https://api.github.com/user', () => {
+      const last = this.requests.at(-1);
+      if (last?.token === token) return { status: 200, json: { login } };
+      return typeof previous === 'function' ? previous() : previous ?? { status: 401, json: null };
+    });
+    return this;
+  }
+
+  exec(
+    command: string,
+    args: readonly string[],
+    options: { cwd?: string; env?: Record<string, string | undefined>; input?: string } = {},
+  ): ExecResult {
+    const call: Call = { command, args, ...(options.env ? { env: options.env } : {}), ...(options.input ? { input: options.input } : {}) };
+    this.calls.push(call);
+    const override = this.execOverride(call);
+    if (override) return override;
+    const ok = (stdout = ''): ExecResult => ({ code: 0, stdout, stderr: '' });
+    const fail = (stderr = 'failed'): ExecResult => ({ code: 1, stdout: '', stderr });
+    if (command === 'git' && args[0] === 'rev-parse') return this.inRepo ? ok(`${ROOT}\n`) : fail();
+    if (command === 'git' && args[0] === 'remote') return ok(`${this.origin}\n`);
+    if (command === 'git' && args[0] === 'commit-tree') return ok('abc123\n');
+    if (command === 'git') return ok();
+    if (command === 'mktemp') return ok('/tmp/verify\n');
+    if (command === 'rm') return ok();
+    if (command === 'ssh-keygen') {
+      const path = args[args.indexOf('-f') + 1] ?? '';
+      this.files.set(path, 'private');
+      this.files.set(`${path}.pub`, `${PUBLIC_KEY}\n`);
+      return ok();
+    }
+    if (command === '/usr/bin/security' && args[0] === 'find-generic-password') {
+      const token = this.keychain.get(args[args.indexOf('-a') + 1] ?? '');
+      return token ? ok(`${token}\n`) : fail('not found');
+    }
+    if (command === '/usr/bin/security' && args[0] === '-i') {
+      const match = /-a (\S+) -w (\S+)/.exec(options.input ?? '');
+      if (match?.[1] && match[2]) this.keychain.set(match[1], match[2]);
+      return ok();
+    }
+    return fail(`unexpected ${command}`);
+  }
+
+  exists(path: string): boolean {
+    return this.files.has(path);
+  }
+
+  read(path: string): string {
+    const data = this.files.get(path);
+    if (data === undefined) throw new Error(`ENOENT ${path}`);
+    return data;
+  }
+
+  write(path: string, data: string): void {
+    this.files.set(path, data);
+  }
+
+  mkdir(): void {}
+
+  http(url: string, options: { method?: string; token?: string; body?: unknown } = {}): Promise<HttpResult> {
+    const method = options.method ?? 'GET';
+    this.requests.push({ url, method, ...(options.token ? { token: options.token } : {}), ...(options.body ? { body: options.body } : {}) });
+    const route = this.routes.get(`${method} ${url}`);
+    const result = typeof route === 'function' ? route() : route ?? { status: 404, json: { message: 'Not Found' } };
+    return Promise.resolve(result);
+  }
+
+  ask(question: string): Promise<string> {
+    this.asked.push(question);
+    return Promise.resolve(this.answers.shift() ?? '');
+  }
+
+  askSecret(question: string): Promise<string> {
+    this.asked.push(question);
+    return Promise.resolve(this.secrets.shift() ?? '');
+  }
+
+  open(url: string): void {
+    this.opened.push(url);
+  }
+
+  now(): Date {
+    return new Date(1_000);
+  }
+}
+
+export function capture(): { out: string[]; err: string[]; io: { out(line: string): void; err(line: string): void } } {
+  const out: string[] = [];
+  const err: string[] = [];
+  return { out, err, io: { out: (line) => out.push(line), err: (line) => err.push(line) } };
+}
