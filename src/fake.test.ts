@@ -24,6 +24,7 @@ export interface Call {
   cwd?: string;
   env?: Record<string, string | undefined>;
   input?: string;
+  timeoutMs?: number;
 }
 
 /** A Sys whose world is plain data; each test changes what it needs. */
@@ -102,9 +103,9 @@ export class FakeSys implements Sys {
   exec(
     command: string,
     args: readonly string[],
-    options: { cwd?: string; env?: Record<string, string | undefined>; input?: string } = {},
+    options: { cwd?: string; env?: Record<string, string | undefined>; input?: string; timeoutMs?: number } = {},
   ): ExecResult {
-    const call: Call = { command, args, ...(options.cwd ? { cwd: options.cwd } : {}), ...(options.env ? { env: options.env } : {}), ...(options.input ? { input: options.input } : {}) };
+    const call: Call = { command, args, ...(options.cwd ? { cwd: options.cwd } : {}), ...(options.env ? { env: options.env } : {}), ...(options.input ? { input: options.input } : {}), ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}) };
     this.calls.push(call);
     const override = this.execOverride(call);
     if (override) return override;

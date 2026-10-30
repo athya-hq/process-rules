@@ -26,6 +26,7 @@ export function realSys(): Sys {
         cwd: options.cwd,
         env: options.env ?? process.env,
         input: options.input,
+        timeout: options.timeoutMs,
       });
       return {
         code: result.status ?? 1,

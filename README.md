@@ -80,7 +80,7 @@ days before the token ends.
    for a yes; commit the three files afterwards. The repository needs at
    least one commit.
 
-The shared checks run four jobs. **Settings** validates
+The shared checks run five jobs. **Settings** validates
 `.github/process-rules.json`. **PR identity** runs on pull requests: every
 commit that claims the agent (its login or its no-reply address) must be
 Verified as the agent, and agent commits must be pushed by the agent, so agent
@@ -102,6 +102,20 @@ Figma frame (`figma.com/design/...?node-id=...`) that holds at least one
 component published by that library and is not a captured image (an image
 covering half the frame or more). Without either, the job says the check is
 off and passes.
+
+**Decisions, weekly** runs on Mondays (and by hand). A Decision issue carries
+its fields one per line: `Kind:` (Override, Risk or Bet), `Review:`,
+`Expires:`, `Check:` (a command in backticks; exit 0 means the decision still
+holds) and `Undo:`. For each open Decision issue, a check that reads laptop
+files (`~/`, `$HOME`, `/Users/`, `/home/`) is labeled `cannot-run-here`; any
+other check runs in the checkout with only `PATH` and `HOME` set, for at most
+two minutes and five more seconds to end it (a check that runs out of time is
+not counted as tripped), and
+when it fails the decision gets a comment and one undo issue labeled
+`needs-owner`. Runs do not overlap, and after 45 minutes of checks the rest
+wait for next week. An Override whose expiry is within 30 days is labeled
+`expiring`; one whose expiry has passed is named in the run's log. A check runs
+only when the owner or the agent wrote the issue and was the last to edit it.
 
 `onboard` also writes a pre-push git hook running `process-rules pre-push`,
 which applies the same rules before an agent session pushes: all the commits

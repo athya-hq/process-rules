@@ -25,7 +25,7 @@ export interface Sys {
   exec(
     command: string,
     args: readonly string[],
-    options?: { cwd?: string; env?: Record<string, string | undefined>; input?: string },
+    options?: { cwd?: string; env?: Record<string, string | undefined>; input?: string; timeoutMs?: number },
   ): ExecResult;
   exists(path: string): boolean;
   read(path: string): string;
