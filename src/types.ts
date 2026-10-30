@@ -38,6 +38,8 @@ export interface Sys {
     url: string,
     options?: { method?: string; token?: string; body?: unknown },
   ): Promise<HttpResult>;
+  /** Everything on standard input, as a git hook receives it. */
+  readStdin(): string;
   ask(question: string): Promise<string>;
   askSecret(question: string): Promise<string>;
   open(url: string): void;

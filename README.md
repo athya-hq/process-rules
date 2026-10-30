@@ -80,12 +80,26 @@ days before the token ends.
    for a yes; commit the three files afterwards. The repository needs at
    least one commit.
 
-The shared checks run two jobs. **Settings** validates
+The shared checks run three jobs. **Settings** validates
 `.github/process-rules.json`. **PR identity** runs on pull requests: every
 commit that claims the agent (its login or its no-reply address) must be
 Verified as the agent, and agent commits must be pushed by the agent, so agent
-work pushed with the owner's login fails. Make `process-rules / PR identity`
-a required check on the default branch.
+work pushed with the owner's login fails. **Work rules** runs on the agent's
+pull requests: each names exactly one slice, as a line `Slice: #N`, and that
+slice may be built:
+
+- it is a Slice issue under a Work item the owner labeled `approved`;
+- if it was added to the work item after the approval, the owner left a
+  comment starting `Decision:` naming it;
+- each of its State sub-issues closed as not planned after the approval
+  carries the owner's `Decision:` comment;
+- no other open pull request names it.
+
+`onboard` also writes a pre-push git hook running `process-rules pre-push`,
+which applies the same rules before an agent session pushes, reading the
+slice from a `Slice: #N` trailer in the commits. Make `process-rules / PR
+identity` and `process-rules / Work rules` required checks on the default
+branch.
 
 Until releases (P-11), the client's workflow follows this repository's `main`,
 and the hook needs `process-rules` on the machine's `PATH`; without it the

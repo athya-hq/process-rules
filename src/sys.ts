@@ -59,6 +59,7 @@ export function realSys(): Sys {
         headers: Object.fromEntries(response.headers),
       };
     },
+    readStdin: () => (process.stdin.isTTY ? '' : readFileSync(0, 'utf8')),
     async ask(question) {
       const rl = createInterface({ input: process.stdin, output: process.stdout });
       try {

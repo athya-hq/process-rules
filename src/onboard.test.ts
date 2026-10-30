@@ -4,11 +4,12 @@ import { describe, it } from 'node:test';
 import { Board, repoJson } from './fake-board.test.ts';
 import { FIELDS, ISSUE_TYPES, LABELS, viewsChecklist } from './board.ts';
 import { AGENT, FakeSys, ROOT, TOKEN, capture } from './fake.test.ts';
-import { HOOK_COMMAND, HOOKS_PATH, WORKFLOW_PATH, onboard, workflow } from './onboard.ts';
+import { HOOK_COMMAND, HOOKS_PATH, PRE_PUSH_HOOK, WORKFLOW_PATH, onboard, workflow } from './onboard.ts';
 
 const SETTINGS = `${ROOT}/.github/process-rules.json`;
 const HOOKS = `${ROOT}/${HOOKS_PATH}`;
 const WORKFLOW = `${ROOT}/${WORKFLOW_PATH}`;
+const PRE_PUSH = `${ROOT}/.git/hooks/pre-push`;
 const REPO = '/repos/example-org/example-app';
 const PUSH = { status: 200, json: repoJson() };
 const VERIFIED = {
@@ -25,7 +26,7 @@ function fresh(): FakeSys {
   sys.route('GET', `${REPO}/commits/abc123`, VERIFIED);
   new Board(sys);
   // Settings, hook, workflow; issue types, labels, Project, fields; test commit.
-  sys.answers = Array<string>(10).fill('y');
+  sys.answers = Array<string>(11).fill('y');
   return sys;
 }
 
@@ -45,6 +46,8 @@ describe('onboard', () => {
       hooks: { SessionStart: [{ hooks: [{ type: 'command', command: HOOK_COMMAND }] }] },
     });
     assert.equal(sys.files.get(WORKFLOW), workflow('main'));
+    assert.equal(sys.files.get(PRE_PUSH), PRE_PUSH_HOOK);
+    assert.equal(sys.modes.get(PRE_PUSH), 0o755);
     assert.deepEqual(sys.dirs.filter((d) => d.startsWith(ROOT)), [`${ROOT}/.github`, `${ROOT}/.claude`, `${ROOT}/.github/workflows`]);
     assert.ok(out.includes('✓ ExampleBot can push to example-org/example-app'));
     assert.ok(out.includes('✓ GitHub shows the test commit Verified by ExampleBot'));
@@ -83,6 +86,7 @@ describe('onboard', () => {
     sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT }));
     sys.files.set(HOOKS, JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: HOOK_COMMAND }] }] } }));
     sys.files.set(WORKFLOW, workflow('main'));
+    sys.files.set(PRE_PUSH, PRE_PUSH_HOOK);
     const board = new Board(sys);
     board.issueTypes = ISSUE_TYPES.map((t) => t.name);
     board.labels = LABELS.map((l) => l.name);
@@ -128,6 +132,21 @@ describe('onboard', () => {
       env: { A: '1' },
       hooks: { SessionStart: [own, { hooks: [{ type: 'command', command: HOOK_COMMAND }] }], Stop: [own] },
     });
+  });
+
+  it("leaves the client's own pre-push hook, naming the line to add", async () => {
+    const sys = fresh();
+    sys.files.set(PRE_PUSH, '#!/bin/sh\nnpm test\n');
+    const { out } = await run(sys);
+    assert.ok(out.includes('! .git/hooks/pre-push is your own; add this line to it: process-rules pre-push "$@"'));
+    assert.equal(sys.files.get(PRE_PUSH), '#!/bin/sh\nnpm test\n');
+  });
+
+  it('writes the hook where git keeps hooks, absolute or not', async () => {
+    const sys = fresh();
+    sys.execOverride = (call) => (call.args[1] === '--git-path' ? { code: 0, stdout: '/shared/hooks/pre-push\n', stderr: '' } : undefined);
+    await run(sys);
+    assert.equal(sys.files.get('/shared/hooks/pre-push'), PRE_PUSH_HOOK);
   });
 
   it('replaces a workflow that differs', async () => {
@@ -222,7 +241,7 @@ describe('onboard', () => {
         invited = true;
         return { code: 0, stdout: '', stderr: '' };
       };
-      sys.answers = Array<string>(10).fill('y');
+      sys.answers = Array<string>(12).fill('y');
       const { code } = await run(sys);
       assert.equal(code, 0);
       assert.equal(sys.requests.find((r) => r.method === 'PATCH')?.token, TOKEN);
@@ -382,13 +401,14 @@ describe('onboard', () => {
     }
   });
 
-  for (const [index, step] of [[0, 'settings file'], [1, 'hook entry'], [2, 'workflow'], [7, 'test commit']] as const) {
+  for (const [index, step] of [[0, 'settings file'], [1, 'hook entry'], [2, 'workflow'], [3, 'pre-push hook'], [8, 'test commit']] as const) {
     it(`stops without changing anything more when "${step}" is declined`, async () => {
       const sys = fresh();
       sys.answers = [...Array<string>(index).fill('y'), 'n'];
       const { code, err } = await run(sys);
       assert.deepEqual({ code, err }, { code: 1, err: [`onboard: stopped at "${step}"; nothing after it was changed`] });
       assert.equal(sys.files.has(WORKFLOW), index > 2);
+      assert.equal(sys.files.has(PRE_PUSH), index > 3);
     });
   }
 

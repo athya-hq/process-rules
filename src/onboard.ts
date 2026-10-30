@@ -20,6 +20,14 @@ import type { Output, Sys } from './types.ts';
 export const PRODUCT = 'athya-hq/process-rules';
 export const HOOKS_PATH = '.claude/settings.json';
 export const WORKFLOW_PATH = '.github/workflows/process-rules.yml';
+/** The pre-push git hook: the work rules before an agent session pushes. */
+export const PRE_PUSH_HOOK = [
+  '#!/bin/sh',
+  '# Written by process-rules onboard: the work rules before an agent session pushes.',
+  'command -v process-rules >/dev/null 2>&1 || exit 0',
+  'exec process-rules pre-push "$@"',
+  '',
+].join('\n');
 /**
  * What the client's SessionStart hook runs. Without the CLI on the machine,
  * nothing can lock GitHub, so the session is told to stop instead.
@@ -42,6 +50,7 @@ export function workflow(branch: string): string {
     '',
     'permissions:',
     '  contents: read',
+    '  issues: read',
     '  pull-requests: read',
     '',
     'jobs:',
@@ -242,6 +251,20 @@ export async function onboard(sys: Sys, io: Output, named: readonly string[] = [
     sys.write(workflowFile, wanted);
   }
   io.out(`✓ ${WORKFLOW_PATH}`);
+
+  const hookPath = sys.exec('git', ['rev-parse', '--git-path', 'hooks/pre-push'], { cwd: root }).stdout.trim();
+  const hookFile = hookPath.startsWith('/') ? hookPath : `${root}/${hookPath}`;
+  if (!sys.exists(hookFile)) {
+    if (!(await confirm(`Write the pre-push git hook ${hookPath}, which runs the work rules before an agent session pushes?`))) {
+      return stop('pre-push hook');
+    }
+    sys.write(hookFile, PRE_PUSH_HOOK, 0o755);
+    io.out(`✓ pre-push hook ${hookPath}`);
+  } else if (sys.read(hookFile).includes('process-rules pre-push')) {
+    io.out(`✓ pre-push hook ${hookPath}`);
+  } else {
+    io.out(`! ${hookPath} is your own; add this line to it: process-rules pre-push "$@"`);
+  }
 
   if (!(await setUpBoard(sys, io, confirm, slug, owner))) return 1;
 
