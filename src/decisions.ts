@@ -1,4 +1,5 @@
 import { API, loadSettings, sameLogin } from './agent.ts';
+import { expireVetoes } from './reviews.ts';
 import type { Output, Sys } from './types.ts';
 
 /** How long one decision's check may run, in seconds. */
@@ -184,6 +185,7 @@ export async function decisionsWeekly(sys: Sys, io: Output): Promise<number> {
     await tell(issue.number, decision.check, run, undo);
     io.out(`${where}: tripped; opened #${undo} to undo it`);
   }
+  await expireVetoes(sys, io, slug, token);
   io.out(`decisions-weekly: ${decisions.length} open decision${decisions.length === 1 ? '' : 's'} checked`);
   return 0;
 }

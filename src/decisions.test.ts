@@ -28,6 +28,7 @@ function weekly(decisions: Node[], checks: Record<string, number> = {}, undos: N
   for (const d of decisions) sys.route('POST', `/repos/${SLUG}/issues/${d.number}/labels`, { status: 200, json: [] });
   for (const d of decisions) sys.route('POST', `/repos/${SLUG}/issues/${d.number}/comments`, { status: 201, json: {} });
   sys.route('POST', `/repos/${SLUG}/issues`, { status: 201, json: { number: 99 } });
+  sys.route('GET', `/repos/${SLUG}/issues?state=all&labels=veto&per_page=100`, { status: 200, json: [] });
   // The wrapper prints the check's own status; a timed-out check (124 here) prints none.
   sys.execOverride = (call) => {
     if (call.command !== 'timeout') return undefined;
