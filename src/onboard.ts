@@ -36,12 +36,21 @@ export const PRE_PUSH_HOOK = [
   '',
 ].join('\n');
 /**
- * What the client's SessionStart hook runs. Without the CLI on the machine,
+ * What the client's SessionStart hook runs. Cloud sessions are left alone,
+ * before anything else: they reach GitHub as the account connected to them
+ * and have no CLI. Without the CLI on a machine, or when it fails to run,
  * nothing can lock GitHub, so the session is told to stop instead.
  */
 export const HOOK_COMMAND =
+  'if [ "$CLAUDE_CODE_REMOTE" = true ]; then :; ' +
+  'elif command -v process-rules >/dev/null 2>&1 && process-rules session-start; then :; ' +
+  'else echo "process-rules: STOP. The process-rules CLI is missing or did not run here, so this session cannot be given the agent identity and gh and git would act as the owner. Do not push, fetch, or run gh in this session; tell the owner."; fi';
+
+/** The hook commands older releases wrote, which onboard replaces with this release's. */
+export const OLDER_HOOK_COMMANDS = [
   'command -v process-rules >/dev/null 2>&1 && process-rules session-start || ' +
-  'echo "process-rules: STOP. The process-rules CLI is not installed here, so this session cannot be given the agent identity and gh and git would act as the owner. Do not push, fetch, or run gh in this session; tell the owner."';
+    'echo "process-rules: STOP. The process-rules CLI is not installed here, so this session cannot be given the agent identity and gh and git would act as the owner. Do not push, fetch, or run gh in this session; tell the owner."',
+];
 
 /**
  * The client's workflow: the shared checks on every pull request, on pushes
@@ -132,14 +141,17 @@ async function invitation(sys: Sys, slug: string, token: string): Promise<number
 
 /** Whether the SessionStart hooks in a Claude Code settings object run exactly `HOOK_COMMAND`. */
 function hasHook(settings: object): boolean {
+  return sessionStartHooks(settings).some((hook) => hook.command === HOOK_COMMAND);
+}
+
+/** The command entries under SessionStart, as written in the settings object (so they can be changed in place). */
+function sessionStartHooks(settings: object): { command?: unknown }[] {
   const groups = (settings as { hooks?: { SessionStart?: unknown } }).hooks?.SessionStart;
-  return (
-    Array.isArray(groups) &&
-    groups.some((group: unknown) => {
-      const hooks = (group as { hooks?: unknown } | null)?.hooks;
-      return Array.isArray(hooks) && hooks.some((hook: unknown) => (hook as { command?: unknown } | null)?.command === HOOK_COMMAND);
-    })
-  );
+  if (!Array.isArray(groups)) return [];
+  return groups.flatMap((group: unknown) => {
+    const hooks = (group as { hooks?: unknown } | null)?.hooks;
+    return Array.isArray(hooks) ? hooks.filter((hook): hook is { command?: unknown } => typeof hook === 'object' && hook !== null) : [];
+  });
 }
 
 /**
@@ -255,7 +267,15 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
   if (typeof hooks !== 'object' || hooks === null || Array.isArray(hooks)) {
     throw new Error(`${HOOKS_PATH} is not a JSON object`);
   }
-  if (!hasHook(hooks)) {
+  // An entry an older release wrote is replaced where it stands, not added to.
+  const older = sessionStartHooks(hooks).filter((hook) => typeof hook.command === 'string' && OLDER_HOOK_COMMANDS.includes(hook.command));
+  if (older.length > 0) {
+    if (!(await confirm(`Replace the older process-rules SessionStart hook in ${HOOKS_PATH} with this release's?`))) {
+      return stop('hook entry');
+    }
+    for (const hook of older) hook.command = HOOK_COMMAND;
+    sys.write(hooksFile, `${JSON.stringify(hooks, null, 2)}\n`);
+  } else if (!hasHook(hooks)) {
     if (!(await confirm(`Add the SessionStart hook that runs process-rules session-start to ${HOOKS_PATH}?`))) {
       return stop('hook entry');
     }

@@ -1,4 +1,8 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 import { Board, repoJson } from './fake-board.test.ts';
@@ -6,7 +10,7 @@ import { FIELDS, ISSUE_TYPES, LABELS, viewsChecklist } from './board.ts';
 import { AGENT, FakeSys, ROOT, TOKEN, capture } from './fake.test.ts';
 import { FEATURES } from './features.ts';
 import { packageVersion } from './version.ts';
-import { HOOK_COMMAND, HOOKS_PATH, PRE_PUSH_HOOK, WORKFLOW_PATH, onboard, onboardArgs, workflow } from './onboard.ts';
+import { HOOK_COMMAND, HOOKS_PATH, OLDER_HOOK_COMMANDS, PRE_PUSH_HOOK, WORKFLOW_PATH, onboard, onboardArgs, workflow } from './onboard.ts';
 
 const SETTINGS = `${ROOT}/.github/process-rules.json`;
 const HOOKS = `${ROOT}/${HOOKS_PATH}`;
@@ -98,9 +102,52 @@ describe('onboard', () => {
     assert.deepEqual(sys.asked.map((q) => q.split(' ')[0]), ['Push']);
   });
 
+  it("replaces an older release's hook where it stands", async () => {
+    const sys = fresh();
+    const older = OLDER_HOOK_COMMANDS[0] as string;
+    sys.files.set(HOOKS, JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: 'echo hi' }, { type: 'command', command: older }] }] } }));
+    await run(sys);
+    assert.ok(sys.asked.some((q) => q.startsWith("Replace the older process-rules SessionStart hook in .claude/settings.json with this release's?")));
+    assert.deepEqual(JSON.parse(sys.files.get(HOOKS) ?? '').hooks.SessionStart, [
+      { hooks: [{ type: 'command', command: 'echo hi' }, { type: 'command', command: HOOK_COMMAND }] },
+    ]);
+  });
+
+  it("leaves a client's own hook that mentions session-start alone", async () => {
+    const sys = fresh();
+    const own = 'my-wrapper && process-rules session-start';
+    sys.files.set(HOOKS, JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: own }] }] } }));
+    await run(sys);
+    const commands = JSON.parse(sys.files.get(HOOKS) ?? '').hooks.SessionStart.flatMap((g: { hooks: { command: string }[] }) => g.hooks.map((h) => h.command));
+    assert.deepEqual(commands, [own, HOOK_COMMAND]);
+  });
+
+  it("stops when replacing an older release's hook is declined", async () => {
+    const sys = fresh();
+    sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT }));
+    sys.files.set(HOOKS, JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ command: OLDER_HOOK_COMMANDS[0] }] }, null, { hooks: 'x' }] } }));
+    sys.answers = ['n'];
+    assert.deepEqual((await run(sys, [])).err, ['onboard: stopped at "hook entry"; nothing after it was changed']);
+  });
+
+  it('runs nothing in a cloud session, says stop without the CLI, and runs session-start with it', () => {
+    const bin = mkdtempSync(join(tmpdir(), 'process-rules-hook-'));
+    writeFileSync(join(bin, 'process-rules'), '#!/bin/sh\necho "ran $*"\n', { mode: 0o755 });
+    const broken = mkdtempSync(join(tmpdir(), 'process-rules-broken-'));
+    writeFileSync(join(broken, 'process-rules'), '#!/bin/sh\nexit 127\n', { mode: 0o755 });
+    const shell = (env: Record<string, string>) => spawnSync('bash', ['-c', HOOK_COMMAND], { encoding: 'utf8', env }).stdout;
+    // With the CLI on PATH, a cloud session still runs nothing.
+    assert.equal(shell({ PATH: `${bin}:/usr/bin:/bin`, CLAUDE_CODE_REMOTE: 'true' }), '');
+    assert.match(shell({ PATH: '/usr/bin:/bin' }), /^process-rules: STOP\. The process-rules CLI is missing or did not run here/);
+    assert.match(shell({ PATH: `${broken}:/usr/bin:/bin` }), /^process-rules: STOP\./);
+    assert.equal(shell({ PATH: `${bin}:/usr/bin:/bin` }), 'ran session-start\n');
+    rmSync(broken, { recursive: true, force: true });
+    rmSync(bin, { recursive: true, force: true });
+  });
+
   it('adds the hook when the command only appears elsewhere', async () => {
     const sys = fresh();
-    const lookalike = { hooks: { Stop: [{ hooks: [{ type: 'command', command: HOOK_COMMAND }] }], SessionStart: [{ hooks: [{ command: 'process-rules session-start --old' }] }, {}] } };
+    const lookalike = { hooks: { Stop: [{ hooks: [{ type: 'command', command: HOOK_COMMAND }] }], SessionStart: [{ hooks: [{ command: 'echo process-rules is set up elsewhere' }] }, {}] } };
     sys.files.set(HOOKS, JSON.stringify(lookalike));
     await run(sys);
     assert.ok(sys.asked.some((q) => q.startsWith('Add the SessionStart hook')));
