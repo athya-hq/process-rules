@@ -96,6 +96,12 @@ describe('run', () => {
     assert.match(err.at(-1) ?? '', /must not push as OtherBot/);
   });
 
+  it('runs pr-work-rules and pre-push, which takes git\'s two arguments and no third', async () => {
+    assert.match((await capture(['pr-work-rules'], () => new FakeSys())).err[0] ?? '', /pr-work-rules runs in GitHub Actions/);
+    assert.equal((await capture(['pre-push', 'origin', 'https://github.com/a/b.git'], () => new FakeSys())).code, 0);
+    assert.equal((await capture(['pre-push', 'origin', 'url', 'extra'])).code, 2);
+  });
+
   it('refuses a second argument after the agent', async () => {
     assert.deepEqual(await capture(['machine', 'OtherBot', 'now']), {
       code: 2,

@@ -1,4 +1,4 @@
-import { API, loadSettings, repoAt, sameLogin } from './agent.ts';
+import { API, NO_TOKEN, loadSettings, repoAt, sameLogin } from './agent.ts';
 import type { Output, Sys } from './types.ts';
 
 /** How a pull request or a commit names the slice it builds. */
@@ -15,21 +15,16 @@ interface Comment {
   createdAt: string;
 }
 
+type TimelineItem =
+  | { __typename: 'LabeledEvent' | 'UnlabeledEvent'; createdAt: string; actor: { login: string } | null; label: { name: string } }
+  | { __typename: 'SubIssueAddedEvent'; createdAt: string; subIssue: { number: number } | null }
+  | ({ __typename: 'IssueComment' } & Comment);
+
 interface SliceGraph {
   number: number;
   issueType: { name: string } | null;
   comments: { nodes: Comment[] };
-  parent: {
-    number: number;
-    issueType: { name: string } | null;
-    timelineItems: {
-      nodes: (
-        | { __typename: 'LabeledEvent' | 'UnlabeledEvent'; createdAt: string; actor: { login: string } | null; label: { name: string } }
-        | { __typename: 'SubIssueAddedEvent'; createdAt: string; subIssue: { number: number } | null }
-        | ({ __typename: 'IssueComment' } & Comment)
-      )[];
-    };
-  } | null;
+  parent: { id: string; number: number; issueType: { name: string } | null } | null;
   subIssues: {
     nodes: {
       number: number;
@@ -46,22 +41,40 @@ const SLICE_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     issue(number: $number) {
       number issueType { name } comments(last: 100) { nodes { ${COMMENT} } }
-      parent {
-        number issueType { name }
-        timelineItems(last: 200, itemTypes: [LABELED_EVENT, UNLABELED_EVENT, SUB_ISSUE_ADDED_EVENT, ISSUE_COMMENT]) {
-          nodes {
-            __typename
-            ... on LabeledEvent { createdAt actor { login } label { name } }
-            ... on UnlabeledEvent { createdAt actor { login } label { name } }
-            ... on SubIssueAddedEvent { createdAt subIssue { number } }
-            ... on IssueComment { ${COMMENT} }
-          }
-        }
-      }
+      parent { id number issueType { name } }
       subIssues(first: 100) { nodes { number issueType { name } stateReason closedAt comments(last: 50) { nodes { ${COMMENT} } } } }
     }
   }
 }`;
+/** The work item's approvals, additions and comments, 100 a page: GitHub's most. */
+const TIMELINE_QUERY = `query($id: ID!, $after: String) {
+  node(id: $id) {
+    ... on Issue {
+      timelineItems(first: 100, after: $after, itemTypes: [LABELED_EVENT, UNLABELED_EVENT, SUB_ISSUE_ADDED_EVENT, ISSUE_COMMENT]) {
+        nodes {
+          __typename
+          ... on LabeledEvent { createdAt actor { login } label { name } }
+          ... on UnlabeledEvent { createdAt actor { login } label { name } }
+          ... on SubIssueAddedEvent { createdAt subIssue { number } }
+          ... on IssueComment { ${COMMENT} }
+        }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+  }
+}`;
+
+async function graphql(sys: Sys, token: string, slice: number, query: string, variables: Record<string, unknown>): Promise<unknown> {
+  const { status, json } = await sys.http(`${API}/graphql`, { method: 'POST', token, body: { query, variables } });
+  const reply = json as { data?: unknown; errors?: { message?: string }[] } | null;
+  if (status !== 200 || reply?.errors?.length) {
+    const why = reply?.errors?.map((e) => e.message).join('; ') ?? `HTTP ${status}`;
+    // A client workflow from before the work rules grants no issues: read.
+    const hint = /not accessible/i.test(why) ? '; the client workflow needs issues: read, so run process-rules onboard to update it' : '';
+    throw new Error(`cannot read #${slice}: ${why}${hint}`);
+  }
+  return reply?.data;
+}
 
 /** Whether the owner left a `Decision:` comment among `comments`, after `since` when given, mentioning `mention` when given. */
 function decided(comments: Comment[], owner: string, since?: string, mention?: string): boolean {
@@ -89,26 +102,29 @@ export async function sliceProblems(
   owner: string,
   mine: { pull?: number; branch?: string },
 ): Promise<string[]> {
+  // The pull request being checked: by number, or by its branch in this repository (not a fork's of the same name).
   const [repoOwner, name] = slug.split('/');
-  const { status, json } = await sys.http(`${API}/graphql`, {
-    method: 'POST',
-    token,
-    body: { query: SLICE_QUERY, variables: { owner: repoOwner, name, number: slice } },
-  });
-  const reply = json as { data?: { repository?: { issue?: SliceGraph | null } | null }; errors?: { message?: string }[] } | null;
-  if (status !== 200 || reply?.errors?.length) {
-    throw new Error(`cannot read #${slice}: ${reply?.errors?.map((e) => e.message).join('; ') ?? `HTTP ${status}`}`);
-  }
-  const issue = reply?.data?.repository?.issue;
+  const data = (await graphql(sys, token, slice, SLICE_QUERY, { owner: repoOwner, name, number: slice })) as {
+    repository?: { issue?: SliceGraph | null } | null;
+  } | undefined;
+  const issue = data?.repository?.issue;
   if (!issue) return [`#${slice} is not an issue in ${slug}`];
   if (issue.issueType?.name !== 'Slice') return [`#${slice} is not a Slice (its type is ${issue.issueType?.name ?? 'none'})`];
   const parent = issue.parent;
   if (parent?.issueType?.name !== 'Work item') return [`#${slice} is not a sub-issue of a Work item`];
 
   const problems: string[] = [];
-  const events = parent.timelineItems.nodes;
+  const events: TimelineItem[] = [];
+  for (let after: string | null = null; ; ) {
+    const page = (await graphql(sys, token, slice, TIMELINE_QUERY, { id: parent.id, after })) as {
+      node: { timelineItems: { nodes: TimelineItem[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } } };
+    };
+    events.push(...page.node.timelineItems.nodes);
+    if (!page.node.timelineItems.pageInfo.hasNextPage) break;
+    after = page.node.timelineItems.pageInfo.endCursor;
+  }
   const approval = events.filter(
-    (event): event is Extract<typeof event, { __typename: 'LabeledEvent' | 'UnlabeledEvent' }> =>
+    (event): event is Extract<TimelineItem, { __typename: 'LabeledEvent' | 'UnlabeledEvent' }> =>
       (event.__typename === 'LabeledEvent' || event.__typename === 'UnlabeledEvent') && event.label.name === 'approved',
   ).at(-1);
   if (approval?.__typename !== 'LabeledEvent') {
@@ -120,10 +136,13 @@ export async function sliceProblems(
   const approvedAt = approval.createdAt;
   const parentComments = events.filter((event): event is { __typename: 'IssueComment' } & Comment => event.__typename === 'IssueComment');
 
-  const added = events.find(
-    (event): event is Extract<typeof event, { __typename: 'SubIssueAddedEvent' }> =>
-      event.__typename === 'SubIssueAddedEvent' && event.subIssue?.number === slice,
-  );
+  // The latest addition counts: a slice removed and added again after approval needs the owner's say.
+  const added = events
+    .filter(
+      (event): event is Extract<TimelineItem, { __typename: 'SubIssueAddedEvent' }> =>
+        event.__typename === 'SubIssueAddedEvent' && event.subIssue?.number === slice,
+    )
+    .at(-1);
   if (
     added &&
     added.createdAt > approvedAt &&
@@ -143,8 +162,8 @@ export async function sliceProblems(
   for (let page = 1; ; page++) {
     const pulls = await sys.http(`${API}/repos/${slug}/pulls?state=open&per_page=100&page=${page}`, { token });
     if (pulls.status !== 200 || !Array.isArray(pulls.json)) throw new Error(`cannot list open pull requests (HTTP ${pulls.status})`);
-    for (const pull of pulls.json as { number: number; body: string | null; head: { ref: string } }[]) {
-      if (pull.number === mine.pull || pull.head.ref === mine.branch) continue;
+    for (const pull of pulls.json as { number: number; body: string | null; head: { ref: string; repo: { full_name: string } | null } }[]) {
+      if (pull.number === mine.pull || (pull.head.ref === mine.branch && pull.head.repo?.full_name.toLowerCase() === slug.toLowerCase())) continue;
       if (slicesNamed(pull.body ?? '').includes(slice)) problems.push(`#${slice} already has pull request #${pull.number}; one slice, one pull request`);
     }
     if (pulls.json.length < 100) break;
@@ -202,34 +221,42 @@ const ZERO = /^0+$/;
 
 /**
  * The work rules before a push from an agent session, run by the client's
- * pre-push git hook with git's ref lines on stdin. The commits pushed must
- * name exactly one slice between them, as a trailer `Slice: #N`, that may be
- * built. Pushes outside agent sessions pass.
+ * pre-push git hook with git's ref lines on stdin. All the commits one push
+ * brings, across every ref, must name exactly one slice between them, as a
+ * trailer `Slice: #N`, that may be built. Pushes outside agent sessions pass;
+ * an agent session with no token is refused.
  */
 export async function prePush(sys: Sys, io: Output, refLines: string): Promise<number> {
+  if (!sys.env.PROCESS_RULES_AGENT) return 0;
   const token = sys.env.GH_TOKEN;
-  if (!sys.env.PROCESS_RULES_AGENT || !token) return 0;
+  if (!token || token === NO_TOKEN) {
+    return report(io, 'pre-push', ['this agent session has no token, so the work rules cannot be checked; run process-rules doctor']);
+  }
   const { root, slug } = repoAt(sys);
   const { owner } = loadSettings(sys, root);
+  let messages = '';
+  const branches: string[] = [];
   for (const line of refLines.split('\n').filter(Boolean)) {
     const [, local, remoteRef, remote] = line.split(' ');
     if (!local || !remoteRef || ZERO.test(local)) continue;
     const range = remote && !ZERO.test(remote) ? [`${remote}..${local}`] : [local, '--not', '--remotes'];
-    const messages = sys.exec('git', ['log', '--format=%B', ...range], { cwd: root });
-    if (messages.code !== 0) throw new Error(`git log failed: ${messages.stderr.trim()}`);
-    if (!messages.stdout.trim()) continue;
-    const slices = slicesNamed(messages.stdout);
-    const branch = remoteRef.replace(/^refs\/heads\//, '');
-    if (slices.length !== 1) {
-      return report(io, 'pre-push', [
-        slices.length === 0
-          ? `the commits for ${branch} name no slice; add a trailer "Slice: #N" to a commit message`
-          : `the commits for ${branch} name ${slices.length} slices (${slices.map((n) => `#${n}`).join(', ')}); one push builds one slice`,
-      ]);
-    }
-    const [slice] = slices as [number];
-    const code = report(io, 'pre-push', await sliceProblems(sys, token, slug, slice, owner, { branch }));
-    if (code !== 0) return code;
+    const log = sys.exec('git', ['log', '--format=%B', ...range], { cwd: root });
+    if (log.code !== 0) throw new Error(`git log failed: ${log.stderr.trim()}`);
+    if (!log.stdout.trim()) continue;
+    messages += `${log.stdout}\n`;
+    branches.push(remoteRef.replace(/^refs\/heads\//, ''));
   }
-  return 0;
+  if (branches.length === 0) return 0;
+  const slices = slicesNamed(messages);
+  const where = branches.join(', ');
+  if (slices.length !== 1) {
+    return report(io, 'pre-push', [
+      slices.length === 0
+        ? `the commits for ${where} name no slice; add a trailer "Slice: #N" to a commit message`
+        : `the commits for ${where} name ${slices.length} slices (${slices.map((n) => `#${n}`).join(', ')}); one push builds one slice`,
+    ]);
+  }
+  if (branches.length > 1) return report(io, 'pre-push', [`one push builds one slice on one branch; this one pushes ${where}`]);
+  const [slice] = slices as [number];
+  return report(io, 'pre-push', await sliceProblems(sys, token, slug, slice, owner, { branch: branches[0] as string }));
 }

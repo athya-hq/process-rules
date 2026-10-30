@@ -10,6 +10,7 @@ import {
 } from 'node:fs';
 import { homedir } from 'node:os';
 import { createInterface } from 'node:readline/promises';
+import { isatty } from 'node:tty';
 
 import type { Sys } from './types.ts';
 
@@ -59,7 +60,8 @@ export function realSys(): Sys {
         headers: Object.fromEntries(response.headers),
       };
     },
-    readStdin: () => (process.stdin.isTTY ? '' : readFileSync(0, 'utf8')),
+    // isatty(0), not process.stdin, which would open the stream and could make the read fail.
+    readStdin: () => (isatty(0) ? '' : readFileSync(0, 'utf8')),
     async ask(question) {
       const rl = createInterface({ input: process.stdin, output: process.stdout });
       try {

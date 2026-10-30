@@ -142,11 +142,28 @@ describe('onboard', () => {
     assert.equal(sys.files.get(PRE_PUSH), '#!/bin/sh\nnpm test\n');
   });
 
-  it('writes the hook where git keeps hooks, absolute or not', async () => {
+  it('writes the hook where git keeps hooks inside the repository', async () => {
+    const sys = fresh();
+    sys.execOverride = (call) => (call.args[1] === '--git-path' ? { code: 0, stdout: `${ROOT}/.git/hooks/pre-push\n`, stderr: '' } : undefined);
+    await run(sys);
+    assert.equal(sys.files.get(`${ROOT}/.git/hooks/pre-push`), PRE_PUSH_HOOK);
+  });
+
+  it('leaves a hooks folder shared by other repositories alone, naming the line to add', async () => {
     const sys = fresh();
     sys.execOverride = (call) => (call.args[1] === '--git-path' ? { code: 0, stdout: '/shared/hooks/pre-push\n', stderr: '' } : undefined);
-    await run(sys);
-    assert.equal(sys.files.get('/shared/hooks/pre-push'), PRE_PUSH_HOOK);
+    const { out } = await run(sys);
+    assert.ok(out.includes('! git runs hooks from /shared/hooks/pre-push, outside this repository; add this line to its pre-push hook: process-rules pre-push "$@"'));
+    assert.ok(!sys.files.has('/shared/hooks/pre-push'));
+  });
+
+  it('counts only a hook line that runs the rules, not a mention', async () => {
+    const sys = fresh();
+    sys.files.set(PRE_PUSH, '#!/bin/sh\n# TODO: process-rules pre-push\n');
+    assert.ok((await run(sys)).out.some((line) => line.startsWith('! .git/hooks/pre-push is your own')));
+    const ours = fresh();
+    ours.files.set(PRE_PUSH, '#!/bin/sh\nnpm test\n  process-rules pre-push "$@"\n');
+    assert.ok((await run(ours)).out.includes('✓ pre-push hook .git/hooks/pre-push'));
   });
 
   it('replaces a workflow that differs', async () => {

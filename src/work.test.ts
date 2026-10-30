@@ -25,14 +25,19 @@ function graph(): { issue: Node; timeline: Node[]; states: Node[]; comments: Nod
     number: 12,
     issueType: { name: 'Slice' },
     comments: { nodes: comments },
-    parent: { number: 10, issueType: { name: 'Work item' }, timelineItems: { nodes: timeline } },
+    parent: { id: 'I_10', number: 10, issueType: { name: 'Work item' }, timelineItems: { nodes: timeline } },
     subIssues: { nodes: states },
   };
   return { issue, timeline, states, comments };
 }
 
 function github(sys: FakeSys, issue: Node | null, pulls: Node[] = []): void {
-  sys.route('POST', '/graphql', { status: 200, json: { data: { repository: { issue } } } });
+  sys.route('POST', '/graphql', () => {
+    const { query } = sys.requests.at(-1)?.body as { query: string };
+    if (!query.includes('timelineItems')) return { status: 200, json: { data: { repository: { issue } } } };
+    const nodes = ((issue?.parent as Node).timelineItems as { nodes: Node[] }).nodes;
+    return { status: 200, json: { data: { node: { timelineItems: { nodes, pageInfo: { hasNextPage: false, endCursor: null } } } } } };
+  });
   sys.route('GET', `/repos/${SLUG}/pulls?state=open&per_page=100&page=1`, { status: 200, json: pulls });
 }
 
@@ -130,6 +135,12 @@ describe('sliceProblems', () => {
       });
     }
 
+    it('checks the latest addition when a slice is removed and added again', async () => {
+      const g = graph();
+      g.timeline.push({ __typename: 'SubIssueAddedEvent', createdAt: LATER, subIssue: { number: 12 } });
+      assert.deepEqual(await problems(g.issue), [refused]);
+    });
+
     it('ignores the add of another slice', async () => {
       const g = graph();
       g.timeline.push({ __typename: 'SubIssueAddedEvent', createdAt: LATER, subIssue: null });
@@ -179,7 +190,11 @@ describe('sliceProblems', () => {
   });
 
   describe('a second pull request', () => {
-    const pull = (number: number, body: string | null, ref = `b${number}`): Node => ({ number, body, head: { ref } });
+    const pull = (number: number, body: string | null, ref = `b${number}`, repo: string | null = SLUG): Node => ({
+      number,
+      body,
+      head: { ref, repo: repo === null ? null : { full_name: repo } },
+    });
 
     it('is refused', async () => {
       assert.deepEqual(await problems(graph().issue, [pull(5, 'Slice: #12'), pull(6, null), pull(7, 'Slice: #13')]), [
@@ -189,7 +204,14 @@ describe('sliceProblems', () => {
 
     it('does not count the pull request or branch being checked', async () => {
       assert.deepEqual(await problems(graph().issue, [pull(5, 'Slice: #12')], { pull: 5 }), []);
-      assert.deepEqual(await problems(graph().issue, [pull(5, 'Slice: #12', 'feature')], { branch: 'feature' }), []);
+      assert.deepEqual(await problems(graph().issue, [pull(5, 'Slice: #12', 'feature', 'Example-Org/Example-App')], { branch: 'feature' }), []);
+    });
+
+    it("counts a fork's pull request from a branch of the same name", async () => {
+      assert.deepEqual(await problems(graph().issue, [pull(6, 'Slice: #12', 'feature', 'someone/example-app'), pull(7, 'Slice: #12', 'feature', null)], { branch: 'feature' }), [
+        '#12 already has pull request #6; one slice, one pull request',
+        '#12 already has pull request #7; one slice, one pull request',
+      ]);
     });
 
     it('reads every page of open pull requests', async () => {
@@ -198,6 +220,29 @@ describe('sliceProblems', () => {
       sys.route('GET', `/repos/${SLUG}/pulls?state=open&per_page=100&page=2`, { status: 200, json: [pull(9, 'Slice: #12')] });
       assert.deepEqual(await sliceProblems(sys, 'tok', SLUG, 12, OWNER, {}), ['#12 already has pull request #9; one slice, one pull request']);
     });
+  });
+
+  it('reads every page of the work item\'s timeline', async () => {
+    const sys = new FakeSys();
+    const g = graph();
+    github(sys, g.issue);
+    let page = 0;
+    sys.route('POST', '/graphql', () => {
+      const { query, variables } = sys.requests.at(-1)?.body as { query: string; variables: { after?: string | null } };
+      if (!query.includes('timelineItems')) return { status: 200, json: { data: { repository: { issue: g.issue } } } };
+      page++;
+      const first = variables.after === null;
+      const nodes = first ? [g.timeline[0]] : [g.timeline[1]];
+      return { status: 200, json: { data: { node: { timelineItems: { nodes, pageInfo: { hasNextPage: first, endCursor: first ? 'c1' : null } } } } } };
+    });
+    assert.deepEqual(await sliceProblems(sys, 'tok', SLUG, 12, OWNER, {}), []);
+    assert.equal(page, 2);
+  });
+
+  it('says how to fix a client workflow without issues: read', async () => {
+    const sys = new FakeSys();
+    sys.route('POST', '/graphql', { status: 200, json: { errors: [{ message: 'Resource not accessible by integration' }] } });
+    await assert.rejects(sliceProblems(sys, 'tok', SLUG, 12, OWNER, {}), /needs issues: read, so run process-rules onboard to update it/);
   });
 
   it('throws when GitHub will not answer', async () => {
@@ -324,6 +369,30 @@ describe('prePush', () => {
     const owner = session('Tidy up');
     owner.env = {};
     assert.equal((await push(owner, `refs/heads/work ${LOCAL} refs/heads/work ${REMOTE}`)).code, 0);
+  });
+
+  it('refuses an agent session with no token', async () => {
+    for (const token of [undefined, 'process-rules-no-agent-token']) {
+      const sys = session('Slice: #12');
+      sys.env = { PROCESS_RULES_AGENT: AGENT, ...(token ? { GH_TOKEN: token } : {}) };
+      assert.deepEqual(await push(sys, `refs/heads/work ${LOCAL} refs/heads/work ${REMOTE}`), {
+        code: 1,
+        err: ['✗ this agent session has no token, so the work rules cannot be checked; run process-rules doctor', 'pre-push: refused by the work rules'],
+      });
+    }
+  });
+
+  it('counts the slices across every ref of one push', async () => {
+    const sys = session('');
+    sys.execOverride = (call) =>
+      call.args[0] === 'log' ? { code: 0, stdout: call.args[2]?.endsWith(LOCAL) ? 'Slice: #12\n' : 'Slice: #13\n', stderr: '' } : undefined;
+    const lines = `refs/heads/a ${LOCAL} refs/heads/a ${REMOTE}\nrefs/heads/b ${'c'.repeat(40)} refs/heads/b ${REMOTE}\n`;
+    assert.equal((await push(sys, lines)).err[0], '✗ the commits for a, b name 2 slices (#12, #13); one push builds one slice');
+  });
+
+  it('refuses one slice pushed to two branches at once', async () => {
+    const lines = `refs/heads/a ${LOCAL} refs/heads/a ${REMOTE}\nrefs/heads/b ${LOCAL} refs/heads/b ${REMOTE}\n`;
+    assert.equal((await push(session('Slice: #12'), lines)).err[0], '✗ one push builds one slice on one branch; this one pushes a, b');
   });
 
   it('skips a ref line it cannot read', async () => {

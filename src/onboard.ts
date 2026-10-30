@@ -24,7 +24,12 @@ export const WORKFLOW_PATH = '.github/workflows/process-rules.yml';
 export const PRE_PUSH_HOOK = [
   '#!/bin/sh',
   '# Written by process-rules onboard: the work rules before an agent session pushes.',
-  'command -v process-rules >/dev/null 2>&1 || exit 0',
+  '# Without the CLI nothing can check an agent session\'s push, so it is refused; anyone else\'s goes ahead.',
+  'if ! command -v process-rules >/dev/null 2>&1; then',
+  '  [ -z "$PROCESS_RULES_AGENT" ] && exit 0',
+  '  echo "process-rules: the CLI is not installed, so this agent push cannot be checked against the work rules" >&2',
+  '  exit 1',
+  'fi',
   'exec process-rules pre-push "$@"',
   '',
 ].join('\n');
@@ -45,6 +50,8 @@ export function workflow(branch: string): string {
     '',
     'on:',
     '  pull_request:',
+    '    # edited: a changed "Slice: #N" line is checked again.',
+    '    types: [opened, synchronize, reopened, edited]',
     '  push:',
     `    branches: [${JSON.stringify(branch)}]`,
     '',
@@ -254,16 +261,21 @@ export async function onboard(sys: Sys, io: Output, named: readonly string[] = [
 
   const hookPath = sys.exec('git', ['rev-parse', '--git-path', 'hooks/pre-push'], { cwd: root }).stdout.trim();
   const hookFile = hookPath.startsWith('/') ? hookPath : `${root}/${hookPath}`;
-  if (!sys.exists(hookFile)) {
+  const gitDir = sys.exec('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd: root }).stdout.trim();
+  const line = 'process-rules pre-push "$@"';
+  if (!hookFile.startsWith(`${root}/`) && !hookFile.startsWith(`${gitDir}/`)) {
+    // A hooks folder shared by other repositories (a global core.hooksPath) is the owner's to change.
+    io.out(`! git runs hooks from ${hookPath}, outside this repository; add this line to its pre-push hook: ${line}`);
+  } else if (!sys.exists(hookFile)) {
     if (!(await confirm(`Write the pre-push git hook ${hookPath}, which runs the work rules before an agent session pushes?`))) {
       return stop('pre-push hook');
     }
     sys.write(hookFile, PRE_PUSH_HOOK, 0o755);
     io.out(`✓ pre-push hook ${hookPath}`);
-  } else if (sys.read(hookFile).includes('process-rules pre-push')) {
+  } else if (/^\s*(?:exec\s+)?process-rules\s+pre-push\b/m.test(sys.read(hookFile))) {
     io.out(`✓ pre-push hook ${hookPath}`);
   } else {
-    io.out(`! ${hookPath} is your own; add this line to it: process-rules pre-push "$@"`);
+    io.out(`! ${hookPath} is your own; add this line to it: ${line}`);
   }
 
   if (!(await setUpBoard(sys, io, confirm, slug, owner))) return 1;

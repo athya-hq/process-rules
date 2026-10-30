@@ -96,8 +96,16 @@ slice may be built:
 - no other open pull request names it.
 
 `onboard` also writes a pre-push git hook running `process-rules pre-push`,
-which applies the same rules before an agent session pushes, reading the
-slice from a `Slice: #N` trailer in the commits. Make `process-rules / PR
+which applies the same rules before an agent session pushes: all the commits
+one push brings, on one branch, name one slice between them as a
+`Slice: #N` trailer. In an agent session, a push is refused when the CLI is
+missing or the session has no token. When the repository already has its own
+pre-push hook, or git runs hooks from a folder outside the repository (a
+global `core.hooksPath`), `onboard` leaves it alone and names the line to add:
+`process-rules pre-push "$@"`. The client workflow re-runs the checks when a
+pull request's description is edited. After upgrading process-rules, run
+`onboard` again: it replaces the workflow when a release needs more
+permissions. Make `process-rules / PR
 identity` and `process-rules / Work rules` required checks on the default
 branch.
 
