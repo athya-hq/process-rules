@@ -72,6 +72,8 @@ export async function decisionsWeekly(sys: Sys, io: Output): Promise<number> {
   const { GITHUB_REPOSITORY: slug, GH_TOKEN: token } = sys.env;
   if (!slug || !token) throw new Error('decisions-weekly runs in GitHub Actions: GITHUB_REPOSITORY and GH_TOKEN must be set');
   const { owner, agent } = loadSettings(sys, sys.cwd);
+  // Vetoes belong to the review routine, so they expire whether decisions are on or not.
+  if (isOn(sys, sys.cwd, 'review')) await expireVetoes(sys, io, slug, token);
   if (!isOn(sys, sys.cwd, 'decisions')) {
     io.out(offLine('decisions-weekly', 'decisions'));
     return 0;
@@ -90,7 +92,6 @@ export async function decisionsWeekly(sys: Sys, io: Output): Promise<number> {
   };
 
   // Before the decisions, so one decision's failing call cannot keep vetoes past their week.
-  if (isOn(sys, sys.cwd, 'review')) await expireVetoes(sys, io, slug, token);
   const started = sys.now().getTime();
   const tell = async (number: number, check: string, run: { code: number; stdout: string; stderr: string }, undo: number): Promise<void> => {
     const output = `${run.stdout}${run.stderr}`.trim().split('\n').slice(-20).join('\n');

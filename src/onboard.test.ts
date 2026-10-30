@@ -460,7 +460,8 @@ describe('staged adoption', () => {
     assert.deepEqual(JSON.parse(sys.files.get(SETTINGS) ?? '').features, ['identity']);
     assert.ok(sys.files.has(HOOKS));
     assert.ok(!sys.files.has(WORKFLOW) && !sys.files.has(PRE_PUSH));
-    assert.ok(!sys.requests.some((r) => r.url.endsWith('/graphql') || r.url.includes('/labels')), 'no board');
+    assert.ok(!sys.requests.some((r) => r.url.endsWith('/graphql') || r.url.includes('/labels') || r.url.includes('/issue-types')), 'no board');
+    assert.equal(out.at(-1), 'onboard: done. Commit .github/process-rules.json and .claude/settings.json; agent sessions then work as ExampleBot.');
     assert.ok(out.includes('✓ GitHub shows the test commit Verified by ExampleBot'));
     assert.deepEqual(sys.asked.map((q) => q.split(' ')[0]), ['Write', 'Add', 'Push']);
   });
@@ -469,9 +470,11 @@ describe('staged adoption', () => {
     const sys = fresh();
     sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity'], project: 'Example work', figma: { library: 'L' } }));
     sys.files.set(HOOKS, JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: HOOK_COMMAND }] }] } }));
+    const board = new Board(sys);
     sys.answers = ['y', 'y', 'y', 'y', 'y', 'y', 'y'];
     const { code } = await run(sys, ['--add', 'board']);
     assert.equal(code, 0);
+    assert.deepEqual(board.titles, ['Example work']);
     assert.deepEqual(JSON.parse(sys.files.get(SETTINGS) ?? ''), {
       owner: 'example-owner',
       agent: AGENT,
@@ -497,9 +500,11 @@ describe('staged adoption', () => {
     sys.files.set(HOOKS, JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: HOOK_COMMAND }] }] } }));
     sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity', 'pr-identity'] }));
     sys.files.set(WORKFLOW, workflow('main', packageVersion()));
+    const before = sys.files.get(SETTINGS);
     sys.answers = ['y'];
     await run(sys, ['--add', 'pr-identity']);
     assert.deepEqual(sys.asked.map((q) => q.split(' ')[0]), ['Push']);
+    assert.equal(sys.files.get(SETTINGS), before);
   });
 
   for (const [name, args, change, message] of [
@@ -513,6 +518,17 @@ describe('staged adoption', () => {
       assert.deepEqual({ code, err }, { code: 1, err: [message] });
     });
   }
+
+  it('leaves the settings alone when a turned-on feature\'s setup stops', async () => {
+    const sys = fresh();
+    const before = JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity'] });
+    sys.files.set(SETTINGS, before);
+    sys.files.set(HOOKS, JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: HOOK_COMMAND }] }] } }));
+    sys.answers = ['y', 'n'];
+    const { err } = await run(sys, ['--add', 'board']);
+    assert.deepEqual(err, ['onboard: stopped at "issue types"; nothing after it was changed']);
+    assert.equal(sys.files.get(SETTINGS), before);
+  });
 
   it('stops when turning a feature on is declined', async () => {
     const sys = fresh();

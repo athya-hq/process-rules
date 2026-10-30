@@ -197,6 +197,7 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
   let owner: string;
   let agent: string;
   let features: Feature[];
+  let pendingSettings: string | undefined;
   if (sys.exists(settingsFile)) {
     const settings = loadSettings(sys, root);
     if (chosen) {
@@ -214,9 +215,10 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     const raw = JSON.parse(sys.read(settingsFile)) as Record<string, unknown>;
     features = featuresIn(raw);
     if (add && !features.includes(add)) {
-      if (!(await confirm(`Turn ${add} on in ${SETTINGS_PATH}?`))) return stop('settings file');
+      if (!(await confirm(`Turn ${add} on in ${SETTINGS_PATH}, once its setup below is done?`))) return stop('settings file');
       features = FEATURES.filter((feature) => features.includes(feature) || feature === add);
-      sys.write(settingsFile, `${JSON.stringify({ ...raw, features }, null, 2)}\n`);
+      // Written only once the feature's setup has finished, so settings never claim a half-set-up feature.
+      pendingSettings = `${JSON.stringify({ ...raw, features }, null, 2)}\n`;
     }
   } else {
     if (add) {
@@ -246,6 +248,7 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
   }
   io.out(`✓ ${SETTINGS_PATH}: owner ${owner}, agent ${agent}; on: ${features.join(', ')}`);
   const on = (feature: Feature): boolean => features.includes(feature);
+  const workflowNeeded = on('pr-identity') || on('work-rules') || on('design') || on('decisions') || on('review');
 
   const hooksFile = `${root}/${HOOKS_PATH}`;
   const hooks: unknown = sys.exists(hooksFile) ? JSON.parse(sys.read(hooksFile)) : {};
@@ -314,7 +317,7 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
   io.out(`✓ ${agent} can push to ${slug}`);
 
   // The shared checks run only for features that need them.
-  if (on('pr-identity') || on('work-rules') || on('design') || on('decisions') || on('review')) {
+  if (workflowNeeded) {
     const workflowFile = `${root}/${WORKFLOW_PATH}`;
     const wanted = workflow(reach.branch, packageVersion());
     if (!sys.exists(workflowFile) || sys.read(workflowFile) !== wanted) {
@@ -351,6 +354,10 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
 
   const projectTitle = (JSON.parse(sys.read(settingsFile)) as { project?: unknown }).project;
   if (on('board') && !(await setUpBoard(sys, io, confirm, slug, owner, typeof projectTitle === 'string' ? projectTitle : undefined))) return 1;
+  if (pendingSettings) {
+    sys.write(settingsFile, pendingSettings);
+    io.out(`✓ ${add} on in ${SETTINGS_PATH}`);
+  }
 
   if (!(await confirm(`Push one signed test commit to a throwaway branch of ${slug} as ${agent}, check it is Verified, then delete the branch?`))) {
     return stop('test commit');
@@ -358,7 +365,8 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
   const { id } = await account(sys, agent);
   const verified = await testCommit(sys, io, { agent, id, token, slug });
   if (verified !== 0) return verified;
-  io.out(`onboard: done. Commit ${SETTINGS_PATH}, ${HOOKS_PATH} and ${WORKFLOW_PATH}; agent sessions then work as ${agent}.`);
+  const files = [SETTINGS_PATH, HOOKS_PATH, ...(workflowNeeded ? [WORKFLOW_PATH] : [])];
+  io.out(`onboard: done. Commit ${files.slice(0, -1).join(', ')} and ${files.at(-1)}; agent sessions then work as ${agent}.`);
   return 0;
 }
 

@@ -24,7 +24,9 @@ describe('features', () => {
   it('refuses features that are not a list of names', () => {
     assert.throws(() => featuresIn({ features: 'board' }), /"features" must be a list of feature names/);
     assert.throws(() => featuresIn({ features: [1] }), /"features" must be a list of feature names/);
-    assert.throws(() => featuresIn({ features: ['boards'] }), /unknown feature boards/);
+    assert.throws(() => featuresIn({ features: ['boards'] }), /unknown feature "boards"/);
+    assert.throws(() => featuresIn({ features: ['board,review'] }), /unknown feature "board,review"/);
+    assert.deepEqual(featuresIn({ features: [] }), ['identity']);
   });
 
   it('reads whether a feature is on from the settings file', () => {
@@ -64,7 +66,7 @@ describe('checks of features that are off', () => {
       const { io, out } = capture();
       assert.equal(await check(sys, io), 0);
       assert.deepEqual(out, [line]);
-      assert.ok(!sys.requests.some((r) => !r.url.includes('/users/')));
+      assert.deepEqual(sys.requests, []);
     });
   }
 
@@ -75,10 +77,28 @@ describe('checks of features that are off', () => {
     assert.deepEqual({ out, err }, { out: [], err: ['reviews-due: review is off in .github/process-rules.json; nothing to check'] });
   });
 
-  it('pre-push lets an agent push, even with no token', async () => {
+  it('pre-push lets an agent push, even with no token, saying so', async () => {
     const sys = identityOnly();
     delete sys.env.GH_TOKEN;
-    assert.equal(await prePush(sys, capture().io, `refs/heads/w ${'a'.repeat(40)} refs/heads/w ${'b'.repeat(40)}`), 0);
+    const { io, err } = capture();
+    assert.equal(await prePush(sys, io, `refs/heads/w ${'a'.repeat(40)} refs/heads/w ${'b'.repeat(40)}`), 0);
+    assert.deepEqual(err, ['pre-push: work-rules is off in .github/process-rules.json; nothing to check']);
+  });
+
+  it('reviews-due needs no token when review is off', async () => {
+    const sys = identityOnly();
+    delete sys.env.GH_TOKEN;
+    assert.equal(await reviewsDue(sys, capture().io), 0);
+  });
+
+  it('the weekly job still expires vetoes when review is on and decisions are off', async () => {
+    const sys = identityOnly();
+    sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['review'] }));
+    sys.route('GET', '/repos/example-org/example-app/issues?state=all&type=Decision&labels=veto&per_page=100&page=1', { status: 200, json: [] });
+    const { io, out } = capture();
+    assert.equal(await decisionsWeekly(sys, io), 0);
+    assert.ok(sys.requests.some((r) => r.url.includes('labels=veto')));
+    assert.deepEqual(out, ['decisions-weekly: decisions is off in .github/process-rules.json; nothing to check']);
   });
 
   it('the weekly job leaves vetoes alone when review is off', async () => {

@@ -154,7 +154,7 @@ export async function setUpBoard(
   }
   io.out(`✓ labels: ${LABELS.map((l) => l.name).join(', ')}`);
 
-  const title = projectTitle ?? `${repo.name} work`;
+  const title = projectTitle?.trim() || `${repo.name} work`;
   const kind = repo.organisation ? 'organization' : 'user';
   type Project = { id: string; title: string; url: string; repositories: { nodes: { id: string }[] } };
   let holderId: string | undefined;

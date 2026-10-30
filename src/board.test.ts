@@ -19,6 +19,7 @@ describe('setUpBoard', () => {
     const { url, out, err } = await setUp(sys);
     assert.deepEqual(err, []);
     assert.equal(url, URL);
+    assert.deepEqual(board.titles, ['example-app work']);
     assert.deepEqual(board.issueTypes, ['Task', 'Bug', ...ISSUE_TYPES.map((t) => t.name)]);
     assert.deepEqual(board.labels, ['bug', ...LABELS.map((l) => l.name)]);
     assert.deepEqual(board.project?.fields, ['Title', 'Status', ...FIELDS.map((f) => f.name)]);
@@ -39,6 +40,14 @@ describe('setUpBoard', () => {
     });
     const date = sys.requests.find((r) => (r.body as { variables?: { name?: string } } | undefined)?.variables?.name === 'Review date');
     assert.deepEqual((date?.body as { variables: { type: string; options: unknown } }).variables.type, 'DATE');
+  });
+
+  it('uses the default title for a blank one', async () => {
+    const sys = new FakeSys();
+    const board = new Board(sys);
+    sys.answers = ['y', 'y', 'y', 'y'];
+    await setUpBoard(sys, capture().io, async (q) => /^y/.test(await sys.ask(q)), SLUG, 'example-owner', '  ');
+    assert.deepEqual(board.titles, ['example-app work']);
   });
 
   it('asks nothing when everything is there', async () => {

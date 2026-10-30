@@ -4,7 +4,7 @@ import { doctor } from './doctor.ts';
 import { prIdentity } from './identity.ts';
 import { machine } from './machine.ts';
 import { reviewsDue } from './reviews.ts';
-import { onboard } from './onboard.ts';
+import { onboard, onboardArgs } from './onboard.ts';
 import { sessionStart } from './session-start.ts';
 import { prePush, prWorkRules } from './work.ts';
 import type { Output, Sys } from './types.ts';
@@ -50,6 +50,16 @@ export async function run(
     io.err(`process-rules: unexpected argument "${extra}"`);
     io.err(USAGE);
     return 2;
+  }
+  if (command === 'onboard') {
+    // onboard's options are checked here, so a bad one is bad usage (exit 2).
+    try {
+      onboardArgs(rest);
+    } catch (error) {
+      io.err(`process-rules: ${error instanceof Error ? error.message : String(error)}`);
+      io.err(USAGE);
+      return 2;
+    }
   }
   switch (command) {
     case undefined:

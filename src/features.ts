@@ -26,7 +26,9 @@ export function featuresIn(raw: unknown): Feature[] {
   if (!Array.isArray(listed) || !listed.every((name): name is string => typeof name === 'string')) {
     throw new Error(`${SETTINGS_PATH}: "features" must be a list of feature names`);
   }
-  return parseFeatures(listed.join(','));
+  const unknown = listed.filter((name) => !isFeature(name.trim()));
+  if (unknown.length > 0) throw new Error(`${SETTINGS_PATH}: unknown feature ${unknown.map((name) => JSON.stringify(name)).join(', ')}; the features are ${FEATURES.join(', ')}`);
+  return FEATURES.filter((feature) => feature === 'identity' || listed.some((name) => name.trim() === feature));
 }
 
 /** Whether the settings at `root` turn `feature` on. */

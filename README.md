@@ -137,9 +137,11 @@ global `core.hooksPath`), `onboard` leaves it alone and names the line to add:
 `process-rules pre-push "$@"`. The client workflow re-runs the checks when a
 pull request's description is edited. After upgrading process-rules, run
 `onboard` again: it replaces the workflow when a release needs more
-permissions. Make `process-rules / PR
-identity` and `process-rules / Work rules` required checks on the default
-branch.
+permissions. Make the checks of the
+features a client has turned on required on its default branch, such as
+`process-rules / PR identity` with `pr-identity` and `process-rules / Work
+rules` with `work-rules`; a check of a feature that is off still runs and
+passes, but with identity alone there is no workflow at all, so require none.
 
 ### One feature at a time
 
@@ -154,7 +156,8 @@ The others are `pr-identity`, `board`, `work-rules`, `design`, `decisions` and
 
 `process-rules onboard <owner> <agent> --features identity` sets up identity
 alone; later, `process-rules onboard --add board` turns one more on and sets
-it up. Settings that list no features keep every feature on. The shared checks,
+it up. Settings with no `features` key keep every feature on, as before;
+`"features": []` means identity alone. The shared checks,
 the weekly job, `reviews-due` and the pre-push hook each pass, saying so, when
 their feature is off; `onboard` writes the workflow only once a check needs it
 and the pre-push hook only with `work-rules`. `project` names the board's

@@ -235,7 +235,10 @@ export async function prePush(sys: Sys, io: Output, refLines: string): Promise<n
   if (!sys.env.PROCESS_RULES_AGENT) return 0;
   const { root, slug } = repoAt(sys);
   const { owner } = loadSettings(sys, root);
-  if (!isOn(sys, root, 'work-rules')) return 0;
+  if (!isOn(sys, root, 'work-rules')) {
+    io.err(offLine('pre-push', 'work-rules'));
+    return 0;
+  }
   const token = sys.env.GH_TOKEN;
   if (!token || token === NO_TOKEN) {
     return report(io, 'pre-push', ['this agent session has no token, so the work rules cannot be checked; run process-rules doctor']);

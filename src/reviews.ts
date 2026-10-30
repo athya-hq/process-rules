@@ -29,14 +29,14 @@ const WAITING = ['veto', 'needs-owner'];
  * which wait on the owner. Runs as the agent, in the client's checkout.
  */
 export async function reviewsDue(sys: Sys, io: Output): Promise<number> {
-  const token = sys.env.GH_TOKEN;
-  if (!token) throw new Error('reviews-due needs GH_TOKEN: run it in an agent session');
   const { root, slug } = repoAt(sys);
   const { owner, agent } = loadSettings(sys, root);
   if (!isOn(sys, root, 'review')) {
     io.err(offLine('reviews-due', 'review'));
     return 0;
   }
+  const token = sys.env.GH_TOKEN;
+  if (!token) throw new Error('reviews-due needs GH_TOKEN: run it in an agent session');
   const trusted = (login: string | undefined): boolean => sameLogin(login, owner) || sameLogin(login, agent);
   const today = sys.now().toISOString().slice(0, 10);
   const open: Issue[] = [];
