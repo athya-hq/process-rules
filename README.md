@@ -9,8 +9,7 @@ GitHub Actions workflow.
 
 ## Status
 
-Skeleton. The CLI runs `help` and `version`; nothing else yet. Planned, in
-order:
+Early. The CLI runs `machine` and `doctor`; the rest is planned, in order:
 
 | Feature                                  | What it does                                                             |
 | ---------------------------------------- | ------------------------------------------------------------------------ |
@@ -22,6 +21,32 @@ order:
 | PR identity check                        | A required check that the PR's commits come from the right account      |
 | Weekly decisions job                     | Runs each Decision issue's check; opens an undo issue when one trips     |
 | Review routine                           | Settles due reversible decisions with reasoning; holds the rest          |
+
+## Agent identity on a Mac
+
+The adopting repo names its accounts in `.github/process-rules.json`:
+
+```json
+{ "owner": "AlokBansal8", "agent": "AthyaBot" }
+```
+
+`process-rules machine`, run once per Mac from inside the repo, makes the
+agent's signing key (`~/.ssh/<agent>_signing`), opens GitHub's token page and
+reads the agent's token through a hidden prompt into the keychain (service
+`process-rules`), registers the key as the agent's signing key, writes
+`~/.config/process-rules/session.sh`, and pushes one signed test commit to a
+throwaway branch to prove GitHub shows it Verified by the agent. Each change
+waits for a yes.
+
+An agent session sources `session.sh` at start (in Claude Code, a SessionStart
+hook appends it to `CLAUDE_ENV_FILE`). It holds no secret: `GH_TOKEN` is read
+from the keychain on each use, and is a value GitHub refuses when the keychain
+has none. Git gets a credential helper that drops every earlier one, commits
+as the agent's no-reply address and signs with its key, and GitHub's SSH
+remotes go over HTTPS, so nothing falls back to the owner's login.
+
+`process-rules doctor` re-checks the key, the token, the key's registration
+and the session file, and names the step to re-run.
 
 ## Adopting
 
