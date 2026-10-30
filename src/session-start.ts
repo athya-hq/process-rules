@@ -65,7 +65,7 @@ export function sessionStart(sys: Sys, io: Output): number {
   }
   const names = sessionNames(script);
   if (!names || !sameLogin(names.agent, agent) || script !== sessionScript(names.agent, names.id, paths)) {
-    return locked(`${paths.session} is not the file process-rules machine writes for ${agent}`, fix);
+    return locked(`${paths.session} is out of date, or not the file process-rules machine writes, for ${agent}`, fix);
   }
   try {
     sys.append(envFile, `\n${script}`);
