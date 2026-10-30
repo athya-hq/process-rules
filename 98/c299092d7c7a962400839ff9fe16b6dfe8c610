@@ -1,0 +1,37 @@
+.github/workflows/checks.yml
+  s_111f8ffd9a52da::t_1ec48594dd3698 12-15,92-115
+src/sys.ts
+  s_111f8ffd9a52da::t_1ec48594dd3698 52
+src/run.ts
+  s_111f8ffd9a52da::t_1ec48594dd3698 3,24,86,89
+src/design.test.ts
+  s_111f8ffd9a52da::t_fdcdd0f5364650 1-185
+src/fake.test.ts
+  s_111f8ffd9a52da::t_1ec48594dd3698 52,64,185,187-193
+src/types.ts
+  s_111f8ffd9a52da::t_1ec48594dd3698 39
+src/design.ts
+  s_111f8ffd9a52da::t_07e6de99bd0283 1-140
+src/onboard.ts
+  s_111f8ffd9a52da::t_1ec48594dd3698 59-60
+README.md
+  s_111f8ffd9a52da::t_a2037babe29255 83,98-105
+docs/roadmap.md
+  s_111f8ffd9a52da::t_386ac6c4a009bc 39
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "98c299092d7c7a962400839ff9fe16b6dfe8c610",
+  "prompts": {},
+  "sessions": {
+    "s_111f8ffd9a52da": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3cfaac9f-97c2-444b-bcc3-3d8813efab1f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Alok Bansal <alokagrawal8@gmail.com>"
+    }
+  }
+}
