@@ -74,6 +74,13 @@ days before the token ends.
    for a yes; commit the three files afterwards. The repository needs at
    least one commit.
 
+The shared checks run two jobs. **Settings** validates
+`.github/process-rules.json`. **PR identity** runs on pull requests: every
+commit that claims the agent (its login or its no-reply address) must be
+Verified as the agent, and agent commits must be pushed by the agent, so agent
+work pushed with the owner's login fails. Make `process-rules / PR identity`
+a required check on the default branch.
+
 Until releases (P-11), the client's workflow follows this repository's `main`,
 and the hook needs `process-rules` on the machine's `PATH`; without it the
 hook tells the session to stop.

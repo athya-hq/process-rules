@@ -4,9 +4,15 @@ name: process-rules checks
 # Later slices add their checks here as jobs.
 on:
   workflow_call:
+    inputs:
+      process-rules-ref:
+        description: The process-rules version whose checks run
+        type: string
+        default: main
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   settings:
@@ -32,3 +38,26 @@ jobs:
           lower() { printf %s "$1" | tr '[:upper:]' '[:lower:]'; }
           [ "$(lower "$owner")" != "$(lower "$agent")" ] || fail "owner and agent must be different accounts"
           echo "process-rules: owner $owner approves; agent $agent builds."
+
+  identity:
+    name: PR identity
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: athya-hq/process-rules
+          ref: ${{ inputs.process-rules-ref }}
+          path: .process-rules
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      # Agent commits must be Verified as the agent and pushed by it.
+      - run: node .process-rules/src/cli.ts pr-identity
+        env:
+          GH_TOKEN: ${{ github.token }}

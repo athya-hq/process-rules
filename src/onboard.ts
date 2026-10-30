@@ -42,6 +42,7 @@ export function workflow(branch: string): string {
     '',
     'permissions:',
     '  contents: read',
+    '  pull-requests: read',
     '',
     'jobs:',
     '  process-rules:',
