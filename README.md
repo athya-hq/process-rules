@@ -167,10 +167,11 @@ Project (by default `<repo> work`).
 
 Each release is a tag `vX.Y.Z` on `main`, matching `package.json`; the
 Release workflow checks both, runs `pnpm check` and publishes the GitHub
-release. Install the CLI from the tag on each machine:
+release, attaching the CLI package it built and tested. Install that package on
+each machine with pnpm; nothing is built on install:
 
 ```bash
-npm install -g github:athya-hq/process-rules#v0.2.1
+pnpm add -g https://github.com/athya-hq/process-rules/releases/download/v0.2.2/athya-hq-process-rules-0.2.2.tgz
 ```
 
 `onboard` pins the client's workflow to one version, the release of the CLI
