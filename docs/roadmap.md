@@ -3,8 +3,9 @@
 process-rules is a product. Client repositories adopt a released version;
 the product names none of them and holds no client's data. Every slice is
 proven against a sandbox client repository made for the purpose, never a
-real client: `athya-hq/process-rules-sandbox`, private, created by the owner
-on 2026-10-30, with the agent account given write access.
+real client: the private repository `process-rules-sandbox` beside this
+one, the product's own, created by the owner on 2026-10-30 with the agent
+account given write access.
 
 **Version v1 — approved by the owner, 2026-10-30**, in chat: "Approved, mark ready".
 The token choice, later that day, settled P-02's need and P-04's wording
