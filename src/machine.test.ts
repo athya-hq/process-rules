@@ -18,7 +18,7 @@ function fresh(): FakeSys {
     registered = true;
     return { status: 201, json: {} };
   });
-  sys.route('GET', '/users/ExampleBot/ssh_signing_keys', () => ({
+  sys.route('GET', '/user/ssh_signing_keys', () => ({
     status: 200,
     json: registered ? [{ key: 'ssh-ed25519 AAAAkey' }] : [],
   }));
@@ -49,6 +49,12 @@ describe('machine', () => {
       token: TOKEN,
       body: { title: 'process-rules signing', key: PUBLIC_KEY },
     });
+    const lists = sys.requests.filter((r) => r.url.endsWith('/ssh_signing_keys') && r.method === 'GET');
+    assert.deepEqual(
+      lists.map((r) => [r.url, r.token]),
+      [['https://api.github.com/user/ssh_signing_keys', TOKEN], ['https://api.github.com/user/ssh_signing_keys', TOKEN]],
+      'reads the fresh list with the token, not the cached public one',
+    );
     assert.equal(sys.modes.get(SESSION), 0o600);
     assert.ok(sys.dirs.includes(`${HOME}/.ssh`));
     assert.ok(sys.dirs.includes(`${HOME}/.config/process-rules/examplebot/gh`));
@@ -78,7 +84,7 @@ describe('machine', () => {
     const sys = fresh();
     let added = false;
     sys.route('POST', '/user/ssh_signing_keys', { status: 403, json: {} });
-    sys.route('GET', '/users/ExampleBot/ssh_signing_keys', () => ({
+    sys.route('GET', '/user/ssh_signing_keys', () => ({
       status: 200,
       json: added ? [{ key: 'ssh-ed25519 AAAAkey' }] : [],
     }));

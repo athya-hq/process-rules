@@ -105,7 +105,7 @@ export async function machine(sys: Sys, io: Output, named?: string): Promise<num
   io.out(`✓ classic token for ${agent} in the keychain`);
 
   const publicKey = sys.read(`${paths.key}.pub`).trim();
-  if (!(await signingKeys(sys, agent)).includes(keyBody(publicKey))) {
+  if (!(await signingKeys(sys, agent, token)).includes(keyBody(publicKey))) {
     if (!(await confirm(`Register ${paths.key}.pub as a signing key on ${agent}?`))) {
       return stop('register key');
     }
@@ -121,7 +121,7 @@ export async function machine(sys: Sys, io: Output, named?: string): Promise<num
       sys.open(KEY_PAGE);
       await sys.ask('Press Enter once it is added. ');
     }
-    if (!(await signingKeys(sys, agent)).includes(keyBody(publicKey))) {
+    if (!(await signingKeys(sys, agent, token)).includes(keyBody(publicKey))) {
       io.err(`machine: GitHub still does not list the key as ${agent}'s signing key`);
       return 1;
     }

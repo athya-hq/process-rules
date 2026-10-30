@@ -247,9 +247,16 @@ export function checkToken(token: string, info: TokenInfo | undefined, agent: st
   return { problem: undefined, days: Math.floor((info.expires.getTime() - now.getTime()) / DAY_MS) };
 }
 
-/** The signing keys GitHub lists publicly for an account, as "type body". */
-export async function signingKeys(sys: Sys, login: string): Promise<string[]> {
-  const { status, json } = await sys.http(`${API}/users/${login}/ssh_signing_keys`);
+/**
+ * The signing keys GitHub lists for an account, as "type body". With the
+ * account's own token the list is read fresh; GitHub's public list is cached
+ * for up to a minute, so a key just added may not show there yet.
+ */
+export async function signingKeys(sys: Sys, login: string, token?: string): Promise<string[]> {
+  const { status, json } = await sys.http(
+    token ? `${API}/user/ssh_signing_keys` : `${API}/users/${login}/ssh_signing_keys`,
+    token ? { token } : {},
+  );
   if (status !== 200 || !Array.isArray(json)) {
     throw new Error(`cannot list ${login}'s signing keys (HTTP ${status})`);
   }

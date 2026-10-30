@@ -49,6 +49,7 @@ export class FakeSys implements Sys {
     this.route('GET', '/users/ExampleBot', { status: 200, json: { id: AGENT_ID, login: AGENT } });
     this.route('GET', '/user', { status: 401, json: null });
     this.route('GET', '/users/ExampleBot/ssh_signing_keys', { status: 200, json: [] });
+    this.route('GET', '/user/ssh_signing_keys', { status: 200, json: [] });
   }
 
   route(method: string, path: string, result: HttpResult | (() => HttpResult)): this {
@@ -62,10 +63,9 @@ export class FakeSys implements Sys {
     this.files.set(`${KEY}.pub`, `${PUBLIC_KEY}\n`);
     this.setToken(AGENT, TOKEN);
     this.acceptToken(TOKEN, AGENT);
-    this.route('GET', '/users/ExampleBot/ssh_signing_keys', {
-      status: 200,
-      json: [{ key: 'ssh-ed25519 AAAAkey' }],
-    });
+    for (const path of ['/users/ExampleBot/ssh_signing_keys', '/user/ssh_signing_keys']) {
+      this.route('GET', path, { status: 200, json: [{ key: 'ssh-ed25519 AAAAkey' }] });
+    }
     return this;
   }
 

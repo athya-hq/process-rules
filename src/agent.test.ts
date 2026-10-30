@@ -282,6 +282,9 @@ describe('GitHub reads', () => {
     });
     assert.deepEqual(await signingKeys(sys, AGENT), ['ssh-ed25519 AAAA']);
     await assert.rejects(signingKeys(new FakeSys(), 'Nobody'), /cannot list Nobody's signing keys \(HTTP 404\)/);
+    const own = new FakeSys().route('GET', '/user/ssh_signing_keys', { status: 200, json: [{ key: 'ssh-ed25519 BBBB y' }] });
+    assert.deepEqual(await signingKeys(own, AGENT, TOKEN), ['ssh-ed25519 BBBB']);
+    assert.equal(own.requests.at(-1)?.token, TOKEN);
   });
 
   it('names what is wrong with a key pair', () => {
