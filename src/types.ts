@@ -32,6 +32,8 @@ export interface Sys {
   write(path: string, data: string, mode?: number): void;
   append(path: string, data: string): void;
   mkdir(path: string): void;
+  /** The names in a folder, or none when it does not exist. */
+  list(path: string): string[];
   http(
     url: string,
     options?: { method?: string; token?: string; body?: unknown },

@@ -75,6 +75,18 @@ describe('doctor', () => {
     for (const typed of ['examplebot', 'EXAMPLEBOT']) assert.equal((await check(healthy(), typed)).code, 0, typed);
   });
 
+  it("warns about the owner's credentials an agent session could reach, and still passes", async () => {
+    const sys = healthy();
+    sys.ghAccounts = ['example-owner'];
+    sys.gitPassword = true;
+    const { code, err } = await check(sys);
+    assert.equal(code, 0);
+    assert.deepEqual(err, [
+      '! gh is signed in as example-owner; an agent session that ignores the lock could use it',
+      '! the macOS keychain holds a saved git password for github.com; an agent session could use it',
+    ]);
+  });
+
   it('checks a named agent outside any repository', async () => {
     const sys = healthy();
     sys.inRepo = false;

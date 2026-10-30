@@ -39,8 +39,12 @@ export class FakeSys implements Sys {
   origin = 'https://github.com/example-org/example-app.git';
   /** What `git ls-remote <url> HEAD` prints: an empty repository prints nothing. */
   remoteHead = 'f00d\tHEAD\n';
-  /** What `gh auth token` prints: the owner's gh login. */
-  ghToken: string | undefined = 'gho_owner';
+  /** The accounts `gh auth status` lists on github.com. */
+  ghAccounts: string[] = [];
+  /** Whether the macOS keychain holds a git password for github.com. */
+  gitPassword = false;
+  /** What `gh auth token` prints: the owner's gh login, when signed in. */
+  ghToken: string | undefined;
   /** Overrides for exec, by "command firstArg"; return undefined to fall through. */
   execOverride: (call: Call) => ExecResult | undefined = () => undefined;
   routes = new Map<string, HttpResult | (() => HttpResult)>();
@@ -107,7 +111,26 @@ export class FakeSys implements Sys {
     const ok = (stdout = ''): ExecResult => ({ code: 0, stdout, stderr: '' });
     const fail = (stderr = 'failed'): ExecResult => ({ code: 1, stdout: '', stderr });
     if (command === 'git' && args[0] === 'rev-parse') return this.inRepo ? ok(`${ROOT}\n`) : fail();
+    if (command === 'gh' && args.slice(0, 2).join(' ') === 'auth logout') {
+      const login = args[args.indexOf('-u') + 1];
+      this.ghAccounts = this.ghAccounts.filter((account) => account !== login);
+      return ok();
+    }
+    if (command === 'gh' && args.slice(0, 2).join(' ') === 'auth status') {
+      // gh writes the accounts to stderr when one of them fails, as old versions always did.
+      const lines = this.ghAccounts.map((account, i) =>
+        i === 1 ? `  X Failed to log in to github.com account ${account} (keyring)` : `  ✓ Logged in to github.com account ${account} (keyring)`,
+      );
+      return { code: 0, stdout: lines.slice(0, 1).join('\n'), stderr: lines.slice(1).join('\n') };
+    }
     if (command === 'gh' && args[0] === 'auth') return this.ghToken ? ok(`${this.ghToken}\n`) : fail('not logged in');
+    if (command === '/usr/bin/security' && args[0] === 'find-internet-password') return this.gitPassword ? ok() : fail('not found');
+    if (command === 'git' && args[0] === 'credential-osxkeychain') {
+      if (options.input?.includes('host=github.com')) this.gitPassword = false;
+      return ok();
+    }
+    // An SSH key with no passphrase: its file starts "open:".
+    if (command === 'ssh-keygen' && args[1] === '-P') return this.files.get(args[4] ?? '')?.startsWith('open:') ? ok() : fail('incorrect passphrase');
     if (command === 'git' && args[0] === 'remote') return ok(`${this.origin}\n`);
     if (command === 'git' && args[0] === 'commit-tree') return ok('abc123\n');
     if (command === 'git' && args[0] === 'ls-remote') return ok(this.remoteHead);
@@ -159,6 +182,15 @@ export class FakeSys implements Sys {
   }
 
   dirs: string[] = [];
+  list(path: string): string[] {
+    const prefix = `${path}/`;
+    // Files directly in the folder, and folders named by the files below it.
+    const names = [...this.files.keys(), ...this.dirs]
+      .filter((name) => name.startsWith(prefix))
+      .map((name) => name.slice(prefix.length).split('/')[0] as string);
+    return [...new Set(names)];
+  }
+
   mkdir(path: string): void {
     this.dirs.push(path);
   }

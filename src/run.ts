@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 
 import { doctor } from './doctor.ts';
+import { prIdentity } from './identity.ts';
 import { machine } from './machine.ts';
 import { onboard } from './onboard.ts';
 import { sessionStart } from './session-start.ts';
@@ -16,6 +17,7 @@ Commands:
   onboard [owner agent]
                    Set up the client repo here: settings, hook, workflow, agent access, a Verified commit
   session-start    Run by a client's SessionStart hook: the agent identity, or GitHub locked out
+  pr-identity      Run by the shared workflow: agent commits Verified and pushed by the agent
   help             Show this text
   version          Print the installed version
 
@@ -74,7 +76,9 @@ export async function run(
     case 'machine':
     case 'doctor':
     case 'onboard':
+    case 'pr-identity':
       try {
+        if (command === 'pr-identity') return await prIdentity(await sys(), io);
         if (command === 'onboard') return await onboard(await sys(), io, rest);
         return await (command === 'machine' ? machine : doctor)(await sys(), io, rest[0]);
       } catch (error) {

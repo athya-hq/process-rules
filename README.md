@@ -46,6 +46,12 @@ credential helper that drops every earlier one and hands the agent's token to
 github.com only, commits as the agent's no-reply address and signs with its
 key.
 
+The lock lives in the session's environment, which a session that ignores it
+could change, so `machine` ends by offering to lock the owner away: to sign
+`gh` out of every account other than the agent's, active or not, and to remove a git password for
+github.com saved in the macOS keychain. It warns about SSH keys in `~/.ssh`
+with no passphrase. Declining leaves them, and `doctor` keeps naming them.
+
 `process-rules doctor` re-checks the key, the token and its scopes, the key's
 registration and the session file, names the step to re-run, and warns 14
 days before the token ends.
@@ -73,6 +79,13 @@ days before the token ends.
    shows it Verified by the agent, and deletes the branch. Each change waits
    for a yes; commit the three files afterwards. The repository needs at
    least one commit.
+
+The shared checks run two jobs. **Settings** validates
+`.github/process-rules.json`. **PR identity** runs on pull requests: every
+commit that claims the agent (its login or its no-reply address) must be
+Verified as the agent, and agent commits must be pushed by the agent, so agent
+work pushed with the owner's login fails. Make `process-rules / PR identity`
+a required check on the default branch.
 
 Until releases (P-11), the client's workflow follows this repository's `main`,
 and the hook needs `process-rules` on the machine's `PATH`; without it the
