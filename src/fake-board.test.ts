@@ -17,6 +17,7 @@ export class Board {
   operations: string[] = [];
 
   constructor(sys: FakeSys, organisation = true) {
+    sys.ghToken = OWNER_TOKEN;
     sys.acceptToken(OWNER_TOKEN, 'example-owner', { 'x-oauth-scopes': 'repo, read:org, project, admin:org, workflow' });
     if (!sys.routes.has(`GET https://api.github.com/repos/${SLUG}`)) {
       sys.route('GET', `/repos/${SLUG}`, { status: 200, json: repoJson(organisation) });

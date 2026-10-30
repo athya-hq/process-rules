@@ -14,6 +14,7 @@ import {
   storeToken,
   tokenInfo,
 } from './agent.ts';
+import { lockOwnerAway } from './lockout.ts';
 import type { Output, Sys } from './types.ts';
 
 /** GitHub's classic-token page, with the note and scopes filled in. */
@@ -138,6 +139,7 @@ export async function machine(sys: Sys, io: Output, named?: string): Promise<num
   }
   io.out(`✓ session file ${paths.session}`);
 
+  await lockOwnerAway(sys, io, confirm, agent);
   io.out(`machine: done. Agent sessions act as ${agent} once they source ${paths.session}.`);
   return 0;
 }

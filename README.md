@@ -46,6 +46,12 @@ credential helper that drops every earlier one and hands the agent's token to
 github.com only, commits as the agent's no-reply address and signs with its
 key.
 
+The lock lives in the session's environment, which a session that ignores it
+could change, so `machine` ends by offering to lock the owner away: to sign
+`gh` out of any account other than the agent, and to remove a git password for
+github.com saved in the macOS keychain. It warns about SSH keys in `~/.ssh`
+with no passphrase. Declining leaves them, and `doctor` keeps naming them.
+
 `process-rules doctor` re-checks the key, the token and its scopes, the key's
 registration and the session file, names the step to re-run, and warns 14
 days before the token ends.

@@ -4,6 +4,7 @@ import {
   chmodSync,
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   writeFileSync,
 } from 'node:fs';
@@ -39,6 +40,7 @@ export function realSys(): Sys {
     },
     append: (path, data) => appendFileSync(path, data),
     mkdir: (path) => mkdirSync(path, { recursive: true, mode: 0o700 }),
+    list: (path) => (existsSync(path) ? readdirSync(path) : []),
     async http(url, options = {}) {
       const response = await fetch(url, {
         method: options.method ?? 'GET',
