@@ -37,6 +37,8 @@ export class FakeSys implements Sys {
   modes = new Map<string, number>();
   inRepo = true;
   origin = 'https://github.com/example-org/example-app.git';
+  /** What `git ls-remote <url> HEAD` prints: an empty repository prints nothing. */
+  remoteHead = 'f00d\tHEAD\n';
   /** Overrides for exec, by "command firstArg"; return undefined to fall through. */
   execOverride: (call: Call) => ExecResult | undefined = () => undefined;
   routes = new Map<string, HttpResult | (() => HttpResult)>();
@@ -105,7 +107,11 @@ export class FakeSys implements Sys {
     if (command === 'git' && args[0] === 'rev-parse') return this.inRepo ? ok(`${ROOT}\n`) : fail();
     if (command === 'git' && args[0] === 'remote') return ok(`${this.origin}\n`);
     if (command === 'git' && args[0] === 'commit-tree') return ok('abc123\n');
-    if (command === 'git') return ok();
+    if (command === 'git' && args[0] === 'ls-remote') return ok(this.remoteHead);
+    // The test commit's other git steps; anything else fails, so an unexpected call shows.
+    if (command === 'git' && args.join(' ') === 'init -q') return ok();
+    if (command === 'git' && args.slice(0, 2).join(' ') === 'fetch -q') return ok();
+    if (command === 'git' && args.slice(0, 2).join(' ') === 'push -q') return ok();
     if (command === 'mktemp') return ok('/tmp/verify\n');
     if (command === 'rm') return ok();
     if (command === 'ssh-keygen' && args[0] === '-y') {

@@ -79,15 +79,30 @@ async function access(sys: Sys, slug: string, token: string): Promise<Access> {
   return { kind: 'refused', reason: `GitHub refused (HTTP ${status}${message ? `: ${message}` : ''})` };
 }
 
-/** The agent's pending invitation to `slug`, if any. */
+/** The agent's pending invitation to `slug`, if any, looking through every page GitHub lists. */
 async function invitation(sys: Sys, slug: string, token: string): Promise<number | undefined> {
-  const { status, json } = await sys.http(`${API}/user/repository_invitations`, { token });
-  if (status !== 200 || !Array.isArray(json)) return undefined;
-  const found = json.find((entry: unknown) => {
-    const name = (entry as { repository?: { full_name?: unknown } } | null)?.repository?.full_name;
-    return typeof name === 'string' && sameLogin(name, slug);
-  }) as { id?: unknown } | undefined;
-  return typeof found?.id === 'number' ? found.id : undefined;
+  for (let page = 1; ; page++) {
+    const { status, json } = await sys.http(`${API}/user/repository_invitations?per_page=100&page=${page}`, { token });
+    if (status !== 200 || !Array.isArray(json)) return undefined;
+    const found = json.find((entry: unknown) => {
+      const name = (entry as { repository?: { full_name?: unknown } } | null)?.repository?.full_name;
+      return typeof name === 'string' && sameLogin(name, slug);
+    }) as { id?: unknown } | undefined;
+    if (typeof found?.id === 'number') return found.id;
+    if (json.length < 100) return undefined;
+  }
+}
+
+/** Whether the SessionStart hooks in a Claude Code settings object run exactly `HOOK_COMMAND`. */
+function hasHook(settings: object): boolean {
+  const groups = (settings as { hooks?: { SessionStart?: unknown } }).hooks?.SessionStart;
+  return (
+    Array.isArray(groups) &&
+    groups.some((group: unknown) => {
+      const hooks = (group as { hooks?: unknown } | null)?.hooks;
+      return Array.isArray(hooks) && hooks.some((hook: unknown) => (hook as { command?: unknown } | null)?.command === HOOK_COMMAND);
+    })
+  );
 }
 
 /**
@@ -115,12 +130,15 @@ export async function onboard(sys: Sys, io: Output, named: readonly string[] = [
   let owner: string;
   let agent: string;
   if (sys.exists(settingsFile)) {
-    ({ owner, agent } = loadSettings(sys, root));
+    const settings = loadSettings(sys, root);
     const [namedOwner, namedAgent] = named;
-    if ((namedOwner && !sameLogin(namedOwner, owner)) || (namedAgent && !sameLogin(namedAgent, agent))) {
-      io.err(`onboard: ${SETTINGS_PATH} already names owner ${owner} and agent ${agent}; edit or delete it to change them`);
+    if ((namedOwner && !sameLogin(namedOwner, settings.owner)) || (namedAgent && !sameLogin(namedAgent, settings.agent))) {
+      io.err(`onboard: ${SETTINGS_PATH} already names owner ${settings.owner} and agent ${settings.agent}; edit or delete it to change them`);
       return 1;
     }
+    // GitHub's spelling, which the keychain, the session file and commits use.
+    owner = (await account(sys, settings.owner)).login;
+    agent = (await account(sys, settings.agent)).login;
   } else {
     const [namedOwner, namedAgent] = named;
     if (!namedOwner || !namedAgent) {
@@ -149,7 +167,7 @@ export async function onboard(sys: Sys, io: Output, named: readonly string[] = [
   if (typeof hooks !== 'object' || hooks === null || Array.isArray(hooks)) {
     throw new Error(`${HOOKS_PATH} is not a JSON object`);
   }
-  if (!JSON.stringify(hooks).includes('process-rules session-start')) {
+  if (!hasHook(hooks)) {
     if (!(await confirm(`Add the SessionStart hook that runs process-rules session-start to ${HOOKS_PATH}?`))) {
       return stop('hook entry');
     }
@@ -250,6 +268,12 @@ async function testCommit(sys: Sys, io: Output, target: Target): Promise<number>
   const branch = `process-rules/verify-${agent.toLowerCase()}-${sys.now().getTime()}`;
   let pushed = false;
   try {
+    const head = git('ls-remote', url, 'HEAD');
+    if (head.code === 0 && !head.stdout.trim()) {
+      // A first push would make the throwaway branch the default one.
+      io.err(`onboard: ${slug} has no commits yet; push a first commit to it, then onboard again`);
+      return 1;
+    }
     for (const args of [
       ['init', '-q'],
       ['fetch', '-q', '--depth=1', '--filter=blob:none', url, 'HEAD'],

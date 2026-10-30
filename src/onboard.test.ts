@@ -50,7 +50,14 @@ describe('onboard', () => {
       'onboard: done. Commit .github/process-rules.json, .claude/settings.json and .github/workflows/process-rules.yml; agent sessions then work as ExampleBot.',
     );
     const git = sys.calls.filter((c) => c.command === 'git' && c.env);
-    assert.deepEqual(git.map((c) => c.args.slice(0, 2).join(' ')), ['init -q', 'fetch -q', 'commit-tree -S', 'push -q', 'push -q']);
+    assert.deepEqual(git.map((c) => c.args.slice(0, 2).join(' ')), [
+      'ls-remote https://github.com/example-org/example-app.git',
+      'init -q',
+      'fetch -q',
+      'commit-tree -S',
+      'push -q',
+      'push -q',
+    ]);
     assert.equal(git[0]?.env?.GH_TOKEN, TOKEN);
     assert.equal(git[0]?.env?.GIT_COMMITTER_EMAIL, '42+ExampleBot@users.noreply.github.com');
     assert.deepEqual(sys.calls.at(-1)?.args, ['-rf', '/tmp/verify']);
@@ -72,6 +79,33 @@ describe('onboard', () => {
     const { code } = await run(sys, []);
     assert.equal(code, 0);
     assert.deepEqual(sys.asked.map((q) => q.split(' ')[0]), ['Push']);
+  });
+
+  it('adds the hook when the command only appears elsewhere', async () => {
+    const sys = fresh();
+    const lookalike = { hooks: { Stop: [{ hooks: [{ type: 'command', command: HOOK_COMMAND }] }], SessionStart: [{ hooks: [{ command: 'process-rules session-start --old' }] }, {}] } };
+    sys.files.set(HOOKS, JSON.stringify(lookalike));
+    await run(sys);
+    assert.ok(sys.asked.some((q) => q.startsWith('Add the SessionStart hook')));
+    assert.equal(JSON.parse(sys.files.get(HOOKS) ?? '').hooks.SessionStart.length, 3);
+  });
+
+  it('uses GitHub\'s spelling of the accounts existing settings name', async () => {
+    const sys = fresh();
+    sys.files.set(SETTINGS, JSON.stringify({ owner: 'Example-Owner', agent: 'examplebot' }));
+    sys.route('GET', '/users/Example-Owner', { status: 200, json: { id: 1, login: 'example-owner' } });
+    const { code, out } = await run(sys, []);
+    assert.equal(code, 0);
+    assert.ok(out.includes('✓ .github/process-rules.json: owner example-owner, agent ExampleBot'));
+    assert.ok(out.includes('✓ GitHub shows the test commit Verified by ExampleBot'));
+  });
+
+  it('refuses a repository with no commits, before pushing anything', async () => {
+    const sys = fresh();
+    sys.remoteHead = '';
+    const { code, err } = await run(sys);
+    assert.deepEqual({ code, err }, { code: 1, err: ['onboard: example-org/example-app has no commits yet; push a first commit to it, then onboard again'] });
+    assert.ok(!sys.calls.some((c) => c.args[0] === 'push'));
   });
 
   it('keeps the hooks a client already has', async () => {
@@ -146,7 +180,7 @@ describe('onboard', () => {
       const sys = fresh();
       let added = false;
       sys.route('GET', REPO, () => (added ? PUSH : { status: 404, json: null }));
-      sys.route('GET', '/user/repository_invitations', { status: 200, json: [] });
+      sys.route('GET', '/user/repository_invitations?per_page=100&page=1', { status: 200, json: [] });
       sys.execOverride = (call) => {
         if (call.command !== 'gh') return undefined;
         added = true;
@@ -164,7 +198,7 @@ describe('onboard', () => {
       let accepted = false;
       let invited = false;
       sys.route('GET', REPO, () => (accepted ? PUSH : { status: 404, json: null }));
-      sys.route('GET', '/user/repository_invitations', () => ({
+      sys.route('GET', '/user/repository_invitations?per_page=100&page=1', () => ({
         status: 200,
         json: invited ? [{ id: 9, repository: { full_name: 'Example-Org/Example-App' } }, { id: 'x' }, null] : [],
       }));
@@ -183,11 +217,25 @@ describe('onboard', () => {
       assert.equal(sys.requests.find((r) => r.method === 'PATCH')?.token, TOKEN);
     });
 
+    it('finds an invitation on a later page', async () => {
+      const sys = fresh();
+      let accepted = false;
+      sys.route('GET', REPO, () => (accepted ? PUSH : { status: 404, json: null }));
+      const others = Array.from({ length: 100 }, (_, i) => ({ id: i, repository: { full_name: `example-org/other-${i}` } }));
+      sys.route('GET', '/user/repository_invitations?per_page=100&page=1', { status: 200, json: others });
+      sys.route('GET', '/user/repository_invitations?per_page=100&page=2', { status: 200, json: [{ id: 900, repository: { full_name: 'example-org/example-app' } }] });
+      sys.route('PATCH', '/user/repository_invitations/900', () => {
+        accepted = true;
+        return { status: 204, json: null };
+      });
+      assert.equal((await run(sys)).code, 0);
+    });
+
     it('accepts a pending invitation without inviting again', async () => {
       const sys = fresh();
       let accepted = false;
       sys.route('GET', REPO, () => (accepted ? PUSH : { status: 404, json: null }));
-      sys.route('GET', '/user/repository_invitations', { status: 200, json: [{ id: 9, repository: { full_name: 'example-org/example-app' } }] });
+      sys.route('GET', '/user/repository_invitations?per_page=100&page=1', { status: 200, json: [{ id: 9, repository: { full_name: 'example-org/example-app' } }] });
       sys.route('PATCH', '/user/repository_invitations/9', () => {
         accepted = true;
         return { status: 204, json: null };
@@ -201,7 +249,7 @@ describe('onboard', () => {
         'gh failing to add the agent',
         (sys: FakeSys) => {
           sys.route('GET', REPO, { status: 404, json: null });
-          sys.route('GET', '/user/repository_invitations', { status: 500, json: null });
+          sys.route('GET', '/user/repository_invitations?per_page=100&page=1', { status: 500, json: null });
           sys.execOverride = (call) => (call.command === 'gh' ? { code: 1, stdout: '', stderr: 'HTTP 403\n' } : undefined);
         },
         ['onboard: gh could not add ExampleBot: HTTP 403', '  Add it yourself: example-org/example-app → Settings → Collaborators → Add people → ExampleBot, role Write.'],
@@ -210,7 +258,7 @@ describe('onboard', () => {
         'an invitation GitHub will not accept',
         (sys: FakeSys) => {
           sys.route('GET', REPO, { status: 404, json: null });
-          sys.route('GET', '/user/repository_invitations', { status: 200, json: [{ id: 9, repository: { full_name: 'example-org/example-app' } }] });
+          sys.route('GET', '/user/repository_invitations?per_page=100&page=1', { status: 200, json: [{ id: 9, repository: { full_name: 'example-org/example-app' } }] });
           sys.route('PATCH', '/user/repository_invitations/9', { status: 403, json: null });
         },
         ['onboard: GitHub did not accept the invitation (HTTP 403)'],
@@ -219,7 +267,7 @@ describe('onboard', () => {
         'an agent still without access',
         (sys: FakeSys) => {
           sys.route('GET', REPO, { status: 404, json: null });
-          sys.route('GET', '/user/repository_invitations', { status: 200, json: [] });
+          sys.route('GET', '/user/repository_invitations?per_page=100&page=1', { status: 200, json: [] });
           sys.execOverride = (call) => (call.command === 'gh' ? { code: 0, stdout: '', stderr: '' } : undefined);
         },
         ['onboard: ExampleBot still cannot see example-org/example-app; check the invitation reached ExampleBot'],
@@ -336,11 +384,11 @@ describe('onboard', () => {
   for (const [name, setUp, answers] of [
     ['inviting the agent', (sys: FakeSys) => {
       sys.route('GET', REPO, { status: 404, json: null });
-      sys.route('GET', '/user/repository_invitations', { status: 200, json: [] });
+      sys.route('GET', '/user/repository_invitations?per_page=100&page=1', { status: 200, json: [] });
     }, ['y', 'y', 'n']],
     ['accepting the invitation', (sys: FakeSys) => {
       sys.route('GET', REPO, { status: 404, json: null });
-      sys.route('GET', '/user/repository_invitations', { status: 200, json: [{ id: 9, repository: { full_name: 'example-org/example-app' } }] });
+      sys.route('GET', '/user/repository_invitations?per_page=100&page=1', { status: 200, json: [{ id: 9, repository: { full_name: 'example-org/example-app' } }] });
     }, ['y', 'y', 'n']],
   ] as const) {
     it(`stops when ${name} is declined`, async () => {
