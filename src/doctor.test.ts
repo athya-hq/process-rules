@@ -72,7 +72,7 @@ describe('doctor', () => {
   });
 
   it("uses GitHub's spelling of a login typed in another case", async () => {
-    assert.equal((await check(healthy(), 'examplebot')).code, 0);
+    for (const typed of ['examplebot', 'EXAMPLEBOT']) assert.equal((await check(healthy(), typed)).code, 0, typed);
   });
 
   it('checks a named agent outside any repository', async () => {

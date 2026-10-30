@@ -46,9 +46,7 @@ export class FakeSys implements Sys {
   asked: string[] = [];
 
   constructor() {
-    // GitHub finds a login in any case and answers with its own spelling.
     this.route('GET', '/users/ExampleBot', { status: 200, json: { id: AGENT_ID, login: AGENT } });
-    this.route('GET', '/users/examplebot', { status: 200, json: { id: AGENT_ID, login: AGENT } });
     this.route('GET', '/user', { status: 401, json: null });
     this.route('GET', '/users/ExampleBot/ssh_signing_keys', { status: 200, json: [] });
   }
@@ -148,7 +146,13 @@ export class FakeSys implements Sys {
   http(url: string, options: { method?: string; token?: string; body?: unknown } = {}): Promise<HttpResult> {
     const method = options.method ?? 'GET';
     this.requests.push({ url, method, ...(options.token ? { token: options.token } : {}), ...(options.body ? { body: options.body } : {}) });
-    const route = this.routes.get(`${method} ${url}`);
+    // GitHub finds a login in /users/ paths in any case, and answers with its own spelling.
+    const wanted = `${method} ${url}`;
+    const route =
+      this.routes.get(wanted) ??
+      (url.includes('/users/')
+        ? [...this.routes].find(([key]) => key.toLowerCase() === wanted.toLowerCase())?.[1]
+        : undefined);
     const result = typeof route === 'function' ? route() : route ?? { status: 404, json: { message: 'Not Found' } };
     return Promise.resolve(result);
   }

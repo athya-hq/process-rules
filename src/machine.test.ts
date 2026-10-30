@@ -172,12 +172,14 @@ describe('machine', () => {
     assert.deepEqual(sys.opened, []);
   });
 
-  it('uses GitHub\'s spelling of a login typed in another case', async () => {
-    const sys = fresh();
-    assert.equal((await setUp(sys, 'examplebot')).code, 0);
-    assert.equal(sys.token(AGENT), TOKEN);
-    assert.equal(sys.files.get(SESSION), sessionScript(AGENT, AGENT_ID, pathsFor(HOME, AGENT)));
-  });
+  for (const typed of ['examplebot', 'EXAMPLEBOT', 'exampleBOT']) {
+    it(`uses GitHub's spelling of the login typed as ${typed}`, async () => {
+      const sys = fresh();
+      assert.equal((await setUp(sys, typed)).code, 0);
+      assert.deepEqual([...sys.keychain.keys()], [`process-rules/${AGENT}`]);
+      assert.equal(sys.files.get(SESSION), sessionScript(AGENT, AGENT_ID, pathsFor(HOME, AGENT)));
+    });
+  }
 
   for (const [name, secret, login, headers, message] of [
     ['an empty paste', '', undefined, CLASSIC, 'machine: GitHub refuses the token (expired or revoked?)'],
