@@ -1,7 +1,8 @@
 name: Release
 
 # A tag vX.Y.Z on main makes the release clients pin: their workflow calls
-# checks.yml at the tag, and they install the CLI from it.
+# checks.yml at the tag, and machines install the CLI package attached to it,
+# built and tested here, so nothing is built on install.
 on:
   push:
     tags: ['v*']
@@ -33,9 +34,14 @@ jobs:
         with:
           node-version-file: .nvmrc
       - run: pnpm install --frozen-lockfile
+      # pnpm check builds dist/ and tests it; the package attached below is that build.
       - run: pnpm check
-      - name: Publish the release
+      - name: Pack the CLI
+        run: pnpm pack --pack-destination "$RUNNER_TEMP"
+      - name: Publish the release, with the CLI package
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
-        run: gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes --title "process-rules $TAG"
+        run: |
+          gh release create "$TAG" "$RUNNER_TEMP"/athya-hq-process-rules-*.tgz \
+            --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes --title "process-rules $TAG"
