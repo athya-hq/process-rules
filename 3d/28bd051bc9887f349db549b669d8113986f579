@@ -1,0 +1,21 @@
+src/identity.test.ts
+  s_111f8ffd9a52da::t_37188c78116bde 11,44,50,100-107,164-165,167,170,174-181,183,185-194,221-222,232-234
+src/identity.ts
+  s_111f8ffd9a52da::t_f1526646ca1bc3 67-69,79,112-115,118,125-133
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "3d28bd051bc9887f349db549b669d8113986f579",
+  "prompts": {},
+  "sessions": {
+    "s_111f8ffd9a52da": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3cfaac9f-97c2-444b-bcc3-3d8813efab1f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Alok Bansal <alokagrawal8@gmail.com>"
+    }
+  }
+}
