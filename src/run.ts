@@ -12,7 +12,7 @@ Commands:
   help       Show this text
   version    Print the installed version
 
-More commands arrive as they are built: setup, machine, doctor.`;
+More commands arrive as they are built: machine, doctor, onboard.`;
 
 /** The version in this package's package.json, from src/ or dist/ alike. */
 export function packageVersion(): string {
