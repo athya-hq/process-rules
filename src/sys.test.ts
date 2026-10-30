@@ -41,6 +41,8 @@ describe('realSys', () => {
     sys.write(path, 'data', 0o600);
     assert.equal(sys.read(path), 'data');
     assert.equal(statSync(path).mode & 0o777, 0o600);
+    sys.append(path, '+more');
+    assert.equal(sys.read(path), 'data+more');
     sys.write(join(dir, 'g'), 'plain');
     assert.equal(sys.exists(join(dir, 'g')), true);
   });

@@ -21,6 +21,7 @@ export const SETTINGS = JSON.stringify({ owner: 'example-owner', agent: AGENT })
 export interface Call {
   command: string;
   args: readonly string[];
+  cwd?: string;
   env?: Record<string, string | undefined>;
   input?: string;
 }
@@ -94,7 +95,7 @@ export class FakeSys implements Sys {
     args: readonly string[],
     options: { cwd?: string; env?: Record<string, string | undefined>; input?: string } = {},
   ): ExecResult {
-    const call: Call = { command, args, ...(options.env ? { env: options.env } : {}), ...(options.input ? { input: options.input } : {}) };
+    const call: Call = { command, args, ...(options.cwd ? { cwd: options.cwd } : {}), ...(options.env ? { env: options.env } : {}), ...(options.input ? { input: options.input } : {}) };
     this.calls.push(call);
     const override = this.execOverride(call);
     if (override) return override;
@@ -136,6 +137,10 @@ export class FakeSys implements Sys {
   write(path: string, data: string, mode?: number): void {
     this.files.set(path, data);
     if (mode !== undefined) this.modes.set(path, mode);
+  }
+
+  append(path: string, data: string): void {
+    this.files.set(path, (this.files.get(path) ?? '') + data);
   }
 
   dirs: string[] = [];

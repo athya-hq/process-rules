@@ -30,10 +30,10 @@ describe('loadSettings', () => {
     assert.deepEqual(loadSettings(new FakeSys(), ROOT), { owner: 'example-owner', agent: AGENT });
   });
 
-  it('asks for the agent when the file is missing', () => {
+  it('says when the file is missing', () => {
     const sys = new FakeSys();
     sys.files.clear();
-    assert.throws(() => loadSettings(sys, ROOT), /not found in \/repo; name the agent account after the command/);
+    assert.throws(() => loadSettings(sys, ROOT), /^Error: \.github\/process-rules\.json not found in \/repo$/);
   });
 
   for (const [raw, message] of [
@@ -67,11 +67,16 @@ describe('agentFrom', () => {
     assert.equal(agentFrom(new FakeSys(), undefined), AGENT);
   });
 
-  it('asks for a name outside a repo', () => {
-    const sys = new FakeSys();
-    sys.inRepo = false;
-    assert.throws(() => agentFrom(sys, undefined), /name the agent account after the command, or run it in a repo/);
-  });
+  for (const [where, change] of [
+    ['outside a repo', (sys: FakeSys) => (sys.inRepo = false)],
+    ['in a repo without settings', (sys: FakeSys) => sys.files.clear()],
+  ] as const) {
+    it(`asks for a name ${where}`, () => {
+      const sys = new FakeSys();
+      change(sys);
+      assert.throws(() => agentFrom(sys, undefined), /name the agent account after the command, or run it in a repo/);
+    });
+  }
 });
 
 describe('pathsFor and noreplyEmail', () => {

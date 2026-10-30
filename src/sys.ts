@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import {
+  appendFileSync,
   chmodSync,
   existsSync,
   mkdirSync,
@@ -36,6 +37,7 @@ export function realSys(): Sys {
       writeFileSync(path, data, { mode });
       if (mode !== undefined) chmodSync(path, mode);
     },
+    append: (path, data) => appendFileSync(path, data),
     mkdir: (path) => mkdirSync(path, { recursive: true, mode: 0o700 }),
     async http(url, options = {}) {
       const response = await fetch(url, {
