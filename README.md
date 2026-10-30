@@ -170,7 +170,7 @@ Release workflow checks both, runs `pnpm check` and publishes the GitHub
 release. Install the CLI from the tag on each machine:
 
 ```bash
-npm install -g github:athya-hq/process-rules#v0.2.0
+npm install -g github:athya-hq/process-rules#v0.2.1
 ```
 
 `onboard` pins the client's workflow to one version, the release of the CLI
