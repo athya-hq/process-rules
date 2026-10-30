@@ -1,4 +1,5 @@
 import { API, loadSettings, sameLogin } from './agent.ts';
+import { isOn, offLine } from './features.ts';
 import { expireVetoes } from './reviews.ts';
 import type { Output, Sys } from './types.ts';
 
@@ -71,6 +72,10 @@ export async function decisionsWeekly(sys: Sys, io: Output): Promise<number> {
   const { GITHUB_REPOSITORY: slug, GH_TOKEN: token } = sys.env;
   if (!slug || !token) throw new Error('decisions-weekly runs in GitHub Actions: GITHUB_REPOSITORY and GH_TOKEN must be set');
   const { owner, agent } = loadSettings(sys, sys.cwd);
+  if (!isOn(sys, sys.cwd, 'decisions')) {
+    io.out(offLine('decisions-weekly', 'decisions'));
+    return 0;
+  }
   const trusted = (login: string | undefined): boolean => sameLogin(login, owner) || sameLogin(login, agent);
   const decisions = await openIssues(sys, token, slug, 'type=Decision');
   const undos = await openIssues(sys, token, slug, 'labels=needs-owner');
@@ -85,7 +90,7 @@ export async function decisionsWeekly(sys: Sys, io: Output): Promise<number> {
   };
 
   // Before the decisions, so one decision's failing call cannot keep vetoes past their week.
-  await expireVetoes(sys, io, slug, token);
+  if (isOn(sys, sys.cwd, 'review')) await expireVetoes(sys, io, slug, token);
   const started = sys.now().getTime();
   const tell = async (number: number, check: string, run: { code: number; stdout: string; stderr: string }, undo: number): Promise<void> => {
     const output = `${run.stdout}${run.stderr}`.trim().split('\n').slice(-20).join('\n');

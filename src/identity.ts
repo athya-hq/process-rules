@@ -1,4 +1,5 @@
 import { API, account, loadSettings, noreplyEmail, sameLogin } from './agent.ts';
+import { isOn, offLine } from './features.ts';
 import type { Output, Sys } from './types.ts';
 
 interface Commit {
@@ -36,6 +37,10 @@ export async function prIdentity(sys: Sys, io: Output): Promise<number> {
     return 0;
   }
   const { agent } = loadSettings(sys, sys.cwd);
+  if (!isOn(sys, sys.cwd, 'pr-identity')) {
+    io.out(offLine('pr-identity', 'pr-identity'));
+    return 0;
+  }
   const { id, login } = await account(sys, agent);
   const email = noreplyEmail(id, login).toLowerCase();
 

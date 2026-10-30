@@ -141,6 +141,25 @@ permissions. Make `process-rules / PR
 identity` and `process-rules / Work rules` required checks on the default
 branch.
 
+### One feature at a time
+
+A client can turn features on one at a time. `identity` is always on: the
+settings, the session-start hook, the agent's access and its Verified commit.
+The others are `pr-identity`, `board`, `work-rules`, `design`, `decisions` and
+`review`. The settings list the ones a client has turned on:
+
+```json
+{ "owner": "example-owner", "agent": "ExampleBot", "features": ["identity"], "project": "Example work" }
+```
+
+`process-rules onboard <owner> <agent> --features identity` sets up identity
+alone; later, `process-rules onboard --add board` turns one more on and sets
+it up. Settings that list no features keep every feature on. The shared checks,
+the weekly job, `reviews-due` and the pre-push hook each pass, saying so, when
+their feature is off; `onboard` writes the workflow only once a check needs it
+and the pre-push hook only with `work-rules`. `project` names the board's
+Project (by default `<repo> work`).
+
 ### Releases and upgrading
 
 Each release is a tag `vX.Y.Z` on `main`, matching `package.json`; the
@@ -148,7 +167,7 @@ Release workflow checks both, runs `pnpm check` and publishes the GitHub
 release. Install the CLI from the tag on each machine:
 
 ```bash
-npm install -g github:athya-hq/process-rules#v0.1.0
+npm install -g github:athya-hq/process-rules#v0.2.0
 ```
 
 `onboard` pins the client's workflow to one version, the release of the CLI

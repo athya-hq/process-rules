@@ -1,4 +1,5 @@
 import { API, NO_TOKEN, loadSettings, repoAt, sameLogin } from './agent.ts';
+import { isOn, offLine } from './features.ts';
 import type { Output, Sys } from './types.ts';
 
 /** How a pull request or a commit names the slice it builds. */
@@ -199,6 +200,10 @@ export async function prWorkRules(sys: Sys, io: Output): Promise<number> {
     return 0;
   }
   const { owner, agent } = loadSettings(sys, sys.cwd);
+  if (!isOn(sys, sys.cwd, 'work-rules')) {
+    io.out(offLine('pr-work-rules', 'work-rules'));
+    return 0;
+  }
   if (!sameLogin(pull.user.login, agent)) {
     io.out(`pr-work-rules: #${pull.number} is by ${pull.user.login}, not the agent; the work rules bind agent pull requests`);
     return 0;
@@ -228,12 +233,13 @@ const ZERO = /^0+$/;
  */
 export async function prePush(sys: Sys, io: Output, refLines: string): Promise<number> {
   if (!sys.env.PROCESS_RULES_AGENT) return 0;
+  const { root, slug } = repoAt(sys);
+  const { owner } = loadSettings(sys, root);
+  if (!isOn(sys, root, 'work-rules')) return 0;
   const token = sys.env.GH_TOKEN;
   if (!token || token === NO_TOKEN) {
     return report(io, 'pre-push', ['this agent session has no token, so the work rules cannot be checked; run process-rules doctor']);
   }
-  const { root, slug } = repoAt(sys);
-  const { owner } = loadSettings(sys, root);
   let messages = '';
   const branches: string[] = [];
   for (const line of refLines.split('\n').filter(Boolean)) {

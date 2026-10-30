@@ -19,8 +19,8 @@ export const USAGE = `Usage: process-rules <command>
 Commands:
   machine [agent]  Set up this machine so agent sessions work as the agent account
   doctor [agent]   Check agent sessions here can work as the agent account
-  onboard [owner agent]
-                   Set up the client repo here: settings, hook, workflow, agent access, a Verified commit
+  onboard [owner agent] [--features a,b] [--add feature]
+                   Set up the client repo here, for the features it turns on
   session-start    Run by a client's SessionStart hook: the agent identity, or GitHub locked out
   pr-identity      Run by the shared workflow: agent commits Verified and pushed by the agent
   pr-work-rules    Run by the shared workflow: an agent pull request builds one slice it may build
@@ -33,7 +33,9 @@ Commands:
 
 Without [agent], machine and doctor use the agent account .github/process-rules.json names
 in the repo around the working directory.
-onboard needs the owner and agent the first time; after that it reads them from that file.`;
+onboard needs the owner and agent the first time; after that it reads them from that file.
+Features: identity (always on), pr-identity, board, work-rules, design, decisions, review.
+--features lists them the first time (all when left out); --add turns one more on.`;
 
 /** Runs one command and returns its exit code: 0 done, 1 failed, 2 bad usage. */
 export async function run(
@@ -42,7 +44,7 @@ export async function run(
   sys: () => Sys | Promise<Sys>,
 ): Promise<number> {
   const [command, ...rest] = args;
-  const allowed = command === 'onboard' || command === 'pre-push' ? 2 : command === 'machine' || command === 'doctor' ? 1 : 0;
+  const allowed = command === 'onboard' ? Infinity : command === 'pre-push' ? 2 : command === 'machine' || command === 'doctor' ? 1 : 0;
   const extra = rest[allowed];
   if (extra !== undefined) {
     io.err(`process-rules: unexpected argument "${extra}"`);
