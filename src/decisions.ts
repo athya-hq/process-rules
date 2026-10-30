@@ -103,7 +103,10 @@ export async function decisionsWeekly(sys: Sys, io: Output): Promise<number> {
     const commented = await sys.http(`${API}/repos/${slug}/issues/${number}/comments`, {
       method: 'POST',
       token,
-      body: { body: `Tripped on ${today.toISOString().slice(0, 10)}: \`${check}\` exited ${run.code}.\n\n\`\`\`\n${output}\n\`\`\`\n\nOpened #${undo} to undo it.` },
+      // The output, when the check printed any.
+      body: {
+        body: `Tripped on ${today.toISOString().slice(0, 10)}: \`${check}\` exited ${run.code}.\n\n${output ? `\`\`\`\n${output}\n\`\`\`\n\n` : ''}Opened #${undo} to undo it.`,
+      },
     });
     if (commented.status !== 201) throw new Error(`cannot comment on #${number} (HTTP ${commented.status})`);
   };

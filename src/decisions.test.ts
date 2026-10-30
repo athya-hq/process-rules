@@ -89,6 +89,14 @@ describe('decisionsWeekly', () => {
     assert.equal((comment?.body as { body: string }).body, 'Tripped on 2026-10-30: `exit 3` exited 3.\n\n```\nline\nwhy it failed\n```\n\nOpened #99 to undo it.');
   });
 
+  it('leaves the output out of the comment when the check printed none', async () => {
+    const sys = weekly([decision(6, 'Check: `test -f gone`')], { 'test -f gone': 1 });
+    const inner = sys.execOverride;
+    sys.execOverride = (call) => (call.command === 'timeout' ? { code: 0, stdout: 'process-rules-check-exit=1\n', stderr: '' } : inner(call));
+    await run(sys);
+    assert.equal((posts(sys)[1]?.body as { body: string }).body, 'Tripped on 2026-10-30: `test -f gone` exited 1.\n\nOpened #99 to undo it.');
+  });
+
   it('asks the owner to decide when the decision names no undo step', async () => {
     const sys = weekly([decision(6, 'Check: `false`')], { false: 1 });
     await run(sys);
