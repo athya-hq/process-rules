@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
+import { Board, repoJson } from './board.test.ts';
+import { FIELDS, ISSUE_TYPES, LABELS, viewsChecklist } from './board.ts';
 import { AGENT, FakeSys, ROOT, TOKEN, capture } from './fake.test.ts';
 import { HOOK_COMMAND, HOOKS_PATH, WORKFLOW_PATH, onboard, workflow } from './onboard.ts';
 
@@ -8,7 +10,7 @@ const SETTINGS = `${ROOT}/.github/process-rules.json`;
 const HOOKS = `${ROOT}/${HOOKS_PATH}`;
 const WORKFLOW = `${ROOT}/${WORKFLOW_PATH}`;
 const REPO = '/repos/example-org/example-app';
-const PUSH = { status: 200, json: { default_branch: 'main', permissions: { push: true } } };
+const PUSH = { status: 200, json: repoJson() };
 const VERIFIED = {
   status: 200,
   json: { committer: { login: AGENT }, commit: { verification: { verified: true, reason: 'valid' } } },
@@ -21,7 +23,9 @@ function fresh(): FakeSys {
   sys.route('GET', '/users/example-owner', { status: 200, json: { id: 1, login: 'example-owner' } });
   sys.route('GET', REPO, PUSH);
   sys.route('GET', `${REPO}/commits/abc123`, VERIFIED);
-  sys.answers = Array<string>(6).fill('y');
+  new Board(sys);
+  // Settings, hook, workflow; issue types, labels, Project, fields; test commit.
+  sys.answers = Array<string>(10).fill('y');
   return sys;
 }
 
@@ -61,7 +65,10 @@ describe('onboard', () => {
     assert.equal(git[0]?.env?.GH_TOKEN, TOKEN);
     assert.equal(git[0]?.env?.GIT_COMMITTER_EMAIL, '42+ExampleBot@users.noreply.github.com');
     assert.deepEqual(sys.calls.at(-1)?.args, ['-rf', '/tmp/verify']);
-    assert.ok(sys.requests.filter((r) => r.url.includes(REPO)).every((r) => r.token === TOKEN), 'asks GitHub as the agent');
+    const reads = sys.requests.filter((r) => r.url === `https://api.github.com${REPO}`);
+    assert.equal(reads[0]?.token, TOKEN, 'checks access as the agent');
+    assert.ok(out.includes('✓ fields: Step, Decision, Review date'));
+    assert.ok(out.includes(viewsChecklist('https://github.com/orgs/example-org/projects/3')[0] ?? ''));
   });
 
   it("uses GitHub's spelling of logins typed in another case", async () => {
@@ -76,6 +83,10 @@ describe('onboard', () => {
     sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT }));
     sys.files.set(HOOKS, JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: HOOK_COMMAND }] }] } }));
     sys.files.set(WORKFLOW, workflow('main'));
+    const board = new Board(sys);
+    board.issueTypes = ISSUE_TYPES.map((t) => t.name);
+    board.labels = LABELS.map((l) => l.name);
+    board.project = { fields: FIELDS.map((f) => f.name) };
     const { code } = await run(sys, []);
     assert.equal(code, 0);
     assert.deepEqual(sys.asked.map((q) => q.split(' ')[0]), ['Push']);
@@ -122,7 +133,7 @@ describe('onboard', () => {
   it('replaces a workflow that differs', async () => {
     const sys = fresh();
     sys.files.set(WORKFLOW, 'old');
-    sys.route('GET', REPO, { status: 200, json: { default_branch: 'trunk', permissions: { push: true } } });
+    sys.route('GET', REPO, { status: 200, json: repoJson(true, 'trunk') });
     await run(sys);
     assert.ok(sys.asked.some((q) => q.startsWith('Replace .github/workflows/process-rules.yml')));
     assert.match(sys.files.get(WORKFLOW) ?? '', /branches: \["trunk"\]/);
@@ -182,7 +193,7 @@ describe('onboard', () => {
       sys.route('GET', REPO, () => (added ? PUSH : { status: 404, json: null }));
       sys.route('GET', '/user/repository_invitations?per_page=100&page=1', { status: 200, json: [] });
       sys.execOverride = (call) => {
-        if (call.command !== 'gh') return undefined;
+        if (call.command !== 'gh' || call.args[0] !== 'api') return undefined;
         added = true;
         return { code: 0, stdout: '', stderr: '' };
       };
@@ -207,11 +218,11 @@ describe('onboard', () => {
         return { status: 204, json: null };
       });
       sys.execOverride = (call) => {
-        if (call.command !== 'gh') return undefined;
+        if (call.command !== 'gh' || call.args[0] !== 'api') return undefined;
         invited = true;
         return { code: 0, stdout: '', stderr: '' };
       };
-      sys.answers = Array<string>(7).fill('y');
+      sys.answers = Array<string>(10).fill('y');
       const { code } = await run(sys);
       assert.equal(code, 0);
       assert.equal(sys.requests.find((r) => r.method === 'PATCH')?.token, TOKEN);
@@ -241,7 +252,7 @@ describe('onboard', () => {
         return { status: 204, json: null };
       });
       assert.equal((await run(sys)).code, 0);
-      assert.ok(!sys.calls.some((c) => c.command === 'gh'));
+      assert.ok(!sys.calls.some((c) => c.command === 'gh' && c.args[0] === 'api'), 'invites no one');
     });
 
     for (const [name, setUp, message] of [
@@ -274,7 +285,7 @@ describe('onboard', () => {
       ],
       [
         'read-only access',
-        (sys: FakeSys) => sys.route('GET', REPO, { status: 200, json: { default_branch: 'main', permissions: { push: false } } }),
+        (sys: FakeSys) => sys.route('GET', REPO, { status: 200, json: { ...repoJson(), permissions: { push: false } } }),
         ['onboard: ExampleBot can read example-org/example-app but not push; give it the Write role'],
       ],
       [
@@ -371,7 +382,7 @@ describe('onboard', () => {
     }
   });
 
-  for (const [index, step] of ['settings file', 'hook entry', 'workflow', 'test commit'].entries()) {
+  for (const [index, step] of [[0, 'settings file'], [1, 'hook entry'], [2, 'workflow'], [7, 'test commit']] as const) {
     it(`stops without changing anything more when "${step}" is declined`, async () => {
       const sys = fresh();
       sys.answers = [...Array<string>(index).fill('y'), 'n'];
