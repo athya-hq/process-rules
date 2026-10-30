@@ -185,7 +185,9 @@ export class FakeSys implements Sys {
   list(path: string): string[] {
     const prefix = `${path}/`;
     // Files directly in the folder, and folders named by the files below it.
-    const names = [...this.files.keys()].filter((name) => name.startsWith(prefix)).map((name) => name.slice(prefix.length).split('/')[0] as string);
+    const names = [...this.files.keys(), ...this.dirs]
+      .filter((name) => name.startsWith(prefix))
+      .map((name) => name.slice(prefix.length).split('/')[0] as string);
     return [...new Set(names)];
   }
 

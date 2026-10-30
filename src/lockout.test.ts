@@ -52,6 +52,13 @@ describe('exposure', () => {
     assert.deepEqual(call?.env, { GH_TOKEN: undefined, GITHUB_TOKEN: undefined, GH_CONFIG_DIR: undefined, KEEP: '1' });
   });
 
+  it("spares the signing key of an agent whose folder is empty", () => {
+    const sys = new FakeSys().ready();
+    sys.mkdir(`${HOME}/.config/process-rules/emptybot`);
+    sys.files.set(`${HOME}/.ssh/emptybot_signing`, 'open:agent');
+    assert.deepEqual(exposure(sys, AGENT).openKeys, []);
+  });
+
   it('finds nothing on a clean Mac', () => {
     assert.deepEqual(exposureLines(exposure(new FakeSys().ready(), AGENT)), []);
   });
