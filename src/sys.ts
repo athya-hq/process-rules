@@ -50,6 +50,7 @@ export function realSys(): Sys {
           'x-github-api-version': '2022-11-28',
           ...(options.token ? { authorization: `Bearer ${options.token}` } : {}),
           ...(options.body ? { 'content-type': 'application/json' } : {}),
+          ...options.headers,
         },
         ...(options.body ? { body: JSON.stringify(options.body) } : {}),
       });

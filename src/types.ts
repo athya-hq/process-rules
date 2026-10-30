@@ -36,7 +36,7 @@ export interface Sys {
   list(path: string): string[];
   http(
     url: string,
-    options?: { method?: string; token?: string; body?: unknown },
+    options?: { method?: string; token?: string; body?: unknown; headers?: Record<string, string> },
   ): Promise<HttpResult>;
   /** Everything on standard input, as a git hook receives it. */
   readStdin(): string;

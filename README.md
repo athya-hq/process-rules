@@ -80,7 +80,7 @@ days before the token ends.
    for a yes; commit the three files afterwards. The repository needs at
    least one commit.
 
-The shared checks run three jobs. **Settings** validates
+The shared checks run four jobs. **Settings** validates
 `.github/process-rules.json`. **PR identity** runs on pull requests: every
 commit that claims the agent (its login or its no-reply address) must be
 Verified as the agent, and agent commits must be pushed by the agent, so agent
@@ -94,6 +94,14 @@ slice may be built:
 - each of its State sub-issues closed as not planned after the approval
   carries the owner's `Decision:` comment;
 - no other open pull request names it.
+
+**Design frames** is optional: with `"figma": { "library": "<file key>" }` in
+the settings and a `FIGMA_TOKEN` Actions secret, each State of the slice an
+agent pull request builds, other than one closed as not planned, must link a
+Figma frame (`figma.com/design/...?node-id=...`) that holds at least one
+component published by that library and is not a captured image (an image
+covering half the frame or more). Without either, the job says the check is
+off and passes.
 
 `onboard` also writes a pre-push git hook running `process-rules pre-push`,
 which applies the same rules before an agent session pushes: all the commits
