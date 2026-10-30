@@ -64,7 +64,9 @@ export async function prIdentity(sys: Sys, io: Output): Promise<number> {
       );
     }
   }
-  const pushers = await whoPushed(sys, token, {
+  // Only commits that claim the agent need their pusher; an owner-only pull request asks GitHub nothing more.
+  const agentCommits = commits.filter(claimsAgent);
+  const pushers = agentCommits.length === 0 ? new Map<string, string>() : await whoPushed(sys, token, {
     repo: pull.head.repo?.full_name ?? slug,
     ref: pull.head.ref,
     base: pull.base.sha,
@@ -74,7 +76,7 @@ export async function prIdentity(sys: Sys, io: Output): Promise<number> {
   // before GitHub records the push; any other run relies on the record alone.
   const fallback = event.action === 'opened' || event.action === 'synchronize' ? actor : undefined;
   const byPusher = new Map<string, string[]>();
-  for (const commit of commits.filter(claimsAgent)) {
+  for (const commit of agentCommits) {
     const pusher = pushers.get(commit.sha) ?? fallback;
     if (pusher && sameLogin(pusher, login)) continue;
     const key = pusher ?? 'an account GitHub has not recorded yet';
@@ -107,22 +109,28 @@ async function whoPushed(
   branch: { repo: string; ref: string; base: string; commits: string[] },
 ): Promise<Map<string, string>> {
   const pushes: { before: string; after: string; activity_type: string; actor: { login: string } | null }[] = [];
-  for (let page = 1; ; page++) {
-    const ref = encodeURIComponent(`refs/heads/${branch.ref}`);
-    const { status, json } = await sys.http(`${API}/repos/${branch.repo}/activity?ref=${ref}&per_page=100&page=${page}`, { token });
+  // The activity list pages by cursor: each reply's Link header names the next page.
+  const ref = encodeURIComponent(`refs/heads/${branch.ref}`);
+  for (let url: string | undefined = `${API}/repos/${branch.repo}/activity?ref=${ref}&per_page=100`; url; ) {
+    const { status, json, headers = {} } = await sys.http(url, { token });
     if (status !== 200 || !Array.isArray(json)) throw new Error(`cannot read the pushes to ${branch.ref} (HTTP ${status})`);
     pushes.push(...(json as typeof pushes));
-    if (json.length < 100) break;
+    url = /<([^>]+)>;\s*rel="next"/.exec(headers.link ?? '')?.[1];
   }
   const wanted = new Set(branch.commits);
   const pushers = new Map<string, string>();
   for (const push of pushes.reverse()) {
     if (ZERO.test(push.after) || !push.actor) continue;
     const from = push.activity_type === 'push' && !ZERO.test(push.before) ? push.before : branch.base;
-    const { status, json } = await sys.http(`${API}/repos/${branch.repo}/compare/${from}...${push.after}?per_page=100`, { token });
-    if (status !== 200) throw new Error(`cannot compare ${from.slice(0, 7)}...${push.after.slice(0, 7)} (HTTP ${status})`);
-    for (const { sha } of (json as { commits?: { sha: string }[] } | null)?.commits ?? []) {
-      if (wanted.has(sha) && !pushers.has(sha)) pushers.set(sha, push.actor.login);
+    // Every page of what the push brought, so no commit is left for the fallback.
+    for (let page = 1; ; page++) {
+      const { status, json } = await sys.http(`${API}/repos/${branch.repo}/compare/${from}...${push.after}?per_page=100&page=${page}`, { token });
+      if (status !== 200) throw new Error(`cannot compare ${from.slice(0, 7)}...${push.after.slice(0, 7)} (HTTP ${status})`);
+      const brought = (json as { commits?: { sha: string }[] } | null)?.commits ?? [];
+      for (const { sha } of brought) {
+        if (wanted.has(sha) && !pushers.has(sha)) pushers.set(sha, push.actor.login);
+      }
+      if (brought.length < 100) break;
     }
   }
   return pushers;

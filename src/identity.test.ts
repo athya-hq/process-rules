@@ -8,6 +8,7 @@ const EVENT = '/tmp/event.json';
 const REPO = '/repos/example-org/example-app';
 const COMMITS = `${REPO}/pulls/7/commits?per_page=100`;
 const ACTIVITY = `${REPO}/activity?ref=refs%2Fheads%2Fwork&per_page=100`;
+const compare = (from: string, to: string, page = 1) => `${REPO}/compare/${from}...${to}?per_page=100&page=${page}`;
 const EMAIL = '42+ExampleBot@users.noreply.github.com';
 const BASE = 'base0';
 const ZERO = '0'.repeat(40);
@@ -40,13 +41,13 @@ function actions(action: string, actor: string, commits: Record<string, unknown>
   sys.env = { GITHUB_EVENT_PATH: EVENT, GITHUB_ACTOR: actor, GITHUB_REPOSITORY: 'example-org/example-app', GH_TOKEN: 'ghs_run' };
   sys.files.set(EVENT, JSON.stringify({ action, pull_request: { number: 7, base: { sha: BASE }, head: { ref: 'work', repo: { full_name: 'example-org/example-app' } } } }));
   sys.route('GET', `${COMMITS}&page=1`, { status: 200, json: commits });
-  sys.route('GET', `${ACTIVITY}&page=1`, {
+  sys.route('GET', ACTIVITY, {
     status: 200,
     json: [...pushes].reverse().map((push) => ({ activity_type: push.type, actor: push.actor ? { login: push.actor } : null, before: push.before, after: push.after })),
   });
   for (const push of pushes) {
     const from = push.type === 'push' && push.before !== ZERO ? push.before : BASE;
-    sys.route('GET', `${REPO}/compare/${from}...${push.after}?per_page=100`, { status: 200, json: { commits: push.brings.map((sha) => ({ sha })) } });
+    sys.route('GET', compare(from, push.after), { status: 200, json: { commits: push.brings.map((sha) => ({ sha })) } });
   }
   return sys;
 }
@@ -94,6 +95,14 @@ describe('prIdentity', () => {
       [created(AGENT, ['a1'], 'h1'), pushed('example-owner', 'h1', 'h2', ['o2']), pushed(AGENT, 'h2', 'h3', ['a1', 'o2', 'a3'])],
     );
     assert.equal((await check(sys)).code, 0);
+  });
+
+  it('keeps an owner push failing when the agent later pushes the same commit again', async () => {
+    const sys = actions('synchronize', AGENT, [commit('a1', 'agent')], [
+      created('example-owner', ['a1'], 'h1'),
+      { type: 'force_push', actor: AGENT, before: 'h1', after: 'h2', brings: ['a1'] },
+    ]);
+    assert.match((await check(sys)).err[0] ?? '', /^✗ example-owner pushed a1/);
   });
 
   it('credits a force push with commits counted from the base', async () => {
@@ -152,22 +161,37 @@ describe('prIdentity', () => {
     const event = JSON.parse(sys.files.get(EVENT) ?? '{}');
     event.pull_request.head.repo = { full_name: 'someone/example-app' };
     sys.files.set(EVENT, JSON.stringify(event));
-    sys.route('GET', '/repos/someone/example-app/activity?ref=refs%2Fheads%2Fwork&per_page=100&page=1', { status: 200, json: [] });
+    sys.route('GET', ACTIVITY, { status: 404, json: null });
+    sys.route('GET', '/repos/someone/example-app/activity?ref=refs%2Fheads%2Fwork&per_page=100', { status: 200, json: [] });
     assert.equal((await check(sys)).code, 0);
+    assert.ok(sys.requests.some((r) => r.url.startsWith('https://api.github.com/repos/someone/example-app/activity')));
     event.pull_request.head.repo = null;
     sys.files.set(EVENT, JSON.stringify(event));
+    sys.route('GET', ACTIVITY, { status: 200, json: [] });
     assert.equal((await check(sys)).code, 0);
   });
 
-  it('reads every page of commits and of pushes', async () => {
+  it('asks nothing about pushes when no commit claims the agent', async () => {
+    const sys = actions('opened', 'example-owner', [commit('o1', 'owner')]);
+    sys.route('GET', ACTIVITY, { status: 403, json: null });
+    assert.equal((await check(sys)).code, 0);
+    assert.ok(!sys.requests.some((r) => r.url.includes('/activity')));
+  });
+
+  it('reads every page of commits, of pushes (by cursor) and of what a push brought', async () => {
     const page = Array.from({ length: 100 }, (_, i) => commit(`o${i}`, 'owner'));
-    const sys = actions('opened', 'example-owner', page);
+    const sys = actions('reopened', 'example-owner', page);
     sys.route('GET', `${COMMITS}&page=2`, { status: 200, json: [commit('a9', 'agent')] });
-    const many = Array.from({ length: 100 }, () => ({ activity_type: 'branch_deletion', actor: null, before: 'x', after: ZERO }));
-    sys.route('GET', `${ACTIVITY}&page=1`, { status: 200, json: many });
-    sys.route('GET', `${ACTIVITY}&page=2`, { status: 200, json: [] });
-    assert.equal((await check(sys)).code, 1);
-    assert.ok(sys.requests.some((r) => r.url.endsWith('&page=2') && r.url.includes('/activity')));
+    const next = 'https://api.github.com/repos/example-org/example-app/activity?ref=refs%2Fheads%2Fwork&per_page=100&after=CURSOR';
+    sys.route('GET', ACTIVITY, {
+      status: 200,
+      json: [{ activity_type: 'branch_deletion', actor: null, before: 'x', after: ZERO }],
+      headers: { link: `<${next}>; rel="next", <https://example.invalid>; rel="last"` },
+    });
+    sys.route('GET', next, { status: 200, json: [{ activity_type: 'branch_creation', actor: { login: AGENT }, before: ZERO, after: 'h1' }] });
+    sys.route('GET', compare(BASE, 'h1'), { status: 200, json: { commits: Array.from({ length: 100 }, (_, i) => ({ sha: `x${i}` })) } });
+    sys.route('GET', compare(BASE, 'h1', 2), { status: 200, json: { commits: [{ sha: 'a9' }] } });
+    assert.equal((await check(sys)).code, 0, 'a9 is credited to the agent from the second page');
   });
 
   it('fails closed at the 250 commits GitHub lists', async () => {
@@ -194,8 +218,8 @@ describe('prIdentity', () => {
 
   for (const [name, change, message] of [
     ['list the commits', (sys: FakeSys) => sys.route('GET', `${COMMITS}&page=1`, { status: 403, json: null }), /cannot list the commits of #7 \(HTTP 403\)/],
-    ['read the pushes', (sys: FakeSys) => sys.route('GET', `${ACTIVITY}&page=1`, { status: 404, json: null }), /cannot read the pushes to work \(HTTP 404\)/],
-    ['compare a push', (sys: FakeSys) => sys.route('GET', `${REPO}/compare/${BASE}...h1?per_page=100`, { status: 500, json: null }), /cannot compare base0...h1 \(HTTP 500\)/],
+    ['read the pushes', (sys: FakeSys) => sys.route('GET', ACTIVITY, { status: 404, json: null }), /cannot read the pushes to work \(HTTP 404\)/],
+    ['compare a push', (sys: FakeSys) => sys.route('GET', compare(BASE, 'h1'), { status: 500, json: null }), /cannot compare base0...h1 \(HTTP 500\)/],
   ] as const) {
     it(`throws when GitHub will not ${name}`, async () => {
       const sys = actions('opened', AGENT, [commit('a1', 'agent')], [created(AGENT, ['a1'])]);
@@ -205,8 +229,8 @@ describe('prIdentity', () => {
   }
 
   it('reads a compare with no commits as bringing none', async () => {
-    const sys = actions('reopened', 'example-owner', [commit('o1', 'owner')], [created('example-owner', [])]);
-    sys.route('GET', `${REPO}/compare/${BASE}...h1?per_page=100`, { status: 200, json: null });
-    assert.equal((await check(sys)).code, 0);
+    const sys = actions('reopened', AGENT, [commit('a1', 'agent')], [created(AGENT, [])]);
+    sys.route('GET', compare(BASE, 'h1'), { status: 200, json: null });
+    assert.match((await check(sys)).err[0] ?? '', /has not recorded yet pushed a1/);
   });
 });
