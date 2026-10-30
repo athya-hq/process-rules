@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 
 import { doctor } from './doctor.ts';
 import { machine } from './machine.ts';
+import { onboard } from './onboard.ts';
 import { sessionStart } from './session-start.ts';
 import type { Output, Sys } from './types.ts';
 
@@ -12,13 +13,15 @@ export const USAGE = `Usage: process-rules <command>
 Commands:
   machine [agent]  Set up this machine so agent sessions work as the agent account
   doctor [agent]   Check agent sessions here can work as the agent account
+  onboard [owner agent]
+                   Set up the client repo here: settings, hook, workflow, agent access, a Verified commit
   session-start    Run by a client's SessionStart hook: the agent identity, or GitHub locked out
   help             Show this text
   version          Print the installed version
 
 Without [agent], machine and doctor use the agent account .github/process-rules.json names
 in the repo around the working directory.
-More commands arrive as they are built: onboard.`;
+onboard needs the owner and agent the first time; after that it reads them from that file.`;
 
 /** The version in this package's package.json, from src/ or dist/ alike. */
 export function packageVersion(): string {
@@ -47,8 +50,8 @@ export async function run(
   sys: () => Sys | Promise<Sys>,
 ): Promise<number> {
   const [command, ...rest] = args;
-  const takesAgent = command === 'machine' || command === 'doctor';
-  const extra = rest[takesAgent ? 1 : 0];
+  const allowed = command === 'onboard' ? 2 : command === 'machine' || command === 'doctor' ? 1 : 0;
+  const extra = rest[allowed];
   if (extra !== undefined) {
     io.err(`process-rules: unexpected argument "${extra}"`);
     io.err(USAGE);
@@ -70,7 +73,9 @@ export async function run(
       return sessionStart(await sys(), io);
     case 'machine':
     case 'doctor':
+    case 'onboard':
       try {
+        if (command === 'onboard') return await onboard(await sys(), io, rest);
         return await (command === 'machine' ? machine : doctor)(await sys(), io, rest[0]);
       } catch (error) {
         io.err(`process-rules ${command}: ${error instanceof Error ? error.message : String(error)}`);

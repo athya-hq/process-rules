@@ -36,6 +36,7 @@ export class FakeSys implements Sys {
   keychain = new Map<string, string>();
   modes = new Map<string, number>();
   inRepo = true;
+  origin = 'https://github.com/example-org/example-app.git';
   /** Overrides for exec, by "command firstArg"; return undefined to fall through. */
   execOverride: (call: Call) => ExecResult | undefined = () => undefined;
   routes = new Map<string, HttpResult | (() => HttpResult)>();
@@ -102,6 +103,11 @@ export class FakeSys implements Sys {
     const ok = (stdout = ''): ExecResult => ({ code: 0, stdout, stderr: '' });
     const fail = (stderr = 'failed'): ExecResult => ({ code: 1, stdout: '', stderr });
     if (command === 'git' && args[0] === 'rev-parse') return this.inRepo ? ok(`${ROOT}\n`) : fail();
+    if (command === 'git' && args[0] === 'remote') return ok(`${this.origin}\n`);
+    if (command === 'git' && args[0] === 'commit-tree') return ok('abc123\n');
+    if (command === 'git') return ok();
+    if (command === 'mktemp') return ok('/tmp/verify\n');
+    if (command === 'rm') return ok();
     if (command === 'ssh-keygen' && args[0] === '-y') {
       const body = /^private:(.*)$/.exec(this.files.get(args[2] ?? '') ?? '')?.[1];
       return body ? ok(`${body}\n`) : fail('invalid format');

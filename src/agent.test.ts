@@ -16,6 +16,7 @@ import {
   noreplyEmail,
   pathsFor,
   readToken,
+  repoAt,
   sameLogin,
   sessionEnv,
   sessionScript,
@@ -75,6 +76,42 @@ describe('agentFrom', () => {
       const sys = new FakeSys();
       change(sys);
       assert.throws(() => agentFrom(sys, undefined), /name the agent account after the command, or run it in a repo/);
+    });
+  }
+});
+
+describe('repoAt', () => {
+  for (const origin of [
+    'https://github.com/example-org/example-app.git',
+    'git@github.com:example-org/example-app.git',
+    'https://github.com/example-org/example-app',
+    'https://x-access-token@github.com/example-org/example-app.git',
+    'ssh://git@github.com/example-org/example-app.git',
+    'ssh://git@ssh.github.com:443/example-org/example-app.git',
+  ]) {
+    it(`reads the slug from ${origin}`, () => {
+      const sys = new FakeSys();
+      sys.origin = origin;
+      assert.deepEqual(repoAt(sys), { root: ROOT, slug: 'example-org/example-app' });
+    });
+  }
+
+  it('refuses outside a repository', () => {
+    const sys = new FakeSys();
+    sys.inRepo = false;
+    assert.throws(() => repoAt(sys), /not inside a git repository/);
+  });
+
+  for (const origin of [
+    'https://gitlab.com/a/b.git',
+    'https://evilgithub.com/a/b.git',
+    'https://github.com.evil.io/a/b.git',
+    'git@evilgithub.com:a/b.git',
+  ]) {
+    it(`refuses the non-GitHub origin ${origin}`, () => {
+      const sys = new FakeSys();
+      sys.origin = origin;
+      assert.throws(() => repoAt(sys), /origin is not a GitHub repository/);
     });
   }
 });

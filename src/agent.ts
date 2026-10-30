@@ -9,6 +9,9 @@ export const NO_TOKEN = 'process-rules-no-agent-token';
 const SECURITY = '/usr/bin/security';
 export const API = 'https://api.github.com';
 const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/;
+/** The GitHub remotes `repoAt` accepts: HTTPS, scp-like SSH, or SSH URLs, on github.com only. */
+const GITHUB_REMOTE =
+  /^(?:https:\/\/(?:[^@/\s]+@)?github\.com\/|git@github\.com:|ssh:\/\/git@(?:ssh\.)?github\.com(?::\d+)?\/)([^/\s]+\/[^/\s]+?)(?:\.git)?\/?$/;
 /** The classic-token scopes an agent account needs (docs/decisions.md). */
 export const TOKEN_SCOPES = ['repo', 'workflow', 'read:org', 'project', 'write:ssh_signing_key'];
 /** Broader scopes that include a needed one. */
@@ -73,6 +76,22 @@ export function agentFrom(sys: Sys, named: string | undefined): string {
     throw new Error(`name the agent account after the command, or run it in a repo whose ${SETTINGS_PATH} names one`);
   }
   return loadSettings(sys, root).agent;
+}
+
+/** Whether `value` can be a GitHub login. */
+export function isLogin(value: string): boolean {
+  return LOGIN.test(value);
+}
+
+/** The git repository containing the working directory, and its GitHub slug. */
+export function repoAt(sys: Sys): { root: string; slug: string } {
+  const top = sys.exec('git', ['rev-parse', '--show-toplevel'], { cwd: sys.cwd });
+  if (top.code !== 0) throw new Error('not inside a git repository');
+  const root = top.stdout.trim();
+  const url = sys.exec('git', ['remote', 'get-url', 'origin'], { cwd: root }).stdout.trim();
+  const match = GITHUB_REMOTE.exec(url);
+  if (!match?.[1]) throw new Error(`origin is not a GitHub repository: "${url}"`);
+  return { root, slug: match[1] };
 }
 
 export interface Paths {
