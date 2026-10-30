@@ -5,7 +5,7 @@ the product names none of them and holds no client's data. Every slice is
 proven against a sandbox client repository made for the purpose, never a
 real client.
 
-**Version v1 — drafted 2026-10-30, awaiting the owner's approval.**
+**Version v1 — approved by the owner, 2026-10-30**, in chat: "Approved, mark ready".
 
 ## What a client gets
 
