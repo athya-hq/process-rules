@@ -151,11 +151,13 @@ release. Install the CLI from the tag on each machine:
 npm install -g github:athya-hq/process-rules#v0.1.0
 ```
 
-`onboard` pins the client's workflow to the release of the CLI that ran it:
-`checks.yml@vX.Y.Z`, and two lines below it, under `with:`,
-`process-rules-ref: vX.Y.Z`.
-Upgrading is changing that version in both, or installing the new CLI and
-running `onboard` again, which offers to replace the workflow. The hooks need
+`onboard` pins the client's workflow to one version, the release of the CLI
+that ran it. The pin is written twice, `checks.yml@vX.Y.Z` and, two lines
+below it under `with:`, `process-rules-ref: vX.Y.Z`, because a called
+workflow cannot read its own ref from GitHub's contexts. Upgrading is one
+step: install the new CLI and run `onboard` again, which rewrites both lines
+together (it offers to replace the workflow). Editing the version by hand
+means changing both lines. The hooks need
 `process-rules` on the machine's `PATH`; without it the session-start hook
 tells the session to stop.
 
