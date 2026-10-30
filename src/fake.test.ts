@@ -39,6 +39,8 @@ export class FakeSys implements Sys {
   origin = 'https://github.com/example-org/example-app.git';
   /** What `git ls-remote <url> HEAD` prints: an empty repository prints nothing. */
   remoteHead = 'f00d\tHEAD\n';
+  /** What `gh auth token` prints: the owner's gh login. */
+  ghToken: string | undefined = 'gho_owner';
   /** Overrides for exec, by "command firstArg"; return undefined to fall through. */
   execOverride: (call: Call) => ExecResult | undefined = () => undefined;
   routes = new Map<string, HttpResult | (() => HttpResult)>();
@@ -105,6 +107,7 @@ export class FakeSys implements Sys {
     const ok = (stdout = ''): ExecResult => ({ code: 0, stdout, stderr: '' });
     const fail = (stderr = 'failed'): ExecResult => ({ code: 1, stdout: '', stderr });
     if (command === 'git' && args[0] === 'rev-parse') return this.inRepo ? ok(`${ROOT}\n`) : fail();
+    if (command === 'gh' && args[0] === 'auth') return this.ghToken ? ok(`${this.ghToken}\n`) : fail('not logged in');
     if (command === 'git' && args[0] === 'remote') return ok(`${this.origin}\n`);
     if (command === 'git' && args[0] === 'commit-tree') return ok('abc123\n');
     if (command === 'git' && args[0] === 'ls-remote') return ok(this.remoteHead);

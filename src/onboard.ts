@@ -13,6 +13,7 @@ import {
   sessionEnv,
   tokenInfo,
 } from './agent.ts';
+import { setUpBoard } from './board.ts';
 import type { Output, Sys } from './types.ts';
 
 /** This product's repository: clients call its shared workflow. */
@@ -110,7 +111,8 @@ function hasHook(settings: object): boolean {
  * owner on a Mac `machine` has set up for the agent: the settings file, the
  * SessionStart hook entry and the workflow, which the owner then commits;
  * the agent's push access, offering to invite it and accept the invitation;
- * and one signed test commit GitHub must show as Verified by the agent.
+ * the work board (issue types, labels, Project and fields); and one signed
+ * test commit GitHub must show as Verified by the agent.
  * Every change waits for a yes.
  */
 export async function onboard(sys: Sys, io: Output, named: readonly string[] = []): Promise<number> {
@@ -239,6 +241,8 @@ export async function onboard(sys: Sys, io: Output, named: readonly string[] = [
     sys.write(workflowFile, wanted);
   }
   io.out(`✓ ${WORKFLOW_PATH}`);
+
+  if (!(await setUpBoard(sys, io, confirm, slug, owner))) return 1;
 
   if (!(await confirm(`Push one signed test commit to a throwaway branch of ${slug} as ${agent}, check it is Verified, then delete the branch?`))) {
     return stop('test commit');
