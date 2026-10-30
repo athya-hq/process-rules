@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 
+import { prDesign } from './design.ts';
 import { doctor } from './doctor.ts';
 import { prIdentity } from './identity.ts';
 import { machine } from './machine.ts';
@@ -20,6 +21,7 @@ Commands:
   session-start    Run by a client's SessionStart hook: the agent identity, or GitHub locked out
   pr-identity      Run by the shared workflow: agent commits Verified and pushed by the agent
   pr-work-rules    Run by the shared workflow: an agent pull request builds one slice it may build
+  pr-design        Run by the shared workflow: each state of the slice links a frame from the design library
   pre-push         Run by the pre-push git hook: the same rules before an agent session pushes
   help             Show this text
   version          Print the installed version
@@ -81,8 +83,10 @@ export async function run(
     case 'onboard':
     case 'pr-identity':
     case 'pr-work-rules':
+    case 'pr-design':
     case 'pre-push':
       try {
+        if (command === 'pr-design') return await prDesign(await sys(), io);
         if (command === 'pr-identity') return await prIdentity(await sys(), io);
         if (command === 'pr-work-rules') return await prWorkRules(await sys(), io);
         if (command === 'pre-push') {

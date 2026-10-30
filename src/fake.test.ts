@@ -51,7 +51,7 @@ export class FakeSys implements Sys {
   answers: string[] = [];
   secrets: string[] = [];
   calls: Call[] = [];
-  requests: { url: string; method: string; token?: string; body?: unknown }[] = [];
+  requests: { url: string; method: string; token?: string; body?: unknown; headers?: Record<string, string> }[] = [];
   opened: string[] = [];
   asked: string[] = [];
 
@@ -63,7 +63,7 @@ export class FakeSys implements Sys {
   }
 
   route(method: string, path: string, result: HttpResult | (() => HttpResult)): this {
-    this.routes.set(`${method} https://api.github.com${path}`, result);
+    this.routes.set(`${method} ${path.startsWith('https://') ? path : `https://api.github.com${path}`}`, result);
     return this;
   }
 
@@ -197,9 +197,15 @@ export class FakeSys implements Sys {
     this.dirs.push(path);
   }
 
-  http(url: string, options: { method?: string; token?: string; body?: unknown } = {}): Promise<HttpResult> {
+  http(url: string, options: { method?: string; token?: string; body?: unknown; headers?: Record<string, string> } = {}): Promise<HttpResult> {
     const method = options.method ?? 'GET';
-    this.requests.push({ url, method, ...(options.token ? { token: options.token } : {}), ...(options.body ? { body: options.body } : {}) });
+    this.requests.push({
+      url,
+      method,
+      ...(options.token ? { token: options.token } : {}),
+      ...(options.body ? { body: options.body } : {}),
+      ...(options.headers ? { headers: options.headers } : {}),
+    });
     // GitHub finds a login in /users/ paths in any case, and answers with its own spelling.
     const wanted = `${method} ${url}`;
     const route =

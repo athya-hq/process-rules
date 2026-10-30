@@ -9,6 +9,10 @@ on:
         description: The process-rules version whose checks run
         type: string
         default: main
+    secrets:
+      FIGMA_TOKEN:
+        description: A Figma token that reads the design library and the frames states link
+        required: false
 
 permissions:
   contents: read
@@ -89,3 +93,29 @@ jobs:
       - run: node .process-rules/src/cli.ts pr-work-rules
         env:
           GH_TOKEN: ${{ github.token }}
+
+  design:
+    name: Design frames
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # The settings come from the base branch, as in PR identity.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: athya-hq/process-rules
+          ref: ${{ inputs.process-rules-ref }}
+          path: .process-rules
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      # Off unless the settings name a Figma library and FIGMA_TOKEN is set.
+      - run: node .process-rules/src/cli.ts pr-design
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FIGMA_TOKEN: ${{ secrets.FIGMA_TOKEN }}

@@ -63,6 +63,8 @@ export function workflow(branch: string): string {
     'jobs:',
     '  process-rules:',
     `    uses: ${PRODUCT}/.github/workflows/checks.yml@main`,
+    '    secrets:',
+    '      FIGMA_TOKEN: ${{ secrets.FIGMA_TOKEN }}',
     '',
   ].join('\n');
 }
