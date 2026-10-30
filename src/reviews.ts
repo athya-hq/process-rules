@@ -81,7 +81,7 @@ export async function reviewsDue(sys: Sys, io: Output): Promise<number> {
 export async function expireVetoes(sys: Sys, io: Output, slug: string, token: string): Promise<void> {
   const vetoed: Issue[] = [];
   for (let page = 1; ; page++) {
-    const { status, json } = await sys.http(`${API}/repos/${slug}/issues?state=all&labels=veto&per_page=100&page=${page}`, { token });
+    const { status, json } = await sys.http(`${API}/repos/${slug}/issues?state=all&type=Decision&labels=veto&per_page=100&page=${page}`, { token });
     if (status !== 200 || !Array.isArray(json)) throw new Error(`cannot list vetoable decisions (HTTP ${status})`);
     vetoed.push(...(json as Issue[]));
     if (json.length < 100) break;

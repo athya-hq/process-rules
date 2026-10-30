@@ -184,17 +184,19 @@ export async function decisionsWeekly(sys: Sys, io: Output): Promise<number> {
 /** Who last edited each issue's body (undefined when no one has), by issue number. */
 export async function lastEditors(sys: Sys, token: string, issues: { number: number; node_id: string }[]): Promise<Map<number, string | undefined>> {
   const editors = new Map<number, string | undefined>();
-  if (issues.length === 0) return editors;
-  const { status, json } = await sys.http(`${API}/graphql`, {
-    method: 'POST',
-    token,
-    body: {
-      query: 'query($ids: [ID!]!) { nodes(ids: $ids) { ... on Issue { number editor { login } } } }',
-      variables: { ids: issues.map((issue) => issue.node_id) },
-    },
-  });
-  const nodes = (json as { data?: { nodes?: ({ number: number; editor: { login: string } | null } | null)[] } } | null)?.data?.nodes;
-  if (status !== 200 || !nodes) throw new Error(`cannot read who edited the decisions (HTTP ${status})`);
-  for (const node of nodes) if (node) editors.set(node.number, node.editor?.login);
+  // GitHub looks up at most 100 nodes a request.
+  for (let at = 0; at < issues.length; at += 100) {
+    const { status, json } = await sys.http(`${API}/graphql`, {
+      method: 'POST',
+      token,
+      body: {
+        query: 'query($ids: [ID!]!) { nodes(ids: $ids) { ... on Issue { number editor { login } } } }',
+        variables: { ids: issues.slice(at, at + 100).map((issue) => issue.node_id) },
+      },
+    });
+    const nodes = (json as { data?: { nodes?: ({ number: number; editor: { login: string } | null } | null)[] } } | null)?.data?.nodes;
+    if (status !== 200 || !nodes) throw new Error(`cannot read who edited the decisions (HTTP ${status})`);
+    for (const node of nodes) if (node) editors.set(node.number, node.editor?.login);
+  }
   return editors;
 }

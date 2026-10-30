@@ -74,6 +74,14 @@ describe('reviewsDue', () => {
     ]);
   });
 
+  it('reads who edited the decisions 100 at a time', async () => {
+    const many = Array.from({ length: 100 }, (_, i) => issue(100 + i, 'Review: 2027-01-01'));
+    const sys = session(many, [issue(9, 'Review: 2026-01-01')]);
+    await reviewsDue(sys, capture().io);
+    const lookups = sys.requests.filter((r) => r.url.endsWith('/graphql')).map((r) => (r.body as { variables: { ids: string[] } }).variables.ids.length);
+    assert.deepEqual(lookups, [100, 1]);
+  });
+
   it('names a Review date that is not a date', async () => {
     const { io, err } = capture();
     await reviewsDue(session([issue(5, 'Review: next week'), issue(6, 'Review: 2026-13-45')]), io);
@@ -107,7 +115,7 @@ describe('reviewsDue', () => {
 });
 
 describe('expireVetoes', () => {
-  const VETOED = `/repos/${SLUG}/issues?state=all&labels=veto&per_page=100&page=1`;
+  const VETOED = `/repos/${SLUG}/issues?state=all&type=Decision&labels=veto&per_page=100&page=1`;
   const events = (number: number, at: string) => [
     { event: 'labeled', label: { name: 'veto' }, created_at: '2026-01-01T00:00:00Z' },
     { event: 'labeled', label: { name: 'needs-owner' }, created_at: at },
