@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs';
-
 import { decisionsWeekly } from './decisions.ts';
 import { prDesign } from './design.ts';
 import { doctor } from './doctor.ts';
@@ -11,7 +9,10 @@ import { sessionStart } from './session-start.ts';
 import { prePush, prWorkRules } from './work.ts';
 import type { Output, Sys } from './types.ts';
 
+import { packageVersion } from './version.ts';
+
 export type { Output } from './types.ts';
+export { packageVersion, versionOf } from './version.ts';
 
 export const USAGE = `Usage: process-rules <command>
 
@@ -33,26 +34,6 @@ Commands:
 Without [agent], machine and doctor use the agent account .github/process-rules.json names
 in the repo around the working directory.
 onboard needs the owner and agent the first time; after that it reads them from that file.`;
-
-/** The version in this package's package.json, from src/ or dist/ alike. */
-export function packageVersion(): string {
-  return versionOf(
-    JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')),
-  );
-}
-
-/** The string `version` of a parsed package.json; throws without one. */
-export function versionOf(raw: unknown): string {
-  if (
-    typeof raw === 'object' &&
-    raw !== null &&
-    'version' in raw &&
-    typeof raw.version === 'string'
-  ) {
-    return raw.version;
-  }
-  throw new Error('package.json has no string "version"');
-}
 
 /** Runs one command and returns its exit code: 0 done, 1 failed, 2 bad usage. */
 export async function run(

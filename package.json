@@ -1,6 +1,6 @@
 {
   "name": "@athya-hq/process-rules",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "description": "Work rules for repos that track work in GitHub Issues: setup, agent identity, push and PR checks.",
   "license": "MIT",
@@ -17,6 +17,7 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "prepare": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json",
     "test": "node --test --experimental-test-coverage --test-coverage-lines=95 --test-coverage-functions=95 --test-coverage-branches=90 --test-coverage-exclude=src/**/*.test.ts src/**/*.test.ts",
     "smoke": "node dist/cli.js --version",

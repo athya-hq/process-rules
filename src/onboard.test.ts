@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import { Board, repoJson } from './fake-board.test.ts';
 import { FIELDS, ISSUE_TYPES, LABELS, viewsChecklist } from './board.ts';
 import { AGENT, FakeSys, ROOT, TOKEN, capture } from './fake.test.ts';
+import { packageVersion } from './version.ts';
 import { HOOK_COMMAND, HOOKS_PATH, PRE_PUSH_HOOK, WORKFLOW_PATH, onboard, workflow } from './onboard.ts';
 
 const SETTINGS = `${ROOT}/.github/process-rules.json`;
@@ -45,7 +46,7 @@ describe('onboard', () => {
     assert.deepEqual(JSON.parse(sys.files.get(HOOKS) ?? ''), {
       hooks: { SessionStart: [{ hooks: [{ type: 'command', command: HOOK_COMMAND }] }] },
     });
-    assert.equal(sys.files.get(WORKFLOW), workflow('main'));
+    assert.equal(sys.files.get(WORKFLOW), workflow('main', packageVersion()));
     assert.equal(sys.files.get(PRE_PUSH), PRE_PUSH_HOOK);
     assert.equal(sys.modes.get(PRE_PUSH), 0o755);
     assert.deepEqual(sys.dirs.filter((d) => d.startsWith(ROOT)), [`${ROOT}/.github`, `${ROOT}/.claude`, `${ROOT}/.github/workflows`]);
@@ -85,7 +86,7 @@ describe('onboard', () => {
     const sys = fresh();
     sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT }));
     sys.files.set(HOOKS, JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: HOOK_COMMAND }] }] } }));
-    sys.files.set(WORKFLOW, workflow('main'));
+    sys.files.set(WORKFLOW, workflow('main', packageVersion()));
     sys.files.set(PRE_PUSH, PRE_PUSH_HOOK);
     const board = new Board(sys);
     board.issueTypes = ISSUE_TYPES.map((t) => t.name);
@@ -451,8 +452,8 @@ describe('onboard', () => {
 
 describe('workflow', () => {
   it("calls the product's shared checks on pull requests and the default branch", () => {
-    const text = workflow('main');
-    assert.match(text, /uses: athya-hq\/process-rules\/\.github\/workflows\/checks\.yml@main/);
+    const text = workflow('main', '0.1.0');
+    assert.match(text, /uses: athya-hq\/process-rules\/\.github\/workflows\/checks\.yml@v0\.1\.0\n {4}with:\n {6}process-rules-ref: v0\.1\.0\n/);
     assert.match(text, /branches: \["main"\]/);
     assert.match(text, /^permissions:\n {2}contents: read\n {2}issues: read\n {2}pull-requests: read$/m);
     assert.match(text, /^ {4}permissions:\n {6}contents: read\n {6}issues: write\n {6}pull-requests: read$/m);
