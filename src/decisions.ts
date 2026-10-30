@@ -7,6 +7,11 @@ const CHECK_TIMEOUT_S = 120;
 const RUN_BUDGET_MS = 45 * 60_000;
 /** What GNU timeout exits with when the check ran out of time. */
 const TIMED_OUT = 124;
+/** The line the wrapper prints with the check's own exit status. */
+const STATUS_MARK = 'process-rules-check-exit=';
+const STATUS_WRAPPER = `sh -c "$1"; echo "${STATUS_MARK}$?"`;
+/** Who writes comments for the workflow's token: only its comments can say an undo issue was opened. */
+const WORKFLOW_BOT = 'github-actions[bot]';
 /** An Override is labeled `expiring` this many days before its expiry. */
 const EXPIRING_DAYS = 30;
 const DAY_MS = 86_400_000;
@@ -131,16 +136,20 @@ export async function decisionsWeekly(sys: Sys, io: Output): Promise<number> {
       continue;
     }
     // GNU timeout ends the whole process group the check starts, not just its shell.
-    const run = sys.exec('timeout', ['-k', '5', String(CHECK_TIMEOUT_S), 'sh', '-c', decision.check], {
+    // The inner shell prints the check's own exit status, so a check that exits 124
+    // itself is told apart from one that ran out of time.
+    const raw = sys.exec('timeout', ['-k', '5', String(CHECK_TIMEOUT_S), 'sh', '-c', STATUS_WRAPPER, 'process-rules', decision.check], {
       cwd: sys.cwd,
       env: { PATH: sys.env.PATH, HOME: sys.env.HOME },
       timeoutMs: (CHECK_TIMEOUT_S + 10) * 1000,
     });
+    const status = new RegExp(`^${STATUS_MARK}(\\d+)$`, 'm').exec(raw.stdout)?.[1];
+    const run = { ...raw, code: status === undefined ? raw.code : Number(status), stdout: raw.stdout.replace(new RegExp(`^${STATUS_MARK}\\d+\\n?`, 'm'), '') };
     if (run.code === 0) {
       io.out(`${where}: holds`);
       continue;
     }
-    if (run.code === TIMED_OUT) {
+    if (status === undefined && raw.code === TIMED_OUT) {
       io.out(`${where}: its check ran past ${CHECK_TIMEOUT_S} seconds; not counted as tripped`);
       continue;
     }
@@ -149,7 +158,9 @@ export async function decisionsWeekly(sys: Sys, io: Output): Promise<number> {
       // A run that opened the undo issue but failed to comment leaves the comment to this one.
       const comments = await sys.http(`${API}/repos/${slug}/issues/${issue.number}/comments?per_page=100`, { token });
       if (comments.status !== 200 || !Array.isArray(comments.json)) throw new Error(`cannot read #${issue.number}'s comments (HTTP ${comments.status})`);
-      const told = (comments.json as { body?: string }[]).some((comment) => comment.body?.includes(`Opened #${open.number} to undo it.`));
+      const told = (comments.json as { body?: string; user?: { login?: string } | null }[]).some(
+        (comment) => comment.user?.login === WORKFLOW_BOT && comment.body?.includes(`Opened #${open.number} to undo it.`),
+      );
       if (told) {
         io.out(`${where}: tripped; its undo issue is already open`);
         continue;

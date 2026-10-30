@@ -28,8 +28,14 @@ function weekly(decisions: Node[], checks: Record<string, number> = {}, undos: N
   for (const d of decisions) sys.route('POST', `/repos/${SLUG}/issues/${d.number}/labels`, { status: 200, json: [] });
   for (const d of decisions) sys.route('POST', `/repos/${SLUG}/issues/${d.number}/comments`, { status: 201, json: {} });
   sys.route('POST', `/repos/${SLUG}/issues`, { status: 201, json: { number: 99 } });
-  sys.execOverride = (call) =>
-    call.command === 'timeout' ? { code: checks[call.args[5] ?? ''] ?? 0, stdout: 'line\n', stderr: 'why it failed\n' } : undefined;
+  // The wrapper prints the check's own status; a timed-out check (124 here) prints none.
+  sys.execOverride = (call) => {
+    if (call.command !== 'timeout') return undefined;
+    const code = checks[call.args[7] ?? ''] ?? 0;
+    return code === 124
+      ? { code: 124, stdout: 'line\n', stderr: '' }
+      : { code: 0, stdout: `line\nprocess-rules-check-exit=${code === 125 ? 124 : code}\n`, stderr: 'why it failed\n' };
+  };
   for (const d of decisions) sys.route('GET', `/repos/${SLUG}/issues/${d.number}/comments?per_page=100`, { status: 200, json: [] });
   return sys;
 }
@@ -61,7 +67,7 @@ describe('decisionsWeekly', () => {
     const sys = weekly([decision(5, 'Kind: Risk\nCheck: `pnpm test`')]);
     assert.deepEqual(await run(sys), { code: 0, out: ['#5: holds', 'decisions-weekly: 1 open decision checked'] });
     const call = sys.calls.find((c) => c.command === 'timeout');
-    assert.deepEqual(call?.args, ['-k', '5', '120', 'sh', '-c', 'pnpm test']);
+    assert.deepEqual(call?.args, ['-k', '5', '120', 'sh', '-c', 'sh -c "$1"; echo "process-rules-check-exit=$?"', 'process-rules', 'pnpm test']);
     assert.equal(call?.cwd, ROOT);
     assert.deepEqual(call?.env, { PATH: '/bin', HOME: '/home/runner' });
     assert.equal(call?.timeoutMs, 130_000);
@@ -90,9 +96,24 @@ describe('decisionsWeekly', () => {
 
   it('opens no second undo issue', async () => {
     const sys = weekly([decision(6, 'Check: `false`')], { false: 1 }, [{ number: 98, body: 'Undoes #6.\n\nmore' }, { number: 97, body: null }, { number: 96, body: 'Undoes #60.' }]);
-    sys.route('GET', `/repos/${SLUG}/issues/6/comments?per_page=100`, { status: 200, json: [{ body: 'Tripped on ...\n\nOpened #98 to undo it.' }, {}] });
+    sys.route('GET', `/repos/${SLUG}/issues/6/comments?per_page=100`, {
+      status: 200,
+      json: [{ body: 'Tripped on ...\n\nOpened #98 to undo it.', user: { login: 'github-actions[bot]' } }, {}],
+    });
     assert.deepEqual((await run(sys)).out[0], '#6: tripped; its undo issue is already open');
     assert.deepEqual(posts(sys), []);
+  });
+
+  it('does not take a forged undo note from anyone but the workflow', async () => {
+    const sys = weekly([decision(6, 'Check: `false`')], { false: 1 }, [{ number: 98, body: 'Undoes #6.' }]);
+    sys.route('GET', `/repos/${SLUG}/issues/6/comments?per_page=100`, { status: 200, json: [{ body: 'Opened #98 to undo it.', user: { login: 'mallory' } }] });
+    assert.deepEqual((await run(sys)).out[0], '#6: tripped; its undo issue #98 is open, and the decision now says so');
+  });
+
+  it('counts a check that itself exits 124 as tripped, not timed out', async () => {
+    const sys = weekly([decision(6, 'Check: `exit 124`')], { 'exit 124': 125 });
+    assert.deepEqual((await run(sys)).out[0], '#6: tripped; opened #99 to undo it');
+    assert.match(String((posts(sys)[1]?.body as { body: string }).body), /exited 124\.\n\n```\nline\nwhy it failed\n```/);
   });
 
   it('adds the comment an earlier run failed to leave', async () => {

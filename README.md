@@ -109,7 +109,8 @@ its fields one per line: `Kind:` (Override, Risk or Bet), `Review:`,
 holds) and `Undo:`. For each open Decision issue, a check that reads laptop
 files (`~/`, `$HOME`, `/Users/`, `/home/`) is labeled `cannot-run-here`; any
 other check runs in the checkout with only `PATH` and `HOME` set, for at most
-two minutes (a check that runs out of time is not counted as tripped), and
+two minutes and five more seconds to end it (a check that runs out of time is
+not counted as tripped), and
 when it fails the decision gets a comment and one undo issue labeled
 `needs-owner`. Runs do not overlap, and after 45 minutes of checks the rest
 wait for next week. An Override whose expiry is within 30 days is labeled
