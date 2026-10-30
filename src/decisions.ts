@@ -75,20 +75,7 @@ export async function decisionsWeekly(sys: Sys, io: Output): Promise<number> {
   const decisions = await openIssues(sys, token, slug, 'type=Decision');
   const undos = await openIssues(sys, token, slug, 'labels=needs-owner');
 
-  const editors = new Map<number, string | undefined>();
-  if (decisions.length > 0) {
-    const { status, json } = await sys.http(`${API}/graphql`, {
-      method: 'POST',
-      token,
-      body: {
-        query: 'query($ids: [ID!]!) { nodes(ids: $ids) { ... on Issue { number editor { login } } } }',
-        variables: { ids: decisions.map((issue) => issue.node_id) },
-      },
-    });
-    const nodes = (json as { data?: { nodes?: ({ number: number; editor: { login: string } | null } | null)[] } } | null)?.data?.nodes;
-    if (status !== 200 || !nodes) throw new Error(`cannot read who edited the decisions (HTTP ${status})`);
-    for (const node of nodes) if (node) editors.set(node.number, node.editor?.login);
-  }
+  const editors = await lastEditors(sys, token, decisions);
 
   const today = sys.now();
   const label = async (issue: Issue, name: string): Promise<void> => {
@@ -97,6 +84,8 @@ export async function decisionsWeekly(sys: Sys, io: Output): Promise<number> {
     if (added.status !== 200) throw new Error(`cannot label #${issue.number} ${name} (HTTP ${added.status})`);
   };
 
+  // Before the decisions, so one decision's failing call cannot keep vetoes past their week.
+  await expireVetoes(sys, io, slug, token);
   const started = sys.now().getTime();
   const tell = async (number: number, check: string, run: { code: number; stdout: string; stderr: string }, undo: number): Promise<void> => {
     const output = `${run.stdout}${run.stderr}`.trim().split('\n').slice(-20).join('\n');
@@ -188,7 +177,24 @@ export async function decisionsWeekly(sys: Sys, io: Output): Promise<number> {
     await tell(issue.number, decision.check, run, undo);
     io.out(`${where}: tripped; opened #${undo} to undo it`);
   }
-  await expireVetoes(sys, io, slug, token);
   io.out(`decisions-weekly: ${decisions.length} open decision${decisions.length === 1 ? '' : 's'} checked`);
   return 0;
+}
+
+/** Who last edited each issue's body (undefined when no one has), by issue number. */
+export async function lastEditors(sys: Sys, token: string, issues: { number: number; node_id: string }[]): Promise<Map<number, string | undefined>> {
+  const editors = new Map<number, string | undefined>();
+  if (issues.length === 0) return editors;
+  const { status, json } = await sys.http(`${API}/graphql`, {
+    method: 'POST',
+    token,
+    body: {
+      query: 'query($ids: [ID!]!) { nodes(ids: $ids) { ... on Issue { number editor { login } } } }',
+      variables: { ids: issues.map((issue) => issue.node_id) },
+    },
+  });
+  const nodes = (json as { data?: { nodes?: ({ number: number; editor: { login: string } | null } | null)[] } } | null)?.data?.nodes;
+  if (status !== 200 || !nodes) throw new Error(`cannot read who edited the decisions (HTTP ${status})`);
+  for (const node of nodes) if (node) editors.set(node.number, node.editor?.login);
+  return editors;
 }
