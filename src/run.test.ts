@@ -80,7 +80,7 @@ describe('run', () => {
   it('runs doctor', async () => {
     const { code, err } = await capture(['doctor'], () => new FakeSys());
     assert.equal(code, 1);
-    assert.match(err.at(-1) ?? '', /must not push as AthyaBot/);
+    assert.match(err.at(-1) ?? '', /must not push as ExampleBot/);
   });
 
   it('reports a thrown non-error', async () => {

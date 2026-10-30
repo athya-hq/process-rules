@@ -3,9 +3,8 @@
 Work rules for a repository that tracks its work in GitHub Issues and a GitHub
 Project, with an owner account that approves and an agent account that builds.
 
-Built for [Athya](https://github.com/athya-hq); written so any repository can
-adopt it. No server, database or dashboard: a CLI, git hooks and a shared
-GitHub Actions workflow.
+Any repository can adopt it. No server, database or dashboard: a CLI, git
+hooks and a shared GitHub Actions workflow.
 
 ## Status
 
@@ -27,7 +26,7 @@ Early. The CLI runs `machine` and `doctor`; the rest is planned, in order:
 The adopting repo names its accounts in `.github/process-rules.json`:
 
 ```json
-{ "owner": "AlokBansal8", "agent": "AthyaBot" }
+{ "owner": "example-owner", "agent": "ExampleBot" }
 ```
 
 `process-rules machine`, run once per Mac from inside the repo, makes the

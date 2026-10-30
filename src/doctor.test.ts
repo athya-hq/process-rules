@@ -22,7 +22,7 @@ describe('doctor', () => {
   it('passes when the machine is set up', async () => {
     assert.deepEqual(await check(healthy()), {
       code: 0,
-      out: ['✓ signing key', '✓ token', '✓ key registered', '✓ session file', 'doctor: ready; agent sessions work as AthyaBot'],
+      out: ['✓ signing key', '✓ token', '✓ key registered', '✓ session file', 'doctor: ready; agent sessions work as ExampleBot'],
       err: [],
     });
   });
@@ -32,10 +32,10 @@ describe('doctor', () => {
     assert.equal(code, 1);
     assert.deepEqual(err, [
       `✗ signing key: ${KEY} is missing`,
-      "✗ token: no AthyaBot token in this machine's keychain",
-      '✗ key registered: GitHub does not list this key as a signing key of AthyaBot',
+      "✗ token: no ExampleBot token in this machine's keychain",
+      '✗ key registered: GitHub does not list this key as a signing key of ExampleBot',
       `✗ session file: ${SESSION} is missing`,
-      'doctor: agent sessions must not push as AthyaBot until fixed; run process-rules machine',
+      'doctor: agent sessions must not push as ExampleBot until fixed; run process-rules machine',
     ]);
   });
 
@@ -50,16 +50,16 @@ describe('doctor', () => {
   it("refuses a token that is someone else's", async () => {
     const sys = healthy();
     sys.setToken(AGENT, 'owners');
-    sys.acceptToken('owners', 'AlokBansal8');
+    sys.acceptToken('owners', 'example-owner');
     const { err } = await check(sys);
-    assert.equal(err[0], '✗ token: the stored token acts as AlokBansal8, not AthyaBot');
+    assert.equal(err[0], '✗ token: the stored token acts as example-owner, not ExampleBot');
   });
 
   it('refuses a key GitHub does not list', async () => {
     const sys = healthy();
-    sys.route('GET', '/users/AthyaBot/ssh_signing_keys', { status: 200, json: [{ key: 'ssh-ed25519 other' }] });
+    sys.route('GET', '/users/ExampleBot/ssh_signing_keys', { status: 200, json: [{ key: 'ssh-ed25519 other' }] });
     const { err } = await check(sys);
-    assert.equal(err[0], '✗ key registered: GitHub does not list this key as a signing key of AthyaBot');
+    assert.equal(err[0], '✗ key registered: GitHub does not list this key as a signing key of ExampleBot');
   });
 
   it('refuses a key pair whose halves do not match', async () => {
@@ -68,13 +68,13 @@ describe('doctor', () => {
     const { err } = await check(sys);
     assert.deepEqual(err.slice(0, 2), [
       `✗ signing key: ${KEY}.pub does not match ${KEY}`,
-      '✗ key registered: GitHub does not list this key as a signing key of AthyaBot',
+      '✗ key registered: GitHub does not list this key as a signing key of ExampleBot',
     ]);
   });
 
   it('accepts a token whose login differs only in case', async () => {
     const sys = healthy();
-    sys.acceptToken(TOKEN, 'athyabot');
+    sys.acceptToken(TOKEN, 'examplebot');
     assert.equal((await check(sys)).code, 0);
   });
 

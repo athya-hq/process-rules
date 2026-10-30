@@ -22,11 +22,11 @@ function fresh(): FakeSys {
     registered = true;
     return { status: 201, json: {} };
   });
-  sys.route('GET', '/users/AthyaBot/ssh_signing_keys', () => ({
+  sys.route('GET', '/users/ExampleBot/ssh_signing_keys', () => ({
     status: 200,
     json: registered ? [{ key: 'ssh-ed25519 AAAAkey' }] : [],
   }));
-  sys.route('GET', '/repos/athya-hq/athya_mono/commits/abc123', VERIFIED);
+  sys.route('GET', '/repos/example-org/example-app/commits/abc123', VERIFIED);
   return sys;
 }
 
@@ -44,7 +44,7 @@ describe('machine', () => {
     assert.equal(sys.token(AGENT), TOKEN);
     assert.equal(sys.files.get(SESSION), sessionScript(AGENT, AGENT_ID, pathsFor(HOME, AGENT)));
     assert.deepEqual(sys.opened, ['https://github.com/settings/personal-access-tokens/new']);
-    assert.ok(out.includes('✓ GitHub shows the test commit Verified by AthyaBot'));
+    assert.ok(out.includes('✓ GitHub shows the test commit Verified by ExampleBot'));
     assert.ok(!out.join('\n').includes(TOKEN), 'the token is never printed');
 
     const register = sys.requests.find((r) => r.method === 'POST');
@@ -52,13 +52,13 @@ describe('machine', () => {
       url: 'https://api.github.com/user/ssh_signing_keys',
       method: 'POST',
       token: TOKEN,
-      body: { title: 'process-rules athya-hq/athya_mono', key: PUBLIC_KEY },
+      body: { title: 'process-rules example-org/example-app', key: PUBLIC_KEY },
     });
     assert.equal(sys.modes.get(SESSION), 0o600);
     assert.ok(sys.dirs.indexOf(`${HOME}/.ssh`) >= 0);
-    assert.ok(out.includes('Deleted the throwaway branch process-rules/verify-athyabot-1000.'));
+    assert.ok(out.includes('Deleted the throwaway branch process-rules/verify-examplebot-1000.'));
     const keygen = sys.calls.find((c) => c.command === 'ssh-keygen');
-    assert.deepEqual(keygen?.args, ['-q', '-t', 'ed25519', '-C', 'AthyaBot signing', '-N', '', '-f', KEY]);
+    assert.deepEqual(keygen?.args, ['-q', '-t', 'ed25519', '-C', 'ExampleBot signing', '-N', '', '-f', KEY]);
 
     const git = sys.calls.filter((c) => c.command === 'git' && c.env);
     assert.deepEqual(
@@ -66,15 +66,15 @@ describe('machine', () => {
       ['init -q', 'fetch -q', 'commit-tree -S', 'push -q', 'push -q'],
     );
     assert.equal(git[0]?.env?.GH_TOKEN, TOKEN);
-    assert.equal(git[0]?.env?.GIT_COMMITTER_EMAIL, '42+AthyaBot@users.noreply.github.com');
-    assert.equal(git.at(-1)?.args[3], ':refs/heads/process-rules/verify-athyabot-1000');
+    assert.equal(git[0]?.env?.GIT_COMMITTER_EMAIL, '42+ExampleBot@users.noreply.github.com');
+    assert.equal(git.at(-1)?.args[3], ':refs/heads/process-rules/verify-examplebot-1000');
     assert.deepEqual(sys.calls.at(-1)?.args, ['-rf', '/tmp/verify']);
   });
 
   it('skips what is already done', async () => {
     const sys = new FakeSys().ready();
     sys.files.set(SESSION, sessionScript(AGENT, AGENT_ID, pathsFor(HOME, AGENT)));
-    sys.route('GET', '/repos/athya-hq/athya_mono/commits/abc123', VERIFIED);
+    sys.route('GET', '/repos/example-org/example-app/commits/abc123', VERIFIED);
     sys.answers = ['y'];
     const { code } = await setUp(sys);
     assert.equal(code, 0);
@@ -87,7 +87,7 @@ describe('machine', () => {
     const sys = fresh();
     let added = false;
     sys.route('POST', '/user/ssh_signing_keys', { status: 403, json: {} });
-    sys.route('GET', '/users/AthyaBot/ssh_signing_keys', () => ({
+    sys.route('GET', '/users/ExampleBot/ssh_signing_keys', () => ({
       status: 200,
       json: added ? [{ key: 'ssh-ed25519 AAAAkey' }] : [],
     }));
@@ -99,8 +99,8 @@ describe('machine', () => {
     sys.answers = ['y', 'y', 'y', '', 'y', 'y'];
     const { code, out } = await setUp(sys);
     assert.equal(code, 0);
-    assert.ok(out.includes("GitHub's API refused (HTTP 403). Add it in the browser, signed in as AthyaBot:"));
-    assert.ok(out.includes('  ssh-ed25519 AAAAkey AthyaBot signing'));
+    assert.ok(out.includes("GitHub's API refused (HTTP 403). Add it in the browser, signed in as ExampleBot:"));
+    assert.ok(out.includes('  ssh-ed25519 AAAAkey ExampleBot signing'));
     assert.deepEqual(sys.opened.at(-1), 'https://github.com/settings/ssh/new');
   });
 
@@ -110,7 +110,7 @@ describe('machine', () => {
     sys.answers = ['y', 'y', 'y', ''];
     const { code, err } = await setUp(sys);
     assert.equal(code, 1);
-    assert.deepEqual(err, ["machine: GitHub still does not list the key as AthyaBot's signing key"]);
+    assert.deepEqual(err, ["machine: GitHub still does not list the key as ExampleBot's signing key"]);
   });
 
   it('writes a missing public half from the private key', async () => {
@@ -118,7 +118,7 @@ describe('machine', () => {
     sys.files.set(KEY, PRIVATE_KEY);
     const { code } = await setUp(sys);
     assert.equal(code, 0);
-    assert.equal(sys.files.get(`${KEY}.pub`), 'ssh-ed25519 AAAAkey AthyaBot signing\n');
+    assert.equal(sys.files.get(`${KEY}.pub`), 'ssh-ed25519 AAAAkey ExampleBot signing\n');
     assert.match(sys.asked[0] ?? '', /Write .*\.pub from the private key/);
   });
 
@@ -145,22 +145,22 @@ describe('machine', () => {
 
   it('accepts logins that differ only in case', async () => {
     const sys = fresh();
-    sys.acceptToken(TOKEN, 'athyabot');
-    sys.route('GET', '/repos/athya-hq/athya_mono/commits/abc123', {
+    sys.acceptToken(TOKEN, 'examplebot');
+    sys.route('GET', '/repos/example-org/example-app/commits/abc123', {
       status: 200,
-      json: { committer: { login: 'athyabot' }, commit: { verification: { verified: true, reason: 'valid' } } },
+      json: { committer: { login: 'examplebot' }, commit: { verification: { verified: true, reason: 'valid' } } },
     });
     assert.equal((await setUp(sys)).code, 0);
   });
 
   it('deletes the branch even when GitHub cannot be asked', async () => {
     const sys = fresh();
-    sys.route('GET', '/repos/athya-hq/athya_mono/commits/abc123', () => {
+    sys.route('GET', '/repos/example-org/example-app/commits/abc123', () => {
       throw new Error('down');
     });
     const { io, out } = capture();
     await assert.rejects(machine(sys, io), /down/);
-    assert.ok(out.includes('Deleted the throwaway branch process-rules/verify-athyabot-1000.'));
+    assert.ok(out.includes('Deleted the throwaway branch process-rules/verify-examplebot-1000.'));
     assert.equal(sys.calls.at(-1)?.command, 'rm');
   });
 
@@ -170,7 +170,7 @@ describe('machine', () => {
       call.command === 'git' && call.args[3]?.startsWith(':') ? { code: 1, stdout: '', stderr: 'protected\n' } : undefined;
     const { code, err } = await setUp(sys);
     assert.equal(code, 0);
-    assert.deepEqual(err, ['machine: could not delete process-rules/verify-athyabot-1000; delete it on GitHub: protected']);
+    assert.deepEqual(err, ['machine: could not delete process-rules/verify-examplebot-1000; delete it on GitHub: protected']);
   });
 
   it('replaces a stored token GitHub refuses', async () => {
@@ -178,14 +178,14 @@ describe('machine', () => {
     sys.setToken(AGENT, 'stale');
     const { code, out } = await setUp(sys);
     assert.equal(code, 0);
-    assert.ok(out.includes("The stored token is refused or is not AthyaBot's; replacing it."));
+    assert.ok(out.includes("The stored token is refused or is not ExampleBot's; replacing it."));
     assert.equal(sys.token(AGENT), TOKEN);
   });
 
   for (const [secret, login, message] of [
     ['', undefined, 'machine: GitHub refuses that token'],
     ['bad', undefined, 'machine: GitHub refuses that token'],
-    ['owners', 'AlokBansal8', 'machine: that token acts as AlokBansal8; create it signed in as AthyaBot'],
+    ['owners', 'example-owner', 'machine: that token acts as example-owner; create it signed in as ExampleBot'],
   ] as const) {
     it(`refuses the pasted token "${secret}"`, async () => {
       const sys = fresh();
@@ -225,7 +225,7 @@ describe('machine', () => {
     ['init', 'machine: git init failed: boom'],
     ['fetch', 'machine: git fetch failed: boom'],
     ['commit-tree', 'machine: signing the test commit failed: boom'],
-    ['push', 'machine: pushing as AthyaBot failed: boom'],
+    ['push', 'machine: pushing as ExampleBot failed: boom'],
   ] as const) {
     it(`reports a failed git ${args} and cleans up`, async () => {
       const sys = fresh();
@@ -239,26 +239,26 @@ describe('machine', () => {
 
   for (const [name, json, shown] of [
     ['unverified', { committer: { login: AGENT }, commit: { verification: { verified: false, reason: 'unknown_key' } } }, `committer: ${AGENT}; verified: false (unknown_key)`],
-    ['committed by someone else', { committer: { login: 'AlokBansal8' }, commit: { verification: { verified: true, reason: 'valid' } } }, 'committer: AlokBansal8; verified: true (valid)'],
+    ['committed by someone else', { committer: { login: 'example-owner' }, commit: { verification: { verified: true, reason: 'valid' } } }, 'committer: example-owner; verified: true (valid)'],
     ['unreadable', null, 'committer: none; verified: undefined (no reason)'],
   ] as const) {
     it(`fails a test commit that is ${name}`, async () => {
       const sys = fresh();
-      sys.route('GET', '/repos/athya-hq/athya_mono/commits/abc123', { status: 200, json });
+      sys.route('GET', '/repos/example-org/example-app/commits/abc123', { status: 200, json });
       const { code, out, err } = await setUp(sys);
       assert.equal(code, 1);
       assert.ok(out.includes(`  ${shown}`), out.join('\n'));
-      assert.deepEqual(err, ['machine: GitHub does not show the commit Verified by AthyaBot']);
+      assert.deepEqual(err, ['machine: GitHub does not show the commit Verified by ExampleBot']);
     });
   }
 });
 
 describe('tokenInstructions', () => {
   it('names the repo, owner and permissions', () => {
-    const text = tokenInstructions(AGENT, 'athya-hq/athya_mono').join('\n');
-    assert.match(text, /signed in as AthyaBot/);
-    assert.match(text, /Name: athya_mono agent · Resource owner: athya-hq/);
-    assert.match(text, /Only select repositories → athya-hq\/athya_mono/);
+    const text = tokenInstructions(AGENT, 'example-org/example-app').join('\n');
+    assert.match(text, /signed in as ExampleBot/);
+    assert.match(text, /Name: example-app agent · Resource owner: example-org/);
+    assert.match(text, /Only select repositories → example-org\/example-app/);
     assert.match(text, /Projects: Read and write/);
   });
 });

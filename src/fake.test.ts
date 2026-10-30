@@ -2,14 +2,14 @@ import type { ExecResult, HttpResult, Sys } from './types.ts';
 
 export const HOME = '/home/u';
 export const ROOT = '/repo';
-export const AGENT = 'AthyaBot';
+export const AGENT = 'ExampleBot';
 export const AGENT_ID = 42;
-export const KEY = `${HOME}/.ssh/athyabot_signing`;
-export const PUBLIC_KEY = 'ssh-ed25519 AAAAkey AthyaBot signing';
+export const KEY = `${HOME}/.ssh/examplebot_signing`;
+export const PUBLIC_KEY = 'ssh-ed25519 AAAAkey ExampleBot signing';
 /** The fake's private key file: `ssh-keygen -y` derives the public half from it. */
 export const PRIVATE_KEY = 'private:ssh-ed25519 AAAAkey';
 export const TOKEN = 'github_pat_good';
-export const SETTINGS = JSON.stringify({ owner: 'AlokBansal8', agent: AGENT });
+export const SETTINGS = JSON.stringify({ owner: 'example-owner', agent: AGENT });
 
 export interface Call {
   command: string;
@@ -27,7 +27,7 @@ export class FakeSys implements Sys {
   /** Keychain items by "service/account". */
   keychain = new Map<string, string>();
   modes = new Map<string, number>();
-  origin = 'https://github.com/athya-hq/athya_mono.git';
+  origin = 'https://github.com/example-org/example-app.git';
   inRepo = true;
   /** Overrides for exec, by "command firstArg"; return undefined to fall through. */
   execOverride: (call: Call) => ExecResult | undefined = () => undefined;
@@ -40,9 +40,9 @@ export class FakeSys implements Sys {
   asked: string[] = [];
 
   constructor() {
-    this.route('GET', '/users/AthyaBot', { status: 200, json: { id: AGENT_ID } });
+    this.route('GET', '/users/ExampleBot', { status: 200, json: { id: AGENT_ID } });
     this.route('GET', '/user', { status: 401, json: null });
-    this.route('GET', '/users/AthyaBot/ssh_signing_keys', { status: 200, json: [] });
+    this.route('GET', '/users/ExampleBot/ssh_signing_keys', { status: 200, json: [] });
   }
 
   route(method: string, path: string, result: HttpResult | (() => HttpResult)): this {
@@ -56,7 +56,7 @@ export class FakeSys implements Sys {
     this.files.set(`${KEY}.pub`, `${PUBLIC_KEY}\n`);
     this.setToken(AGENT, TOKEN);
     this.acceptToken(TOKEN, AGENT);
-    this.route('GET', '/users/AthyaBot/ssh_signing_keys', {
+    this.route('GET', '/users/ExampleBot/ssh_signing_keys', {
       status: 200,
       json: [{ key: 'ssh-ed25519 AAAAkey' }],
     });

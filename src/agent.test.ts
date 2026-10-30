@@ -26,7 +26,7 @@ import { AGENT, AGENT_ID, FakeSys, HOME, KEY, PRIVATE_KEY, PUBLIC_KEY, ROOT, TOK
 
 describe('loadSettings', () => {
   it('reads owner and agent', () => {
-    assert.deepEqual(loadSettings(new FakeSys(), ROOT), { owner: 'AlokBansal8', agent: AGENT });
+    assert.deepEqual(loadSettings(new FakeSys(), ROOT), { owner: 'example-owner', agent: AGENT });
   });
 
   it('asks for setup when the file is missing', () => {
@@ -53,17 +53,17 @@ describe('loadSettings', () => {
 
 describe('repoAt', () => {
   for (const origin of [
-    'https://github.com/athya-hq/athya_mono.git',
-    'git@github.com:athya-hq/athya_mono.git',
-    'https://github.com/athya-hq/athya_mono',
-    'https://x-access-token@github.com/athya-hq/athya_mono.git',
-    'ssh://git@github.com/athya-hq/athya_mono.git',
-    'ssh://git@ssh.github.com:443/athya-hq/athya_mono.git',
+    'https://github.com/example-org/example-app.git',
+    'git@github.com:example-org/example-app.git',
+    'https://github.com/example-org/example-app',
+    'https://x-access-token@github.com/example-org/example-app.git',
+    'ssh://git@github.com/example-org/example-app.git',
+    'ssh://git@ssh.github.com:443/example-org/example-app.git',
   ]) {
     it(`reads the slug from ${origin}`, () => {
       const sys = new FakeSys();
       sys.origin = origin;
-      assert.deepEqual(repoAt(sys), { root: ROOT, slug: 'athya-hq/athya_mono' });
+      assert.deepEqual(repoAt(sys), { root: ROOT, slug: 'example-org/example-app' });
     });
   }
 
@@ -90,12 +90,12 @@ describe('repoAt', () => {
 describe('pathsFor and noreplyEmail', () => {
   it('keeps the key in ~/.ssh and the rest in ~/.config/process-rules', () => {
     assert.deepEqual(pathsFor(HOME, AGENT), {
-      key: `${HOME}/.ssh/athyabot_signing`,
+      key: `${HOME}/.ssh/examplebot_signing`,
       dir: `${HOME}/.config/process-rules`,
       session: `${HOME}/.config/process-rules/session.sh`,
       gh: `${HOME}/.config/process-rules/gh`,
     });
-    assert.equal(noreplyEmail(AGENT_ID, AGENT), '42+AthyaBot@users.noreply.github.com');
+    assert.equal(noreplyEmail(AGENT_ID, AGENT), '42+ExampleBot@users.noreply.github.com');
   });
 });
 
@@ -218,7 +218,7 @@ describe('keychain', () => {
   it('stores a token through stdin, never argv', () => {
     const sys = new FakeSys();
     assert.equal(storeToken(sys, AGENT, TOKEN), true);
-    assert.deepEqual([...sys.keychain], [['process-rules/AthyaBot', TOKEN]]);
+    assert.deepEqual([...sys.keychain], [['process-rules/ExampleBot', TOKEN]]);
     const call = sys.calls.find((c) => c.args[0] === '-i');
     assert.ok(call?.input?.includes(TOKEN));
     assert.ok(!call?.args.some((arg) => arg.includes(TOKEN)));
@@ -248,7 +248,7 @@ describe('GitHub reads', () => {
   });
 
   it('lists signing keys without comments', async () => {
-    const sys = new FakeSys().route('GET', '/users/AthyaBot/ssh_signing_keys', {
+    const sys = new FakeSys().route('GET', '/users/ExampleBot/ssh_signing_keys', {
       status: 200,
       json: [{ key: 'ssh-ed25519 AAAA x' }, { id: 1 }, null],
     });
@@ -270,7 +270,7 @@ describe('GitHub reads', () => {
   });
 
   it('compares logins ignoring case', () => {
-    assert.equal(sameLogin('athyabot', AGENT), true);
+    assert.equal(sameLogin('examplebot', AGENT), true);
     assert.equal(sameLogin('Other', AGENT), false);
     assert.equal(sameLogin(undefined, AGENT), false);
   });
