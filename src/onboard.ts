@@ -14,6 +14,7 @@ import {
   tokenInfo,
 } from './agent.ts';
 import { setUpBoard } from './board.ts';
+import { packageVersion } from './version.ts';
 import type { Output, Sys } from './types.ts';
 
 /** This product's repository: clients call its shared workflow. */
@@ -41,11 +42,15 @@ export const HOOK_COMMAND =
   'command -v process-rules >/dev/null 2>&1 && process-rules session-start || ' +
   'echo "process-rules: STOP. The process-rules CLI is not installed here, so this session cannot be given the agent identity and gh and git would act as the owner. Do not push, fetch, or run gh in this session; tell the owner."';
 
-/** The client's workflow: the shared checks on every pull request and on pushes to the default branch. */
-export function workflow(branch: string): string {
+/**
+ * The client's workflow: the shared checks on every pull request, on pushes
+ * to the default branch and weekly, at the process-rules release `version`.
+ * Upgrading is changing that version, which appears twice on adjacent lines.
+ */
+export function workflow(branch: string, version: string): string {
   return [
-    '# Written by process-rules onboard: the shared process-rules checks.',
-    '# Until process-rules publishes releases, this follows its main branch.',
+    `# Written by process-rules onboard: the shared process-rules checks at v${version}.`,
+    '# To upgrade, change the version on both lines that name it.',
     'name: process-rules',
     '',
     'on:',
@@ -71,7 +76,9 @@ export function workflow(branch: string): string {
     '      contents: read',
     '      issues: write',
     '      pull-requests: read',
-    `    uses: ${PRODUCT}/.github/workflows/checks.yml@main`,
+    `    uses: ${PRODUCT}/.github/workflows/checks.yml@v${version}`,
+    '    with:',
+    `      process-rules-ref: v${version}`,
     '    secrets:',
     '      FIGMA_TOKEN: ${{ secrets.FIGMA_TOKEN }}',
     '',
@@ -259,7 +266,7 @@ export async function onboard(sys: Sys, io: Output, named: readonly string[] = [
   io.out(`✓ ${agent} can push to ${slug}`);
 
   const workflowFile = `${root}/${WORKFLOW_PATH}`;
-  const wanted = workflow(reach.branch);
+  const wanted = workflow(reach.branch, packageVersion());
   if (!sys.exists(workflowFile) || sys.read(workflowFile) !== wanted) {
     const verb = sys.exists(workflowFile) ? 'Replace' : 'Write';
     if (!(await confirm(`${verb} ${WORKFLOW_PATH}, which runs the shared process-rules checks?`))) {

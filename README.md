@@ -141,9 +141,22 @@ permissions. Make `process-rules / PR
 identity` and `process-rules / Work rules` required checks on the default
 branch.
 
-Until releases (P-11), the client's workflow follows this repository's `main`,
-and the hook needs `process-rules` on the machine's `PATH`; without it the
-hook tells the session to stop.
+### Releases and upgrading
+
+Each release is a tag `vX.Y.Z` on `main`, matching `package.json`; the
+Release workflow checks both, runs `pnpm check` and publishes the GitHub
+release. Install the CLI from the tag on each machine:
+
+```bash
+npm install -g github:athya-hq/process-rules#v0.1.0
+```
+
+`onboard` pins the client's workflow to the release of the CLI that ran it:
+`checks.yml@vX.Y.Z` and `process-rules-ref: vX.Y.Z`, on adjacent lines.
+Upgrading is changing that version in both, or installing the new CLI and
+running `onboard` again, which offers to replace the workflow. The hooks need
+`process-rules` on the machine's `PATH`; without it the session-start hook
+tells the session to stop.
 
 ## Developing
 
