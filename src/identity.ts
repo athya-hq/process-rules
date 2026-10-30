@@ -14,19 +14,24 @@ const MOST_COMMITS = 250;
 /**
  * The PR identity check, run by the shared workflow on a pull request. Every
  * commit that claims the agent (its login or its no-reply address) must be
- * Verified as the agent; and when this push or opening brought agent commits,
- * the account that triggered it must be the agent, so agent work pushed with
- * the owner's login fails. Reads the event, actor and repository from the
- * Actions environment and asks GitHub with GH_TOKEN.
+ * Verified as the agent, and pushed by it: GitHub's record of the branch's
+ * pushes names who brought each commit, so agent work pushed with the
+ * owner's login fails on every later run too, whatever started it. Reads the
+ * event, actor and repository from the Actions environment and asks GitHub
+ * with GH_TOKEN.
  */
 export async function prIdentity(sys: Sys, io: Output): Promise<number> {
   const { GITHUB_EVENT_PATH: eventPath, GITHUB_ACTOR: actor, GITHUB_REPOSITORY: slug, GH_TOKEN: token } = sys.env;
   if (!eventPath || !actor || !slug || !token) {
     throw new Error('pr-identity runs in GitHub Actions: GITHUB_EVENT_PATH, GITHUB_ACTOR, GITHUB_REPOSITORY and GH_TOKEN must be set');
   }
-  const event = JSON.parse(sys.read(eventPath)) as { action?: string; before?: string; pull_request?: { number?: number } };
-  const number = event.pull_request?.number;
-  if (typeof number !== 'number') {
+  const event = JSON.parse(sys.read(eventPath)) as {
+    action?: string;
+    pull_request?: { number?: number; base?: { sha: string }; head?: { ref: string; repo: { full_name: string } | null } };
+  };
+  const pull = event.pull_request;
+  const number = pull?.number;
+  if (typeof number !== 'number' || !pull?.base || !pull.head) {
     io.out('pr-identity: not a pull request; nothing to check');
     return 0;
   }
@@ -59,12 +64,24 @@ export async function prIdentity(sys: Sys, io: Output): Promise<number> {
       );
     }
   }
-  // Only opening and pushing bring commits: on a push, those after the old
-  // head (all of them after a force push); reopening or editing brings none.
-  const before = event.action === 'synchronize' ? commits.findIndex((commit) => commit.sha === event.before) : -1;
-  const pushed = event.action === 'opened' || event.action === 'synchronize' ? commits.slice(before + 1) : [];
-  if (pushed.some(claimsAgent) && !sameLogin(actor, login)) {
-    problems.push(`${actor} pushed commits that claim ${login}; agent work must be pushed by ${login}`);
+  const pushers = await whoPushed(sys, token, {
+    repo: pull.head.repo?.full_name ?? slug,
+    ref: pull.head.ref,
+    base: pull.base.sha,
+    commits: commits.map((commit) => commit.sha),
+  });
+  // A run started by opening or pushing knows who brought the newest commits even
+  // before GitHub records the push; any other run relies on the record alone.
+  const fallback = event.action === 'opened' || event.action === 'synchronize' ? actor : undefined;
+  const byPusher = new Map<string, string[]>();
+  for (const commit of commits.filter(claimsAgent)) {
+    const pusher = pushers.get(commit.sha) ?? fallback;
+    if (pusher && sameLogin(pusher, login)) continue;
+    const key = pusher ?? 'an account GitHub has not recorded yet';
+    byPusher.set(key, [...(byPusher.get(key) ?? []), commit.sha.slice(0, 7)]);
+  }
+  for (const [pusher, shas] of byPusher) {
+    problems.push(`${pusher} pushed ${shas.join(', ')}, which claim${shas.length === 1 ? 's' : ''} ${login}; agent work must be pushed by ${login}`);
   }
 
   for (const problem of problems) io.err(`✗ ${problem}`);
@@ -73,6 +90,40 @@ export async function prIdentity(sys: Sys, io: Output): Promise<number> {
     return 1;
   }
   const count = commits.filter(claimsAgent).length;
-  io.out(`✓ pr-identity: ${count} commit${count === 1 ? '' : 's'} by ${login}, each Verified; pushed by ${actor}`);
+  io.out(`✓ pr-identity: ${count} commit${count === 1 ? '' : 's'} by ${login}, each Verified and pushed by ${login}`);
   return 0;
+}
+
+const ZERO = /^0+$/;
+
+/**
+ * Who pushed each of a pull request's commits, from GitHub's record of the
+ * pushes to its branch, oldest first: each push is credited with the
+ * commits it brought that the pull request still has.
+ */
+async function whoPushed(
+  sys: Sys,
+  token: string,
+  branch: { repo: string; ref: string; base: string; commits: string[] },
+): Promise<Map<string, string>> {
+  const pushes: { before: string; after: string; activity_type: string; actor: { login: string } | null }[] = [];
+  for (let page = 1; ; page++) {
+    const ref = encodeURIComponent(`refs/heads/${branch.ref}`);
+    const { status, json } = await sys.http(`${API}/repos/${branch.repo}/activity?ref=${ref}&per_page=100&page=${page}`, { token });
+    if (status !== 200 || !Array.isArray(json)) throw new Error(`cannot read the pushes to ${branch.ref} (HTTP ${status})`);
+    pushes.push(...(json as typeof pushes));
+    if (json.length < 100) break;
+  }
+  const wanted = new Set(branch.commits);
+  const pushers = new Map<string, string>();
+  for (const push of pushes.reverse()) {
+    if (ZERO.test(push.after) || !push.actor) continue;
+    const from = push.activity_type === 'push' && !ZERO.test(push.before) ? push.before : branch.base;
+    const { status, json } = await sys.http(`${API}/repos/${branch.repo}/compare/${from}...${push.after}?per_page=100`, { token });
+    if (status !== 200) throw new Error(`cannot compare ${from.slice(0, 7)}...${push.after.slice(0, 7)} (HTTP ${status})`);
+    for (const { sha } of (json as { commits?: { sha: string }[] } | null)?.commits ?? []) {
+      if (wanted.has(sha) && !pushers.has(sha)) pushers.set(sha, push.actor.login);
+    }
+  }
+  return pushers;
 }
