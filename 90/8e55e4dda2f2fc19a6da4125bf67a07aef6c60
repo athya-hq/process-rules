@@ -1,0 +1,51 @@
+src/fake.test.ts
+  s_111f8ffd9a52da::t_4d577187848fe4 11-18,82,86,169
+README.md
+  s_111f8ffd9a52da::t_8475a832e3c7e3 23-31,41-43
+src/types.ts
+  s_111f8ffd9a52da::t_839608b414c868 16-17
+src/sys.ts
+  s_111f8ffd9a52da::t_839608b414c868 52-56
+docs/roadmap.md
+  s_111f8ffd9a52da::t_8475a832e3c7e3 9-10,31,33
+src/doctor.ts
+  s_111f8ffd9a52da::t_ac7c3f0188452d 2,4-5,12-13,36-38,40-41,43,52-58,77
+src/run.test.ts
+  s_111f8ffd9a52da::t_986ee7b9af732a 75-77,88-99
+  s_111f8ffd9a52da::t_b3b54edc039d7a 100
+src/machine.test.ts
+  s_111f8ffd9a52da::t_839a8115750aaf 5-6,8,13,28,30,34,41,43,50,53-54,57-58,60-65,73,90,143,145-149,152,154-158,160-161,164,166-177,180,183-188,190,193,214,220,226-238
+docs/decisions.md
+  s_111f8ffd9a52da::t_8475a832e3c7e3 16-27
+src/sys.test.ts
+  s_111f8ffd9a52da::t_c316ed9d47f753 63,70-73
+src/agent.test.ts
+  s_111f8ffd9a52da::t_0b6f769d1af282 232
+  s_111f8ffd9a52da::t_8dd5a220abf47f 11-12,24-25,27,34,37,56-57,60,63-75,79,82-84,234-269
+src/agent.ts
+  s_111f8ffd9a52da::t_9c43439f84236f 208
+  s_111f8ffd9a52da::t_839608b414c868 3,12-21,39,61-69,71-74,84,86,205-207,209-215,217-232,234-244
+  s_111f8ffd9a52da::t_8ef3d020306661 233
+src/machine.ts
+  s_111f8ffd9a52da::t_8ef3d020306661 3-4,6-7,15-16,20-21,24-25,27-31,36-39,41-42,45,79-88,91,94-97,100-102,112,122,148-149
+src/run.ts
+  s_111f8ffd9a52da::t_ac7c3f0188452d 12-15,17-18,48-51,70
+src/doctor.test.ts
+  s_111f8ffd9a52da::t_4728d9a0e92b0c 6,8,16,18,47,52-53,55-78
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "908e55e4dda2f2fc19a6da4125bf67a07aef6c60",
+  "prompts": {},
+  "sessions": {
+    "s_111f8ffd9a52da": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3cfaac9f-97c2-444b-bcc3-3d8813efab1f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Alok Bansal <alokagrawal8@gmail.com>"
+    }
+  }
+}
