@@ -11,6 +11,8 @@ export class Board {
   issueTypes = ['Task', 'Bug'];
   labels = ['bug'];
   project: { fields: string[]; linked: boolean } | undefined;
+  /** The titles of the Projects this board created. */
+  titles: string[] = [];
   /** Projects listed before this board's, as pages of other titles. */
   otherPages = 0;
   /** What the board's GraphQL calls asked for, by the operation they ran. */
@@ -52,7 +54,8 @@ export class Board {
         return { status: 200, json: { data: { [kind]: { id: 'O_1', projectsV2: { nodes, pageInfo: { hasNextPage: !last, endCursor: last ? null : String(page + 1) } } } } } };
       }
       case 'createProjectV2(':
-        assert.deepEqual(variables, { owner: 'O_1', title: 'example-app work', repo: 'R_1' });
+        assert.deepEqual({ ...variables, title: undefined }, { owner: 'O_1', title: undefined, repo: 'R_1' });
+        this.titles.push(String(variables.title));
         this.project = { fields: ['Title', 'Status'], linked: true };
         return { status: 200, json: { data: { createProjectV2: { projectV2: node } } } };
       case 'linkProjectV2ToRepository':

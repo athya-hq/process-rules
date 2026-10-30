@@ -26,3 +26,12 @@
   before it ends. `machine` also refuses a fine-grained token or missing
   scopes; `onboard` names an organisation that requires SAML authorisation
   or blocks classic tokens (P-02, P-04).
+- **2026-10-31 — Record: staged adoption, P-12.** The owner, in chat: "Yes,
+  add P-12 first". The first client adopts one feature at a time, and
+  `onboard` turned every feature on at once: its work rules would refuse
+  every agent push and pull request before the client's work lives in
+  issues. So a client's settings list the features it has turned on,
+  `onboard` sets up only those and adds one more on request, the shared
+  checks and the pre-push hook skip features that are off, and the
+  Project's title is a setting. Settings that list no features keep every
+  feature on, as before. Added to roadmap v1 as P-12, after P-11.

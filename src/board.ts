@@ -83,6 +83,8 @@ export async function setUpBoard(
   confirm: (question: string) => Promise<boolean>,
   slug: string,
   owner: string,
+  /** The Project's title; `<repo> work` when the settings name none. */
+  projectTitle?: string,
 ): Promise<string | undefined> {
   const login = sys.exec('gh', ['auth', 'token']);
   const token = login.stdout.trim();
@@ -152,7 +154,7 @@ export async function setUpBoard(
   }
   io.out(`✓ labels: ${LABELS.map((l) => l.name).join(', ')}`);
 
-  const title = `${repo.name} work`;
+  const title = projectTitle?.trim() || `${repo.name} work`;
   const kind = repo.organisation ? 'organization' : 'user';
   type Project = { id: string; title: string; url: string; repositories: { nodes: { id: string }[] } };
   let holderId: string | undefined;

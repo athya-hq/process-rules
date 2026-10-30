@@ -107,6 +107,14 @@ describe('run', () => {
     assert.equal((await capture(['pre-push', 'origin', 'url', 'extra'])).code, 2);
   });
 
+  it('treats a bad onboard option as bad usage', async () => {
+    for (const args of [['onboard', 'a', 'b', 'c'], ['onboard', '--add', 'boards'], ['onboard', '--force']]) {
+      const { code, err } = await capture(args);
+      assert.equal(code, 2, args.join(' '));
+      assert.equal(err.at(-1), USAGE);
+    }
+  });
+
   it('refuses a second argument after the agent', async () => {
     assert.deepEqual(await capture(['machine', 'OtherBot', 'now']), {
       code: 2,

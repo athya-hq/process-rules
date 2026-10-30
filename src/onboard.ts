@@ -14,6 +14,7 @@ import {
   tokenInfo,
 } from './agent.ts';
 import { setUpBoard } from './board.ts';
+import { type Feature, FEATURES, featuresIn, parseFeatures } from './features.ts';
 import { packageVersion } from './version.ts';
 import type { Output, Sys } from './types.ts';
 
@@ -150,7 +151,36 @@ function hasHook(settings: object): boolean {
  * test commit GitHub must show as Verified by the agent.
  * Every change waits for a yes.
  */
-export async function onboard(sys: Sys, io: Output, named: readonly string[] = []): Promise<number> {
+/** onboard's arguments: up to two logins, then `--features a,b` (first time) or `--add <feature>`. */
+export function onboardArgs(args: readonly string[]): { named: string[]; features?: Feature[]; add?: Feature } {
+  const named: string[] = [];
+  let features: Feature[] | undefined;
+  let add: Feature | undefined;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i] as string;
+    const value = args[i + 1];
+    if (arg === '--features' || arg === '--add') {
+      if (value === undefined) throw new Error(`${arg} needs a value`);
+      if (arg === '--features') features = parseFeatures(value);
+      else {
+        const [, feature] = parseFeatures(value);
+        if (!feature || value.includes(',')) throw new Error('--add takes one feature other than identity');
+        add = feature;
+      }
+      i++;
+    } else if (arg.startsWith('--')) {
+      throw new Error(`unknown option ${arg}`);
+    } else if (named.length < 2) {
+      named.push(arg);
+    } else {
+      throw new Error(`unexpected argument "${arg}"`);
+    }
+  }
+  return { named, ...(features ? { features } : {}), ...(add ? { add } : {}) };
+}
+
+export async function onboard(sys: Sys, io: Output, args: readonly string[] = []): Promise<number> {
+  const { named, features: chosen, add } = onboardArgs(args);
   if (sys.env.PROCESS_RULES_AGENT) {
     io.err('onboard: run it in your own terminal, not in an agent session');
     return 1;
@@ -166,8 +196,14 @@ export async function onboard(sys: Sys, io: Output, named: readonly string[] = [
   const settingsFile = `${root}/${SETTINGS_PATH}`;
   let owner: string;
   let agent: string;
+  let features: Feature[];
+  let pendingSettings: string | undefined;
   if (sys.exists(settingsFile)) {
     const settings = loadSettings(sys, root);
+    if (chosen) {
+      io.err(`onboard: ${SETTINGS_PATH} already lists its features; turn one more on with --add <feature>`);
+      return 1;
+    }
     const [namedOwner, namedAgent] = named;
     if ((namedOwner && !sameLogin(namedOwner, settings.owner)) || (namedAgent && !sameLogin(namedAgent, settings.agent))) {
       io.err(`onboard: ${SETTINGS_PATH} already names owner ${settings.owner} and agent ${settings.agent}; edit or delete it to change them`);
@@ -176,7 +212,20 @@ export async function onboard(sys: Sys, io: Output, named: readonly string[] = [
     // GitHub's spelling, which the keychain, the session file and commits use.
     owner = (await account(sys, settings.owner)).login;
     agent = (await account(sys, settings.agent)).login;
+    const raw = JSON.parse(sys.read(settingsFile)) as Record<string, unknown>;
+    features = featuresIn(raw);
+    if (add && !features.includes(add)) {
+      if (!(await confirm(`Turn ${add} on in ${SETTINGS_PATH}, once its setup below is done?`))) return stop('settings file');
+      features = FEATURES.filter((feature) => features.includes(feature) || feature === add);
+      // Written only once the feature's setup has finished, so settings never claim a half-set-up feature.
+      pendingSettings = `${JSON.stringify({ ...raw, features }, null, 2)}\n`;
+    }
   } else {
+    if (add) {
+      io.err(`onboard: there is no ${SETTINGS_PATH} to add to; run process-rules onboard <owner> <agent> first`);
+      return 1;
+    }
+    features = chosen ?? [...FEATURES];
     const [namedOwner, namedAgent] = named;
     if (!namedOwner || !namedAgent) {
       io.err('onboard: name the owner and the agent account: process-rules onboard <owner> <agent>');
@@ -191,13 +240,15 @@ export async function onboard(sys: Sys, io: Output, named: readonly string[] = [
       io.err('onboard: the owner and the agent must be different accounts');
       return 1;
     }
-    if (!(await confirm(`Write ${SETTINGS_PATH}: owner ${owner} approves, agent ${agent} builds?`))) {
+    if (!(await confirm(`Write ${SETTINGS_PATH}: owner ${owner} approves, agent ${agent} builds, with ${features.join(', ')} on?`))) {
       return stop('settings file');
     }
     sys.mkdir(`${root}/.github`);
-    sys.write(settingsFile, `${JSON.stringify({ owner, agent }, null, 2)}\n`);
+    sys.write(settingsFile, `${JSON.stringify({ owner, agent, features }, null, 2)}\n`);
   }
-  io.out(`✓ ${SETTINGS_PATH}: owner ${owner}, agent ${agent}`);
+  io.out(`✓ ${SETTINGS_PATH}: owner ${owner}, agent ${agent}; on: ${features.join(', ')}`);
+  const on = (feature: Feature): boolean => features.includes(feature);
+  const workflowNeeded = on('pr-identity') || on('work-rules') || on('design') || on('decisions') || on('review');
 
   const hooksFile = `${root}/${HOOKS_PATH}`;
   const hooks: unknown = sys.exists(hooksFile) ? JSON.parse(sys.read(hooksFile)) : {};
@@ -265,38 +316,48 @@ export async function onboard(sys: Sys, io: Output, named: readonly string[] = [
   }
   io.out(`✓ ${agent} can push to ${slug}`);
 
-  const workflowFile = `${root}/${WORKFLOW_PATH}`;
-  const wanted = workflow(reach.branch, packageVersion());
-  if (!sys.exists(workflowFile) || sys.read(workflowFile) !== wanted) {
-    const verb = sys.exists(workflowFile) ? 'Replace' : 'Write';
-    if (!(await confirm(`${verb} ${WORKFLOW_PATH}, which runs the shared process-rules checks?`))) {
-      return stop('workflow');
+  // The shared checks run only for features that need them.
+  if (workflowNeeded) {
+    const workflowFile = `${root}/${WORKFLOW_PATH}`;
+    const wanted = workflow(reach.branch, packageVersion());
+    if (!sys.exists(workflowFile) || sys.read(workflowFile) !== wanted) {
+      const verb = sys.exists(workflowFile) ? 'Replace' : 'Write';
+      if (!(await confirm(`${verb} ${WORKFLOW_PATH}, which runs the shared process-rules checks?`))) {
+        return stop('workflow');
+      }
+      sys.mkdir(`${root}/.github/workflows`);
+      sys.write(workflowFile, wanted);
     }
-    sys.mkdir(`${root}/.github/workflows`);
-    sys.write(workflowFile, wanted);
-  }
-  io.out(`✓ ${WORKFLOW_PATH}`);
-
-  const hookPath = sys.exec('git', ['rev-parse', '--git-path', 'hooks/pre-push'], { cwd: root }).stdout.trim();
-  const hookFile = hookPath.startsWith('/') ? hookPath : `${root}/${hookPath}`;
-  const gitDir = sys.exec('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd: root }).stdout.trim();
-  const line = 'process-rules pre-push "$@"';
-  if (!hookFile.startsWith(`${root}/`) && !hookFile.startsWith(`${gitDir}/`)) {
-    // A hooks folder shared by other repositories (a global core.hooksPath) is the owner's to change.
-    io.out(`! git runs hooks from ${hookPath}, outside this repository; add this line to its pre-push hook: ${line}`);
-  } else if (!sys.exists(hookFile)) {
-    if (!(await confirm(`Write the pre-push git hook ${hookPath}, which runs the work rules before an agent session pushes?`))) {
-      return stop('pre-push hook');
-    }
-    sys.write(hookFile, PRE_PUSH_HOOK, 0o755);
-    io.out(`✓ pre-push hook ${hookPath}`);
-  } else if (/^\s*(?:exec\s+)?process-rules\s+pre-push\b/m.test(sys.read(hookFile))) {
-    io.out(`✓ pre-push hook ${hookPath}`);
-  } else {
-    io.out(`! ${hookPath} is your own; add this line to it: ${line}`);
+    io.out(`✓ ${WORKFLOW_PATH}`);
   }
 
-  if (!(await setUpBoard(sys, io, confirm, slug, owner))) return 1;
+  if (on('work-rules')) {
+    const hookPath = sys.exec('git', ['rev-parse', '--git-path', 'hooks/pre-push'], { cwd: root }).stdout.trim();
+    const hookFile = hookPath.startsWith('/') ? hookPath : `${root}/${hookPath}`;
+    const gitDir = sys.exec('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd: root }).stdout.trim();
+    const line = 'process-rules pre-push "$@"';
+    if (!hookFile.startsWith(`${root}/`) && !hookFile.startsWith(`${gitDir}/`)) {
+      // A hooks folder shared by other repositories (a global core.hooksPath) is the owner's to change.
+      io.out(`! git runs hooks from ${hookPath}, outside this repository; add this line to its pre-push hook: ${line}`);
+    } else if (!sys.exists(hookFile)) {
+      if (!(await confirm(`Write the pre-push git hook ${hookPath}, which runs the work rules before an agent session pushes?`))) {
+        return stop('pre-push hook');
+      }
+      sys.write(hookFile, PRE_PUSH_HOOK, 0o755);
+      io.out(`✓ pre-push hook ${hookPath}`);
+    } else if (/^\s*(?:exec\s+)?process-rules\s+pre-push\b/m.test(sys.read(hookFile))) {
+      io.out(`✓ pre-push hook ${hookPath}`);
+    } else {
+      io.out(`! ${hookPath} is your own; add this line to it: ${line}`);
+    }
+  }
+
+  const projectTitle = (JSON.parse(sys.read(settingsFile)) as { project?: unknown }).project;
+  if (on('board') && !(await setUpBoard(sys, io, confirm, slug, owner, typeof projectTitle === 'string' ? projectTitle : undefined))) return 1;
+  if (pendingSettings) {
+    sys.write(settingsFile, pendingSettings);
+    io.out(`✓ ${add} on in ${SETTINGS_PATH}`);
+  }
 
   if (!(await confirm(`Push one signed test commit to a throwaway branch of ${slug} as ${agent}, check it is Verified, then delete the branch?`))) {
     return stop('test commit');
@@ -304,7 +365,8 @@ export async function onboard(sys: Sys, io: Output, named: readonly string[] = [
   const { id } = await account(sys, agent);
   const verified = await testCommit(sys, io, { agent, id, token, slug });
   if (verified !== 0) return verified;
-  io.out(`onboard: done. Commit ${SETTINGS_PATH}, ${HOOKS_PATH} and ${WORKFLOW_PATH}; agent sessions then work as ${agent}.`);
+  const files = [SETTINGS_PATH, HOOKS_PATH, ...(workflowNeeded ? [WORKFLOW_PATH] : [])];
+  io.out(`onboard: done. Commit ${files.slice(0, -1).join(', ')} and ${files.at(-1)}; agent sessions then work as ${agent}.`);
   return 0;
 }
 

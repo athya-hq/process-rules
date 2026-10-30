@@ -4,8 +4,9 @@ import { describe, it } from 'node:test';
 import { Board, repoJson } from './fake-board.test.ts';
 import { FIELDS, ISSUE_TYPES, LABELS, viewsChecklist } from './board.ts';
 import { AGENT, FakeSys, ROOT, TOKEN, capture } from './fake.test.ts';
+import { FEATURES } from './features.ts';
 import { packageVersion } from './version.ts';
-import { HOOK_COMMAND, HOOKS_PATH, PRE_PUSH_HOOK, WORKFLOW_PATH, onboard, workflow } from './onboard.ts';
+import { HOOK_COMMAND, HOOKS_PATH, PRE_PUSH_HOOK, WORKFLOW_PATH, onboard, onboardArgs, workflow } from './onboard.ts';
 
 const SETTINGS = `${ROOT}/.github/process-rules.json`;
 const HOOKS = `${ROOT}/${HOOKS_PATH}`;
@@ -42,7 +43,7 @@ describe('onboard', () => {
     const { code, out, err } = await run(sys);
     assert.deepEqual(err, []);
     assert.equal(code, 0);
-    assert.equal(sys.files.get(SETTINGS), '{\n  "owner": "example-owner",\n  "agent": "ExampleBot"\n}\n');
+    assert.deepEqual(JSON.parse(sys.files.get(SETTINGS) ?? ''), { owner: 'example-owner', agent: 'ExampleBot', features: [...FEATURES] });
     assert.deepEqual(JSON.parse(sys.files.get(HOOKS) ?? ''), {
       hooks: { SessionStart: [{ hooks: [{ type: 'command', command: HOOK_COMMAND }] }] },
     });
@@ -112,7 +113,7 @@ describe('onboard', () => {
     sys.route('GET', '/users/Example-Owner', { status: 200, json: { id: 1, login: 'example-owner' } });
     const { code, out } = await run(sys, []);
     assert.equal(code, 0);
-    assert.ok(out.includes('✓ .github/process-rules.json: owner example-owner, agent ExampleBot'));
+    assert.ok(out.includes(`✓ .github/process-rules.json: owner example-owner, agent ExampleBot; on: ${FEATURES.join(', ')}`));
     assert.ok(out.includes('✓ GitHub shows the test commit Verified by ExampleBot'));
   });
 
@@ -446,6 +447,113 @@ describe('onboard', () => {
       sys.answers = [...answers];
       const { code, err } = await run(sys);
       assert.deepEqual({ code, err }, { code: 1, err: ['onboard: stopped at "agent access"; nothing after it was changed'] });
+    });
+  }
+});
+
+describe('staged adoption', () => {
+  it('sets up identity alone, with no workflow, hook or board', async () => {
+    const sys = fresh();
+    sys.answers = ['y', 'y', 'y'];
+    const { code, out } = await run(sys, ['example-owner', AGENT, '--features', 'identity']);
+    assert.equal(code, 0);
+    assert.deepEqual(JSON.parse(sys.files.get(SETTINGS) ?? '').features, ['identity']);
+    assert.ok(sys.files.has(HOOKS));
+    assert.ok(!sys.files.has(WORKFLOW) && !sys.files.has(PRE_PUSH));
+    assert.ok(!sys.requests.some((r) => r.url.endsWith('/graphql') || r.url.includes('/labels') || r.url.includes('/issue-types')), 'no board');
+    assert.equal(out.at(-1), 'onboard: done. Commit .github/process-rules.json and .claude/settings.json; agent sessions then work as ExampleBot.');
+    assert.ok(out.includes('✓ GitHub shows the test commit Verified by ExampleBot'));
+    assert.deepEqual(sys.asked.map((q) => q.split(' ')[0]), ['Write', 'Add', 'Push']);
+  });
+
+  it('turns one more feature on, keeping the other settings', async () => {
+    const sys = fresh();
+    sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity'], project: 'Example work', figma: { library: 'L' } }));
+    sys.files.set(HOOKS, JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: HOOK_COMMAND }] }] } }));
+    const board = new Board(sys);
+    sys.answers = ['y', 'y', 'y', 'y', 'y', 'y', 'y'];
+    const { code } = await run(sys, ['--add', 'board']);
+    assert.equal(code, 0);
+    assert.deepEqual(board.titles, ['Example work']);
+    assert.deepEqual(JSON.parse(sys.files.get(SETTINGS) ?? ''), {
+      owner: 'example-owner',
+      agent: AGENT,
+      features: ['identity', 'board'],
+      project: 'Example work',
+      figma: { library: 'L' },
+    });
+    assert.ok(sys.asked.some((q) => q.startsWith('Create the Project "Example work"')));
+    assert.ok(!sys.files.has(WORKFLOW), 'board alone needs no workflow');
+  });
+
+  it('writes the workflow and pre-push hook once work rules are on', async () => {
+    const sys = fresh();
+    sys.answers = Array<string>(5).fill('y');
+    await run(sys, ['example-owner', AGENT, '--features', 'work-rules']);
+    assert.deepEqual(JSON.parse(sys.files.get(SETTINGS) ?? '').features, ['identity', 'work-rules']);
+    assert.ok(sys.files.has(WORKFLOW) && sys.files.has(PRE_PUSH));
+  });
+
+  it('adds nothing when the feature is already on', async () => {
+    const sys = fresh();
+    sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity'] }));
+    sys.files.set(HOOKS, JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: HOOK_COMMAND }] }] } }));
+    sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity', 'pr-identity'] }));
+    sys.files.set(WORKFLOW, workflow('main', packageVersion()));
+    const before = sys.files.get(SETTINGS);
+    sys.answers = ['y'];
+    await run(sys, ['--add', 'pr-identity']);
+    assert.deepEqual(sys.asked.map((q) => q.split(' ')[0]), ['Push']);
+    assert.equal(sys.files.get(SETTINGS), before);
+  });
+
+  for (const [name, args, change, message] of [
+    ['--features for a repo that has settings', ['--features', 'board'], (sys: FakeSys) => sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT })), 'onboard: .github/process-rules.json already lists its features; turn one more on with --add <feature>'],
+    ['--add with no settings', ['--add', 'board'], () => undefined, 'onboard: there is no .github/process-rules.json to add to; run process-rules onboard <owner> <agent> first'],
+  ] as const) {
+    it(`refuses ${name}`, async () => {
+      const sys = fresh();
+      change(sys);
+      const { code, err } = await run(sys, [...args]);
+      assert.deepEqual({ code, err }, { code: 1, err: [message] });
+    });
+  }
+
+  it('leaves the settings alone when a turned-on feature\'s setup stops', async () => {
+    const sys = fresh();
+    const before = JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity'] });
+    sys.files.set(SETTINGS, before);
+    sys.files.set(HOOKS, JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: HOOK_COMMAND }] }] } }));
+    sys.answers = ['y', 'n'];
+    const { err } = await run(sys, ['--add', 'board']);
+    assert.deepEqual(err, ['onboard: stopped at "issue types"; nothing after it was changed']);
+    assert.equal(sys.files.get(SETTINGS), before);
+  });
+
+  it('stops when turning a feature on is declined', async () => {
+    const sys = fresh();
+    sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity'] }));
+    sys.answers = ['n'];
+    assert.deepEqual((await run(sys, ['--add', 'board'])).err, ['onboard: stopped at "settings file"; nothing after it was changed']);
+  });
+});
+
+describe('onboardArgs', () => {
+  it('reads logins, --features and --add', () => {
+    assert.deepEqual(onboardArgs(['a', 'b', '--features', 'board, work-rules']), { named: ['a', 'b'], features: ['identity', 'board', 'work-rules'] });
+    assert.deepEqual(onboardArgs(['--add', 'review']), { named: [], add: 'review' });
+  });
+
+  for (const [args, message] of [
+    [['--features'], /--features needs a value/],
+    [['--add', 'board,review'], /--add takes one feature other than identity/],
+    [['--add', 'identity'], /--add takes one feature other than identity/],
+    [['--features', 'boards'], /unknown feature boards; the features are identity, pr-identity/],
+    [['--force'], /unknown option --force/],
+    [['a', 'b', 'c'], /unexpected argument "c"/],
+  ] as const) {
+    it(`refuses ${args.join(' ')}`, () => {
+      assert.throws(() => onboardArgs([...args]), message);
     });
   }
 });
