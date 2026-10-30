@@ -38,13 +38,19 @@ export const PRE_PUSH_HOOK = [
 /**
  * What the client's SessionStart hook runs. Cloud sessions are left alone,
  * before anything else: they reach GitHub as the account connected to them
- * and have no CLI. Without the CLI on a machine, nothing can lock GitHub, so
- * the session is told to stop instead.
+ * and have no CLI. Without the CLI on a machine, or when it fails to run,
+ * nothing can lock GitHub, so the session is told to stop instead.
  */
 export const HOOK_COMMAND =
   'if [ "$CLAUDE_CODE_REMOTE" = true ]; then :; ' +
-  'elif command -v process-rules >/dev/null 2>&1; then process-rules session-start; ' +
-  'else echo "process-rules: STOP. The process-rules CLI is not installed here, so this session cannot be given the agent identity and gh and git would act as the owner. Do not push, fetch, or run gh in this session; tell the owner."; fi';
+  'elif command -v process-rules >/dev/null 2>&1 && process-rules session-start; then :; ' +
+  'else echo "process-rules: STOP. The process-rules CLI is missing or did not run here, so this session cannot be given the agent identity and gh and git would act as the owner. Do not push, fetch, or run gh in this session; tell the owner."; fi';
+
+/** The hook commands older releases wrote, which onboard replaces with this release's. */
+export const OLDER_HOOK_COMMANDS = [
+  'command -v process-rules >/dev/null 2>&1 && process-rules session-start || ' +
+    'echo "process-rules: STOP. The process-rules CLI is not installed here, so this session cannot be given the agent identity and gh and git would act as the owner. Do not push, fetch, or run gh in this session; tell the owner."',
+];
 
 /**
  * The client's workflow: the shared checks on every pull request, on pushes
@@ -262,9 +268,7 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     throw new Error(`${HOOKS_PATH} is not a JSON object`);
   }
   // An entry an older release wrote is replaced where it stands, not added to.
-  const older = sessionStartHooks(hooks).filter(
-    (hook) => typeof hook.command === 'string' && hook.command !== HOOK_COMMAND && hook.command.includes('process-rules session-start'),
-  );
+  const older = sessionStartHooks(hooks).filter((hook) => typeof hook.command === 'string' && OLDER_HOOK_COMMANDS.includes(hook.command));
   if (older.length > 0) {
     if (!(await confirm(`Replace the older process-rules SessionStart hook in ${HOOKS_PATH} with this release's?`))) {
       return stop('hook entry');
