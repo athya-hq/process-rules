@@ -1,4 +1,5 @@
 import { API, loadSettings, sameLogin } from './agent.ts';
+import { expireVetoes } from './reviews.ts';
 import type { Output, Sys } from './types.ts';
 
 /** How long one decision's check may run, in seconds. */
@@ -74,20 +75,7 @@ export async function decisionsWeekly(sys: Sys, io: Output): Promise<number> {
   const decisions = await openIssues(sys, token, slug, 'type=Decision');
   const undos = await openIssues(sys, token, slug, 'labels=needs-owner');
 
-  const editors = new Map<number, string | undefined>();
-  if (decisions.length > 0) {
-    const { status, json } = await sys.http(`${API}/graphql`, {
-      method: 'POST',
-      token,
-      body: {
-        query: 'query($ids: [ID!]!) { nodes(ids: $ids) { ... on Issue { number editor { login } } } }',
-        variables: { ids: decisions.map((issue) => issue.node_id) },
-      },
-    });
-    const nodes = (json as { data?: { nodes?: ({ number: number; editor: { login: string } | null } | null)[] } } | null)?.data?.nodes;
-    if (status !== 200 || !nodes) throw new Error(`cannot read who edited the decisions (HTTP ${status})`);
-    for (const node of nodes) if (node) editors.set(node.number, node.editor?.login);
-  }
+  const editors = await lastEditors(sys, token, decisions);
 
   const today = sys.now();
   const label = async (issue: Issue, name: string): Promise<void> => {
@@ -96,13 +84,18 @@ export async function decisionsWeekly(sys: Sys, io: Output): Promise<number> {
     if (added.status !== 200) throw new Error(`cannot label #${issue.number} ${name} (HTTP ${added.status})`);
   };
 
+  // Before the decisions, so one decision's failing call cannot keep vetoes past their week.
+  await expireVetoes(sys, io, slug, token);
   const started = sys.now().getTime();
   const tell = async (number: number, check: string, run: { code: number; stdout: string; stderr: string }, undo: number): Promise<void> => {
     const output = `${run.stdout}${run.stderr}`.trim().split('\n').slice(-20).join('\n');
     const commented = await sys.http(`${API}/repos/${slug}/issues/${number}/comments`, {
       method: 'POST',
       token,
-      body: { body: `Tripped on ${today.toISOString().slice(0, 10)}: \`${check}\` exited ${run.code}.\n\n\`\`\`\n${output}\n\`\`\`\n\nOpened #${undo} to undo it.` },
+      // The output, when the check printed any.
+      body: {
+        body: `Tripped on ${today.toISOString().slice(0, 10)}: \`${check}\` exited ${run.code}.\n\n${output ? `\`\`\`\n${output}\n\`\`\`\n\n` : ''}Opened #${undo} to undo it.`,
+      },
     });
     if (commented.status !== 201) throw new Error(`cannot comment on #${number} (HTTP ${commented.status})`);
   };
@@ -186,4 +179,24 @@ export async function decisionsWeekly(sys: Sys, io: Output): Promise<number> {
   }
   io.out(`decisions-weekly: ${decisions.length} open decision${decisions.length === 1 ? '' : 's'} checked`);
   return 0;
+}
+
+/** Who last edited each issue's body (undefined when no one has), by issue number. */
+export async function lastEditors(sys: Sys, token: string, issues: { number: number; node_id: string }[]): Promise<Map<number, string | undefined>> {
+  const editors = new Map<number, string | undefined>();
+  // GitHub looks up at most 100 nodes a request.
+  for (let at = 0; at < issues.length; at += 100) {
+    const { status, json } = await sys.http(`${API}/graphql`, {
+      method: 'POST',
+      token,
+      body: {
+        query: 'query($ids: [ID!]!) { nodes(ids: $ids) { ... on Issue { number editor { login } } } }',
+        variables: { ids: issues.slice(at, at + 100).map((issue) => issue.node_id) },
+      },
+    });
+    const nodes = (json as { data?: { nodes?: ({ number: number; editor: { login: string } | null } | null)[] } } | null)?.data?.nodes;
+    if (status !== 200 || !nodes) throw new Error(`cannot read who edited the decisions (HTTP ${status})`);
+    for (const node of nodes) if (node) editors.set(node.number, node.editor?.login);
+  }
+  return editors;
 }

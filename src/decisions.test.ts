@@ -28,6 +28,7 @@ function weekly(decisions: Node[], checks: Record<string, number> = {}, undos: N
   for (const d of decisions) sys.route('POST', `/repos/${SLUG}/issues/${d.number}/labels`, { status: 200, json: [] });
   for (const d of decisions) sys.route('POST', `/repos/${SLUG}/issues/${d.number}/comments`, { status: 201, json: {} });
   sys.route('POST', `/repos/${SLUG}/issues`, { status: 201, json: { number: 99 } });
+  sys.route('GET', `/repos/${SLUG}/issues?state=all&type=Decision&labels=veto&per_page=100&page=1`, { status: 200, json: [] });
   // The wrapper prints the check's own status; a timed-out check (124 here) prints none.
   sys.execOverride = (call) => {
     if (call.command !== 'timeout') return undefined;
@@ -86,6 +87,14 @@ describe('decisionsWeekly', () => {
     });
     assert.equal(comment?.url, `https://api.github.com/repos/${SLUG}/issues/6/comments`);
     assert.equal((comment?.body as { body: string }).body, 'Tripped on 2026-10-30: `exit 3` exited 3.\n\n```\nline\nwhy it failed\n```\n\nOpened #99 to undo it.');
+  });
+
+  it('leaves the output out of the comment when the check printed none', async () => {
+    const sys = weekly([decision(6, 'Check: `test -f gone`')], { 'test -f gone': 1 });
+    const inner = sys.execOverride;
+    sys.execOverride = (call) => (call.command === 'timeout' ? { code: 0, stdout: 'process-rules-check-exit=1\n', stderr: '' } : inner(call));
+    await run(sys);
+    assert.equal((posts(sys)[1]?.body as { body: string }).body, 'Tripped on 2026-10-30: `test -f gone` exited 1.\n\nOpened #99 to undo it.');
   });
 
   it('asks the owner to decide when the decision names no undo step', async () => {

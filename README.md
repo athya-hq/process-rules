@@ -117,6 +117,16 @@ wait for next week. An Override whose expiry is within 30 days is labeled
 `expiring`; one whose expiry has passed is named in the run's log. A check runs
 only when the owner or the agent wrote the issue and was the last to edit it.
 
+The **review routine** is a weekly scheduled agent session in the client
+repository, working as the agent; its prompt is
+[routines/review.md](routines/review.md). It runs `process-rules reviews-due`
+for the open decisions whose `Review:` date has come, then for each one either
+keeps it (comment `Kept:` with reasoning and a new review date) or settles it
+(comment `Settled:` with reasoning, and closes it), labeling both `veto` so
+the owner has a week to reverse it. A decision touching secrets, money or
+production is held for the owner with a suggestion and `needs-owner`. The
+weekly job removes `veto` once the week has passed.
+
 `onboard` also writes a pre-push git hook running `process-rules pre-push`,
 which applies the same rules before an agent session pushes: all the commits
 one push brings, on one branch, name one slice between them as a

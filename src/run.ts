@@ -5,6 +5,7 @@ import { prDesign } from './design.ts';
 import { doctor } from './doctor.ts';
 import { prIdentity } from './identity.ts';
 import { machine } from './machine.ts';
+import { reviewsDue } from './reviews.ts';
 import { onboard } from './onboard.ts';
 import { sessionStart } from './session-start.ts';
 import { prePush, prWorkRules } from './work.ts';
@@ -24,6 +25,7 @@ Commands:
   pr-work-rules    Run by the shared workflow: an agent pull request builds one slice it may build
   pr-design        Run by the shared workflow: each state of the slice links a frame from the design library
   decisions-weekly Run by the shared workflow weekly: decision checks, undo issues, expiring labels
+  reviews-due      For the review routine: open decisions whose review date has come, as JSON lines
   pre-push         Run by the pre-push git hook: the same rules before an agent session pushes
   help             Show this text
   version          Print the installed version
@@ -87,8 +89,10 @@ export async function run(
     case 'pr-work-rules':
     case 'pr-design':
     case 'decisions-weekly':
+    case 'reviews-due':
     case 'pre-push':
       try {
+        if (command === 'reviews-due') return await reviewsDue(await sys(), io);
         if (command === 'decisions-weekly') return await decisionsWeekly(await sys(), io);
         if (command === 'pr-design') return await prDesign(await sys(), io);
         if (command === 'pr-identity') return await prIdentity(await sys(), io);
