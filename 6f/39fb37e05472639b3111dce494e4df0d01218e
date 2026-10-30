@@ -1,0 +1,30 @@
+src/onboard.ts
+  s_111f8ffd9a52da::t_f5eae562fa00b6 45
+.github/workflows/checks.yml
+  s_111f8ffd9a52da::t_f5eae562fa00b6 7-11,15,41-63
+src/identity.test.ts
+  s_111f8ffd9a52da::t_4df401aa0d4f09 1-43,45-123
+  s_111f8ffd9a52da::t_7393ddfa50f6da 44
+src/identity.ts
+  s_111f8ffd9a52da::t_295906005578a7 1-72
+src/run.ts
+  s_111f8ffd9a52da::t_f5eae562fa00b6 4,20,79,81
+README.md
+  s_111f8ffd9a52da::t_64ab6868a0d1b6 77-83
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "6f39fb37e05472639b3111dce494e4df0d01218e",
+  "prompts": {},
+  "sessions": {
+    "s_111f8ffd9a52da": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3cfaac9f-97c2-444b-bcc3-3d8813efab1f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Alok Bansal <alokagrawal8@gmail.com>"
+    }
+  }
+}
