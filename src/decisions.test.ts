@@ -29,7 +29,8 @@ function weekly(decisions: Node[], checks: Record<string, number> = {}, undos: N
   for (const d of decisions) sys.route('POST', `/repos/${SLUG}/issues/${d.number}/comments`, { status: 201, json: {} });
   sys.route('POST', `/repos/${SLUG}/issues`, { status: 201, json: { number: 99 } });
   sys.execOverride = (call) =>
-    call.command === 'sh' ? { code: checks[call.args[1] ?? ''] ?? 0, stdout: 'line\n', stderr: 'why it failed\n' } : undefined;
+    call.command === 'timeout' ? { code: checks[call.args[5] ?? ''] ?? 0, stdout: 'line\n', stderr: 'why it failed\n' } : undefined;
+  for (const d of decisions) sys.route('GET', `/repos/${SLUG}/issues/${d.number}/comments?per_page=100`, { status: 200, json: [] });
   return sys;
 }
 
@@ -59,10 +60,11 @@ describe('decisionsWeekly', () => {
   it('runs each check in the checkout with a bare environment', async () => {
     const sys = weekly([decision(5, 'Kind: Risk\nCheck: `pnpm test`')]);
     assert.deepEqual(await run(sys), { code: 0, out: ['#5: holds', 'decisions-weekly: 1 open decision checked'] });
-    const call = sys.calls.find((c) => c.command === 'sh');
-    assert.deepEqual(call?.args, ['-c', 'pnpm test']);
+    const call = sys.calls.find((c) => c.command === 'timeout');
+    assert.deepEqual(call?.args, ['-k', '5', '120', 'sh', '-c', 'pnpm test']);
     assert.equal(call?.cwd, ROOT);
     assert.deepEqual(call?.env, { PATH: '/bin', HOME: '/home/runner' });
+    assert.equal(call?.timeoutMs, 130_000);
     assert.deepEqual(posts(sys), []);
   });
 
@@ -88,18 +90,53 @@ describe('decisionsWeekly', () => {
 
   it('opens no second undo issue', async () => {
     const sys = weekly([decision(6, 'Check: `false`')], { false: 1 }, [{ number: 98, body: 'Undoes #6.\n\nmore' }, { number: 97, body: null }, { number: 96, body: 'Undoes #60.' }]);
+    sys.route('GET', `/repos/${SLUG}/issues/6/comments?per_page=100`, { status: 200, json: [{ body: 'Tripped on ...\n\nOpened #98 to undo it.' }, {}] });
     assert.deepEqual((await run(sys)).out[0], '#6: tripped; its undo issue is already open');
     assert.deepEqual(posts(sys), []);
   });
 
-  for (const check of ['cat ~/notes.txt', 'test -f $HOME/x', 'ls "${HOME}/y"', 'grep a /Users/me/z', 'wc -l /home/me/z']) {
+  it('adds the comment an earlier run failed to leave', async () => {
+    const sys = weekly([decision(6, 'Check: `false`')], { false: 1 }, [{ number: 98, body: 'Undoes #6.' }]);
+    assert.deepEqual((await run(sys)).out[0], '#6: tripped; its undo issue #98 is open, and the decision now says so');
+    assert.match(String((posts(sys)[0]?.body as { body: string }).body), /Opened #98 to undo it\.$/);
+  });
+
+  it("throws when it cannot read a tripped decision's comments", async () => {
+    const sys = weekly([decision(6, 'Check: `false`')], { false: 1 }, [{ number: 98, body: 'Undoes #6.' }]);
+    sys.route('GET', `/repos/${SLUG}/issues/6/comments?per_page=100`, { status: 500, json: null });
+    await assert.rejects(decisionsWeekly(sys, capture().io), /cannot read #6's comments \(HTTP 500\)/);
+  });
+
+  it('does not count a check that ran out of time as tripped', async () => {
+    const sys = weekly([decision(6, 'Check: `sleep 999`')], { 'sleep 999': 124 });
+    assert.equal((await run(sys)).out[0], '#6: its check ran past 120 seconds; not counted as tripped');
+    assert.deepEqual(posts(sys), []);
+  });
+
+  it('leaves checks for next week once the run has spent 45 minutes', async () => {
+    const sys = weekly([decision(5, 'Check: `true`'), decision(6, 'Check: `true`')]);
+    const start = sys.now().getTime();
+    let calls = 0;
+    sys.now = () => new Date(start + (calls++ > 2 ? 46 * 60_000 : 0));
+    const { out } = await run(sys);
+    assert.deepEqual(out.slice(0, 2), ['#5: holds', "#6: not run; this week's run has spent its time, so it waits for next week"]);
+  });
+
+  for (const check of ['cat ~/notes.txt', 'test -f $HOME/x', 'ls "${HOME}/y"', 'grep a /Users/me/z', 'wc -l /home/me/z', 'cat </home/me/secret', 'echo x>/Users/me/out', 'a|/home/me/b']) {
     it(`labels a check reading laptop files cannot-run-here: ${check}`, async () => {
       const sys = weekly([decision(7, `Check: \`${check}\``)]);
       assert.equal((await run(sys)).out[0], '#7: reads laptop files; labeled cannot-run-here');
       assert.deepEqual(posts(sys).map((p) => p.body), [{ labels: ['cannot-run-here'] }]);
-      assert.ok(!sys.calls.some((c) => c.command === 'sh'));
+      assert.ok(!sys.calls.some((c) => c.command === 'timeout'));
     });
   }
+
+  it('names an Override whose expiry has passed, without labeling it expiring', async () => {
+    const sys = weekly([decision(8, 'Kind: Override\nExpires: 2026-10-29'), decision(9, 'Kind: Override\nExpires: 2026-10-30')]);
+    const { out } = await run(sys);
+    assert.deepEqual(out.slice(0, 2), ['#8: its expiry 2026-10-29 has passed', '#9: expires 2026-10-30; labeled expiring']);
+    assert.deepEqual(posts(sys).map((p) => p.url), [`https://api.github.com/repos/${SLUG}/issues/9/labels`]);
+  });
 
   it('labels an Override expiring within 30 days, once', async () => {
     const sys = weekly([
@@ -124,7 +161,7 @@ describe('decisionsWeekly', () => {
       else d.user = { login: author };
       const sys = weekly([d], {}, [], { 12: editor });
       assert.equal((await run(sys)).out[0], `#12: not run; only ${OWNER} or ${AGENT} may write a decision's check`);
-      assert.ok(!sys.calls.some((c) => c.command === 'sh'));
+      assert.ok(!sys.calls.some((c) => c.command === 'timeout'));
     });
   }
 

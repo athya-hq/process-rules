@@ -454,6 +454,7 @@ describe('workflow', () => {
     const text = workflow('main');
     assert.match(text, /uses: athya-hq\/process-rules\/\.github\/workflows\/checks\.yml@main/);
     assert.match(text, /branches: \["main"\]/);
-    assert.match(text, /permissions:\n {2}contents: read/);
+    assert.match(text, /^permissions:\n {2}contents: read\n {2}issues: read\n {2}pull-requests: read$/m);
+    assert.match(text, /^ {4}permissions:\n {6}contents: read\n {6}issues: write\n {6}pull-requests: read$/m);
   });
 });

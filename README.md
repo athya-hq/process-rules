@@ -108,9 +108,12 @@ its fields one per line: `Kind:` (Override, Risk or Bet), `Review:`,
 `Expires:`, `Check:` (a command in backticks; exit 0 means the decision still
 holds) and `Undo:`. For each open Decision issue, a check that reads laptop
 files (`~/`, `$HOME`, `/Users/`, `/home/`) is labeled `cannot-run-here`; any
-other check runs in the checkout with only `PATH` and `HOME` set, and when it
-fails the decision gets a comment and one undo issue labeled `needs-owner`. An
-Override whose expiry is within 30 days is labeled `expiring`. A check runs
+other check runs in the checkout with only `PATH` and `HOME` set, for at most
+two minutes (a check that runs out of time is not counted as tripped), and
+when it fails the decision gets a comment and one undo issue labeled
+`needs-owner`. Runs do not overlap, and after 45 minutes of checks the rest
+wait for next week. An Override whose expiry is within 30 days is labeled
+`expiring`; one whose expiry has passed is named in the run's log. A check runs
 only when the owner or the agent wrote the issue and was the last to edit it.
 
 `onboard` also writes a pre-push git hook running `process-rules pre-push`,

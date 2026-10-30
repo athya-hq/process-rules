@@ -1,13 +1,17 @@
 import { API, loadSettings, sameLogin } from './agent.ts';
 import type { Output, Sys } from './types.ts';
 
-/** How long one decision's check may run. */
-const CHECK_TIMEOUT_MS = 120_000;
+/** How long one decision's check may run, in seconds. */
+const CHECK_TIMEOUT_S = 120;
+/** How long a weekly run may spend on checks before it leaves the rest for next week; the job allows 60 minutes. */
+const RUN_BUDGET_MS = 45 * 60_000;
+/** What GNU timeout exits with when the check ran out of time. */
+const TIMED_OUT = 124;
 /** An Override is labeled `expiring` this many days before its expiry. */
 const EXPIRING_DAYS = 30;
 const DAY_MS = 86_400_000;
 /** A check that reads files only a laptop has: it cannot run in Actions. */
-const LAPTOP_PATH = /(?:^|[\s"'=(])(?:~\/|\$HOME\b|\$\{HOME\}|\/Users\/|\/home\/)/;
+const LAPTOP_PATH = /(?:^|[\s"'=(<>|;&:`])(?:~\/|\$HOME\b|\$\{HOME\}|\/Users\/|\/home\/)/;
 
 export interface Decision {
   kind: string | undefined;
@@ -87,12 +91,26 @@ export async function decisionsWeekly(sys: Sys, io: Output): Promise<number> {
     if (added.status !== 200) throw new Error(`cannot label #${issue.number} ${name} (HTTP ${added.status})`);
   };
 
+  const started = sys.now().getTime();
+  const tell = async (number: number, check: string, run: { code: number; stdout: string; stderr: string }, undo: number): Promise<void> => {
+    const output = `${run.stdout}${run.stderr}`.trim().split('\n').slice(-20).join('\n');
+    const commented = await sys.http(`${API}/repos/${slug}/issues/${number}/comments`, {
+      method: 'POST',
+      token,
+      body: { body: `Tripped on ${today.toISOString().slice(0, 10)}: \`${check}\` exited ${run.code}.\n\n\`\`\`\n${output}\n\`\`\`\n\nOpened #${undo} to undo it.` },
+    });
+    if (commented.status !== 201) throw new Error(`cannot comment on #${number} (HTTP ${commented.status})`);
+  };
+
   for (const issue of decisions) {
     const decision = parseDecision(issue.body ?? '');
     const where = `#${issue.number}`;
     if (decision.kind?.toLowerCase() === 'override' && decision.expires) {
-      const left = (Date.parse(`${decision.expires}T00:00:00Z`) - today.getTime()) / DAY_MS;
-      if (left <= EXPIRING_DAYS) {
+      // Whole days from today's date to the expiry: 0 is today.
+      const left = Math.round((Date.parse(`${decision.expires}T00:00:00Z`) - Date.parse(today.toISOString().slice(0, 10))) / DAY_MS);
+      if (left < 0) {
+        io.out(`${where}: its expiry ${decision.expires} has passed`);
+      } else if (left <= EXPIRING_DAYS) {
         await label(issue, 'expiring');
         io.out(`${where}: expires ${decision.expires}; labeled expiring`);
       }
@@ -108,20 +126,38 @@ export async function decisionsWeekly(sys: Sys, io: Output): Promise<number> {
       io.out(`${where}: reads laptop files; labeled cannot-run-here`);
       continue;
     }
-    const run = sys.exec('sh', ['-c', decision.check], {
+    if (sys.now().getTime() - started > RUN_BUDGET_MS) {
+      io.out(`${where}: not run; this week's run has spent its time, so it waits for next week`);
+      continue;
+    }
+    // GNU timeout ends the whole process group the check starts, not just its shell.
+    const run = sys.exec('timeout', ['-k', '5', String(CHECK_TIMEOUT_S), 'sh', '-c', decision.check], {
       cwd: sys.cwd,
       env: { PATH: sys.env.PATH, HOME: sys.env.HOME },
-      timeoutMs: CHECK_TIMEOUT_MS,
+      timeoutMs: (CHECK_TIMEOUT_S + 10) * 1000,
     });
     if (run.code === 0) {
       io.out(`${where}: holds`);
       continue;
     }
-    if (undos.some((undo) => new RegExp(`^Undoes #${issue.number}\\b`, 'm').test(undo.body ?? ''))) {
-      io.out(`${where}: tripped; its undo issue is already open`);
+    if (run.code === TIMED_OUT) {
+      io.out(`${where}: its check ran past ${CHECK_TIMEOUT_S} seconds; not counted as tripped`);
       continue;
     }
-    const output = `${run.stdout}${run.stderr}`.trim().split('\n').slice(-20).join('\n');
+    const open = undos.find((undo) => new RegExp(`^Undoes #${issue.number}\\b`, 'm').test(undo.body ?? ''));
+    if (open) {
+      // A run that opened the undo issue but failed to comment leaves the comment to this one.
+      const comments = await sys.http(`${API}/repos/${slug}/issues/${issue.number}/comments?per_page=100`, { token });
+      if (comments.status !== 200 || !Array.isArray(comments.json)) throw new Error(`cannot read #${issue.number}'s comments (HTTP ${comments.status})`);
+      const told = (comments.json as { body?: string }[]).some((comment) => comment.body?.includes(`Opened #${open.number} to undo it.`));
+      if (told) {
+        io.out(`${where}: tripped; its undo issue is already open`);
+        continue;
+      }
+      await tell(issue.number, decision.check, run, open.number);
+      io.out(`${where}: tripped; its undo issue #${open.number} is open, and the decision now says so`);
+      continue;
+    }
     const opened = await sys.http(`${API}/repos/${slug}/issues`, {
       method: 'POST',
       token,
@@ -134,12 +170,7 @@ export async function decisionsWeekly(sys: Sys, io: Output): Promise<number> {
     });
     const undo = (opened.json as { number?: number } | null)?.number;
     if (opened.status !== 201 || typeof undo !== 'number') throw new Error(`cannot open the undo issue for #${issue.number} (HTTP ${opened.status})`);
-    const commented = await sys.http(`${API}/repos/${slug}/issues/${issue.number}/comments`, {
-      method: 'POST',
-      token,
-      body: { body: `Tripped on ${today.toISOString().slice(0, 10)}: \`${decision.check}\` exited ${run.code}.\n\n\`\`\`\n${output}\n\`\`\`\n\nOpened #${undo} to undo it.` },
-    });
-    if (commented.status !== 201) throw new Error(`cannot comment on #${issue.number} (HTTP ${commented.status})`);
+    await tell(issue.number, decision.check, run, undo);
     io.out(`${where}: tripped; opened #${undo} to undo it`);
   }
   io.out(`decisions-weekly: ${decisions.length} open decision${decisions.length === 1 ? '' : 's'} checked`);

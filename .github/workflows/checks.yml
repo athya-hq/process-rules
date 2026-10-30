@@ -123,8 +123,13 @@ jobs:
   decisions:
     name: Decisions, weekly
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    # One run at a time, so two cannot both open an undo issue for one decision.
+    concurrency:
+      group: process-rules-decisions-${{ github.repository }}
+      cancel-in-progress: false
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Checks stop starting after 45 minutes; the rest wait for next week.
+    timeout-minutes: 60
     permissions:
       contents: read
       issues: write
