@@ -8,7 +8,7 @@ hooks and a shared GitHub Actions workflow.
 
 ## Status
 
-Early. The CLI runs `machine`, `doctor` and `session-start`. What comes next, and in what
+Early. The CLI runs `machine`, `doctor`, `session-start` and `onboard`. What comes next, and in what
 order: [docs/roadmap.md](docs/roadmap.md). Decisions:
 [docs/decisions.md](docs/decisions.md).
 
@@ -52,9 +52,24 @@ days before the token ends.
 
 ## Adopting
 
-Not yet. Adoption will be one workflow file calling this repository's shared
-workflow at a pinned version, plus `process-rules onboard` once per repository
-and `process-rules machine` once per machine.
+1. On each Mac that runs agent sessions: `process-rules machine <agent>`.
+2. In the client repository, as its owner: `process-rules onboard <owner>
+   <agent>`. It writes `.github/process-rules.json`, adds a SessionStart hook
+   running `process-rules session-start` to `.claude/settings.json`, and
+   writes `.github/workflows/process-rules.yml`, which calls this repository's
+   shared checks (`.github/workflows/checks.yml`). It checks the agent can
+   push. With no access, `onboard` offers to give it write access through your
+   `gh` and to accept the invitation as the agent; with read access only, it
+   asks you to give it the Write role; and it names an organisation that
+   requires SAML authorisation or blocks classic tokens. Last, it pushes
+   one signed test commit as the agent to a throwaway branch, checks GitHub
+   shows it Verified by the agent, and deletes the branch. Each change waits
+   for a yes; commit the three files afterwards. The repository needs at
+   least one commit.
+
+Until releases (P-11), the client's workflow follows this repository's `main`,
+and the hook needs `process-rules` on the machine's `PATH`; without it the
+hook tells the session to stop.
 
 ## Developing
 
