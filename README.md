@@ -62,7 +62,7 @@ days before the token ends.
    `gh` and to accept the invitation as the agent; with read access only, it
    asks you to give it the Write role; and it names an organisation that
    requires SAML authorisation or blocks classic tokens. Through your `gh`
-   login (which needs the `project` scope, and `admin:org` in an
+   login as the owner (which needs the `project` scope, and `admin:org` in an
    organisation), it sets up the work board: the organisation's issue types
    (Work item, Slice, State, Decision, Brief), the repo's labels (`approved`,
    `needs-owner`, `mechanical`, `veto`, `expiring`, `cannot-run-here`), and a

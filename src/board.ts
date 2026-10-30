@@ -58,10 +58,16 @@ async function graphql(sys: Sys, token: string, query: string, variables: Record
   return reply.data;
 }
 
+/** Every named entry a REST list holds, reading 100 a page. */
 async function list(sys: Sys, token: string, url: string): Promise<{ name: string }[]> {
-  const { status, json } = await sys.http(url, { token });
-  if (status !== 200 || !Array.isArray(json)) throw new Error(`cannot read ${url} (HTTP ${status})`);
-  return json.filter((entry): entry is { name: string } => typeof (entry as { name?: unknown } | null)?.name === 'string');
+  const names: { name: string }[] = [];
+  for (let page = 1; ; page++) {
+    const pageUrl = `${url}${url.includes('?') ? '&' : '?'}per_page=100&page=${page}`;
+    const { status, json } = await sys.http(pageUrl, { token });
+    if (status !== 200 || !Array.isArray(json)) throw new Error(`cannot read ${url} (HTTP ${status})`);
+    names.push(...json.filter((entry): entry is { name: string } => typeof (entry as { name?: unknown } | null)?.name === 'string'));
+    if (json.length < 100) return names;
+  }
 }
 
 /**
@@ -81,7 +87,7 @@ export async function setUpBoard(
   const login = sys.exec('gh', ['auth', 'token']);
   const token = login.stdout.trim();
   if (login.code !== 0 || !token) {
-    io.err(`onboard: gh is not signed in; sign in as ${owner} with: gh auth login -s ${OWNER_SCOPES.join(',')}`);
+    io.err(`onboard: gh is not signed in; sign in as ${owner} with: gh auth login -s project`);
     return undefined;
   }
   const me = await sys.http(`${API}/user`, { token });
@@ -133,7 +139,7 @@ export async function setUpBoard(
     io.out('- issue types: GitHub has them for organisations only; skipped for a personal repository');
   }
 
-  const labels = await list(sys, token, `${API}/repos/${slug}/labels?per_page=100`);
+  const labels = await list(sys, token, `${API}/repos/${slug}/labels`);
   const newLabels = LABELS.filter((label) => !labels.some((had) => had.name.toLowerCase() === label.name));
   if (newLabels.length > 0) {
     if (!(await confirm(`Add the labels ${newLabels.map((l) => l.name).join(', ')} to ${slug}?`))) {
@@ -148,15 +154,23 @@ export async function setUpBoard(
 
   const title = `${repo.name} work`;
   const kind = repo.organisation ? 'organization' : 'user';
-  const projects = (await graphql(
-    sys,
-    token,
-    `query($login: String!, $title: String!) { ${kind}(login: $login) { id projectsV2(first: 20, query: $title) { nodes { id title url } } } }`,
-    { login: repo.ownerLogin, title },
-  )) as Record<string, { id: string; projectsV2: { nodes: { id: string; title: string; url: string }[] } }>;
-  const holder = projects[kind];
-  if (!holder) throw new Error(`GitHub has no ${kind} ${repo.ownerLogin}`);
-  let project = holder.projectsV2.nodes.find((node) => node.title === title);
+  type Project = { id: string; title: string; url: string; repositories: { nodes: { id: string }[] } };
+  let holderId: string | undefined;
+  let project: Project | undefined;
+  for (let after: string | null = null; !project; ) {
+    const page = (await graphql(
+      sys,
+      token,
+      `query($login: String!, $title: String!, $after: String) { ${kind}(login: $login) { id projectsV2(first: 100, query: $title, after: $after) { nodes { id title url repositories(first: 100) { nodes { id } } } pageInfo { hasNextPage endCursor } } } }`,
+      { login: repo.ownerLogin, title, after },
+    )) as Record<string, { id: string; projectsV2: { nodes: Project[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } } } | null>;
+    const holder = page[kind];
+    if (!holder) throw new Error(`GitHub has no ${kind} ${repo.ownerLogin}`);
+    holderId = holder.id;
+    project = holder.projectsV2.nodes.find((node) => node.title === title);
+    if (!holder.projectsV2.pageInfo.hasNextPage) break;
+    after = holder.projectsV2.pageInfo.endCursor;
+  }
   if (!project) {
     if (!(await confirm(`Create the Project "${title}" for ${repo.ownerLogin}, linked to ${slug}?`))) {
       return stopped(io, 'project');
@@ -165,9 +179,18 @@ export async function setUpBoard(
       sys,
       token,
       'mutation($owner: ID!, $title: String!, $repo: ID!) { createProjectV2(input: { ownerId: $owner, title: $title, repositoryId: $repo }) { projectV2 { id title url } } }',
-      { owner: holder.id, title, repo: repo.nodeId },
-    )) as { createProjectV2: { projectV2: { id: string; title: string; url: string } } };
-    project = made.createProjectV2.projectV2;
+      { owner: holderId, title, repo: repo.nodeId },
+    )) as { createProjectV2: { projectV2: Omit<Project, 'repositories'> } };
+    project = { ...made.createProjectV2.projectV2, repositories: { nodes: [{ id: repo.nodeId }] } };
+  }
+  if (!project.repositories.nodes.some((linked) => linked.id === repo.nodeId)) {
+    if (!(await confirm(`Link the Project "${title}" to ${slug}?`))) return stopped(io, 'project');
+    await graphql(
+      sys,
+      token,
+      'mutation($project: ID!, $repo: ID!) { linkProjectV2ToRepository(input: { projectId: $project, repositoryId: $repo }) { repository { id } } }',
+      { project: project.id, repo: repo.nodeId },
+    );
   }
   io.out(`✓ Project "${title}": ${project.url}`);
 

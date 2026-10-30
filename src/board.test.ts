@@ -2,72 +2,8 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { FIELDS, ISSUE_TYPES, LABELS, setUpBoard, viewsChecklist } from './board.ts';
+import { Board, OWNER_TOKEN, SLUG, URL } from './fake-board.test.ts';
 import { FakeSys, capture } from './fake.test.ts';
-
-export const OWNER_TOKEN = 'gho_owner';
-const SLUG = 'example-org/example-app';
-const URL = 'https://github.com/orgs/example-org/projects/3';
-
-/** GitHub as the owner's `gh` sees it: an organisation with none of the board yet. */
-export class Board {
-  issueTypes = ['Task', 'Bug'];
-  labels = ['bug'];
-  project: { fields: string[] } | undefined;
-  /** What the board's GraphQL calls asked for, by the operation they ran. */
-  operations: string[] = [];
-
-  constructor(sys: FakeSys, organisation = true) {
-    sys.acceptToken(OWNER_TOKEN, 'example-owner', { 'x-oauth-scopes': 'repo, read:org, project, admin:org, workflow' });
-    if (!sys.routes.has(`GET https://api.github.com/repos/${SLUG}`)) {
-      sys.route('GET', `/repos/${SLUG}`, { status: 200, json: repoJson(organisation) });
-    }
-    sys.route('GET', '/orgs/example-org/issue-types', () => ({ status: 200, json: this.issueTypes.map((name) => ({ name })) }));
-    sys.route('POST', '/orgs/example-org/issue-types', () => {
-      this.issueTypes.push(String((sys.requests.at(-1)?.body as { name: string }).name));
-      return { status: 201, json: {} };
-    });
-    sys.route('GET', `/repos/${SLUG}/labels?per_page=100`, () => ({ status: 200, json: this.labels.map((name) => ({ name })) }));
-    sys.route('POST', `/repos/${SLUG}/labels`, () => {
-      this.labels.push(String((sys.requests.at(-1)?.body as { name: string }).name));
-      return { status: 201, json: {} };
-    });
-    sys.route('POST', '/graphql', () => this.graphql((sys.requests.at(-1)?.body ?? {}) as { query: string; variables: Record<string, unknown> }));
-  }
-
-  graphql({ query, variables }: { query: string; variables: Record<string, unknown> }): { status: number; json: unknown } {
-    const operation = /(projectsV2\(|createProjectV2Field|createProjectV2\(|fields\(first)/.exec(query)?.[1] ?? 'unknown';
-    this.operations.push(operation);
-    const node = { id: 'P_1', title: 'example-app work', url: URL };
-    switch (operation) {
-      case 'projectsV2(': {
-        const kind = query.includes('organization(') ? 'organization' : 'user';
-        return { status: 200, json: { data: { [kind]: { id: 'O_1', projectsV2: { nodes: this.project ? [{ id: 'P_0', title: 'other', url: 'x' }, node] : [] } } } } };
-      }
-      case 'createProjectV2(':
-        assert.deepEqual(variables, { owner: 'O_1', title: 'example-app work', repo: 'R_1' });
-        this.project = { fields: ['Title', 'Status'] };
-        return { status: 200, json: { data: { createProjectV2: { projectV2: node } } } };
-      case 'fields(first':
-        return { status: 200, json: { data: { node: { fields: { nodes: [...(this.project?.fields ?? []).map((name) => ({ name })), {}] } } } } };
-      case 'createProjectV2Field':
-        this.project?.fields.push(String(variables.name));
-        return { status: 200, json: { data: { createProjectV2Field: { projectV2Field: { name: variables.name } } } } };
-      default:
-        return { status: 200, json: { errors: [{ message: 'unknown query' }] } };
-    }
-  }
-}
-
-/** The repository as GitHub describes it to someone who can push. */
-export function repoJson(organisation = true, branch = 'main'): Record<string, unknown> {
-  return {
-    node_id: 'R_1',
-    name: 'example-app',
-    default_branch: branch,
-    permissions: { push: true },
-    owner: { login: 'example-org', type: organisation ? 'Organization' : 'User' },
-  };
-}
 
 async function setUp(sys: FakeSys, answers = ['y', 'y', 'y', 'y']): Promise<{ url: string | undefined; out: string[]; err: string[] }> {
   sys.answers = [...answers];
@@ -110,7 +46,7 @@ describe('setUpBoard', () => {
     const board = new Board(sys);
     board.issueTypes = ISSUE_TYPES.map((t) => t.name.toUpperCase());
     board.labels = LABELS.map((l) => l.name);
-    board.project = { fields: FIELDS.map((f) => f.name) };
+    board.project = { fields: FIELDS.map((f) => f.name), linked: true };
     const { url } = await setUp(sys, []);
     assert.equal(url, URL);
     assert.deepEqual(sys.asked, []);
@@ -127,7 +63,7 @@ describe('setUpBoard', () => {
   });
 
   for (const [name, change, message] of [
-    ['gh not signed in', (sys: FakeSys) => (sys.ghToken = undefined), 'onboard: gh is not signed in; sign in as example-owner with: gh auth login -s project,admin:org'],
+    ['gh not signed in', (sys: FakeSys) => (sys.ghToken = undefined), 'onboard: gh is not signed in; sign in as example-owner with: gh auth login -s project'],
     ['gh signed in as someone else', (sys: FakeSys) => sys.acceptToken(OWNER_TOKEN, 'someone'), 'onboard: gh is signed in as someone, not the owner example-owner'],
     ['gh with a token GitHub refuses', (sys: FakeSys) => (sys.ghToken = 'gho_bad'), 'onboard: gh is signed in as nobody GitHub accepts, not the owner example-owner'],
     ['gh without the scopes', (sys: FakeSys) => sys.acceptToken(OWNER_TOKEN, 'example-owner', { 'x-oauth-scopes': 'repo, project' }), 'onboard: your gh login lacks admin:org; run: gh auth refresh -h github.com -s admin:org'],
@@ -143,17 +79,61 @@ describe('setUpBoard', () => {
   }
 
   for (const [index, step] of ['issue types', 'labels', 'project', 'fields'].entries()) {
-    it(`stops when "${step}" is declined`, async () => {
+    it(`stops when "${step}" is declined, changing nothing from it on`, async () => {
       const sys = new FakeSys();
-      new Board(sys);
+      const board = new Board(sys);
       const { url, err } = await setUp(sys, [...Array<string>(index).fill('y'), 'n']);
       assert.deepEqual({ url, err }, { url: undefined, err: [`onboard: stopped at "${step}"; nothing after it was changed`] });
+      assert.equal(board.issueTypes.length, index > 0 ? 7 : 2);
+      assert.equal(board.labels.length, index > 1 ? 7 : 1);
+      assert.equal(board.project === undefined, index < 3);
+      assert.deepEqual(board.project?.fields ?? [], index === 3 ? ['Title', 'Status'] : []);
     });
   }
 
+  it("links a same-titled Project that is not linked to the repo", async () => {
+    const sys = new FakeSys();
+    const board = new Board(sys);
+    board.project = { fields: FIELDS.map((f) => f.name), linked: false };
+    const { url } = await setUp(sys, ['y', 'y', 'y']);
+    assert.equal(url, URL);
+    assert.ok(board.project.linked);
+    assert.ok(sys.asked.includes('Link the Project "example-app work" to example-org/example-app?'));
+  });
+
+  it('stops when linking is declined', async () => {
+    const sys = new FakeSys();
+    const board = new Board(sys);
+    board.project = { fields: FIELDS.map((f) => f.name), linked: false };
+    const { err } = await setUp(sys, ['y', 'y', 'n']);
+    assert.deepEqual(err, ['onboard: stopped at "project"; nothing after it was changed']);
+    assert.equal(board.project.linked, false);
+  });
+
+  it('finds the Project on a later page instead of making another', async () => {
+    const sys = new FakeSys();
+    const board = new Board(sys);
+    board.project = { fields: FIELDS.map((f) => f.name), linked: true };
+    board.otherPages = 2;
+    await setUp(sys, ['y', 'y']);
+    assert.deepEqual(board.operations.filter((o) => o === 'projectsV2('), ['projectsV2(', 'projectsV2(', 'projectsV2(']);
+    assert.ok(!board.operations.includes('createProjectV2('));
+  });
+
+  it('reads every page of labels before adding any', async () => {
+    const sys = new FakeSys();
+    const board = new Board(sys);
+    board.issueTypes = ISSUE_TYPES.map((t) => t.name);
+    const many = Array.from({ length: 100 }, (_, i) => ({ name: `l${i}` }));
+    sys.route('GET', `/repos/${SLUG}/labels?per_page=100&page=1`, { status: 200, json: many });
+    sys.route('GET', `/repos/${SLUG}/labels?per_page=100&page=2`, { status: 200, json: LABELS.map((l) => ({ name: l.name })) });
+    await setUp(sys, ['y', 'y']);
+    assert.ok(!sys.requests.some((r) => r.method === 'POST' && r.url.endsWith('/labels')));
+  });
+
   for (const [name, change, message] of [
     ['the repo', (sys: FakeSys) => sys.route('GET', `/repos/${SLUG}`, { status: 404, json: null }), /cannot read example-org\/example-app as example-owner \(HTTP 404\)/],
-    ['the issue types', (sys: FakeSys) => sys.route('GET', '/orgs/example-org/issue-types', { status: 403, json: null }), /cannot read https:\/\/api\.github\.com\/orgs\/example-org\/issue-types \(HTTP 403\)/],
+    ['the issue types', (sys: FakeSys) => sys.route('GET', '/orgs/example-org/issue-types?per_page=100&page=1', { status: 403, json: null }), /cannot read https:\/\/api\.github\.com\/orgs\/example-org\/issue-types \(HTTP 403\)/],
     ['adding an issue type', (sys: FakeSys) => sys.route('POST', '/orgs/example-org/issue-types', { status: 422, json: null }), /did not add the issue type Work item \(HTTP 422\)/],
     ['adding a label', (sys: FakeSys) => sys.route('POST', `/repos/${SLUG}/labels`, { status: 422, json: null }), /did not add the label approved \(HTTP 422\)/],
     ['GraphQL', (sys: FakeSys) => sys.route('POST', '/graphql', { status: 200, json: { errors: [{ message: 'no project scope' }] } }), /GraphQL API refused: no project scope/],

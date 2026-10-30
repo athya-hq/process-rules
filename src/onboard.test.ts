@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { Board, repoJson } from './board.test.ts';
+import { Board, repoJson } from './fake-board.test.ts';
 import { FIELDS, ISSUE_TYPES, LABELS, viewsChecklist } from './board.ts';
 import { AGENT, FakeSys, ROOT, TOKEN, capture } from './fake.test.ts';
 import { HOOK_COMMAND, HOOKS_PATH, WORKFLOW_PATH, onboard, workflow } from './onboard.ts';
@@ -86,7 +86,7 @@ describe('onboard', () => {
     const board = new Board(sys);
     board.issueTypes = ISSUE_TYPES.map((t) => t.name);
     board.labels = LABELS.map((l) => l.name);
-    board.project = { fields: FIELDS.map((f) => f.name) };
+    board.project = { fields: FIELDS.map((f) => f.name), linked: true };
     const { code } = await run(sys, []);
     assert.equal(code, 0);
     assert.deepEqual(sys.asked.map((q) => q.split(' ')[0]), ['Push']);
