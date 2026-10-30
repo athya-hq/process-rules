@@ -1,0 +1,23 @@
+docs/decisions.md
+  s_111f8ffd9a52da::t_f16b9e54829ff8 4-6,8-9
+docs/roadmap.md
+  s_111f8ffd9a52da::t_e3dbe22b4b3531 30,42-53
+src/run.ts
+  s_111f8ffd9a52da::t_5ea01a564e7c1a 15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "918adfae937b482822c31e05e86ae3444488ff6c",
+  "prompts": {},
+  "sessions": {
+    "s_111f8ffd9a52da": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3cfaac9f-97c2-444b-bcc3-3d8813efab1f",
+        "model": "unknown"
+      },
+      "human_author": "Alok Bansal <alokagrawal8@gmail.com>"
+    }
+  }
+}
