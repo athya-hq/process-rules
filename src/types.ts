@@ -30,6 +30,7 @@ export interface Sys {
   exists(path: string): boolean;
   read(path: string): string;
   write(path: string, data: string, mode?: number): void;
+  append(path: string, data: string): void;
   mkdir(path: string): void;
   http(
     url: string,

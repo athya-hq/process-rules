@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 
 import { doctor } from './doctor.ts';
 import { machine } from './machine.ts';
+import { sessionStart } from './session-start.ts';
 import type { Output, Sys } from './types.ts';
 
 export type { Output } from './types.ts';
@@ -11,10 +12,11 @@ export const USAGE = `Usage: process-rules <command>
 Commands:
   machine [agent]  Set up this machine so agent sessions work as the agent account
   doctor [agent]   Check agent sessions here can work as the agent account
+  session-start    Run by a client's SessionStart hook: the agent identity, or GitHub locked out
   help             Show this text
   version          Print the installed version
 
-Without [agent], both use the agent account .github/process-rules.json names
+Without [agent], machine and doctor use the agent account .github/process-rules.json names
 in the repo around the working directory.
 More commands arrive as they are built: onboard.`;
 
@@ -64,6 +66,8 @@ export async function run(
     case '-v':
       io.out(packageVersion());
       return 0;
+    case 'session-start':
+      return sessionStart(await sys(), io);
     case 'machine':
     case 'doctor':
       try {

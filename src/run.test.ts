@@ -85,6 +85,12 @@ describe('run', () => {
     assert.match(err.at(-1) ?? '', /must not push as ExampleBot/);
   });
 
+  it('runs session-start, which always exits 0', async () => {
+    const { code, out } = await capture(['session-start'], () => new FakeSys());
+    assert.equal(code, 0);
+    assert.match(out[0] ?? '', /CLAUDE_ENV_FILE is unset/);
+  });
+
   it('passes the named agent on', async () => {
     const { err } = await capture(['doctor', 'OtherBot'], () => new FakeSys());
     assert.match(err.at(-1) ?? '', /must not push as OtherBot/);

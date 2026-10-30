@@ -36,7 +36,7 @@ export interface Settings {
 export function loadSettings(sys: Sys, root: string): Settings {
   const path = `${root}/${SETTINGS_PATH}`;
   if (!sys.exists(path)) {
-    throw new Error(`${SETTINGS_PATH} not found in ${root}; name the agent account after the command`);
+    throw new Error(`${SETTINGS_PATH} not found in ${root}`);
   }
   const raw: unknown = JSON.parse(sys.read(path));
   const owner = field(raw, 'owner');
@@ -68,10 +68,11 @@ export function agentFrom(sys: Sys, named: string | undefined): string {
     return named;
   }
   const top = sys.exec('git', ['rev-parse', '--show-toplevel'], { cwd: sys.cwd });
-  if (top.code !== 0) {
+  const root = top.stdout.trim();
+  if (top.code !== 0 || !sys.exists(`${root}/${SETTINGS_PATH}`)) {
     throw new Error(`name the agent account after the command, or run it in a repo whose ${SETTINGS_PATH} names one`);
   }
-  return loadSettings(sys, top.stdout.trim()).agent;
+  return loadSettings(sys, root).agent;
 }
 
 export interface Paths {
@@ -100,24 +101,36 @@ export function noreplyEmail(id: number, login: string): string {
 /** What an agent session must not inherit from the owner's shell. */
 const UNSET = ['GITHUB_TOKEN', 'GIT_CONFIG', 'GIT_CONFIG_PARAMETERS', 'GIT_ASKPASS', 'SSH_ASKPASS'];
 
+/**
+ * Git config that keeps GitHub on HTTPS, drops every credential helper
+ * configured before it (the keychain's, gh's) and any configured askpass
+ * program, so git has no login to give.
+ */
+const LOCKED_CONFIG: [string, string][] = [
+  ['credential.helper', ''],
+  // Empty, git asks no program; GIT_TERMINAL_PROMPT=0 then fails the prompt.
+  ['core.askpass', ''],
+  ['url.https://github.com/.insteadOf', 'git@github.com:'],
+  ['url.https://github.com/.insteadOf', 'ssh://git@github.com/'],
+  ['url.https://github.com/.insteadOf', 'ssh://git@github.com:22/'],
+  ['url.https://github.com/.insteadOf', 'ssh://git@ssh.github.com:443/'],
+];
+
+function configVars(config: [string, string][]): [string, string][] {
+  return [
+    ['GIT_CONFIG_COUNT', String(config.length)],
+    ...config.flatMap(([key, value], i): [string, string][] => [
+      [`GIT_CONFIG_KEY_${i}`, key],
+      [`GIT_CONFIG_VALUE_${i}`, value],
+    ]),
+  ];
+}
+
 /** The variables an agent session gets, except GH_TOKEN. */
 function identityVars(agent: string, id: number, paths: Paths): [string, string][] {
   const email = noreplyEmail(id, agent);
   const helper = `!f() { test "$1" = get && printf 'username=%s\\npassword=%s\\n' ${agent} "$GH_TOKEN"; }; f`;
-  const config: [string, string][] = [
-    ['gpg.format', 'ssh'],
-    ['user.signingkey', `${paths.key}.pub`],
-    ['commit.gpgsign', 'true'],
-    ['tag.gpgsign', 'true'],
-    // An empty helper drops every helper configured before it (the keychain's,
-    // gh's); the agent's token then goes to github.com only.
-    ['credential.helper', ''],
-    ['credential.https://github.com.helper', helper],
-    ['url.https://github.com/.insteadOf', 'git@github.com:'],
-    ['url.https://github.com/.insteadOf', 'ssh://git@github.com/'],
-    ['url.https://github.com/.insteadOf', 'ssh://git@github.com:22/'],
-    ['url.https://github.com/.insteadOf', 'ssh://git@ssh.github.com:443/'],
-  ];
+  const [reset, askpass, ...https] = LOCKED_CONFIG as [[string, string], [string, string], ...[string, string][]];
   return [
     ['PROCESS_RULES_AGENT', agent],
     ['GH_CONFIG_DIR', paths.gh],
@@ -128,10 +141,16 @@ function identityVars(agent: string, id: number, paths: Paths): [string, string]
     ['GIT_TERMINAL_PROMPT', '0'],
     // Any SSH remote left (a host alias in ~/.ssh/config) fails instead of using the owner's key.
     ['GIT_SSH_COMMAND', NO_SSH],
-    ['GIT_CONFIG_COUNT', String(config.length)],
-    ...config.flatMap(([key, value], i): [string, string][] => [
-      [`GIT_CONFIG_KEY_${i}`, key],
-      [`GIT_CONFIG_VALUE_${i}`, value],
+    ...configVars([
+      ['gpg.format', 'ssh'],
+      ['user.signingkey', `${paths.key}.pub`],
+      ['commit.gpgsign', 'true'],
+      ['tag.gpgsign', 'true'],
+      // After the reset, the agent's token goes to github.com only.
+      reset,
+      ['credential.https://github.com.helper', helper],
+      askpass,
+      ...https,
     ]),
   ];
 }
@@ -168,6 +187,34 @@ export function sessionEnv(
     ...Object.fromEntries(UNSET.map((name) => [name, undefined])),
     GH_TOKEN: token,
   };
+}
+
+/**
+ * The shell lines that lock GitHub out of a session: a token GitHub refuses,
+ * no credential helper, nothing inherited that could bring one back, GitHub
+ * remotes on HTTPS and SSH off. gh and git then reach GitHub as nobody.
+ */
+export function lockScript(home: string): string {
+  const vars: [string, string][] = [
+    ['GH_CONFIG_DIR', `${home}/.config/process-rules/locked/gh`],
+    ['GIT_TERMINAL_PROMPT', '0'],
+    ['GIT_SSH_COMMAND', NO_SSH],
+    ...configVars(LOCKED_CONFIG),
+  ];
+  return [
+    '# Written by process-rules session-start. GitHub is locked out unless an agent identity below replaces this.',
+    `export GH_TOKEN=${NO_TOKEN}`,
+    `unset ${UNSET.join(' ')}`,
+    ...vars.map(([name, value]) => `export ${name}=${quote(value)}`),
+    '',
+  ].join('\n');
+}
+
+/** The agent and account id a session file names, or undefined when it names none. */
+export function sessionNames(script: string): { agent: string; id: number } | undefined {
+  const agent = /^export PROCESS_RULES_AGENT='([^']*)'$/m.exec(script)?.[1];
+  const id = /^export GIT_AUTHOR_EMAIL='(\d+)\+/m.exec(script)?.[1];
+  return agent && id ? { agent, id: Number(id) } : undefined;
 }
 
 function quote(value: string): string {

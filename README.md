@@ -8,7 +8,7 @@ hooks and a shared GitHub Actions workflow.
 
 ## Status
 
-Early. The CLI runs `machine` and `doctor`. What comes next, and in what
+Early. The CLI runs `machine`, `doctor` and `session-start`. What comes next, and in what
 order: [docs/roadmap.md](docs/roadmap.md). Decisions:
 [docs/decisions.md](docs/decisions.md).
 
@@ -30,13 +30,21 @@ missing scopes or no expiry. It then registers the key as the agent's signing ke
 `~/.config/process-rules/<agent, lowercased>/session.sh`. Each change waits
 for a yes. Why a classic token: [docs/decisions.md](docs/decisions.md).
 
-An agent session sources `session.sh` at start (in Claude Code, a SessionStart
-hook appends it to `CLAUDE_ENV_FILE`). It holds no secret: `GH_TOKEN` is read
-from the keychain on each use, and is a value GitHub refuses when the keychain
-has none. Git gets a credential helper that drops every earlier one and hands the
-agent's token to github.com only, commits as the agent's no-reply address and
-signs with its key. GitHub's SSH remotes go over HTTPS and any other SSH
-remote fails, so nothing falls back to the owner's login or keys.
+In Claude Code, the client's SessionStart hook runs `process-rules
+session-start`. It appends a lock to `CLAUDE_ENV_FILE`: a token GitHub refuses,
+no credential helper, nothing inherited that could bring one back (`git -c`
+injection, `GIT_CONFIG`, askpass), GitHub's SSH remotes on HTTPS and every
+other SSH remote refused. Then, when this Mac has the session file `machine`
+wrote for the agent the repo's settings name, exactly as `machine` writes it,
+it appends that file, which replaces the lock with the agent's identity. Any
+other outcome leaves GitHub locked out and says why, so a session never falls
+back to the owner's login. Cloud sessions are left alone.
+
+The session file holds no secret: `GH_TOKEN` is read from the keychain on each
+use, and is a value GitHub refuses when the keychain has none. Git gets a
+credential helper that drops every earlier one and hands the agent's token to
+github.com only, commits as the agent's no-reply address and signs with its
+key.
 
 `process-rules doctor` re-checks the key, the token and its scopes, the key's
 registration and the session file, names the step to re-run, and warns 14

@@ -30,10 +30,10 @@ describe('loadSettings', () => {
     assert.deepEqual(loadSettings(new FakeSys(), ROOT), { owner: 'example-owner', agent: AGENT });
   });
 
-  it('asks for the agent when the file is missing', () => {
+  it('says when the file is missing', () => {
     const sys = new FakeSys();
     sys.files.clear();
-    assert.throws(() => loadSettings(sys, ROOT), /not found in \/repo; name the agent account after the command/);
+    assert.throws(() => loadSettings(sys, ROOT), /^Error: \.github\/process-rules\.json not found in \/repo$/);
   });
 
   for (const [raw, message] of [
@@ -67,11 +67,16 @@ describe('agentFrom', () => {
     assert.equal(agentFrom(new FakeSys(), undefined), AGENT);
   });
 
-  it('asks for a name outside a repo', () => {
-    const sys = new FakeSys();
-    sys.inRepo = false;
-    assert.throws(() => agentFrom(sys, undefined), /name the agent account after the command, or run it in a repo/);
-  });
+  for (const [where, change] of [
+    ['outside a repo', (sys: FakeSys) => (sys.inRepo = false)],
+    ['in a repo without settings', (sys: FakeSys) => sys.files.clear()],
+  ] as const) {
+    it(`asks for a name ${where}`, () => {
+      const sys = new FakeSys();
+      change(sys);
+      assert.throws(() => agentFrom(sys, undefined), /name the agent account after the command, or run it in a repo/);
+    });
+  }
 });
 
 describe('pathsFor and noreplyEmail', () => {
@@ -172,12 +177,17 @@ describe('sessionScript, sourced by a real shell', () => {
     assert.match(result.stderr, /SSH is off in agent sessions/);
   });
 
-  it('keeps the agent token from other hosts', () => {
+  it("keeps the agent token, and the owner's askpass, from other hosts", () => {
+    // An askpass program the owner configured would otherwise answer git's prompt.
+    const askpass = join(dir, 'owner-askpass.sh');
+    writeFileSync(askpass, '#!/bin/sh\necho owner-secret\n', { mode: 0o755 });
+    const global = join(dir, 'owner-askpass.gitconfig');
+    writeFileSync(global, `[core]\n\taskpass = ${askpass}\n`);
     const out = shell(
       `export GH_TOKEN=tok; printf 'protocol=https\\nhost=example.com\\n\\n' | git credential fill 2>&1; echo "exit=$?"`,
-      { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' },
+      { GIT_CONFIG_GLOBAL: global, GIT_CONFIG_NOSYSTEM: '1' },
     );
-    assert.doesNotMatch(out, /password=tok/);
+    assert.doesNotMatch(out, /password=tok|owner-secret/);
     assert.match(out, /exit=128/);
   });
 
