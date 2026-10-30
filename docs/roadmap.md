@@ -27,7 +27,7 @@ the **owner**, whose labels and comments count as approvals, and the
 | ---- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | -------------- |
 | P-01 | Skeleton                | Public repo, CI green, secret scans clean                                                                                                                                        | shipped  | —              |
 | P-02 | Agent identity          | `machine` on a Mac with no client repo: key made and registered, token stored; `doctor` names each missing step; one session file per agent account                              | building | token decision |
-| P-03 | Session start           | `session-start` gives a session the agent identity the repo's settings name, or locks GitHub out (refused token, no credential helper, SSH off); never the owner's login          | todo     | P-02           |
+| P-03 | Session start           | `session-start` gives a session the agent identity the repo's settings name, or locks GitHub out (a refused token, no credential helper, every SSH remote refused); never the owner's login          | todo     | P-02           |
 | P-04 | Onboard a client        | `onboard` in the sandbox writes the settings file, hook entry and workflow; checks the agent can push, naming pending organisation approval or a missing invite; a signed test commit Verified by the agent | todo     | P-03, sandbox  |
 | P-05 | Board setup             | `onboard` creates issue types, labels, fields and the Project; prints the views checklist                                                                                        | todo     | P-04           |
 | P-06 | Owner locked away       | `machine` signs the owner out of `gh`, offers to drop the saved git password, warns about unprotected keys; a planted agent commit pushed as the owner fails the PR identity check | todo     | P-04           |
@@ -39,11 +39,17 @@ the **owner**, whose labels and comments count as approvals, and the
 
 ## Open, for the owner
 
-- **Token for the agent account.** A fine-grained token reaches one owner's
-  repositories, and none where the agent is only an outside collaborator; it
-  cannot register the agent's signing key, so that step stays in the
-  browser. A classic token reaches every repository the agent is invited to
-  and can register the key itself, at the cost of broader rights within
-  those repositories. P-02 waits on this choice.
+- **Token for the agent account.** A fine-grained token has one resource
+  owner. Owned by an organisation, it reaches that organisation's chosen
+  repositories, may need an organisation owner's approval, and cannot
+  register the agent's signing key, since "SSH signing keys: write" is a
+  permission only a token owned by the agent account itself can hold; that
+  step stays in the browser or takes a second, user-owned token. It reaches
+  no repository where the agent is only an outside collaborator. A classic
+  token with `repo`, `workflow`, `read:org`, `project` and
+  `write:ssh_signing_key` reaches every repository the agent is invited to
+  and registers the key itself, with broader rights within those
+  repositories; an organisation may block classic tokens or require SSO
+  authorisation for them. P-02 waits on this choice.
 - **Sandbox client repository.** P-04 onward need one; creating it is the
   owner's call.
