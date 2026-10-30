@@ -102,11 +102,14 @@ export function noreplyEmail(id: number, login: string): string {
 const UNSET = ['GITHUB_TOKEN', 'GIT_CONFIG', 'GIT_CONFIG_PARAMETERS', 'GIT_ASKPASS', 'SSH_ASKPASS'];
 
 /**
- * Git config that keeps GitHub on HTTPS and drops every credential helper
- * configured before it (the keychain's, gh's), so git has no login to give.
+ * Git config that keeps GitHub on HTTPS, drops every credential helper
+ * configured before it (the keychain's, gh's) and any configured askpass
+ * program, so git has no login to give.
  */
 const LOCKED_CONFIG: [string, string][] = [
   ['credential.helper', ''],
+  // Empty, git asks no program; GIT_TERMINAL_PROMPT=0 then fails the prompt.
+  ['core.askpass', ''],
   ['url.https://github.com/.insteadOf', 'git@github.com:'],
   ['url.https://github.com/.insteadOf', 'ssh://git@github.com/'],
   ['url.https://github.com/.insteadOf', 'ssh://git@github.com:22/'],
@@ -127,7 +130,7 @@ function configVars(config: [string, string][]): [string, string][] {
 function identityVars(agent: string, id: number, paths: Paths): [string, string][] {
   const email = noreplyEmail(id, agent);
   const helper = `!f() { test "$1" = get && printf 'username=%s\\npassword=%s\\n' ${agent} "$GH_TOKEN"; }; f`;
-  const [reset, ...https] = LOCKED_CONFIG as [[string, string], ...[string, string][]];
+  const [reset, askpass, ...https] = LOCKED_CONFIG as [[string, string], [string, string], ...[string, string][]];
   return [
     ['PROCESS_RULES_AGENT', agent],
     ['GH_CONFIG_DIR', paths.gh],
@@ -146,6 +149,7 @@ function identityVars(agent: string, id: number, paths: Paths): [string, string]
       // After the reset, the agent's token goes to github.com only.
       reset,
       ['credential.https://github.com.helper', helper],
+      askpass,
       ...https,
     ]),
   ];

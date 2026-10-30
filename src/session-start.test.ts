@@ -162,7 +162,12 @@ describe('lockScript, sourced by a real shell', () => {
   // A global config whose helpers would hand out the owner's login.
   const global = join(dir, 'owner.gitconfig');
   const leak = '!f() { echo username=owner; echo password=leak; }; f';
-  writeFileSync(global, `[credential]\n\thelper = "${leak}"\n[credential "https://github.com"]\n\thelper = "${leak}"\n`);
+  const askpass = join(dir, 'owner-askpass.sh');
+  writeFileSync(askpass, '#!/bin/sh\necho owner-secret\n', { mode: 0o755 });
+  writeFileSync(
+    global,
+    `[credential]\n\thelper = "${leak}"\n[credential "https://github.com"]\n\thelper = "${leak}"\n[core]\n\taskpass = ${askpass}\n`,
+  );
 
   const shell = (command: string): { status: number | null; stdout: string; stderr: string } =>
     spawnSync('bash', ['-c', `. '${env}'; ${command}`], {
@@ -185,7 +190,7 @@ describe('lockScript, sourced by a real shell', () => {
 
   it('gives git no credential for GitHub', () => {
     const result = shell(`printf 'protocol=https\\nhost=github.com\\n\\n' | git credential fill`);
-    assert.doesNotMatch(result.stdout, /password=/);
+    assert.doesNotMatch(result.stdout, /password=|owner-secret/);
     assert.notEqual(result.status, 0);
   });
 
