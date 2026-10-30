@@ -1,0 +1,35 @@
+src/version.ts
+  s_111f8ffd9a52da::t_53e5f6c9820925 1-21
+src/run.ts
+  s_111f8ffd9a52da::t_53e5f6c9820925 12-13,15
+src/onboard.ts
+  s_111f8ffd9a52da::t_53e5f6c9820925 17
+  s_111f8ffd9a52da::t_c398cff09ce9d4 40-45,47-48,67-69,257
+package.json
+  s_111f8ffd9a52da::t_c398cff09ce9d4 3,20
+.github/workflows/release.yml
+  s_111f8ffd9a52da::t_deba0bcc49e1b3 1-41
+src/onboard.test.ts
+  s_111f8ffd9a52da::t_c398cff09ce9d4 49,89,438-439
+  s_111f8ffd9a52da::t_53e5f6c9820925 7
+README.md
+  s_111f8ffd9a52da::t_50c40d1f4b32cc 132-147
+docs/roadmap.md
+  s_111f8ffd9a52da::t_cf48a46dcb05de 42
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "441311bd7c26efe98b017490519157841e6c70ea",
+  "prompts": {},
+  "sessions": {
+    "s_111f8ffd9a52da": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3cfaac9f-97c2-444b-bcc3-3d8813efab1f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Alok Bansal <alokagrawal8@gmail.com>"
+    }
+  }
+}
