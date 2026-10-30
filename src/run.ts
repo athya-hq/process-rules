@@ -15,7 +15,7 @@ Commands:
   version    Print the installed version
 
 Both read the agent account from .github/process-rules.json in the repo.
-More commands arrive as they are built: setup.`;
+More commands arrive as they are built: onboard.`;
 
 /** The version in this package's package.json, from src/ or dist/ alike. */
 export function packageVersion(): string {
