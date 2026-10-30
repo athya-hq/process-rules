@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { pathsFor, sessionScript } from './agent.ts';
-import { AGENT, AGENT_ID, FakeSys, HOME, KEY, TOKEN, capture } from './fake.test.ts';
+import { AGENT, AGENT_ID, FakeSys, HOME, KEY, PRIVATE_KEY, PUBLIC_KEY, TOKEN, capture } from './fake.test.ts';
 import { machine, tokenInstructions } from './machine.ts';
 
 const SESSION = `${HOME}/.config/process-rules/session.sh`;
@@ -41,14 +41,22 @@ describe('machine', () => {
     const { code, out, err } = await setUp(sys);
     assert.deepEqual(err, []);
     assert.equal(code, 0);
-    assert.equal(sys.keychain.get(AGENT), TOKEN);
+    assert.equal(sys.token(AGENT), TOKEN);
     assert.equal(sys.files.get(SESSION), sessionScript(AGENT, AGENT_ID, pathsFor(HOME, AGENT)));
     assert.deepEqual(sys.opened, ['https://github.com/settings/personal-access-tokens/new']);
-    assert.ok(out.includes('✓ GitHub shows the test commit Verified by AthyaBot; branch process-rules/verify-athyabot-1000 deleted'));
+    assert.ok(out.includes('✓ GitHub shows the test commit Verified by AthyaBot'));
     assert.ok(!out.join('\n').includes(TOKEN), 'the token is never printed');
 
     const register = sys.requests.find((r) => r.method === 'POST');
-    assert.equal(register?.token, TOKEN);
+    assert.deepEqual(register, {
+      url: 'https://api.github.com/user/ssh_signing_keys',
+      method: 'POST',
+      token: TOKEN,
+      body: { title: 'process-rules athya-hq/athya_mono', key: PUBLIC_KEY },
+    });
+    assert.equal(sys.modes.get(SESSION), 0o600);
+    assert.ok(sys.dirs.indexOf(`${HOME}/.ssh`) >= 0);
+    assert.ok(out.includes('Deleted the throwaway branch process-rules/verify-athyabot-1000.'));
     const keygen = sys.calls.find((c) => c.command === 'ssh-keygen');
     assert.deepEqual(keygen?.args, ['-q', '-t', 'ed25519', '-C', 'AthyaBot signing', '-N', '', '-f', KEY]);
 
@@ -72,7 +80,7 @@ describe('machine', () => {
     assert.equal(code, 0);
     assert.equal(sys.asked.length, 1);
     assert.match(sys.asked[0] ?? '', /Push one signed test commit/);
-    assert.ok(!sys.calls.some((c) => c.command === 'ssh-keygen'));
+    assert.ok(!sys.calls.some((c) => c.command === 'ssh-keygen' && c.args[0] !== '-y'));
   });
 
   it('falls back to the browser when the API cannot add the key', async () => {
@@ -105,13 +113,73 @@ describe('machine', () => {
     assert.deepEqual(err, ["machine: GitHub still does not list the key as AthyaBot's signing key"]);
   });
 
+  it('writes a missing public half from the private key', async () => {
+    const sys = fresh();
+    sys.files.set(KEY, PRIVATE_KEY);
+    const { code } = await setUp(sys);
+    assert.equal(code, 0);
+    assert.equal(sys.files.get(`${KEY}.pub`), 'ssh-ed25519 AAAAkey AthyaBot signing\n');
+    assert.match(sys.asked[0] ?? '', /Write .*\.pub from the private key/);
+  });
+
+  it('stops when the public half is declined', async () => {
+    const sys = fresh();
+    sys.files.set(KEY, PRIVATE_KEY);
+    sys.answers = ['n'];
+    const { code, err } = await setUp(sys);
+    assert.deepEqual({ code, err }, { code: 1, err: ['machine: stopped at "signing key"; nothing after it was changed'] });
+  });
+
+  for (const [name, files, problem] of [
+    ['unusable', { [KEY]: 'garbage' }, `${KEY} is not a usable private key`],
+    ['mismatched', { [KEY]: PRIVATE_KEY, [`${KEY}.pub`]: 'ssh-ed25519 other' }, `${KEY}.pub does not match ${KEY}`],
+  ] as const) {
+    it(`refuses an ${name} key pair without touching it`, async () => {
+      const sys = fresh();
+      for (const [path, data] of Object.entries(files)) sys.files.set(path, data);
+      const { code, err } = await setUp(sys);
+      assert.deepEqual({ code, err }, { code: 1, err: [`machine: ${problem}; move it aside and run machine again to make a new key`] });
+      assert.ok(!sys.calls.some((c) => c.command === 'ssh-keygen' && c.args[0] !== '-y'));
+    });
+  }
+
+  it('accepts logins that differ only in case', async () => {
+    const sys = fresh();
+    sys.acceptToken(TOKEN, 'athyabot');
+    sys.route('GET', '/repos/athya-hq/athya_mono/commits/abc123', {
+      status: 200,
+      json: { committer: { login: 'athyabot' }, commit: { verification: { verified: true, reason: 'valid' } } },
+    });
+    assert.equal((await setUp(sys)).code, 0);
+  });
+
+  it('deletes the branch even when GitHub cannot be asked', async () => {
+    const sys = fresh();
+    sys.route('GET', '/repos/athya-hq/athya_mono/commits/abc123', () => {
+      throw new Error('down');
+    });
+    const { io, out } = capture();
+    await assert.rejects(machine(sys, io), /down/);
+    assert.ok(out.includes('Deleted the throwaway branch process-rules/verify-athyabot-1000.'));
+    assert.equal(sys.calls.at(-1)?.command, 'rm');
+  });
+
+  it('says so when the branch cannot be deleted', async () => {
+    const sys = fresh();
+    sys.execOverride = (call) =>
+      call.command === 'git' && call.args[3]?.startsWith(':') ? { code: 1, stdout: '', stderr: 'protected\n' } : undefined;
+    const { code, err } = await setUp(sys);
+    assert.equal(code, 0);
+    assert.deepEqual(err, ['machine: could not delete process-rules/verify-athyabot-1000; delete it on GitHub: protected']);
+  });
+
   it('replaces a stored token GitHub refuses', async () => {
     const sys = fresh();
-    sys.keychain.set(AGENT, 'stale');
+    sys.setToken(AGENT, 'stale');
     const { code, out } = await setUp(sys);
     assert.equal(code, 0);
     assert.ok(out.includes("The stored token is refused or is not AthyaBot's; replacing it."));
-    assert.equal(sys.keychain.get(AGENT), TOKEN);
+    assert.equal(sys.token(AGENT), TOKEN);
   });
 
   for (const [secret, login, message] of [

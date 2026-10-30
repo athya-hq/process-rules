@@ -31,7 +31,7 @@ The adopting repo names its accounts in `.github/process-rules.json`:
 ```
 
 `process-rules machine`, run once per Mac from inside the repo, makes the
-agent's signing key (`~/.ssh/<agent>_signing`), opens GitHub's token page and
+agent's signing key (`~/.ssh/<agent, lowercased>_signing`), opens GitHub's token page and
 reads the agent's token through a hidden prompt into the keychain (service
 `process-rules`), registers the key as the agent's signing key, writes
 `~/.config/process-rules/session.sh`, and pushes one signed test commit to a
@@ -41,9 +41,10 @@ waits for a yes.
 An agent session sources `session.sh` at start (in Claude Code, a SessionStart
 hook appends it to `CLAUDE_ENV_FILE`). It holds no secret: `GH_TOKEN` is read
 from the keychain on each use, and is a value GitHub refuses when the keychain
-has none. Git gets a credential helper that drops every earlier one, commits
-as the agent's no-reply address and signs with its key, and GitHub's SSH
-remotes go over HTTPS, so nothing falls back to the owner's login.
+has none. Git gets a credential helper that drops every earlier one and hands the
+agent's token to github.com only, commits as the agent's no-reply address and
+signs with its key. GitHub's SSH remotes go over HTTPS and any other SSH
+remote fails, so nothing falls back to the owner's login or keys.
 
 `process-rules doctor` re-checks the key, the token, the key's registration
 and the session file, and names the step to re-run.

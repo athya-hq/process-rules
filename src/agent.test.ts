@@ -9,18 +9,20 @@ import {
   NO_TOKEN,
   accountId,
   keyBody,
+  keyPairProblem,
   loadSettings,
   noreplyEmail,
   pathsFor,
   readToken,
   repoAt,
+  sameLogin,
   sessionEnv,
   sessionScript,
   signingKeys,
   storeToken,
   tokenLogin,
 } from './agent.ts';
-import { AGENT, AGENT_ID, FakeSys, HOME, ROOT, TOKEN } from './fake.test.ts';
+import { AGENT, AGENT_ID, FakeSys, HOME, KEY, PRIVATE_KEY, PUBLIC_KEY, ROOT, TOKEN } from './fake.test.ts';
 
 describe('loadSettings', () => {
   it('reads owner and agent', () => {
@@ -39,6 +41,7 @@ describe('loadSettings', () => {
     ['{"owner":"me","agent":7}', /"agent" must be a GitHub login/],
     ['{"owner":"me","agent":"-bot"}', /"agent" must be a GitHub login/],
     ['{"owner":"me","agent":"me"}', /must be different accounts/],
+    ['{"owner":"Me","agent":"mE"}', /must be different accounts/],
   ] as const) {
     it(`refuses ${raw}`, () => {
       const sys = new FakeSys();
@@ -53,6 +56,9 @@ describe('repoAt', () => {
     'https://github.com/athya-hq/athya_mono.git',
     'git@github.com:athya-hq/athya_mono.git',
     'https://github.com/athya-hq/athya_mono',
+    'https://x-access-token@github.com/athya-hq/athya_mono.git',
+    'ssh://git@github.com/athya-hq/athya_mono.git',
+    'ssh://git@ssh.github.com:443/athya-hq/athya_mono.git',
   ]) {
     it(`reads the slug from ${origin}`, () => {
       const sys = new FakeSys();
@@ -67,11 +73,18 @@ describe('repoAt', () => {
     assert.throws(() => repoAt(sys), /not inside a git repository/);
   });
 
-  it('refuses a non-GitHub origin', () => {
-    const sys = new FakeSys();
-    sys.origin = 'https://gitlab.com/a/b.git';
-    assert.throws(() => repoAt(sys), /origin is not a GitHub repository/);
-  });
+  for (const origin of [
+    'https://gitlab.com/a/b.git',
+    'https://evilgithub.com/a/b.git',
+    'https://github.com.evil.io/a/b.git',
+    'git@evilgithub.com:a/b.git',
+  ]) {
+    it(`refuses the non-GitHub origin ${origin}`, () => {
+      const sys = new FakeSys();
+      sys.origin = origin;
+      assert.throws(() => repoAt(sys), /origin is not a GitHub repository/);
+    });
+  }
 });
 
 describe('pathsFor and noreplyEmail', () => {
@@ -137,8 +150,33 @@ describe('sessionScript, sourced by a real shell', () => {
   });
 
   it('sends SSH GitHub remotes over HTTPS', () => {
-    assert.equal(shell('git ls-remote --get-url git@github.com:a/b.git'), 'https://github.com/a/b.git\n');
-    assert.equal(shell('git ls-remote --get-url ssh://git@github.com/a/b.git'), 'https://github.com/a/b.git\n');
+    for (const remote of [
+      'git@github.com:a/b.git',
+      'ssh://git@github.com/a/b.git',
+      'ssh://git@github.com:22/a/b.git',
+      'ssh://git@ssh.github.com:443/a/b.git',
+    ]) {
+      assert.equal(shell(`git ls-remote --get-url ${remote}`), 'https://github.com/a/b.git\n', remote);
+    }
+  });
+
+  it('turns SSH off for any remote left', () => {
+    const result = spawnSync('bash', ['-c', `. '${script}'; git ls-remote ssh://git@example.invalid/a/b.git`], {
+      encoding: 'utf8',
+      cwd: dir,
+      env: { PATH: process.env.PATH, HOME: dir },
+    });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /SSH is off in agent sessions/);
+  });
+
+  it('keeps the agent token from other hosts', () => {
+    const out = shell(
+      `export GH_TOKEN=tok; printf 'protocol=https\\nhost=example.com\\n\\n' | git credential fill 2>&1; echo "exit=$?"`,
+      { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' },
+    );
+    assert.doesNotMatch(out, /password=tok/);
+    assert.match(out, /exit=128/);
   });
 
   it('matches sessionEnv', () => {
@@ -156,7 +194,8 @@ describe('sessionScript, sourced by a real shell', () => {
 describe('keychain', () => {
   it('reads a stored token', () => {
     const sys = new FakeSys();
-    sys.keychain.set(AGENT, TOKEN);
+    sys.setToken(AGENT, TOKEN);
+    sys.keychain.set('gh:github.com/Other', 'owners');
     assert.equal(readToken(sys, AGENT), TOKEN);
     assert.equal(readToken(sys, 'Other'), undefined);
   });
@@ -164,6 +203,7 @@ describe('keychain', () => {
   it('stores a token through stdin, never argv', () => {
     const sys = new FakeSys();
     assert.equal(storeToken(sys, AGENT, TOKEN), true);
+    assert.deepEqual([...sys.keychain], [['process-rules/AthyaBot', TOKEN]]);
     const call = sys.calls.find((c) => c.args[0] === '-i');
     assert.ok(call?.input?.includes(TOKEN));
     assert.ok(!call?.args.some((arg) => arg.includes(TOKEN)));
@@ -199,6 +239,25 @@ describe('GitHub reads', () => {
     });
     assert.deepEqual(await signingKeys(sys, AGENT), ['ssh-ed25519 AAAA']);
     await assert.rejects(signingKeys(new FakeSys(), 'Nobody'), /cannot list Nobody's signing keys \(HTTP 404\)/);
+  });
+
+  it('names what is wrong with a key pair', () => {
+    const sys = new FakeSys();
+    assert.equal(keyPairProblem(sys, KEY), `${KEY} is missing`);
+    sys.files.set(KEY, 'garbage');
+    assert.equal(keyPairProblem(sys, KEY), `${KEY} is not a usable private key`);
+    sys.files.set(KEY, PRIVATE_KEY);
+    assert.equal(keyPairProblem(sys, KEY), `${KEY}.pub is missing`);
+    sys.files.set(`${KEY}.pub`, 'ssh-ed25519 other');
+    assert.equal(keyPairProblem(sys, KEY), `${KEY}.pub does not match ${KEY}`);
+    sys.files.set(`${KEY}.pub`, PUBLIC_KEY);
+    assert.equal(keyPairProblem(sys, KEY), undefined);
+  });
+
+  it('compares logins ignoring case', () => {
+    assert.equal(sameLogin('athyabot', AGENT), true);
+    assert.equal(sameLogin('Other', AGENT), false);
+    assert.equal(sameLogin(undefined, AGENT), false);
   });
 
   it('reduces a key line to type and body', () => {

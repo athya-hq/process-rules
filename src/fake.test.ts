@@ -6,6 +6,8 @@ export const AGENT = 'AthyaBot';
 export const AGENT_ID = 42;
 export const KEY = `${HOME}/.ssh/athyabot_signing`;
 export const PUBLIC_KEY = 'ssh-ed25519 AAAAkey AthyaBot signing';
+/** The fake's private key file: `ssh-keygen -y` derives the public half from it. */
+export const PRIVATE_KEY = 'private:ssh-ed25519 AAAAkey';
 export const TOKEN = 'github_pat_good';
 export const SETTINGS = JSON.stringify({ owner: 'AlokBansal8', agent: AGENT });
 
@@ -22,7 +24,9 @@ export class FakeSys implements Sys {
   home = HOME;
   cwd = ROOT;
   files = new Map<string, string>([[`${ROOT}/.github/process-rules.json`, SETTINGS]]);
+  /** Keychain items by "service/account". */
   keychain = new Map<string, string>();
+  modes = new Map<string, number>();
   origin = 'https://github.com/athya-hq/athya_mono.git';
   inRepo = true;
   /** Overrides for exec, by "command firstArg"; return undefined to fall through. */
@@ -48,15 +52,25 @@ export class FakeSys implements Sys {
 
   /** The machine as `machine` leaves it: key, token, registered key. */
   ready(): this {
-    this.files.set(KEY, 'private');
+    this.files.set(KEY, PRIVATE_KEY);
     this.files.set(`${KEY}.pub`, `${PUBLIC_KEY}\n`);
-    this.keychain.set(AGENT, TOKEN);
+    this.setToken(AGENT, TOKEN);
     this.acceptToken(TOKEN, AGENT);
     this.route('GET', '/users/AthyaBot/ssh_signing_keys', {
       status: 200,
       json: [{ key: 'ssh-ed25519 AAAAkey' }],
     });
     return this;
+  }
+
+  /** The agent token as `machine` stores it: service process-rules. */
+  setToken(account: string, token: string): this {
+    this.keychain.set(`process-rules/${account}`, token);
+    return this;
+  }
+
+  token(account: string): string | undefined {
+    return this.keychain.get(`process-rules/${account}`);
   }
 
   acceptToken(token: string, login: string): this {
@@ -86,19 +100,23 @@ export class FakeSys implements Sys {
     if (command === 'git') return ok();
     if (command === 'mktemp') return ok('/tmp/verify\n');
     if (command === 'rm') return ok();
+    if (command === 'ssh-keygen' && args[0] === '-y') {
+      const body = /^private:(.*)$/.exec(this.files.get(args[2] ?? '') ?? '')?.[1];
+      return body ? ok(`${body}\n`) : fail('invalid format');
+    }
     if (command === 'ssh-keygen') {
       const path = args[args.indexOf('-f') + 1] ?? '';
-      this.files.set(path, 'private');
+      this.files.set(path, PRIVATE_KEY);
       this.files.set(`${path}.pub`, `${PUBLIC_KEY}\n`);
       return ok();
     }
     if (command === '/usr/bin/security' && args[0] === 'find-generic-password') {
-      const token = this.keychain.get(args[args.indexOf('-a') + 1] ?? '');
+      const token = this.keychain.get(`${args[args.indexOf('-s') + 1] ?? ''}/${args[args.indexOf('-a') + 1] ?? ''}`);
       return token ? ok(`${token}\n`) : fail('not found');
     }
     if (command === '/usr/bin/security' && args[0] === '-i') {
-      const match = /-a (\S+) -w (\S+)/.exec(options.input ?? '');
-      if (match?.[1] && match[2]) this.keychain.set(match[1], match[2]);
+      const match = /-s (\S+) -a (\S+) -w (\S+)/.exec(options.input ?? '');
+      if (match?.[1] && match[2] && match[3]) this.keychain.set(`${match[1]}/${match[2]}`, match[3]);
       return ok();
     }
     return fail(`unexpected ${command}`);
@@ -114,11 +132,15 @@ export class FakeSys implements Sys {
     return data;
   }
 
-  write(path: string, data: string): void {
+  write(path: string, data: string, mode?: number): void {
     this.files.set(path, data);
+    if (mode !== undefined) this.modes.set(path, mode);
   }
 
-  mkdir(): void {}
+  dirs: string[] = [];
+  mkdir(path: string): void {
+    this.dirs.push(path);
+  }
 
   http(url: string, options: { method?: string; token?: string; body?: unknown } = {}): Promise<HttpResult> {
     const method = options.method ?? 'GET';

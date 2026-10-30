@@ -3,7 +3,7 @@ import { describe, it } from 'node:test';
 
 import { pathsFor, sessionScript } from './agent.ts';
 import { doctor } from './doctor.ts';
-import { AGENT, AGENT_ID, FakeSys, HOME, KEY, capture } from './fake.test.ts';
+import { AGENT, AGENT_ID, FakeSys, HOME, KEY, TOKEN, capture } from './fake.test.ts';
 
 const SESSION = `${HOME}/.config/process-rules/session.sh`;
 
@@ -41,7 +41,7 @@ describe('doctor', () => {
 
   it('refuses a token GitHub rejects', async () => {
     const sys = healthy();
-    sys.keychain.set(AGENT, 'revoked');
+    sys.setToken(AGENT, 'revoked');
     const { code, err } = await check(sys);
     assert.equal(code, 1);
     assert.equal(err[0], '✗ token: GitHub refuses the stored token (expired or revoked?)');
@@ -49,7 +49,7 @@ describe('doctor', () => {
 
   it("refuses a token that is someone else's", async () => {
     const sys = healthy();
-    sys.keychain.set(AGENT, 'owners');
+    sys.setToken(AGENT, 'owners');
     sys.acceptToken('owners', 'AlokBansal8');
     const { err } = await check(sys);
     assert.equal(err[0], '✗ token: the stored token acts as AlokBansal8, not AthyaBot');
@@ -60,6 +60,41 @@ describe('doctor', () => {
     sys.route('GET', '/users/AthyaBot/ssh_signing_keys', { status: 200, json: [{ key: 'ssh-ed25519 other' }] });
     const { err } = await check(sys);
     assert.equal(err[0], '✗ key registered: GitHub does not list this key as a signing key of AthyaBot');
+  });
+
+  it('refuses a key pair whose halves do not match', async () => {
+    const sys = healthy();
+    sys.files.set(`${KEY}.pub`, 'ssh-ed25519 other');
+    const { err } = await check(sys);
+    assert.deepEqual(err.slice(0, 2), [
+      `✗ signing key: ${KEY}.pub does not match ${KEY}`,
+      '✗ key registered: GitHub does not list this key as a signing key of AthyaBot',
+    ]);
+  });
+
+  it('accepts a token whose login differs only in case', async () => {
+    const sys = healthy();
+    sys.acceptToken(TOKEN, 'athyabot');
+    assert.equal((await check(sys)).code, 0);
+  });
+
+  it('names each check GitHub could not answer, and still runs the rest', async () => {
+    const sys = healthy();
+    sys.http = () => Promise.reject(new Error('rate limited'));
+    const { code, out, err } = await check(sys);
+    assert.equal(code, 1);
+    assert.deepEqual(out, ['✓ signing key']);
+    assert.deepEqual(err.slice(0, 3), [
+      '✗ token: cannot ask GitHub: rate limited',
+      '✗ key registered: cannot ask GitHub: rate limited',
+      '✗ session file: cannot ask GitHub: rate limited',
+    ]);
+  });
+
+  it('reports a thrown non-error from GitHub', async () => {
+    const sys = healthy();
+    sys.http = () => Promise.reject('down');
+    assert.equal((await check(sys)).err[0], '✗ token: cannot ask GitHub: down');
   });
 
   it('refuses a stale session file', async () => {

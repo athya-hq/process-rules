@@ -2,10 +2,12 @@ import {
   API,
   accountId,
   keyBody,
+  keyPairProblem,
   loadSettings,
   pathsFor,
   readToken,
   repoAt,
+  sameLogin,
   sessionEnv,
   sessionScript,
   signingKeys,
@@ -56,16 +58,28 @@ export async function machine(sys: Sys, io: Output): Promise<number> {
     if (!(await confirm(`Create ${agent}'s signing key at ${paths.key}, with no passphrase so sessions can sign?`))) {
       return stop('signing key');
     }
+    sys.mkdir(`${sys.home}/.ssh`);
     const made = sys.exec('ssh-keygen', ['-q', '-t', 'ed25519', '-C', `${agent} signing`, '-N', '', '-f', paths.key]);
     if (made.code !== 0) {
       io.err(`machine: ssh-keygen failed: ${made.stderr.trim()}`);
       return 1;
     }
+  } else if (!sys.exists(`${paths.key}.pub`)) {
+    const derived = sys.exec('ssh-keygen', ['-y', '-f', paths.key]);
+    if (derived.code === 0) {
+      if (!(await confirm(`Write ${paths.key}.pub from the private key?`))) return stop('signing key');
+      sys.write(`${paths.key}.pub`, `${derived.stdout.trim()} ${agent} signing\n`);
+    }
+  }
+  const keyProblem = keyPairProblem(sys, paths.key);
+  if (keyProblem) {
+    io.err(`machine: ${keyProblem}; move it aside and run machine again to make a new key`);
+    return 1;
   }
   io.out(`✓ signing key ${paths.key}`);
 
   let token = readToken(sys, agent);
-  if (token && (await tokenLogin(sys, token)) !== agent) {
+  if (token && !sameLogin(await tokenLogin(sys, token), agent)) {
     io.out(`The stored token is refused or is not ${agent}'s; replacing it.`);
     token = undefined;
   }
@@ -74,7 +88,7 @@ export async function machine(sys: Sys, io: Output): Promise<number> {
     sys.open(TOKEN_PAGE);
     const entered = (await sys.askSecret(`Paste ${agent}'s new token (hidden): `)).trim();
     const login = entered ? await tokenLogin(sys, entered) : undefined;
-    if (login !== agent) {
+    if (!sameLogin(login, agent)) {
       io.err(
         login === undefined
           ? 'machine: GitHub refuses that token'
@@ -150,6 +164,7 @@ async function testCommit(sys: Sys, io: Output, target: Target): Promise<number>
   const git = (...args: string[]) => sys.exec('git', args, { cwd: dir, env });
   const url = `https://github.com/${slug}.git`;
   const branch = `process-rules/verify-${agent.toLowerCase()}-${sys.now().getTime()}`;
+  let pushed = false;
   try {
     for (const args of [
       ['init', '-q'],
@@ -167,13 +182,13 @@ async function testCommit(sys: Sys, io: Output, target: Target): Promise<number>
       io.err(`machine: signing the test commit failed: ${made.stderr.trim()}`);
       return 1;
     }
-    const pushed = git('push', '-q', url, `${sha}:refs/heads/${branch}`);
-    if (pushed.code !== 0) {
-      io.err(`machine: pushing as ${agent} failed: ${pushed.stderr.trim()}`);
+    const push = git('push', '-q', url, `${sha}:refs/heads/${branch}`);
+    if (push.code !== 0) {
+      io.err(`machine: pushing as ${agent} failed: ${push.stderr.trim()}`);
       return 1;
     }
+    pushed = true;
     const { json } = await sys.http(`${API}/repos/${slug}/commits/${sha}`, { token });
-    git('push', '-q', url, `:refs/heads/${branch}`);
     const commit = json as {
       committer?: { login?: string } | null;
       commit?: { verification?: { verified?: boolean; reason?: string } };
@@ -182,14 +197,20 @@ async function testCommit(sys: Sys, io: Output, target: Target): Promise<number>
     const committer = commit?.committer?.login;
     io.out(`Test commit https://github.com/${slug}/commit/${sha}`);
     io.out(`  committer: ${committer ?? 'none'}; verified: ${String(verification?.verified)} (${verification?.reason ?? 'no reason'})`);
-    if (verification?.verified !== true || committer !== agent) {
+    if (verification?.verified !== true || !sameLogin(committer, agent)) {
       io.err(`machine: GitHub does not show the commit Verified by ${agent}`);
       return 1;
     }
-    io.out(`✓ GitHub shows the test commit Verified by ${agent}; branch ${branch} deleted`);
+    io.out(`✓ GitHub shows the test commit Verified by ${agent}`);
     io.out(`machine: done. Agent sessions act as ${agent} once they source ${paths.session}.`);
     return 0;
   } finally {
+    // Runs on every path after the push, the API failing included; says so when the branch stays.
+    if (pushed) {
+      const removed = git('push', '-q', url, `:refs/heads/${branch}`);
+      if (removed.code === 0) io.out(`Deleted the throwaway branch ${branch}.`);
+      else io.err(`machine: could not delete ${branch}; delete it on GitHub: ${removed.stderr.trim()}`);
+    }
     sys.exec('rm', ['-rf', dir]);
   }
 }

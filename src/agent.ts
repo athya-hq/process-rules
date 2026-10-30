@@ -9,6 +9,16 @@ export const NO_TOKEN = 'process-rules-no-agent-token';
 const SECURITY = '/usr/bin/security';
 export const API = 'https://api.github.com';
 const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/;
+/** The GitHub remotes `repoAt` accepts: HTTPS, scp-like SSH, or SSH URLs, on github.com only. */
+const GITHUB_REMOTE =
+  /^(?:https:\/\/(?:[^@/\s]+@)?github\.com\/|git@github\.com:|ssh:\/\/git@(?:ssh\.)?github\.com(?::\d+)?\/)([^/\s]+\/[^/\s]+?)(?:\.git)?\/?$/;
+/** What a session runs instead of ssh: GitHub goes over HTTPS, so no SSH key of the owner's is used. */
+export const NO_SSH = `echo 'process-rules: SSH is off in agent sessions; GitHub goes over HTTPS' >&2; false`;
+
+/** GitHub logins are case-insensitive. */
+export function sameLogin(a: string | undefined, b: string): boolean {
+  return a !== undefined && a.toLowerCase() === b.toLowerCase();
+}
 
 export interface Settings {
   owner: string;
@@ -24,7 +34,7 @@ export function loadSettings(sys: Sys, root: string): Settings {
   const raw: unknown = JSON.parse(sys.read(path));
   const owner = field(raw, 'owner');
   const agent = field(raw, 'agent');
-  if (owner === agent) {
+  if (sameLogin(owner, agent)) {
     throw new Error(`${SETTINGS_PATH}: owner and agent must be different accounts`);
   }
   return { owner, agent };
@@ -47,7 +57,7 @@ export function repoAt(sys: Sys): { root: string; slug: string } {
   if (top.code !== 0) throw new Error('not inside a git repository');
   const root = top.stdout.trim();
   const url = sys.exec('git', ['remote', 'get-url', 'origin'], { cwd: root }).stdout.trim();
-  const match = /github\.com[:/]([^/\s]+\/[^/\s]+?)(?:\.git)?\/?$/.exec(url);
+  const match = GITHUB_REMOTE.exec(url);
   if (!match?.[1]) throw new Error(`origin is not a GitHub repository: "${url}"`);
   return { root, slug: match[1] };
 }
@@ -84,11 +94,14 @@ function identityVars(agent: string, id: number, paths: Paths): [string, string]
     ['user.signingkey', `${paths.key}.pub`],
     ['commit.gpgsign', 'true'],
     ['tag.gpgsign', 'true'],
-    // An empty helper drops every helper configured before it (the keychain's, gh's).
+    // An empty helper drops every helper configured before it (the keychain's,
+    // gh's); the agent's token then goes to github.com only.
     ['credential.helper', ''],
-    ['credential.helper', helper],
+    ['credential.https://github.com.helper', helper],
     ['url.https://github.com/.insteadOf', 'git@github.com:'],
     ['url.https://github.com/.insteadOf', 'ssh://git@github.com/'],
+    ['url.https://github.com/.insteadOf', 'ssh://git@github.com:22/'],
+    ['url.https://github.com/.insteadOf', 'ssh://git@ssh.github.com:443/'],
   ];
   return [
     ['PROCESS_RULES_AGENT', agent],
@@ -98,6 +111,8 @@ function identityVars(agent: string, id: number, paths: Paths): [string, string]
     ['GIT_AUTHOR_EMAIL', email],
     ['GIT_COMMITTER_EMAIL', email],
     ['GIT_TERMINAL_PROMPT', '0'],
+    // Any SSH remote left (a host alias in ~/.ssh/config) fails instead of using the owner's key.
+    ['GIT_SSH_COMMAND', NO_SSH],
     ['GIT_CONFIG_COUNT', String(config.length)],
     ...config.flatMap(([key, value], i): [string, string][] => [
       [`GIT_CONFIG_KEY_${i}`, key],
@@ -193,4 +208,16 @@ export async function signingKeys(sys: Sys, login: string): Promise<string[]> {
 /** "type body" of an OpenSSH public key line, without its comment. */
 export function keyBody(line: string): string {
   return line.trim().split(/\s+/).slice(0, 2).join(' ');
+}
+
+/** What is wrong with the signing key pair at `key`, or undefined when its halves match. */
+export function keyPairProblem(sys: Sys, key: string): string | undefined {
+  if (!sys.exists(key)) return `${key} is missing`;
+  const derived = sys.exec('ssh-keygen', ['-y', '-f', key]);
+  if (derived.code !== 0) return `${key} is not a usable private key`;
+  if (!sys.exists(`${key}.pub`)) return `${key}.pub is missing`;
+  if (keyBody(sys.read(`${key}.pub`)) !== keyBody(derived.stdout)) {
+    return `${key}.pub does not match ${key}`;
+  }
+  return undefined;
 }
