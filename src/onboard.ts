@@ -45,7 +45,7 @@ export const HOOK_COMMAND =
 /**
  * The client's workflow: the shared checks on every pull request, on pushes
  * to the default branch and weekly, at the process-rules release `version`.
- * Upgrading is changing that version, which appears twice on adjacent lines.
+ * Upgrading is changing that version, which appears twice, two lines apart.
  */
 export function workflow(branch: string, version: string): string {
   return [

@@ -152,7 +152,8 @@ npm install -g github:athya-hq/process-rules#v0.1.0
 ```
 
 `onboard` pins the client's workflow to the release of the CLI that ran it:
-`checks.yml@vX.Y.Z` and `process-rules-ref: vX.Y.Z`, on adjacent lines.
+`checks.yml@vX.Y.Z`, and two lines below it, under `with:`,
+`process-rules-ref: vX.Y.Z`.
 Upgrading is changing that version in both, or installing the new CLI and
 running `onboard` again, which offers to replace the workflow. The hooks need
 `process-rules` on the machine's `PATH`; without it the session-start hook
