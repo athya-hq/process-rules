@@ -2,9 +2,9 @@ import {
   API,
   EXPIRY_WARNING_DAYS,
   TOKEN_SCOPES,
-  accountId,
+  account,
   agentFrom,
-  daysLeft,
+  checkToken,
   keyBody,
   keyPairProblem,
   pathsFor,
@@ -13,7 +13,6 @@ import {
   signingKeys,
   storeToken,
   tokenInfo,
-  tokenProblem,
 } from './agent.ts';
 import type { Output, Sys } from './types.ts';
 
@@ -39,9 +38,8 @@ export function tokenInstructions(agent: string): string[] {
  * push to one is `onboard`'s check. Every change waits for a yes.
  */
 export async function machine(sys: Sys, io: Output, named?: string): Promise<number> {
-  const agent = agentFrom(sys, named);
+  const { id, login: agent } = await account(sys, agentFrom(sys, named));
   const paths = pathsFor(sys.home, agent);
-  const id = await accountId(sys, agent);
   io.out(`Setting up this machine so agent sessions work as ${agent}. Each change asks first.`);
 
   const confirm = async (question: string): Promise<boolean> =>
@@ -77,14 +75,12 @@ export async function machine(sys: Sys, io: Output, named?: string): Promise<num
 
   let token = readToken(sys, agent);
   if (token) {
-    const info = await tokenInfo(sys, token);
-    const problem = tokenProblem(token, info, agent);
-    const days = daysLeft(info?.expires, sys.now());
-    if (problem) {
-      io.out(`The stored token cannot stay: ${problem}. Replacing it.`);
+    const check = checkToken(token, await tokenInfo(sys, token), agent, sys.now());
+    if (check.problem !== undefined) {
+      io.out(`The stored token cannot stay: ${check.problem}. Replacing it.`);
       token = undefined;
-    } else if (days !== undefined && days <= EXPIRY_WARNING_DAYS) {
-      if (await confirm(`The stored token ends in ${days} days. Replace it with a new one?`)) token = undefined;
+    } else if (check.days <= EXPIRY_WARNING_DAYS) {
+      if (await confirm(`The stored token ends in ${check.days} days. Replace it with a new one?`)) token = undefined;
     }
   }
   if (!token) {
@@ -92,13 +88,10 @@ export async function machine(sys: Sys, io: Output, named?: string): Promise<num
     sys.open(TOKEN_PAGE);
     const entered = (await sys.askSecret(`Paste ${agent}'s new token (hidden): `)).trim();
     const info = entered ? await tokenInfo(sys, entered) : undefined;
-    const problem = tokenProblem(entered, info, agent);
-    if (problem) {
+    const { problem } = checkToken(entered, info, agent, sys.now());
+    if (problem !== undefined) {
       io.err(`machine: ${problem}`);
       return 1;
-    }
-    if (info?.expires === undefined) {
-      io.out('This token never expires. A 90-day token limits what a leak can do; consider replacing it.');
     }
     if (!(await confirm(`Store it in this machine's keychain (service process-rules, account ${agent})?`))) {
       return stop('token');

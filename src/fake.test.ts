@@ -46,7 +46,9 @@ export class FakeSys implements Sys {
   asked: string[] = [];
 
   constructor() {
-    this.route('GET', '/users/ExampleBot', { status: 200, json: { id: AGENT_ID } });
+    // GitHub finds a login in any case and answers with its own spelling.
+    this.route('GET', '/users/ExampleBot', { status: 200, json: { id: AGENT_ID, login: AGENT } });
+    this.route('GET', '/users/examplebot', { status: 200, json: { id: AGENT_ID, login: AGENT } });
     this.route('GET', '/user', { status: 401, json: null });
     this.route('GET', '/users/ExampleBot/ssh_signing_keys', { status: 200, json: [] });
   }

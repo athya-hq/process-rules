@@ -172,12 +172,11 @@ describe('machine', () => {
     assert.deepEqual(sys.opened, []);
   });
 
-  it('says so when a pasted token never expires', async () => {
+  it('uses GitHub\'s spelling of a login typed in another case', async () => {
     const sys = fresh();
-    sys.acceptToken(TOKEN, AGENT, { 'x-oauth-scopes': CLASSIC['x-oauth-scopes'] });
-    const { code, out } = await setUp(sys);
-    assert.equal(code, 0);
-    assert.ok(out.includes('This token never expires. A 90-day token limits what a leak can do; consider replacing it.'));
+    assert.equal((await setUp(sys, 'examplebot')).code, 0);
+    assert.equal(sys.token(AGENT), TOKEN);
+    assert.equal(sys.files.get(SESSION), sessionScript(AGENT, AGENT_ID, pathsFor(HOME, AGENT)));
   });
 
   for (const [name, secret, login, headers, message] of [
@@ -186,6 +185,7 @@ describe('machine', () => {
     ["the owner's token", 'ghp_owner', 'example-owner', CLASSIC, 'machine: the token acts as example-owner, not ExampleBot'],
     ['a fine-grained token', 'github_pat_x', AGENT, {}, 'machine: it is not a classic token, which process-rules needs (see its docs/decisions.md)'],
     ['a token short of scopes', 'ghp_thin', AGENT, { 'x-oauth-scopes': 'repo' }, 'machine: the token lacks the scopes workflow, read:org, project, write:ssh_signing_key'],
+    ['a token that never expires', 'ghp_forever', AGENT, { 'x-oauth-scopes': CLASSIC['x-oauth-scopes'] }, 'machine: the token never expires; create one with an expiry (90 days recommended)'],
   ] as const) {
     it(`refuses ${name}`, async () => {
       const sys = fresh();

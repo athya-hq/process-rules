@@ -7,9 +7,9 @@ import { after, describe, it } from 'node:test';
 
 import {
   NO_TOKEN,
-  accountId,
+  account,
   agentFrom,
-  daysLeft,
+  checkToken,
   keyBody,
   keyPairProblem,
   loadSettings,
@@ -22,7 +22,6 @@ import {
   signingKeys,
   storeToken,
   tokenInfo,
-  tokenProblem,
 } from './agent.ts';
 import { AGENT, AGENT_ID, CLASSIC, FakeSys, HOME, KEY, NOW, PRIVATE_KEY, PUBLIC_KEY, ROOT, TOKEN } from './fake.test.ts';
 
@@ -224,9 +223,9 @@ describe('keychain', () => {
 });
 
 describe('GitHub reads', () => {
-  it('finds an account id, or says the account is missing', async () => {
-    assert.equal(await accountId(new FakeSys(), AGENT), AGENT_ID);
-    await assert.rejects(accountId(new FakeSys(), 'Nobody'), /no account "Nobody" \(HTTP 404\)/);
+  it("finds an account's id and GitHub's spelling of its login, or says it is missing", async () => {
+    assert.deepEqual(await account(new FakeSys(), 'examplebot'), { id: AGENT_ID, login: AGENT });
+    await assert.rejects(account(new FakeSys(), 'Nobody'), /no account "Nobody" \(HTTP 404\)/);
   });
 
   it("reads a token's login, scopes and end", async () => {
@@ -240,33 +239,40 @@ describe('GitHub reads', () => {
   });
 
   it('reads a fine-grained or never-ending token as having no scopes or no end', async () => {
-    const sys = new FakeSys().acceptToken(TOKEN, AGENT, { 'github-authentication-token-expiration': 'soon' });
-    assert.deepEqual(await tokenInfo(sys, TOKEN), { login: AGENT, scopes: undefined, expires: undefined });
+    const none = { login: AGENT, scopes: undefined, expires: undefined };
+    const sys = new FakeSys().acceptToken(TOKEN, AGENT, {});
+    assert.deepEqual(await tokenInfo(sys, TOKEN), none);
+    sys.acceptToken('ghp_odd', AGENT, { 'github-authentication-token-expiration': 'soon' });
+    assert.deepEqual(await tokenInfo(sys, 'ghp_odd'), none);
   });
 
 
-  describe('tokenProblem', () => {
-    const info = { login: AGENT, scopes: CLASSIC['x-oauth-scopes'].split(', '), expires: undefined };
+  describe('checkToken', () => {
+    const info = {
+      login: AGENT,
+      scopes: CLASSIC['x-oauth-scopes'].split(', '),
+      expires: new Date('2027-01-28T12:00:00Z'),
+    };
+    const notClassic = 'it is not a classic token, which process-rules needs (see its docs/decisions.md)';
     for (const [name, token, given, problem] of [
-      ['a classic token with every scope', TOKEN, info, undefined],
       ['wider scopes that include the needed ones', TOKEN, { ...info, scopes: ['repo', 'workflow', 'admin:org', 'project', 'admin:ssh_signing_key'] }, undefined],
       ['a login differing only in case', TOKEN, { ...info, login: 'examplebot' }, undefined],
       ['a refused token', TOKEN, undefined, 'GitHub refuses the token (expired or revoked?)'],
       ["someone else's token", TOKEN, { ...info, login: 'example-owner' }, 'the token acts as example-owner, not ExampleBot'],
-      ['a fine-grained token', 'github_pat_x', { ...info, scopes: undefined }, 'it is not a classic token, which process-rules needs (see its docs/decisions.md)'],
-      ['a token GitHub reports no scopes for', TOKEN, { ...info, scopes: undefined }, 'it is not a classic token, which process-rules needs (see its docs/decisions.md)'],
+      ['a fine-grained token', 'github_pat_x', { ...info, scopes: undefined }, notClassic],
+      ['a token GitHub reports no scopes for', TOKEN, { ...info, scopes: undefined }, notClassic],
       ['missing scopes', TOKEN, { ...info, scopes: ['repo', 'read:project'] }, 'the token lacks the scopes workflow, read:org, project, write:ssh_signing_key'],
+      ['a token that never expires', TOKEN, { ...info, expires: undefined }, 'the token never expires; create one with an expiry (90 days recommended)'],
     ] as const) {
       it(`judges ${name}`, () => {
-        assert.equal(tokenProblem(token, given, AGENT), problem);
+        assert.equal(checkToken(token, given, AGENT, NOW).problem, problem);
       });
     }
-  });
 
-  it('counts whole days left', () => {
-    assert.equal(daysLeft(new Date('2027-01-28T12:00:00Z'), NOW), 90);
-    assert.equal(daysLeft(new Date('2026-10-31T11:00:00Z'), NOW), 0);
-    assert.equal(daysLeft(undefined, NOW), undefined);
+    it('counts whole days left on a good token', () => {
+      assert.deepEqual(checkToken(TOKEN, info, AGENT, NOW), { problem: undefined, days: 90 });
+      assert.deepEqual(checkToken(TOKEN, { ...info, expires: new Date('2026-10-31T11:00:00Z') }, AGENT, NOW), { problem: undefined, days: 0 });
+    });
   });
 
   it('lists signing keys without comments', async () => {

@@ -71,6 +71,10 @@ describe('doctor', () => {
     assert.deepEqual(err, ['! the token ends in 11 days; run process-rules machine to replace it']);
   });
 
+  it("uses GitHub's spelling of a login typed in another case", async () => {
+    assert.equal((await check(healthy(), 'examplebot')).code, 0);
+  });
+
   it('checks a named agent outside any repository', async () => {
     const sys = healthy();
     sys.inRepo = false;

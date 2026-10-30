@@ -1,8 +1,8 @@
 import {
   EXPIRY_WARNING_DAYS,
-  accountId,
+  account,
   agentFrom,
-  daysLeft,
+  checkToken,
   keyBody,
   keyPairProblem,
   pathsFor,
@@ -10,7 +10,6 @@ import {
   sessionScript,
   signingKeys,
   tokenInfo,
-  tokenProblem,
 } from './agent.ts';
 import type { Output, Sys } from './types.ts';
 
@@ -38,7 +37,13 @@ async function remote(
  * names the `machine` step to re-run; a token near its end is a warning.
  */
 export async function doctor(sys: Sys, io: Output, named?: string): Promise<number> {
-  const agent = agentFrom(sys, named);
+  const typed = agentFrom(sys, named);
+  // GitHub's spelling of the login, as machine stored it; when GitHub cannot
+  // be asked, the typed one, and the session file check says why.
+  const found = await account(sys, typed).catch((error: unknown) =>
+    error instanceof Error ? error : new Error(String(error)),
+  );
+  const agent = found instanceof Error ? typed : found.login;
   const paths = pathsFor(sys.home, agent);
   const warnings: string[] = [];
 
@@ -49,13 +54,11 @@ export async function doctor(sys: Sys, io: Output, named?: string): Promise<numb
   checks.push(
     await remote('token', async () => {
       if (!token) return `no ${agent} token in this machine's keychain`;
-      const info = await tokenInfo(sys, token);
-      const problem = tokenProblem(token, info, agent);
-      const days = daysLeft(info?.expires, sys.now());
-      if (!problem && days !== undefined && days <= EXPIRY_WARNING_DAYS) {
-        warnings.push(`the token ends in ${days} days; run process-rules machine to replace it`);
+      const check = checkToken(token, await tokenInfo(sys, token), agent, sys.now());
+      if (check.problem === undefined && check.days <= EXPIRY_WARNING_DAYS) {
+        warnings.push(`the token ends in ${check.days} days; run process-rules machine to replace it`);
       }
-      return problem;
+      return check.problem;
     }),
     await remote('key registered', async () => {
       const registered =
@@ -65,7 +68,8 @@ export async function doctor(sys: Sys, io: Output, named?: string): Promise<numb
     }),
     await remote('session file', async () => {
       if (!sys.exists(paths.session)) return `${paths.session} is missing`;
-      const script = sessionScript(agent, await accountId(sys, agent), paths);
+      if (found instanceof Error) throw found;
+      const script = sessionScript(agent, found.id, paths);
       return sys.read(paths.session) === script ? undefined : `${paths.session} is out of date`;
     }),
   );

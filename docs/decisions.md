@@ -21,7 +21,8 @@
   classic token with `repo`, `workflow`, `read:org`, `project` and
   `write:ssh_signing_key` reaches every repository the agent is invited to.
   What a leak could reach is bounded by inviting the dedicated agent account
-  to client repositories only, and by a 90-day expiry that `doctor` warns
-  about 14 days ahead. `machine` refuses a fine-grained token or missing
+  to client repositories only, and by an expiry: `machine` refuses a token
+  that never expires and recommends 90 days, and `doctor` warns 14 days
+  before it ends. `machine` also refuses a fine-grained token or missing
   scopes; `onboard` names an organisation that requires SAML authorisation
   or blocks classic tokens (P-02, P-04).

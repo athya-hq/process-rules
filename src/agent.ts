@@ -192,14 +192,18 @@ export function storeToken(sys: Sys, agent: string, token: string): boolean {
   return result.code === 0 && readToken(sys, agent) === token;
 }
 
-/** An account's numeric id, from GitHub's public API. */
-export async function accountId(sys: Sys, login: string): Promise<number> {
+/**
+ * An account's numeric id and its login as GitHub spells it, from the public
+ * API. Logins are case-insensitive; the keychain item, the session file and
+ * commits all use GitHub's spelling, whatever case the login was typed in.
+ */
+export async function account(sys: Sys, login: string): Promise<{ id: number; login: string }> {
   const { status, json } = await sys.http(`${API}/users/${login}`);
-  const id = (json as { id?: unknown } | null)?.id;
-  if (status !== 200 || typeof id !== 'number') {
+  const found = json as { id?: unknown; login?: unknown } | null;
+  if (status !== 200 || typeof found?.id !== 'number' || typeof found.login !== 'string') {
     throw new Error(`GitHub has no account "${login}" (HTTP ${status})`);
   }
-  return id;
+  return { id: found.id, login: found.login };
 }
 
 export interface TokenInfo {
@@ -225,23 +229,22 @@ export async function tokenInfo(sys: Sys, token: string): Promise<TokenInfo | un
   };
 }
 
-/** Why a token cannot be the agent's, or undefined when it can. */
-export function tokenProblem(token: string, info: TokenInfo | undefined, agent: string): string | undefined {
-  if (!info) return 'GitHub refuses the token (expired or revoked?)';
-  if (!sameLogin(info.login, agent)) return `the token acts as ${info.login}, not ${agent}`;
+/** Why a token cannot be the agent's, or the whole days it has left when it can. */
+export type TokenCheck = { problem: string } | { problem: undefined; days: number };
+
+export function checkToken(token: string, info: TokenInfo | undefined, agent: string, now: Date): TokenCheck {
+  if (!info) return { problem: 'GitHub refuses the token (expired or revoked?)' };
+  if (!sameLogin(info.login, agent)) return { problem: `the token acts as ${info.login}, not ${agent}` };
   if (!token.startsWith('ghp_') || !info.scopes) {
-    return 'it is not a classic token, which process-rules needs (see its docs/decisions.md)';
+    return { problem: 'it is not a classic token, which process-rules needs (see its docs/decisions.md)' };
   }
   const { scopes } = info;
   const missing = TOKEN_SCOPES.filter(
     (scope) => !scopes.includes(scope) && !(INCLUDED_BY[scope] ?? []).some((wider) => scopes.includes(wider)),
   );
-  return missing.length > 0 ? `the token lacks the scopes ${missing.join(', ')}` : undefined;
-}
-
-/** Whole days until `expires`, rounded down; undefined for a token that never expires. */
-export function daysLeft(expires: Date | undefined, now: Date): number | undefined {
-  return expires && Math.floor((expires.getTime() - now.getTime()) / DAY_MS);
+  if (missing.length > 0) return { problem: `the token lacks the scopes ${missing.join(', ')}` };
+  if (!info.expires) return { problem: 'the token never expires; create one with an expiry (90 days recommended)' };
+  return { problem: undefined, days: Math.floor((info.expires.getTime() - now.getTime()) / DAY_MS) };
 }
 
 /** The signing keys GitHub lists publicly for an account, as "type body". */

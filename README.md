@@ -25,8 +25,8 @@ an adopting repo the name can be left out), needs no client repo. It makes the
 agent's signing key (`~/.ssh/<agent, lowercased>_signing`), opens GitHub's
 classic-token page with the scopes filled in (`repo`, `workflow`, `read:org`,
 `project`, `write:ssh_signing_key`) and reads the token through a hidden prompt
-into the keychain (service `process-rules`), refusing a fine-grained token or
-missing scopes. It then registers the key as the agent's signing key and writes
+into the keychain (service `process-rules`), refusing a fine-grained token,
+missing scopes or no expiry. It then registers the key as the agent's signing key and writes
 `~/.config/process-rules/<agent, lowercased>/session.sh`. Each change waits
 for a yes. Why a classic token: [docs/decisions.md](docs/decisions.md).
 
