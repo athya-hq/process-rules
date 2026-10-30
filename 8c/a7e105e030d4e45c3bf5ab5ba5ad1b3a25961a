@@ -1,0 +1,130 @@
+docs/roadmap.md
+  s_111f8ffd9a52da::t_f8cfbecfd792cb 34-35
+  s_111f8ffd9a52da::t_d1b87296fc5072 36
+  s_111f8ffd9a52da::t_8ff62f866c2b86 37
+  s_111f8ffd9a52da::t_1878faa8507e11 38
+src/agent.ts
+  s_111f8ffd9a52da::t_cb4daa28c656ca 12-14,81-95
+  s_111f8ffd9a52da::t_017d1d3b143e71 96
+src/agent.test.ts
+  s_111f8ffd9a52da::t_b9fd4a52a47f63 19,83-116
+  s_111f8ffd9a52da::t_6ada124cc2253e 117-118
+.github/workflows/checks.yml
+  s_111f8ffd9a52da::t_b62a4b971110fc 39-40
+  s_111f8ffd9a52da::t_d2d059c8020d8c 1-6,12-14,17-38,41
+  s_111f8ffd9a52da::t_f5eae562fa00b6 7-11,16,42-48,50-51,53-66
+  s_111f8ffd9a52da::t_1d4fff8c7459d8 49,52
+  s_111f8ffd9a52da::t_cf44960a191bfa 15,67-87
+  s_111f8ffd9a52da::t_7ef452f14a8217 88-89
+src/onboard.test.ts
+  s_111f8ffd9a52da::t_7ceb8e6b915fa9 51
+  s_111f8ffd9a52da::t_cdf835fadb6ed8 1-3,6,8-11,13,15-26,30-48,52-59,68-70,75-88,94-98,126-136,152-154,156-212,214,216-230,232-239,241-243,245-249,264-267,269-273,275-281,283-290,292-299,301-306,308-403,405-410,412-417,419-421,423-442
+  s_111f8ffd9a52da::t_9e2d04f6b0c1e8 60-67,99-125,213,231,250-263,268,282,291,300,418,422
+  s_111f8ffd9a52da::t_479742b67331b6 14,27-28,155,307
+  s_111f8ffd9a52da::t_716c9c0ff6c4b1 5,90-92
+  s_111f8ffd9a52da::t_7c776562170e1b 71-74
+  s_111f8ffd9a52da::t_02430f05c8baa3 215,240
+  s_111f8ffd9a52da::t_941d8971e70792 274
+  s_111f8ffd9a52da::t_68001bf984ab39 4,93
+  s_111f8ffd9a52da::t_3c80991d7bc086 7,12,29,49-50,89,137-151,244,404,411
+README.md
+  s_111f8ffd9a52da::t_f8cfbecfd792cb 11,61-66,78-79,82,104-106
+  s_111f8ffd9a52da::t_55b3d98a62a142 67-69,80-81
+  s_111f8ffd9a52da::t_21780776146fb1 72-77
+  s_111f8ffd9a52da::t_18f5c4d4c31e4d 70
+  s_111f8ffd9a52da::t_68001bf984ab39 71
+  s_111f8ffd9a52da::t_64ab6868a0d1b6 84-86,103
+  s_111f8ffd9a52da::t_8ff62f866c2b86 49-50,52-54
+  s_111f8ffd9a52da::t_6b2b289997dddd 51
+  s_111f8ffd9a52da::t_8e2f2e38202e5c 83,87-102
+src/run.ts
+  s_111f8ffd9a52da::t_96a9dd374cd408 6,18-19,29,59,81,92
+  s_111f8ffd9a52da::t_f5eae562fa00b6 4,21,82,86
+  s_111f8ffd9a52da::t_cf44960a191bfa 58
+  s_111f8ffd9a52da::t_012a6f73b03022 8,22-23,83-84,87-91
+src/onboard.ts
+  s_111f8ffd9a52da::t_ac2c4bc8dc5e91 1-15,17-22,31-52,55-92,94,117-123,126-144,146,149-150,154-171,173-181,183-254,271-298,305-351
+  s_111f8ffd9a52da::t_7ceb8e6b915fa9 172
+  s_111f8ffd9a52da::t_55b3d98a62a142 93,95-116,145,147-148,151-153,182,299-304
+  s_111f8ffd9a52da::t_ed1ef158145242 16,124-125,269
+  s_111f8ffd9a52da::t_c43030f6579e9b 270
+  s_111f8ffd9a52da::t_f5eae562fa00b6 54
+  s_111f8ffd9a52da::t_cf44960a191bfa 23-30,53,255-267
+  s_111f8ffd9a52da::t_57a34927cd8495 268
+src/fake.test.ts
+  s_111f8ffd9a52da::t_7d513e51cd769f 39,135-136,142-143
+  s_111f8ffd9a52da::t_55b3d98a62a142 40-41,137-141
+  s_111f8ffd9a52da::t_7c776562170e1b 127
+  s_111f8ffd9a52da::t_70fdb533e568b1 186-187,193-194
+  s_111f8ffd9a52da::t_f8d0a1cc7c99a8 46-47
+  s_111f8ffd9a52da::t_807ec5351c5a21 44-45,115,118-119,128-134
+  s_111f8ffd9a52da::t_1d4fff8c7459d8 42-43,116-117,120-125
+  s_111f8ffd9a52da::t_42596223cd8347 188,192
+  s_111f8ffd9a52da::t_4af0ff9c611200 126
+  s_111f8ffd9a52da::t_1d58115c869d98 189-191
+  s_111f8ffd9a52da::t_012a6f73b03022 213-217
+  s_111f8ffd9a52da::t_cf44960a191bfa 113
+.github/workflows/ci.yml
+  s_111f8ffd9a52da::t_10dab770b5521d 29-42
+src/board.test.ts
+  s_111f8ffd9a52da::t_518aa3e830fbe8 1-4,6-7,8-48,50-65,67,69-81,83,85-86,91-93,134-135,137-150
+  s_111f8ffd9a52da::t_7c776562170e1b 68
+  s_111f8ffd9a52da::t_a72d3a81fa007f 5,66,82,84,87-90,94-133,136
+  s_111f8ffd9a52da::t_68001bf984ab39 49
+src/board.ts
+  s_111f8ffd9a52da::t_30ce1f454bdd2f 1-60,62,71-89,91-141,143-156,174-181,194-231
+  s_111f8ffd9a52da::t_1176e13dc4f8a4 61,63-70,90,142,157-173,182-193
+src/fake-board.test.ts
+  s_111f8ffd9a52da::t_68001bf984ab39 1-19,21-83
+src/identity.test.ts
+  s_111f8ffd9a52da::t_4df401aa0d4f09 1-43,45-71,86-114,116-118,124-141
+  s_111f8ffd9a52da::t_7393ddfa50f6da 44
+  s_111f8ffd9a52da::t_6b2b289997dddd 72-85,115,119-123
+src/identity.ts
+  s_111f8ffd9a52da::t_295906005578a7 1-37,39-41,49-61,64,66-78
+  s_111f8ffd9a52da::t_1d4fff8c7459d8 38,42-48,62-63,65
+src/doctor.test.ts
+  s_111f8ffd9a52da::t_8ff62f866c2b86 78-79,81-89
+  s_111f8ffd9a52da::t_6f0d34b7be39e1 80
+src/machine.ts
+  s_111f8ffd9a52da::t_70fdb533e568b1 17,142
+src/types.ts
+  s_111f8ffd9a52da::t_70fdb533e568b1 35-36
+  s_111f8ffd9a52da::t_012a6f73b03022 41-42
+src/sys.ts
+  s_111f8ffd9a52da::t_70fdb533e568b1 7,43
+  s_111f8ffd9a52da::t_012a6f73b03022 62
+src/lockout.ts
+  s_111f8ffd9a52da::t_70fdb533e568b1 2-5,10-11,14-18,23,25-27,30,36,39-41,43-44,46-50,52-67,73,75-86,88-90
+  s_111f8ffd9a52da::t_3745cfb8bc9ca8 1,6-9,12-13,19-22,24,28-29,31-35,37-38,42,45,51,68-72,74,87
+src/lockout.test.ts
+  s_111f8ffd9a52da::t_807ec5351c5a21 1-11,13-18,24-34,38-39,41-42,44-46,48,51,53-54,56,60-61,64-67,69,73-78,82-91,94-99
+  s_111f8ffd9a52da::t_6f0d34b7be39e1 12,19-23,35-37,40,43,47,49-50,52,62-63,68,70-72,79-81,92-93
+  s_111f8ffd9a52da::t_1d58115c869d98 55-60
+  s_111f8ffd9a52da::t_e8f9214c562b2d 54
+src/doctor.ts
+  s_111f8ffd9a52da::t_70fdb533e568b1 14
+  s_111f8ffd9a52da::t_3745cfb8bc9ca8 82
+src/machine.test.ts
+  s_111f8ffd9a52da::t_6b2b289997dddd 66-87
+src/work.ts
+  s_111f8ffd9a52da::t_0566374a218bb1 1-235
+src/work.test.ts
+  s_111f8ffd9a52da::t_c78cb4ee274c69 1-338
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8ca7e105e030d4e45c3bf5ab5ba5ad1b3a25961a",
+  "prompts": {},
+  "sessions": {
+    "s_111f8ffd9a52da": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3cfaac9f-97c2-444b-bcc3-3d8813efab1f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Alok Bansal <alokagrawal8@gmail.com>"
+    }
+  }
+}
