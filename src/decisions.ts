@@ -1,0 +1,147 @@
+import { API, loadSettings, sameLogin } from './agent.ts';
+import type { Output, Sys } from './types.ts';
+
+/** How long one decision's check may run. */
+const CHECK_TIMEOUT_MS = 120_000;
+/** An Override is labeled `expiring` this many days before its expiry. */
+const EXPIRING_DAYS = 30;
+const DAY_MS = 86_400_000;
+/** A check that reads files only a laptop has: it cannot run in Actions. */
+const LAPTOP_PATH = /(?:^|[\s"'=(])(?:~\/|\$HOME\b|\$\{HOME\}|\/Users\/|\/home\/)/;
+
+export interface Decision {
+  kind: string | undefined;
+  review: string | undefined;
+  expires: string | undefined;
+  check: string | undefined;
+  undo: string | undefined;
+}
+
+/** The fields a Decision issue's body carries, one per line: `Kind:`, `Review:`, `Expires:`, `Check:` (a command in backticks), `Undo:`. */
+export function parseDecision(body: string): Decision {
+  const field = (name: string): string | undefined => new RegExp(`^${name}:[ \\t]*(.+)$`, 'im').exec(body)?.[1]?.trim();
+  const check = field('Check');
+  return {
+    kind: field('Kind'),
+    review: field('Review'),
+    expires: field('Expires'),
+    check: check ? /^`([^`]+)`/.exec(check)?.[1] : undefined,
+    undo: field('Undo'),
+  };
+}
+
+interface Issue {
+  number: number;
+  node_id: string;
+  title: string;
+  body: string | null;
+  user: { login: string } | null;
+  labels: { name: string }[];
+}
+
+async function openIssues(sys: Sys, token: string, slug: string, filter: string): Promise<Issue[]> {
+  const issues: Issue[] = [];
+  for (let page = 1; ; page++) {
+    const { status, json } = await sys.http(`${API}/repos/${slug}/issues?state=open&${filter}&per_page=100&page=${page}`, { token });
+    if (status !== 200 || !Array.isArray(json)) throw new Error(`cannot list open issues (HTTP ${status})`);
+    issues.push(...(json as Issue[]));
+    if (json.length < 100) return issues;
+  }
+}
+
+/**
+ * The weekly decisions job, run by the shared workflow on a schedule. For
+ * each open Decision issue: a check that reads laptop files is labeled
+ * `cannot-run-here`; any other check runs in the checkout, and when it fails
+ * the decision gets a comment and one undo issue for the owner; an Override
+ * whose expiry is within 30 days is labeled `expiring`. A check runs only
+ * when the owner or the agent wrote the issue and was the last to edit it.
+ */
+export async function decisionsWeekly(sys: Sys, io: Output): Promise<number> {
+  const { GITHUB_REPOSITORY: slug, GH_TOKEN: token } = sys.env;
+  if (!slug || !token) throw new Error('decisions-weekly runs in GitHub Actions: GITHUB_REPOSITORY and GH_TOKEN must be set');
+  const { owner, agent } = loadSettings(sys, sys.cwd);
+  const trusted = (login: string | undefined): boolean => sameLogin(login, owner) || sameLogin(login, agent);
+  const decisions = await openIssues(sys, token, slug, 'type=Decision');
+  const undos = await openIssues(sys, token, slug, 'labels=needs-owner');
+
+  const editors = new Map<number, string | undefined>();
+  if (decisions.length > 0) {
+    const { status, json } = await sys.http(`${API}/graphql`, {
+      method: 'POST',
+      token,
+      body: {
+        query: 'query($ids: [ID!]!) { nodes(ids: $ids) { ... on Issue { number editor { login } } } }',
+        variables: { ids: decisions.map((issue) => issue.node_id) },
+      },
+    });
+    const nodes = (json as { data?: { nodes?: ({ number: number; editor: { login: string } | null } | null)[] } } | null)?.data?.nodes;
+    if (status !== 200 || !nodes) throw new Error(`cannot read who edited the decisions (HTTP ${status})`);
+    for (const node of nodes) if (node) editors.set(node.number, node.editor?.login);
+  }
+
+  const today = sys.now();
+  const label = async (issue: Issue, name: string): Promise<void> => {
+    if (issue.labels.some((had) => had.name === name)) return;
+    const added = await sys.http(`${API}/repos/${slug}/issues/${issue.number}/labels`, { method: 'POST', token, body: { labels: [name] } });
+    if (added.status !== 200) throw new Error(`cannot label #${issue.number} ${name} (HTTP ${added.status})`);
+  };
+
+  for (const issue of decisions) {
+    const decision = parseDecision(issue.body ?? '');
+    const where = `#${issue.number}`;
+    if (decision.kind?.toLowerCase() === 'override' && decision.expires) {
+      const left = (Date.parse(`${decision.expires}T00:00:00Z`) - today.getTime()) / DAY_MS;
+      if (left <= EXPIRING_DAYS) {
+        await label(issue, 'expiring');
+        io.out(`${where}: expires ${decision.expires}; labeled expiring`);
+      }
+    }
+    if (!decision.check) continue;
+    const editor = editors.get(issue.number);
+    if (!trusted(issue.user?.login) || (editor !== undefined && !trusted(editor))) {
+      io.out(`${where}: not run; only ${owner} or ${agent} may write a decision's check`);
+      continue;
+    }
+    if (LAPTOP_PATH.test(decision.check)) {
+      await label(issue, 'cannot-run-here');
+      io.out(`${where}: reads laptop files; labeled cannot-run-here`);
+      continue;
+    }
+    const run = sys.exec('sh', ['-c', decision.check], {
+      cwd: sys.cwd,
+      env: { PATH: sys.env.PATH, HOME: sys.env.HOME },
+      timeoutMs: CHECK_TIMEOUT_MS,
+    });
+    if (run.code === 0) {
+      io.out(`${where}: holds`);
+      continue;
+    }
+    if (undos.some((undo) => new RegExp(`^Undoes #${issue.number}\\b`, 'm').test(undo.body ?? ''))) {
+      io.out(`${where}: tripped; its undo issue is already open`);
+      continue;
+    }
+    const output = `${run.stdout}${run.stderr}`.trim().split('\n').slice(-20).join('\n');
+    const opened = await sys.http(`${API}/repos/${slug}/issues`, {
+      method: 'POST',
+      token,
+      body: {
+        title: `Undo: ${issue.title}`,
+        body: `Undoes #${issue.number}.\n\nThe weekly check \`${decision.check}\` failed (exit ${run.code}).\n\n${decision.undo ? `Undo: ${decision.undo}` : 'The decision names no undo step; decide what to do.'}`,
+        labels: ['needs-owner'],
+        type: 'Brief',
+      },
+    });
+    const undo = (opened.json as { number?: number } | null)?.number;
+    if (opened.status !== 201 || typeof undo !== 'number') throw new Error(`cannot open the undo issue for #${issue.number} (HTTP ${opened.status})`);
+    const commented = await sys.http(`${API}/repos/${slug}/issues/${issue.number}/comments`, {
+      method: 'POST',
+      token,
+      body: { body: `Tripped on ${today.toISOString().slice(0, 10)}: \`${decision.check}\` exited ${run.code}.\n\n\`\`\`\n${output}\n\`\`\`\n\nOpened #${undo} to undo it.` },
+    });
+    if (commented.status !== 201) throw new Error(`cannot comment on #${issue.number} (HTTP ${commented.status})`);
+    io.out(`${where}: tripped; opened #${undo} to undo it`);
+  }
+  io.out(`decisions-weekly: ${decisions.length} open decision${decisions.length === 1 ? '' : 's'} checked`);
+  return 0;
+}

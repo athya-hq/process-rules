@@ -102,7 +102,7 @@ export class FakeSys implements Sys {
   exec(
     command: string,
     args: readonly string[],
-    options: { cwd?: string; env?: Record<string, string | undefined>; input?: string } = {},
+    options: { cwd?: string; env?: Record<string, string | undefined>; input?: string; timeoutMs?: number } = {},
   ): ExecResult {
     const call: Call = { command, args, ...(options.cwd ? { cwd: options.cwd } : {}), ...(options.env ? { env: options.env } : {}), ...(options.input ? { input: options.input } : {}) };
     this.calls.push(call);
