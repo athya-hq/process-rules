@@ -35,11 +35,17 @@ export async function prIdentity(sys: Sys, io: Output): Promise<number> {
   const email = noreplyEmail(id, login).toLowerCase();
 
   const commits: Commit[] = [];
-  for (let page = 1; commits.length < MOST_COMMITS; page++) {
+  for (let page = 1; ; page++) {
     const { status, json } = await sys.http(`${API}/repos/${slug}/pulls/${number}/commits?per_page=100&page=${page}`, { token });
     if (status !== 200 || !Array.isArray(json)) throw new Error(`cannot list the commits of #${number} (HTTP ${status})`);
     commits.push(...(json as Commit[]));
-    if (json.length < 100) break;
+    if (json.length < 100 || commits.length >= MOST_COMMITS) break;
+  }
+  if (commits.length >= MOST_COMMITS) {
+    // Commits past GitHub's limit cannot be seen, so they cannot pass.
+    io.err(`✗ #${number} has ${MOST_COMMITS} or more commits, more than GitHub lists; split it so every commit can be checked`);
+    io.err(`pr-identity: #${number} fails the identity check`);
+    return 1;
   }
 
   const claimsAgent = (commit: Commit): boolean =>
@@ -53,10 +59,10 @@ export async function prIdentity(sys: Sys, io: Output): Promise<number> {
       );
     }
   }
-  // On a push to the pull request, only the commits after the old head are new;
-  // after a force push the old head is gone and every commit counts.
+  // Only opening and pushing bring commits: on a push, those after the old
+  // head (all of them after a force push); reopening or editing brings none.
   const before = event.action === 'synchronize' ? commits.findIndex((commit) => commit.sha === event.before) : -1;
-  const pushed = commits.slice(before + 1);
+  const pushed = event.action === 'opened' || event.action === 'synchronize' ? commits.slice(before + 1) : [];
   if (pushed.some(claimsAgent) && !sameLogin(actor, login)) {
     problems.push(`${actor} pushed commits that claim ${login}; agent work must be pushed by ${login}`);
   }

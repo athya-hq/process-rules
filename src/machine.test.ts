@@ -63,6 +63,28 @@ describe('machine', () => {
     assert.ok(!sys.calls.some((c) => c.command === 'git' && c.args[0] !== 'rev-parse'), 'touches no repository');
   });
 
+  it("ends by offering to lock the owner's credentials away", async () => {
+    const sys = new FakeSys().ready();
+    sys.files.set(SESSION, sessionScript(AGENT, AGENT_ID, pathsFor(HOME, AGENT)));
+    sys.ghAccounts = ['example-owner'];
+    sys.gitPassword = true;
+    sys.files.set(`${HOME}/.ssh/id_ed25519`, 'open:key');
+    sys.answers = ['y', 'y'];
+    const { code, out } = await setUp(sys);
+    assert.equal(code, 0);
+    assert.deepEqual(sys.asked, [
+      'gh is signed in as example-owner. Sign it out, so agent sessions cannot use it? (gh auth login brings it back) [y/N] ',
+      'The macOS keychain holds a saved git password for github.com. Remove it? [y/N] ',
+    ]);
+    assert.deepEqual(out.slice(-4), [
+      '✓ gh signed out of example-owner',
+      '✓ removed the saved git password for github.com',
+      `! ${HOME}/.ssh/id_ed25519 has no passphrase; add one with: ssh-keygen -p -f ${HOME}/.ssh/id_ed25519`,
+      `machine: done. Agent sessions act as ExampleBot once they source ${SESSION}.`,
+    ]);
+    assert.deepEqual(sys.ghAccounts, []);
+  });
+
   it('needs no repository when the agent is named', async () => {
     const sys = fresh();
     sys.inRepo = false;

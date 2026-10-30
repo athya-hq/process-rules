@@ -9,14 +9,18 @@ const OWNER_KEY = `${HOME}/.ssh/id_ed25519`;
 /** A Mac where the owner is signed in to gh, has a saved git password and an open SSH key. */
 function exposed(): FakeSys {
   const sys = new FakeSys().ready();
-  sys.ghToken = 'gho_owner';
-  sys.acceptToken('gho_owner', 'example-owner');
+  sys.ghAccounts = ['example-owner', AGENT, 'old-owner'];
   sys.gitPassword = true;
   sys.files.set(OWNER_KEY, 'open:key');
   sys.files.set(`${OWNER_KEY}.pub`, 'ssh-ed25519 OWNER');
   sys.files.set(`${HOME}/.ssh/id_rsa`, 'locked:key');
   sys.files.set(`${HOME}/.ssh/id_rsa.pub`, 'ssh-rsa OWNER');
   sys.files.set(`${HOME}/.ssh/config`, 'Host x');
+  // Another agent set up on this Mac: its key has no passphrase on purpose.
+  sys.files.set(`${HOME}/.config/process-rules/otherbot/session.sh`, '');
+  sys.files.set(`${HOME}/.ssh/otherbot_signing`, 'open:agent');
+  // An owner key with no .pub beside it, named like a signing key.
+  sys.files.set(`${HOME}/.ssh/work_signing`, 'open:owner');
   return sys;
 }
 
@@ -28,62 +32,46 @@ async function lock(sys: FakeSys, answers: string[]): Promise<string[]> {
 }
 
 describe('exposure', () => {
-  it("finds the owner's gh login, saved git password and open keys, not the agent's", async () => {
-    const found = await exposure(exposed(), AGENT);
-    assert.deepEqual(found, { ghLogin: 'example-owner', gitPassword: true, openKeys: [OWNER_KEY] });
+  it("finds the owner's gh accounts, saved git password and open keys, not the agents'", () => {
+    const found = exposure(exposed(), AGENT);
+    assert.deepEqual(found, { ghLogins: ['example-owner', 'old-owner'], gitPassword: true, openKeys: [OWNER_KEY, `${HOME}/.ssh/work_signing`] });
     assert.deepEqual(exposureLines(found), [
       'gh is signed in as example-owner; an agent session that ignores the lock could use it',
+      'gh is signed in as old-owner; an agent session that ignores the lock could use it',
       'the macOS keychain holds a saved git password for github.com; an agent session could use it',
       `${OWNER_KEY} has no passphrase; add one with: ssh-keygen -p -f ${OWNER_KEY}`,
+      `${HOME}/.ssh/work_signing has no passphrase; add one with: ssh-keygen -p -f ${HOME}/.ssh/work_signing`,
     ]);
   });
 
-  it('reads the stored gh login, not a token in the environment', async () => {
+  it("reads the owner's stored gh logins, not an agent session's", () => {
     const sys = exposed();
-    sys.env = { GH_TOKEN: 'ghp_agent', GITHUB_TOKEN: 'x', KEEP: '1' };
-    await exposure(sys, AGENT);
+    sys.env = { GH_TOKEN: 'ghp_agent', GITHUB_TOKEN: 'x', GH_CONFIG_DIR: '/agent/gh', KEEP: '1' };
+    exposure(sys, AGENT);
     const call = sys.calls.find((c) => c.command === 'gh');
-    assert.deepEqual(call?.env, { GH_TOKEN: undefined, GITHUB_TOKEN: undefined, KEEP: '1' });
+    assert.deepEqual(call?.env, { GH_TOKEN: undefined, GITHUB_TOKEN: undefined, GH_CONFIG_DIR: undefined, KEEP: '1' });
   });
 
-  it('ignores gh signed in as the agent', async () => {
-    const sys = new FakeSys().ready();
-    sys.ghToken = 'ghp_good';
-    assert.equal((await exposure(sys, AGENT)).ghLogin, undefined);
-  });
-
-  it('names a gh login GitHub will not name', async () => {
-    const sys = new FakeSys();
-    sys.ghToken = 'gho_stale';
-    assert.equal((await exposure(sys, AGENT)).ghLogin, 'an account GitHub could not name');
-    sys.http = () => Promise.reject(new Error('offline'));
-    assert.equal((await exposure(sys, AGENT)).ghLogin, 'an account GitHub could not name');
-  });
-
-  it('finds nothing on a clean Mac', async () => {
-    assert.deepEqual(exposureLines(await exposure(new FakeSys().ready(), AGENT)), []);
+  it('finds nothing on a clean Mac', () => {
+    assert.deepEqual(exposureLines(exposure(new FakeSys().ready(), AGENT)), []);
   });
 });
 
 describe('lockOwnerAway', () => {
-  it('signs gh out and removes the git password when told to', async () => {
+  it('signs every owner account out of gh and removes the git password when told to', async () => {
     const sys = exposed();
-    const out = await lock(sys, ['y', 'y']);
-    assert.deepEqual(out, [
-      '✓ gh signed out of example-owner',
-      '✓ removed the saved git password for github.com',
-      `! ${OWNER_KEY} has no passphrase; add one with: ssh-keygen -p -f ${OWNER_KEY}`,
-    ]);
-    assert.equal(sys.ghToken, undefined);
+    const out = await lock(sys, ['y', 'y', 'y']);
+    assert.deepEqual(out.slice(0, 3), ['✓ gh signed out of example-owner', '✓ gh signed out of old-owner', '✓ removed the saved git password for github.com']);
+    assert.deepEqual(sys.ghAccounts, [AGENT]);
     assert.equal(sys.gitPassword, false);
     assert.deepEqual(sys.calls.find((c) => c.args[1] === 'logout')?.args, ['auth', 'logout', '-h', 'github.com', '-u', 'example-owner']);
   });
 
   it('leaves them in place when declined', async () => {
     const sys = exposed();
-    const out = await lock(sys, ['n', 'n']);
-    assert.deepEqual(out.slice(0, 2), ['! gh stays signed in as example-owner', '! the saved git password for github.com stays in the keychain']);
-    assert.equal(sys.ghToken, 'gho_owner');
+    const out = await lock(sys, ['n', 'n', 'n']);
+    assert.deepEqual(out.slice(0, 3), ['! gh stays signed in as example-owner', '! gh stays signed in as old-owner', '! the saved git password for github.com stays in the keychain']);
+    assert.deepEqual(sys.ghAccounts, ['example-owner', AGENT, 'old-owner']);
     assert.equal(sys.gitPassword, true);
   });
 
@@ -94,8 +82,8 @@ describe('lockOwnerAway', () => {
       if (call.command === 'git' && call.args[0] === 'credential-osxkeychain') return { code: 0, stdout: '', stderr: '' };
       return undefined;
     };
-    const out = await lock(sys, ['y', 'y']);
-    assert.deepEqual(out.slice(0, 2), ['! gh could not sign out: no such account', '! the saved git password for github.com is still in the keychain']);
+    const out = await lock(sys, ['y', 'n', 'y']);
+    assert.deepEqual(out.slice(0, 3), ['! gh could not sign out of example-owner: no such account', '! gh stays signed in as old-owner', '! the saved git password for github.com is still in the keychain']);
   });
 
   it('says when there is nothing to lock away', async () => {

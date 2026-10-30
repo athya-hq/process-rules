@@ -77,8 +77,7 @@ describe('doctor', () => {
 
   it("warns about the owner's credentials an agent session could reach, and still passes", async () => {
     const sys = healthy();
-    sys.ghToken = 'gho_owner';
-    sys.acceptToken('gho_owner', 'example-owner');
+    sys.ghAccounts = ['example-owner'];
     sys.gitPassword = true;
     const { code, err } = await check(sys);
     assert.equal(code, 0);

@@ -48,7 +48,7 @@ key.
 
 The lock lives in the session's environment, which a session that ignores it
 could change, so `machine` ends by offering to lock the owner away: to sign
-`gh` out of any account other than the agent, and to remove a git password for
+`gh` out of every account other than the agent's, active or not, and to remove a git password for
 github.com saved in the macOS keychain. It warns about SSH keys in `~/.ssh`
 with no passphrase. Declining leaves them, and `doctor` keeps naming them.
 

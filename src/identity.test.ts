@@ -69,6 +69,20 @@ describe('prIdentity', () => {
     ]);
   });
 
+  it('fails a Verified commit that claims the agent but was committed by the owner', async () => {
+    const owned = commit('d4d4d4d', 'agent');
+    owned.committer = { login: 'example-owner' };
+    const sys = actions(opened, AGENT, [owned]);
+    assert.deepEqual((await check(sys)).err[0], '✗ d4d4d4d claims ExampleBot but is not Verified as ExampleBot (committer example-owner, valid)');
+  });
+
+  it('lets the owner reopen or edit an agent pull request', async () => {
+    for (const action of ['reopened', 'edited']) {
+      const sys = actions({ action, pull_request: { number: 7 } }, 'example-owner', [commit('a1', 'agent')]);
+      assert.equal((await check(sys)).code, 0, action);
+    }
+  });
+
   it('names a commit with no committer or verification', async () => {
     const sys = actions(opened, AGENT, [{ sha: 'c3', author: { login: AGENT } }]);
     assert.equal((await check(sys)).err[0], '✗ c3 claims ExampleBot but is not Verified as ExampleBot (committer none, no verification)');
@@ -98,11 +112,15 @@ describe('prIdentity', () => {
     assert.equal((await check(sys)).code, 1);
   });
 
-  it('stops at the 250 commits GitHub lists', async () => {
+  it('fails closed at the 250 commits GitHub lists', async () => {
     const page = Array.from({ length: 100 }, (_, i) => commit(`o${i}`, 'owner'));
     const sys = actions(opened, 'example-owner', page);
     for (const n of [2, 3, 4]) sys.route('GET', `${COMMITS}&page=${n}`, { status: 200, json: page });
-    await check(sys);
+    assert.deepEqual(await check(sys), {
+      code: 1,
+      out: [],
+      err: ['✗ #7 has 250 or more commits, more than GitHub lists; split it so every commit can be checked', 'pr-identity: #7 fails the identity check'],
+    });
     assert.equal(sys.requests.filter((r) => r.url.includes('/commits?')).length, 3);
   });
 
