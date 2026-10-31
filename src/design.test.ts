@@ -184,6 +184,8 @@ describe('prDesign', () => {
       return { status: 200, json: { data: { repository: { issue: { subIssues } } } } };
     });
     assert.deepEqual((await check(sys)).err, ['✗ state #250 links no Figma frame (a figma.com/design link with node-id)', 'pr-design: refused by the design check']);
+    const cursors = sys.requests.filter((request) => request.url.endsWith('/graphql')).map((request) => (request.body as { variables: { after: string | null } }).variables.after);
+    assert.deepEqual(cursors, [null, 'p2']);
   });
 
   it('throws when GitHub will not list the states', async () => {
