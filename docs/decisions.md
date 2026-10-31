@@ -397,3 +397,18 @@
     those sections, naming them, so the agent writes them first. The first
     line still names the issue first (`#N`), which the 👍 matching relies
     on, so proposals posted before P-40 still count.
+- **2026-11-01 — Record: one GitHub host constant, P-30.** The owner, in
+  chat: route every github.com and api.github.com address through one host
+  constant, so a host setting is easy to add later; the README documents
+  github.com as the only supported host. `src/host.ts` names the host once
+  and derives the API, web, SSH and no-reply forms from it; the API base,
+  remotes and their HTTPS rewrites, the credential helper, the token and key
+  pages, the release download, `gh -h` calls and push-identity's checks all
+  use it. What clients already have stays byte for byte the same: the
+  settings `env` that `onboard` writes, the session file session-start
+  compares, the hook commands and the workflow template. A test fails when
+  the host is written out in `src/` outside that module. The shared
+  workflow `.github/workflows/checks.yml` still checks out
+  `athya-hq/process-rules` from github.com, since workflow YAML cannot
+  import a constant; a host setting would change it there too. The setting
+  itself, for GitHub Enterprise Server or GHE.com, is not built.

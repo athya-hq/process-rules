@@ -24,6 +24,7 @@ import { type Change, HOOKS_PATH, WORKFLOW_PATH, openPull } from './onboard-pull
 import { setSecret } from './secrets.ts';
 import { packageVersion } from './version.ts';
 import type { Output, Sys } from './types.ts';
+import { GITHUB_WEB } from './host.ts';
 
 /** This product's repository: clients call its shared workflow. */
 export const PRODUCT = 'athya-hq/process-rules';
@@ -877,7 +878,7 @@ async function testCommit(sys: Sys, io: Output, target: Target): Promise<number>
   const dir = sys.exec('mktemp', ['-d']).stdout.trim();
   const env = sessionEnv(sys.env, agent, id, token, paths);
   const git = (...args: string[]) => sys.exec('git', args, { cwd: dir, env });
-  const url = `https://github.com/${slug}.git`;
+  const url = `${GITHUB_WEB}/${slug}.git`;
   const branch = `process-rules/verify-${agent.toLowerCase()}-${sys.now().getTime()}`;
   let pushed = false;
   try {
@@ -909,7 +910,7 @@ async function testCommit(sys: Sys, io: Output, target: Target): Promise<number>
       return 1;
     }
     pushed = true;
-    io.out(`Test commit https://github.com/${slug}/commit/${sha}`);
+    io.out(`Test commit ${GITHUB_WEB}/${slug}/commit/${sha}`);
     const asked = await commitInfo(sys, slug, sha, token);
     if (asked instanceof Error) {
       io.err(`onboard: cannot ask GitHub whether the test commit is Verified (${asked.message}); open the link above to see`);

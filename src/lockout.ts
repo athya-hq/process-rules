@@ -1,20 +1,21 @@
 import { pathsFor, sameLogin } from './agent.ts';
 import type { Output, Sys } from './types.ts';
+import { GITHUB_HOST, GITHUB_HOST_RE, GITHUB_SSH } from './host.ts';
 
 /**
  * What of the owner's on this Mac an agent session could reach if it ignored
  * session-start's lock: `gh` accounts other than the agent's (active or
- * not), a git password for github.com saved in the macOS keychain, SSH
+ * not), a git password for GitHub saved in the macOS keychain, SSH
  * keys with no passphrase, and the account SSH reaches GitHub as. Only removing them closes that; the lock lives in
  * the session's environment, which a session can change.
  */
 export interface Exposure {
-  /** The accounts `gh` is signed in to on github.com, other than the agent. */
+  /** The accounts `gh` is signed in to on GitHub, other than the agent. */
   ghLogins: string[];
   gitPassword: boolean;
   /** Private keys in ~/.ssh that open with no passphrase, other than agents' signing keys. */
   openKeys: string[];
-  /** The account other than the agent that `ssh git@github.com` reaches without asking: a key loaded or open. */
+  /** The account other than the agent that SSH to GitHub reaches without asking: a key loaded or open. */
   sshLogin: string | undefined;
 }
 
@@ -26,12 +27,12 @@ function ownerEnv(sys: Sys): Record<string, string | undefined> {
   return { ...sys.env, GH_TOKEN: undefined, GITHUB_TOKEN: undefined, GH_CONFIG_DIR: undefined };
 }
 
-const KEYCHAIN_QUERY = ['find-internet-password', '-s', 'github.com'];
+const KEYCHAIN_QUERY = ['find-internet-password', '-s', GITHUB_HOST];
 /** How `gh auth status` names each account, whether its token still works or not. */
-const GH_ACCOUNT = /(?:Logged in to|log in to) github\.com account ([A-Za-z0-9-]+)/g;
+const GH_ACCOUNT = new RegExp(`(?:Logged in to|log in to) ${GITHUB_HOST_RE} account ([A-Za-z0-9-]+)`, 'g');
 
 export function exposure(sys: Sys, agent: string): Exposure {
-  const status = sys.exec('gh', ['auth', 'status', '-h', 'github.com'], { env: ownerEnv(sys) });
+  const status = sys.exec('gh', ['auth', 'status', '-h', GITHUB_HOST], { env: ownerEnv(sys) });
   const ghLogins = [...new Set([...`${status.stdout}\n${status.stderr}`.matchAll(GH_ACCOUNT)].map((match) => match[1] as string))].filter(
     (login) => !sameLogin(login, agent),
   );
@@ -53,7 +54,7 @@ export function exposure(sys: Sys, agent: string): Exposure {
  * when that is nobody, the agent, or GitHub cannot be reached.
  */
 function sshLogin(sys: Sys, agent: string): string | undefined {
-  const tried = sys.exec('ssh', ['-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', 'git@github.com'], { env: ownerEnv(sys), timeoutMs: 15_000 });
+  const tried = sys.exec('ssh', ['-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', GITHUB_SSH], { env: ownerEnv(sys), timeoutMs: 15_000 });
   const login = /^Hi ([A-Za-z0-9-]+)!/m.exec(`${tried.stdout}\n${tried.stderr}`)?.[1];
   return login && !sameLogin(login, agent) ? login : undefined;
 }
@@ -73,7 +74,7 @@ export function sshLine(login: string): string {
 export function exposureLines(found: Exposure): string[] {
   return [
     ...found.ghLogins.map((login) => `gh is signed in as ${login}; an agent session that ignores the lock could use it`),
-    ...(found.gitPassword ? ["the macOS keychain holds a saved git password for github.com; an agent session could use it"] : []),
+    ...(found.gitPassword ? [`the macOS keychain holds a saved git password for ${GITHUB_HOST}; an agent session could use it`] : []),
     ...found.openKeys.map((key) => `${key} has no passphrase; add one with: ssh-keygen -p -f ${key}`),
     ...(found.sshLogin ? [sshLine(found.sshLogin)] : []),
   ];
@@ -121,7 +122,7 @@ export function setAside(found: Exposure, declined: Declined): { left: Exposure;
     left: { ...found, ghLogins: found.ghLogins.filter((login) => !isDeclined(login)), gitPassword: found.gitPassword && !keptPassword },
     kept: [
       ...found.ghLogins.filter(isDeclined).map((login) => `lockout declined: gh stays signed in as ${login}; process-rules machine offers again`),
-      ...(keptPassword ? ['lockout declined: the saved git password for github.com stays; process-rules machine offers again'] : []),
+      ...(keptPassword ? [`lockout declined: the saved git password for ${GITHUB_HOST} stays; process-rules machine offers again`] : []),
     ],
   };
 }
@@ -142,7 +143,7 @@ export async function lockOwnerAway(
   const declined: Declined = { ghLogins: [], gitPassword: false };
   for (const login of found.ghLogins) {
     if (await confirm(`gh is signed in as ${login}. Sign it out, so agent sessions cannot use it?`)) {
-      const out = sys.exec('gh', ['auth', 'logout', '-h', 'github.com', '-u', login], { env: ownerEnv(sys) });
+      const out = sys.exec('gh', ['auth', 'logout', '-h', GITHUB_HOST, '-u', login], { env: ownerEnv(sys) });
       io.out(out.code === 0 ? `✓ gh signed out of ${login}` : `! gh could not sign out of ${login}: ${out.stderr.trim()}`);
     } else {
       declined.ghLogins.push(login);
@@ -150,13 +151,13 @@ export async function lockOwnerAway(
     }
   }
   if (found.gitPassword) {
-    if (await confirm('The macOS keychain holds a saved git password for github.com. Remove it?')) {
-      sys.exec('git', ['credential-osxkeychain', 'erase'], { input: 'protocol=https\nhost=github.com\n\n' });
+    if (await confirm(`The macOS keychain holds a saved git password for ${GITHUB_HOST}. Remove it?`)) {
+      sys.exec('git', ['credential-osxkeychain', 'erase'], { input: `protocol=https\nhost=${GITHUB_HOST}\n\n` });
       const left = sys.exec('/usr/bin/security', KEYCHAIN_QUERY).code === 0;
-      io.out(left ? '! the saved git password for github.com is still in the keychain' : '✓ removed the saved git password for github.com');
+      io.out(left ? `! the saved git password for ${GITHUB_HOST} is still in the keychain` : `✓ removed the saved git password for ${GITHUB_HOST}`);
     } else {
       declined.gitPassword = true;
-      io.out('! the saved git password for github.com stays in the keychain');
+      io.out(`! the saved git password for ${GITHUB_HOST} stays in the keychain`);
     }
   }
   const path = declinedPath(sys.home, agent);

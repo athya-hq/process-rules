@@ -2,6 +2,7 @@ import { API, NO_TOKEN } from './agent.ts';
 import { PRODUCT } from './onboard.ts';
 import type { Output, Sys } from './types.ts';
 import { packageVersion } from './version.ts';
+import { GITHUB_WEB } from './host.ts';
 
 /**
  * What a cloud session's GH_TOKEN reads when its environment sets none; the
@@ -43,7 +44,7 @@ export const CLOUD_NODE_SHA256 = {
  * against the sha256 pinned here before it is unpacked.
  */
 export function cloudSetupScript(version: string): string {
-  const tarball = `https://github.com/${PRODUCT}/releases/download/v${version}/athya-hq-process-rules-${version}.tgz`;
+  const tarball = `${GITHUB_WEB}/${PRODUCT}/releases/download/v${version}/athya-hq-process-rules-${version}.tgz`;
   return [
     '#!/bin/bash',
     `# process-rules ${version} for Claude cloud sessions: Node ${CLOUD_NODE} and the CLI, as process-rules on PATH.`,

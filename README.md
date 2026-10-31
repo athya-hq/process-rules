@@ -15,6 +15,11 @@ on the Project [process-rules work](https://github.com/orgs/athya-hq/projects/2)
 [docs/roadmap.md](docs/roadmap.md) keeps version v1 as approved. Decisions:
 [docs/decisions.md](docs/decisions.md).
 
+GitHub means github.com: it is the only supported host. GitHub Enterprise
+Server and GitHub Enterprise Cloud with data residency (GHE.com) are not
+supported yet; every GitHub address in the CLI comes from one host constant,
+so a host setting can be added later.
+
 ## Agent identity on a Mac
 
 macOS is the supported platform: the agent's token lives in the macOS

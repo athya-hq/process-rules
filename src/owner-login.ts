@@ -1,6 +1,7 @@
 import { API, sameLogin } from './agent.ts';
 import type { Feature } from './features.ts';
 import type { Sys } from './types.ts';
+import { GITHUB_HOST } from './host.ts';
 
 /** The owner's GitHub token for one run, held in memory only. */
 export interface OwnerToken {
@@ -51,10 +52,10 @@ export async function signInOnce(sys: Sys, scopes: readonly string[]): Promise<O
       GIT_CONFIG_GLOBAL: `${dir}/gitconfig`,
     };
     // SSH as the protocol, with no key, keeps gh from asking to set up git's credentials.
-    const args = ['auth', 'login', '--web', '-h', 'github.com', '-p', 'ssh', '--skip-ssh-key', '--insecure-storage'];
+    const args = ['auth', 'login', '--web', '-h', GITHUB_HOST, '-p', 'ssh', '--skip-ssh-key', '--insecure-storage'];
     const signed = sys.exec('gh', [...args, ...(scopes.length > 0 ? ['-s', scopes.join(',')] : [])], { env, interactive: true });
     if (signed.code !== 0) return { problem: 'the GitHub sign-in in the browser did not finish' };
-    const read = sys.exec('gh', ['auth', 'token', '-h', 'github.com'], { env });
+    const read = sys.exec('gh', ['auth', 'token', '-h', GITHUB_HOST], { env });
     const token = read.stdout.trim();
     if (read.code !== 0 || !token) return { problem: 'gh did not hand over the token from the sign-in' };
     const me = await sys.http(`${API}/user`, { token });
@@ -71,7 +72,7 @@ export async function signInOnce(sys: Sys, scopes: readonly string[]): Promise<O
 export function asOwner(signed: OwnerToken | { problem: string }, owner: string, scopes: readonly string[]): string | { problem: string } {
   if ('problem' in signed) return signed;
   if (!sameLogin(signed.login, owner)) {
-    return { problem: `the browser signed in to GitHub as ${signed.login}, not the owner ${owner}; sign in to github.com there as ${owner} and run it again` };
+    return { problem: `the browser signed in to GitHub as ${signed.login}, not the owner ${owner}; sign in to ${GITHUB_HOST} there as ${owner} and run it again` };
   }
   const missing = scopes.filter((scope) => !signed.scopes.includes(scope));
   if (missing.length > 0) return { problem: `the GitHub sign-in did not grant ${missing.join(', ')}` };

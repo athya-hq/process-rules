@@ -4,9 +4,10 @@ import { agentSession, pushIdentityProblem } from './push-identity.ts';
 import { cloudToken } from './cloud.ts';
 import { ONBOARD_BRANCH, ONBOARD_FILES } from './onboard-pull.ts';
 import type { Output, Sys } from './types.ts';
+import { GITHUB_HOST_RE } from './host.ts';
 
 /** How a pull request or a commit names the slice it builds. */
-const SLICE_LINE = /^Slice:\s*(?:#|https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/issues\/)(\d+)\s*$/gim;
+const SLICE_LINE = new RegExp(`^Slice:\\s*(?:#|https://${GITHUB_HOST_RE}/[^/\\s]+/[^/\\s]+/issues/)(\\d+)\\s*$`, 'gim');
 
 /** The slices `text` names, in order, without repeats. */
 export function slicesNamed(text: string): number[] {
@@ -133,7 +134,7 @@ function thumbsUp(proposals: Comment[], reactions: Map<Comment['id'], Reaction[]
  * since REST does not say who edited it.
  */
 function requested(body: string, slug: string, parent: number, comments: Comment[], owner: string, since: string): boolean {
-  const link = new RegExp(`https://github\\.com/${slug.replaceAll('.', '\\.')}/issues/${parent}#issuecomment-(\\d+)\\b`, 'gi');
+  const link = new RegExp(`https://${GITHUB_HOST_RE}/${slug.replaceAll('.', '\\.')}/issues/${parent}#issuecomment-(\\d+)\\b`, 'gi');
   const linked = new Set([...body.matchAll(link)].map((match) => match[1]));
   return comments.some(
     (comment) => linked.has(String(comment.id)) && sameLogin(comment.user?.login, owner) && comment.created_at < since && !editedAt(comment),

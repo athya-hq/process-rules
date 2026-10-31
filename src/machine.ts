@@ -17,10 +17,11 @@ import {
 import { lockOwnerAway } from './lockout.ts';
 import { tokenStore, unsupported } from './token-store.ts';
 import type { Output, Sys } from './types.ts';
+import { GITHUB_WEB } from './host.ts';
 
 /** GitHub's classic-token page, with the note and scopes filled in. */
-export const TOKEN_PAGE = `https://github.com/settings/tokens/new?description=process-rules%20agent&scopes=${TOKEN_SCOPES.join(',')}`;
-const KEY_PAGE = 'https://github.com/settings/ssh/new';
+export const TOKEN_PAGE = `${GITHUB_WEB}/settings/tokens/new?description=process-rules%20agent&scopes=${TOKEN_SCOPES.join(',')}`;
+const KEY_PAGE = `${GITHUB_WEB}/settings/ssh/new`;
 
 /** What to do on the token page; the expiry is the one field a link cannot fill. */
 export function tokenInstructions(agent: string): string[] {
