@@ -301,7 +301,7 @@ export async function prWorkRules(sys: Sys, io: Output): Promise<number> {
 const ZERO = /^0+$/;
 
 /** The token an agent session reaches GitHub with: in a Claude cloud session, through its proxy. */
-function sessionToken(sys: Sys): string | undefined {
+export function sessionToken(sys: Sys): string | undefined {
   if (sys.env.CLAUDE_CODE_REMOTE === 'true') return cloudToken(sys);
   const token = sys.env.GH_TOKEN;
   return token && token !== NO_TOKEN ? token : undefined;

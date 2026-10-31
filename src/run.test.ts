@@ -123,6 +123,17 @@ describe('run', () => {
     assert.deepEqual(await capture(['propose', '#0']), { code: 2, out: [], err: ['process-rules: propose needs an issue number, not "#0"', USAGE] });
   });
 
+  it('runs review-thread, whose arguments are checked first', async () => {
+    const refused = await capture(['review-thread', 'PRRT_x', '--resolve'], () => new FakeSys());
+    assert.deepEqual(refused, { code: 1, out: [], err: ['✗ this session has no token; run process-rules doctor', 'review-thread: refused'] });
+    assert.deepEqual(await capture(['review-thread', 'PRRT_x']), {
+      code: 2,
+      out: [],
+      err: ['process-rules: review-thread needs --reply <text>, --resolve, or both', USAGE],
+    });
+    assert.equal((await capture(['review-thread', 'PRRT_x', '--resolve', 'more'])).code, 2);
+  });
+
   it('runs guard, refusing when the check itself fails', async () => {
     const sys = new FakeSys();
     sys.stdin = JSON.stringify({ session_id: 's', tool_input: { command: 'ls' } });
