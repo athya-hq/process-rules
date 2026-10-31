@@ -1,0 +1,21 @@
+docs/decisions.md
+  s_662ad5007ff2f0::t_5558607db5f0fa 220-227
+README.md
+  s_662ad5007ff2f0::t_a9441cbefdaeef 40-52
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "202d3403b171ca11d438b9bf198c17890675e4bc",
+  "prompts": {},
+  "sessions": {
+    "s_662ad5007ff2f0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "36c96ab4-6ade-4bea-ab41-bcd0c91fef17",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Alok Bansal <alokagrawal8@gmail.com>"
+    }
+  }
+}
