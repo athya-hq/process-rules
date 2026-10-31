@@ -1,0 +1,32 @@
+# Written by process-rules onboard: the shared process-rules checks at v0.3.0.
+# To upgrade, change the version on both lines that name it.
+name: process-rules
+
+on:
+  pull_request:
+    # edited: a changed "Slice: #N" line is checked again.
+    types: [opened, synchronize, reopened, edited]
+  push:
+    branches: ["main"]
+  # The weekly decisions job: Mondays, 06:17 UTC.
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+jobs:
+  process-rules:
+    # Write to issues for this job only: the weekly run comments and opens undo issues.
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+    uses: athya-hq/process-rules/.github/workflows/checks.yml@v0.3.0
+    with:
+      process-rules-ref: v0.3.0
+    secrets:
+      FIGMA_TOKEN: ${{ secrets.FIGMA_TOKEN }}
