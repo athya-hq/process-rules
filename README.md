@@ -204,7 +204,7 @@ push over SSH is refused, whatever the host, since it would use this Mac's
 SSH keys, the owner's; over HTTPS to GitHub, git is asked for the
 credentials it would push with (one in the URL included) and GitHub for
 whose they are, and only the agent's push goes ahead; in a Claude cloud
-session, GitHub is asked through its proxy whose the session is. The
+session, GitHub is asked through its proxy whose account the session is. The
 owner's pushes from their own terminal are not checked. With `work-rules` on, it then applies the same rules before an
 agent session pushes: all the commits
 one push brings, on one branch, name one slice between them as a
@@ -259,7 +259,8 @@ The proxy refuses GitHub's GraphQL API, so the work rules read only its
 REST API, here and everywhere else. The cloud environment's Setup script,
 which runs as root before each session, installs the CLI:
 `process-rules cloud-setup` prints one for the installed release. It
-unpacks Node and the CLI under `/opt/process-rules` and puts
+unpacks Node, once it matches the sha256 the release pins, and the CLI
+under `/opt/process-rules` and puts
 `process-rules` on `PATH`, leaving the image's own Node alone. The
 environment needs the network to reach nodejs.org and GitHub's release
 downloads.

@@ -139,7 +139,7 @@
   connection for agent sessions is the agent account, the environment's
   setup script installs the CLI, and session-start checks the account
   GitHub sees is the agent, printing STOP otherwise. This replaces the
-  2026-10-30 rule above that a cloud session's hook unsets the lock: now it
+  2026-10-31 rule above (P-17) that a cloud session's hook unsets the lock: now it
   lifts it only for the agent. Claude's GitHub proxy refuses GraphQL
   (whatever the credentials), so the owner chose the more robust of the
   ways through: the work rules read GitHub's REST API alone, on a Mac, in

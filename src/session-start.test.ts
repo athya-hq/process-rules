@@ -127,6 +127,15 @@ describe('sessionStart', () => {
       assert.equal(own.files.get(hook), '#!/bin/sh\npnpm lint\n');
     });
 
+    it('leaves a pre-push hook outside the repository unchecked, and says so', async () => {
+      const sys = cloud(AGENT);
+      sys.execOverride = (call) => (call.args[1] === '--git-path' ? { code: 0, stdout: '/shared/hooks/pre-push\n', stderr: '' } : undefined);
+      assert.deepEqual((await start(sys)).out, [
+        "process-rules: this cloud session works as ExampleBot on GitHub. Its pre-push hook /shared/hooks/pre-push is outside the repository and was not checked, so only the pull request's checks may hold the work rules.",
+      ]);
+      assert.equal(sys.files.has('/shared/hooks/pre-push'), false);
+    });
+
     it('says to stop when the pre-push hook cannot be written', async () => {
       const sys = cloud(AGENT);
       sys.write = () => {

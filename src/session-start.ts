@@ -113,9 +113,11 @@ async function cloudStart(sys: Sys): Promise<Said> {
   } catch (error) {
     return { line: `process-rules: STOP. Writing to CLAUDE_ENV_FILE failed (${message(error)}), so this cloud session cannot be given the agent identity. ${stop}` };
   }
-  const unchecked = hook.state === 'own' || hook.state === 'outside'
+  const unchecked = hook.state === 'own'
     ? ` Its pre-push hook ${hook.path} does not run process-rules, so only the pull request's checks hold the work rules.`
-    : '';
+    : hook.state === 'outside'
+      ? ` Its pre-push hook ${hook.path} is outside the repository and was not checked, so only the pull request's checks may hold the work rules.`
+      : '';
   return { line: `process-rules: this cloud session works as ${asked.login} on GitHub.${unchecked}`, agent: asked.login };
 }
 
