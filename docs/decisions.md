@@ -235,6 +235,23 @@
   account, which the owner can revoke under Settings → Applications; no
   token is left on the Mac. Approval: the owner's 👍 on #83. Released as
   v0.5.7, a patch release.
+- **2026-11-01 — Record: P-38, PR identity judges the pusher, not the
+  run's actor.** In sandbox PR #8 on 2026-10-30, the run on `opened` failed
+  the owner's push of an agent commit, and the run started ten seconds
+  later by Cubic editing the description passed, "pushed by
+  cubic-dev-ai[bot]". #11 moved the check to GitHub's push record
+  (`GET /repos/{repo}/activity` on the head branch), but kept the run's
+  actor as the pusher of commits not recorded yet on `opened` and
+  `synchronize`, so the owner pushing and the agent opening the pull
+  request at once still passed. Decided: who pushed comes from the push
+  record alone and `GITHUB_ACTOR` is not read. A commit no recorded push
+  brought is read again for about a minute, then fails closed until a
+  re-run finds it; a push recorded with no actor, and a pull request whose
+  head repository is gone, fail too. The record is the head repository's,
+  so a fork's pull request reads the fork's; a private fork the run's token
+  cannot read fails the check. Merge-queue pushes go to the queue's own
+  branches, not the pull request's, so they never count. Approval: the
+  owner's 👍 on #91. Released as v0.5.8, a patch release.
 - **2026-11-01 — Record: P-27, a declined lockout stays declined.** The
   owner's decision of 2026-10-31 on #57: keep offering the lockout. On a
   team member's laptop or a shared machine, accepting it signs that person
