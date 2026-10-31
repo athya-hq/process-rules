@@ -12,9 +12,11 @@ export function slicesNamed(text: string): number[] {
 }
 
 interface Comment {
+  id: string;
   author: { login: string } | null;
   body: string;
   createdAt: string;
+  lastEditedAt: string | null;
 }
 
 type TimelineItem =
@@ -23,13 +25,16 @@ type TimelineItem =
   | ({ __typename: 'IssueComment' } & Comment);
 
 interface SliceGraph {
+  id: string;
   number: number;
+  title: string;
   issueType: { name: string } | null;
-  comments: { nodes: Comment[] };
+  comments: { nodes: Comment[]; pageInfo?: { hasPreviousPage: boolean; startCursor: string | null } };
   parent: { id: string; number: number; issueType: { name: string } | null } | null;
   subIssues: {
     nodes: {
       number: number;
+      title: string;
       issueType: { name: string } | null;
       stateReason: string | null;
       closedAt: string | null;
@@ -38,13 +43,13 @@ interface SliceGraph {
   };
 }
 
-const COMMENT = 'author { login } body createdAt';
+const COMMENT = 'id author { login } body createdAt lastEditedAt';
 const SLICE_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     issue(number: $number) {
-      number issueType { name } comments(last: 100) { nodes { ${COMMENT} } }
+      id number title issueType { name } comments(last: 100) { nodes { ${COMMENT} } pageInfo { hasPreviousPage startCursor } }
       parent { id number issueType { name } }
-      subIssues(first: 100) { nodes { number issueType { name } stateReason closedAt comments(last: 50) { nodes { ${COMMENT} } } } }
+      subIssues(first: 100) { nodes { number title issueType { name } stateReason closedAt comments(last: 50) { nodes { ${COMMENT} } } } }
     }
   }
 }`;
@@ -64,6 +69,14 @@ const TIMELINE_QUERY = `query($id: ID!, $after: String) {
       }
     }
   }
+}`;
+/** The slice's earlier comments, 100 a page, newest page first. */
+const COMMENTS_QUERY = `query($id: ID!, $before: String) {
+  node(id: $id) { ... on Issue { comments(last: 100, before: $before) { nodes { ${COMMENT} } pageInfo { hasPreviousPage startCursor } } } }
+}`;
+/** The 👍 reactions on some comments, by comment id; GitHub reads 100 ids at a time. */
+const THUMBS_UP_QUERY = `query($ids: [ID!]!) {
+  nodes(ids: $ids) { ... on IssueComment { id reactions(content: THUMBS_UP, first: 100) { nodes { user { login } createdAt } } } }
 }`;
 
 async function graphql(sys: Sys, token: string, slice: number, query: string, variables: Record<string, unknown>): Promise<unknown> {
@@ -89,33 +102,69 @@ function decided(comments: Comment[], owner: string, since?: string, mention?: s
   );
 }
 
+/** A proposal's first line, and the issue it names first: what the proposal is for. */
+const PROPOSAL = /^\s*Proposal:[^#\n]*#(\d+)\b/i;
+
+/** The agent's proposals among `comments` for issue `number`. */
+function proposalsFor(comments: Comment[], agent: string, number: number): Comment[] {
+  return comments.filter((comment) => sameLogin(comment.author?.login, agent) && Number(PROPOSAL.exec(comment.body)?.[1]) === number);
+}
+
+/** A decision the owner owes a slice: its addition after the work item's approval, or a state dropped after it. */
+interface Owed {
+  kind: 'added' | 'dropped';
+  /** The slice, when it was added; the state, when it was dropped. */
+  number: number;
+  title: string;
+  /** The owner's say counts only after this, when given: the slice's latest addition. */
+  since?: string;
+  /** The agent's proposals for it, on the slice. */
+  proposals: Comment[];
+  /** Whether the owner gave it: a `Decision:` comment, or 👍 on one of the proposals. */
+  settled: boolean;
+}
+
 /**
- * The work rules for building one slice, as problems; none means it may be
- * built: the slice is a Slice under a Work item the owner approved; a slice
- * added after the approval, and an approved State closed as not planned, each
- * carry the owner's `Decision:` comment; and no other open pull request
- * builds the slice.
+ * Whether the owner reacted 👍 to one of `proposals`, after `since` when
+ * given and after the proposal's last edit, from the reactions read by id.
  */
-export async function sliceProblems(
+function thumbsUp(proposals: Comment[], reactions: Map<string, { user: { login: string } | null; createdAt: string }[]>, owner: string, since?: string): boolean {
+  return proposals.some((proposal) =>
+    (reactions.get(proposal.id) ?? []).some(
+      (reaction) =>
+        sameLogin(reaction.user?.login, owner) &&
+        (!since || reaction.createdAt > since) &&
+        (!proposal.lastEditedAt || reaction.createdAt > proposal.lastEditedAt),
+    ),
+  );
+}
+
+async function sliceGraph(sys: Sys, token: string, slug: string, number: number): Promise<SliceGraph | undefined> {
+  const [repoOwner, name] = slug.split('/');
+  const data = (await graphql(sys, token, number, SLICE_QUERY, { owner: repoOwner, name, number })) as {
+    repository?: { issue?: SliceGraph | null } | null;
+  } | undefined;
+  return data?.repository?.issue ?? undefined;
+}
+
+/**
+ * Reads slice `slice` against the work rules' approvals: the problems that
+ * stop it outright (not a Slice under a Work item the owner approved), else
+ * the decisions it owes the owner and whether each was given.
+ */
+async function readSlice(
   sys: Sys,
   token: string,
   slug: string,
   slice: number,
-  owner: string,
-  mine: { pull?: number; branch?: string },
-): Promise<string[]> {
-  // The pull request being checked: by number, or by its branch in this repository (not a fork's of the same name).
-  const [repoOwner, name] = slug.split('/');
-  const data = (await graphql(sys, token, slice, SLICE_QUERY, { owner: repoOwner, name, number: slice })) as {
-    repository?: { issue?: SliceGraph | null } | null;
-  } | undefined;
-  const issue = data?.repository?.issue;
-  if (!issue) return [`#${slice} is not an issue in ${slug}`];
-  if (issue.issueType?.name !== 'Slice') return [`#${slice} is not a Slice (its type is ${issue.issueType?.name ?? 'none'})`];
+  { owner, agent }: { owner: string; agent: string },
+): Promise<{ problems: string[]; parent?: number; owed: Owed[] }> {
+  const issue = await sliceGraph(sys, token, slug, slice);
+  if (!issue) return { problems: [`#${slice} is not an issue in ${slug}`], owed: [] };
+  if (issue.issueType?.name !== 'Slice') return { problems: [`#${slice} is not a Slice (its type is ${issue.issueType?.name ?? 'none'})`], owed: [] };
   const parent = issue.parent;
-  if (parent?.issueType?.name !== 'Work item') return [`#${slice} is not a sub-issue of a Work item`];
+  if (parent?.issueType?.name !== 'Work item') return { problems: [`#${slice} is not a sub-issue of a Work item`], owed: [] };
 
-  const problems: string[] = [];
   const events: TimelineItem[] = [];
   for (let after: string | null = null; ; ) {
     const page = (await graphql(sys, token, slice, TIMELINE_QUERY, { id: parent.id, after })) as {
@@ -130,14 +179,24 @@ export async function sliceProblems(
       (event.__typename === 'LabeledEvent' || event.__typename === 'UnlabeledEvent') && event.label.name === 'approved',
   ).at(-1);
   if (approval?.__typename !== 'LabeledEvent') {
-    return [`work item #${parent.number} is not approved: ${owner} adds the approved label before any slice starts`];
+    return { problems: [`work item #${parent.number} is not approved: ${owner} adds the approved label before any slice starts`], owed: [] };
   }
   if (!sameLogin(approval.actor?.login, owner)) {
-    return [`work item #${parent.number} was labeled approved by ${approval.actor?.login ?? 'someone unknown'}, not ${owner}`];
+    return { problems: [`work item #${parent.number} was labeled approved by ${approval.actor?.login ?? 'someone unknown'}, not ${owner}`], owed: [] };
   }
   const approvedAt = approval.createdAt;
   const parentComments = events.filter((event): event is { __typename: 'IssueComment' } & Comment => event.__typename === 'IssueComment');
+  // Every comment on the slice, so a proposal or decision that later discussion pushed back still counts.
+  const comments = [...issue.comments.nodes];
+  for (let info = issue.comments.pageInfo; info?.hasPreviousPage; ) {
+    const page = (await graphql(sys, token, slice, COMMENTS_QUERY, { id: issue.id, before: info.startCursor })) as {
+      node: { comments: { nodes: Comment[]; pageInfo: { hasPreviousPage: boolean; startCursor: string | null } } };
+    };
+    comments.unshift(...page.node.comments.nodes);
+    info = page.node.comments.pageInfo;
+  }
 
+  const owed: Owed[] = [];
   // The latest addition counts: a slice removed and added again after approval needs the owner's say.
   const added = events
     .filter(
@@ -145,22 +204,68 @@ export async function sliceProblems(
         event.__typename === 'SubIssueAddedEvent' && event.subIssue?.number === slice,
     )
     .at(-1);
-  if (
-    added &&
-    added.createdAt > approvedAt &&
-    !decided(parentComments, owner, added.createdAt, `#${slice}`) &&
-    !decided(issue.comments.nodes, owner, added.createdAt)
-  ) {
-    problems.push(`#${slice} was added to work item #${parent.number} after its approval; ${owner} adds a "Decision:" comment naming #${slice}`);
+  if (added && added.createdAt > approvedAt) {
+    owed.push({
+      kind: 'added',
+      number: slice,
+      title: issue.title,
+      since: added.createdAt,
+      proposals: proposalsFor(comments, agent, slice),
+      settled: decided(parentComments, owner, added.createdAt, `#${slice}`) || decided(comments, owner, added.createdAt),
+    });
   }
-
   for (const state of issue.subIssues.nodes) {
     if (state.issueType?.name !== 'State' || state.stateReason !== 'NOT_PLANNED' || !state.closedAt || state.closedAt < approvedAt) continue;
-    if (!decided(state.comments.nodes, owner) && !decided(issue.comments.nodes, owner, undefined, `#${state.number}`)) {
-      problems.push(`state #${state.number} was closed as not planned after approval; ${owner} adds a "Decision:" comment to it`);
-    }
+    owed.push({
+      kind: 'dropped',
+      number: state.number,
+      title: state.title,
+      proposals: proposalsFor(comments, agent, state.number),
+      settled: decided(state.comments.nodes, owner) || decided(comments, owner, undefined, `#${state.number}`),
+    });
   }
 
+  // Reactions are read only for the proposals that could still settle something.
+  const ids = owed.filter((one) => !one.settled).flatMap((one) => one.proposals.map((proposal) => proposal.id));
+  const reactions = new Map<string, { user: { login: string } | null; createdAt: string }[]>();
+  for (let i = 0; i < ids.length; i += 100) {
+    const data = (await graphql(sys, token, slice, THUMBS_UP_QUERY, { ids: ids.slice(i, i + 100) })) as {
+      nodes: ({ id: string; reactions: { nodes: { user: { login: string } | null; createdAt: string }[] } } | null)[];
+    };
+    for (const node of data.nodes) if (node) reactions.set(node.id, node.reactions.nodes);
+  }
+  for (const one of owed) one.settled ||= thumbsUp(one.proposals, reactions, owner, one.since);
+  return { problems: [], parent: parent.number, owed };
+}
+
+/** Why `owed` stops slice `slice`, and how the owner settles it. */
+function owedProblem(one: Owed, slice: number, parent: number | undefined, { owner, agent }: { owner: string; agent: string }): string {
+  const ask = one.proposals.length > 0 ? '' : `; ${agent} proposes it with: process-rules propose ${one.number}`;
+  return one.kind === 'added'
+    ? `#${slice} was added to work item #${parent} after its approval; ${owner} reacts 👍 on ${agent}'s proposal on #${slice}, or adds a "Decision:" comment naming #${slice}${ask}`
+    : `state #${one.number} was closed as not planned after approval; ${owner} reacts 👍 on ${agent}'s proposal for it on #${slice}, or adds a "Decision:" comment to it${ask}`;
+}
+
+/**
+ * The work rules for building one slice, as problems; none means it may be
+ * built: the slice is a Slice under a Work item the owner approved; a slice
+ * added after the approval, and an approved State closed as not planned, each
+ * carry the owner's say, a `Decision:` comment or a 👍 on the agent's
+ * proposal; and no other open pull request builds the slice.
+ */
+export async function sliceProblems(
+  sys: Sys,
+  token: string,
+  slug: string,
+  slice: number,
+  accounts: { owner: string; agent: string },
+  mine: { pull?: number; branch?: string },
+): Promise<string[]> {
+  const read = await readSlice(sys, token, slug, slice, accounts);
+  if (read.problems.length > 0) return read.problems;
+  const problems = read.owed.filter((one) => !one.settled).map((one) => owedProblem(one, slice, read.parent, accounts));
+
+  // The pull request being checked: by number, or by its branch in this repository (not a fork's of the same name).
   for (let page = 1; ; page++) {
     const pulls = await sys.http(`${API}/repos/${slug}/pulls?state=open&per_page=100&page=${page}`, { token });
     if (pulls.status !== 200 || !Array.isArray(pulls.json)) throw new Error(`cannot list open pull requests (HTTP ${pulls.status})`);
@@ -223,7 +328,7 @@ export async function prWorkRules(sys: Sys, io: Output): Promise<number> {
     ]);
   }
   const [slice] = slices as [number];
-  const problems = await sliceProblems(sys, token, slug, slice, owner, { pull: pull.number });
+  const problems = await sliceProblems(sys, token, slug, slice, { owner, agent }, { pull: pull.number });
   if (problems.length === 0) io.out(`✓ pr-work-rules: #${pull.number} builds slice #${slice}, which may be built`);
   return report(io, 'pr-work-rules', problems);
 }
@@ -301,5 +406,77 @@ export async function prePush(sys: Sys, io: Output, refLines: string, url: strin
   }
   if (branches.length > 1) return report(io, 'pre-push', [`one push builds one slice on one branch; this one pushes ${where}`]);
   const [slice] = slices as [number];
-  return report(io, 'pre-push', await sliceProblems(sys, token, slug, slice, owner, { branch: branches[0] as string }));
+  return report(io, 'pre-push', await sliceProblems(sys, token, slug, slice, { owner, agent }, { branch: branches[0] as string }));
+}
+
+/** The label that puts an issue in the owner's Needs you view. */
+const NEEDS_OWNER = 'needs-owner';
+
+function proposalBody(one: Owed, parent: number | undefined, owner: string): string {
+  // The issue it is for comes first: that is how the work rules match a 👍 to it.
+  const what = one.kind === 'added'
+    ? `add #${one.number} (${one.title}) to work item #${parent}, after its approval.`
+    : `drop state #${one.number} (${one.title}), closed as not planned after work item #${parent}'s approval.`;
+  return `Proposal: ${what}\n\n@${owner}: react 👍 to this comment to approve it, or comment "Decision:".`;
+}
+
+/**
+ * Proposes what slice `number` owes the owner, run by an agent session: one
+ * `Proposal:` comment on the slice, as the agent, for its addition after the
+ * work item's approval and one for each state dropped after it, labeling
+ * the slice `needs-owner`. Given a State, proposes that state alone. Run
+ * again, it posts nothing twice, and once the owner has settled everything
+ * it takes the label off.
+ */
+export async function propose(sys: Sys, io: Output, number: number): Promise<number> {
+  const { root, slug } = repoAt(sys);
+  const accounts = loadSettings(sys, root);
+  if (!isOn(sys, root, 'work-rules')) {
+    io.out(offLine('propose', 'work-rules'));
+    return 0;
+  }
+  const token = sys.env.GH_TOKEN;
+  if (!token || token === NO_TOKEN) return report(io, 'propose', ['this session has no token; run process-rules doctor']);
+  // Only the agent's proposals count, so one posted as anyone else would wait for nothing.
+  const user = await sys.http(`${API}/user`, { token });
+  const login = (user.json as { login?: string } | null)?.login;
+  if (user.status !== 200 || !sameLogin(login, accounts.agent)) {
+    return report(io, 'propose', [`propose posts as ${accounts.agent}, but this session's token is ${login ?? 'refused'}`]);
+  }
+
+  const issue = await sliceGraph(sys, token, slug, number);
+  const state = issue?.issueType?.name === 'State' && issue.parent?.issueType?.name === 'Slice';
+  const slice = state ? (issue.parent?.number as number) : number;
+  const read = await readSlice(sys, token, slug, slice, accounts);
+  if (read.problems.length > 0) return report(io, 'propose', read.problems);
+  const asked = read.owed.filter((one) => !state || one.number === number);
+  if (asked.length === 0) {
+    io.out(`propose: #${number} needs no decision from ${accounts.owner}`);
+    return 0;
+  }
+
+  const issues = `${API}/repos/${slug}/issues/${slice}`;
+  for (const one of asked) {
+    const what = one.kind === 'added' ? `#${slice}` : `state #${one.number}`;
+    if (one.settled) {
+      io.out(`✓ ${what}: ${accounts.owner} has decided`);
+    } else if (one.proposals.length > 0) {
+      io.out(`${what}: proposed on #${slice}, waiting on ${accounts.owner}'s 👍`);
+    } else {
+      const posted = await sys.http(`${issues}/comments`, { method: 'POST', token, body: { body: proposalBody(one, read.parent, accounts.owner) } });
+      if (posted.status !== 201) throw new Error(`cannot comment on #${slice} (HTTP ${posted.status})`);
+      io.out(`✓ ${what}: proposed on #${slice}: ${(posted.json as { html_url?: string } | null)?.html_url ?? ''}`.trimEnd());
+    }
+  }
+  if (read.owed.some((one) => !one.settled)) {
+    const labeled = await sys.http(`${issues}/labels`, { method: 'POST', token, body: { labels: [NEEDS_OWNER] } });
+    if (labeled.status !== 200) throw new Error(`cannot label #${slice} ${NEEDS_OWNER} (HTTP ${labeled.status})`);
+    io.out(`#${slice} is labeled ${NEEDS_OWNER}, so it shows in ${accounts.owner}'s Needs you view`);
+    return 0;
+  }
+  const removed = await sys.http(`${issues}/labels/${NEEDS_OWNER}`, { method: 'DELETE', token });
+  // 404: the slice had no such label.
+  if (removed.status !== 200 && removed.status !== 404) throw new Error(`cannot take ${NEEDS_OWNER} off #${slice} (HTTP ${removed.status})`);
+  io.out(`✓ #${slice}: nothing waits on ${accounts.owner}`);
+  return 0;
 }

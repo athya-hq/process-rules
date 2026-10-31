@@ -8,7 +8,7 @@ hooks and a shared GitHub Actions workflow.
 
 ## Status
 
-Early. The CLI runs `machine`, `doctor`, `session-start`, `guard` and `onboard`. What comes next, and in what
+Early. The CLI runs `machine`, `doctor`, `session-start`, `guard`, `onboard` and `propose`. What comes next, and in what
 order: the Slice issues under
 [process-rules roadmap v1](https://github.com/athya-hq/process-rules/issues/22),
 on the Project [process-rules work](https://github.com/orgs/athya-hq/projects/2);
@@ -141,11 +141,28 @@ pull requests: each names exactly one slice, as a line `Slice: #N`, and that
 slice may be built:
 
 - it is a Slice issue under a Work item the owner labeled `approved`;
-- if it was added to the work item after the approval, the owner left a
+- if it was added to the work item after the approval, the owner approved
+  it: a 👍 on the agent's proposal for it, made after it was added, or a
   comment starting `Decision:` naming it;
 - each of its State sub-issues closed as not planned after the approval
-  carries the owner's `Decision:` comment;
+  carries the owner's approval: a 👍 on the agent's proposal for it, or a
+  `Decision:` comment;
 - no other open pull request names it.
+
+**Approving with one tap.** In an agent session, `process-rules propose
+<issue>` asks the owner for what a slice owes: given the slice, it comments
+on it as the agent, one `Proposal:` comment for its addition after the
+approval and one for each State dropped after it (given a State, for that
+state alone), mentioning the owner, and labels the slice `needs-owner`, so it
+shows in the owner's Needs you view and their GitHub notifications. The owner
+approves a proposal by reacting 👍 to it, from the phone or the web; a typed
+`Decision:` comment still works. A 👍 counts only from the owner, only on the
+agent's comment starting `Proposal:` whose first `#N` is the slice or state
+it approves, and only when made after the proposal's last edit (and, for a
+slice, after it was last added). Run again, `propose` posts nothing twice, and
+once the owner has approved everything it takes `needs-owner` off. A
+reaction does not re-run a pull request's checks: the agent proposes before
+it starts, and pre-push or a re-run of Work rules sees the 👍.
 
 **Design frames** is optional: with `"figma": { "library": "<file key>" }` in
 the settings and a `FIGMA_TOKEN` Actions secret, each State of the slice an
@@ -233,7 +250,7 @@ release, attaching the CLI package it built and tested. Install that package on
 each machine with pnpm; nothing is built on install:
 
 ```bash
-pnpm add -g https://github.com/athya-hq/process-rules/releases/download/v0.5.1/athya-hq-process-rules-0.5.1.tgz
+pnpm add -g https://github.com/athya-hq/process-rules/releases/download/v0.5.2/athya-hq-process-rules-0.5.2.tgz
 ```
 
 `onboard` pins the client's workflow to one version, the release of the CLI

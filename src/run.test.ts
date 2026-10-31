@@ -107,6 +107,16 @@ describe('run', () => {
     assert.equal((await capture(['pre-push', 'origin', 'url', 'extra'])).code, 2);
   });
 
+  it('runs propose, which takes one issue number', async () => {
+    const refused = await capture(['propose', '#12'], () => new FakeSys());
+    assert.equal(refused.code, 1);
+    assert.match(refused.err[0] ?? '', /this session has no token/);
+    assert.deepEqual(await capture(['propose']), { code: 2, out: [], err: ['process-rules: propose needs an issue number', USAGE] });
+    assert.deepEqual(await capture(['propose', 'twelve']), { code: 2, out: [], err: ['process-rules: propose needs an issue number, not "twelve"', USAGE] });
+    assert.equal((await capture(['propose', '12', '13'])).code, 2);
+    assert.deepEqual(await capture(['propose', '#0']), { code: 2, out: [], err: ['process-rules: propose needs an issue number, not "#0"', USAGE] });
+  });
+
   it('runs guard, refusing when the check itself fails', async () => {
     const sys = new FakeSys();
     sys.stdin = JSON.stringify({ session_id: 's', tool_input: { command: 'ls' } });
