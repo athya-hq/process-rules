@@ -1,7 +1,7 @@
 import { API, SETTINGS_PATH, loadSettings, sameLogin } from './agent.ts';
 import type { Output, Sys } from './types.ts';
 import { slicesNamed } from './work.ts';
-import { isOn, offLine } from './features.ts';
+import { isOn, notAdoptedLine, offLine } from './features.ts';
 
 const FIGMA = 'https://api.figma.com/v1';
 /** A Figma link to one node: the file's key and the node's id. */
@@ -89,6 +89,11 @@ export async function prDesign(sys: Sys, io: Output): Promise<number> {
   const { GITHUB_EVENT_PATH: eventPath, GITHUB_REPOSITORY: slug, GH_TOKEN: token, FIGMA_TOKEN: figmaToken } = sys.env;
   if (!eventPath || !slug || !token) {
     throw new Error('pr-design runs in GitHub Actions: GITHUB_EVENT_PATH, GITHUB_REPOSITORY and GH_TOKEN must be set');
+  }
+  const notAdopted = notAdoptedLine(sys, sys.cwd, 'pr-design');
+  if (notAdopted) {
+    io.out(notAdopted);
+    return 0;
   }
   loadSettings(sys, sys.cwd);
   if (!isOn(sys, sys.cwd, 'design')) {

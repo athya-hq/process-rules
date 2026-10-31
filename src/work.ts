@@ -1,5 +1,5 @@
 import { API, NO_TOKEN, loadSettings, repoAt, sameLogin } from './agent.ts';
-import { isOn, offLine } from './features.ts';
+import { isOn, notAdoptedLine, offLine } from './features.ts';
 import type { Output, Sys } from './types.ts';
 
 /** How a pull request or a commit names the slice it builds. */
@@ -199,6 +199,11 @@ export async function prWorkRules(sys: Sys, io: Output): Promise<number> {
     io.out('pr-work-rules: not a pull request; nothing to check');
     return 0;
   }
+  const notAdopted = notAdoptedLine(sys, sys.cwd, 'pr-work-rules');
+  if (notAdopted) {
+    io.out(notAdopted);
+    return 0;
+  }
   const { owner, agent } = loadSettings(sys, sys.cwd);
   if (!isOn(sys, sys.cwd, 'work-rules')) {
     io.out(offLine('pr-work-rules', 'work-rules'));
@@ -224,12 +229,32 @@ export async function prWorkRules(sys: Sys, io: Output): Promise<number> {
 
 const ZERO = /^0+$/;
 
+function gitLog(sys: Sys, root: string, args: string[]): string {
+  const log = sys.exec('git', ['log', ...args], { cwd: root });
+  if (log.code !== 0) throw new Error(`git log failed: ${log.stderr.trim()}`);
+  return log.stdout;
+}
+
+/**
+ * When every commit in `range` is a merge, the messages of the commits its
+ * tip reaches that the merges did not bring in: the branch's own, a merge's
+ * first parent being the branch it was made on. Otherwise undefined.
+ */
+function branchBeyondMerges(sys: Sys, root: string, range: string[]): string | undefined {
+  const parents = gitLog(sys, root, ['--format=%P', ...range]).split('\n').filter(Boolean).map((line) => line.split(' '));
+  if (parents.some((commit) => commit.length < 2)) return undefined;
+  return gitLog(sys, root, ['--no-merges', '--format=%B', range[0] as string, '--not', ...parents.flatMap((commit) => commit.slice(1))]);
+}
+
 /**
  * The work rules before a push from an agent session, run by the client's
  * pre-push git hook with git's ref lines on stdin. All the commits one push
  * brings, across every ref, must name exactly one slice between them, as a
- * trailer `Slice: #N`, that may be built. Pushes outside agent sessions pass;
- * an agent session with no token is refused.
+ * trailer `Slice: #N`, that may be built. Commits a remote already has, such
+ * as the default branch's, are not the push's own; a push whose own commits
+ * are all merges, such as a merge of the default branch, is judged by the
+ * branch's commits that the merges did not bring. Pushes outside agent
+ * sessions pass; an agent session with no token is refused.
  */
 export async function prePush(sys: Sys, io: Output, refLines: string): Promise<number> {
   if (!sys.env.PROCESS_RULES_AGENT) return 0;
@@ -248,11 +273,11 @@ export async function prePush(sys: Sys, io: Output, refLines: string): Promise<n
   for (const line of refLines.split('\n').filter(Boolean)) {
     const [, local, remoteRef, remote] = line.split(' ');
     if (!local || !remoteRef || ZERO.test(local)) continue;
-    const range = remote && !ZERO.test(remote) ? [`${remote}..${local}`] : [local, '--not', '--remotes'];
-    const log = sys.exec('git', ['log', '--format=%B', ...range], { cwd: root });
-    if (log.code !== 0) throw new Error(`git log failed: ${log.stderr.trim()}`);
-    if (!log.stdout.trim()) continue;
-    messages += `${log.stdout}\n`;
+    const range = [local, '--not', ...(remote && !ZERO.test(remote) ? [remote] : []), '--remotes'];
+    let log = gitLog(sys, root, ['--format=%B', ...range]);
+    if (!log.trim()) continue;
+    if (slicesNamed(log).length === 0) log = branchBeyondMerges(sys, root, range) ?? log;
+    messages += `${log}\n`;
     branches.push(remoteRef.replace(/^refs\/heads\//, ''));
   }
   if (branches.length === 0) return 0;

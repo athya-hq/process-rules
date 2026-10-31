@@ -4,7 +4,7 @@ import { describe, it } from 'node:test';
 import { decisionsWeekly } from './decisions.ts';
 import { prDesign } from './design.ts';
 import { AGENT, FakeSys, ROOT, capture } from './fake.test.ts';
-import { FEATURES, featuresIn, isOn, offLine, parseFeatures } from './features.ts';
+import { FEATURES, featuresIn, isOn, notAdoptedLine, offLine, parseFeatures } from './features.ts';
 import { prIdentity } from './identity.ts';
 import { reviewsDue } from './reviews.ts';
 import { prePush, prWorkRules } from './work.ts';
@@ -35,6 +35,31 @@ describe('features', () => {
     assert.equal(isOn(sys, ROOT, 'identity'), true);
     assert.equal(isOn(sys, ROOT, 'board'), false);
     assert.equal(offLine('pr-design', 'design'), 'pr-design: design is off in .github/process-rules.json; nothing to check');
+  });
+});
+
+describe('pull request checks on a base not adopted yet', () => {
+  for (const [command, check] of [
+    ['pr-identity', prIdentity],
+    ['pr-work-rules', prWorkRules],
+    ['pr-design', prDesign],
+  ] as const) {
+    it(`${command} passes, saying the base has no settings, and asks GitHub nothing`, async () => {
+      const sys = new FakeSys();
+      sys.files.delete(SETTINGS);
+      sys.files.set('/tmp/event.json', JSON.stringify({ action: 'opened', pull_request: { number: 7, body: 'Slice: #1', user: { login: AGENT }, base: { sha: 'b' }, head: { ref: 'w', repo: null } } }));
+      sys.env = { GITHUB_EVENT_PATH: '/tmp/event.json', GITHUB_ACTOR: AGENT, GITHUB_REPOSITORY: 'example-org/example-app', GH_TOKEN: 'ghs_run', FIGMA_TOKEN: 'figd' };
+      const { io, out } = capture();
+      assert.equal(await check(sys, io), 0);
+      assert.deepEqual(out, [`${command}: the base branch has no .github/process-rules.json, so the repo is not adopted on its base yet; nothing to check`]);
+      assert.deepEqual(sys.requests, []);
+    });
+  }
+
+  it('says nothing once the base has settings', () => {
+    const sys = new FakeSys();
+    sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT }));
+    assert.equal(notAdoptedLine(sys, ROOT, 'pr-identity'), undefined);
   });
 });
 

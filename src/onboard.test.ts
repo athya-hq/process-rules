@@ -403,6 +403,33 @@ describe('onboard', () => {
       assert.equal(sys.requests.find((r) => r.method === 'PATCH')?.token, TOKEN);
     });
 
+    it('offers write access to an agent that can only read, then accepts the invitation', async () => {
+      const sys = fresh();
+      let accepted = false;
+      let invited = false;
+      sys.route('GET', REPO, () => (accepted ? PUSH : { status: 200, json: { ...repoJson(), permissions: { push: false } } }));
+      sys.route('GET', '/user/repository_invitations?per_page=100&page=1', () => ({
+        status: 200,
+        json: invited ? [{ id: 9, repository: { full_name: 'example-org/example-app' } }] : [],
+      }));
+      sys.route('PATCH', '/user/repository_invitations/9', () => {
+        accepted = true;
+        return { status: 204, json: null };
+      });
+      sys.execOverride = (call) => {
+        if (call.command !== 'gh' || call.args[0] !== 'api') return undefined;
+        assert.deepEqual(call.args, ['api', '-X', 'PUT', 'repos/example-org/example-app/collaborators/ExampleBot', '-f', 'permission=push']);
+        invited = true;
+        return { code: 0, stdout: '', stderr: '' };
+      };
+      sys.answers = Array<string>(12).fill('y');
+      const { code } = await run(sys);
+      assert.equal(code, 0);
+      assert.ok(invited, 'grants write access');
+      assert.ok(sys.asked.some((q) => q.startsWith('ExampleBot can read but not push to example-org/example-app. Give it write access')));
+      assert.ok(sys.asked.some((q) => q.startsWith("Accept ExampleBot's invitation")));
+    });
+
     it('finds an invitation on a later page', async () => {
       const sys = fresh();
       let accepted = false;
@@ -459,9 +486,13 @@ describe('onboard', () => {
         ['onboard: ExampleBot still cannot see example-org/example-app; check the invitation reached ExampleBot'],
       ],
       [
-        'read-only access',
-        (sys: FakeSys) => sys.route('GET', REPO, { status: 200, json: { ...repoJson(), permissions: { push: false } } }),
-        ['onboard: ExampleBot can read example-org/example-app but not push; give it the Write role'],
+        'an agent still read-only',
+        (sys: FakeSys) => {
+          sys.route('GET', REPO, { status: 200, json: { ...repoJson(), permissions: { push: false } } });
+          sys.route('GET', '/user/repository_invitations?per_page=100&page=1', { status: 200, json: [] });
+          sys.execOverride = (call) => (call.command === 'gh' ? { code: 0, stdout: '', stderr: '' } : undefined);
+        },
+        ['onboard: ExampleBot can read example-org/example-app but still not push; check the invitation reached ExampleBot, or give it the Write role'],
       ],
       [
         'an organisation requiring SAML',

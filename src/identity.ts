@@ -1,5 +1,5 @@
 import { API, account, loadSettings, noreplyEmail, sameLogin } from './agent.ts';
-import { isOn, offLine } from './features.ts';
+import { isOn, notAdoptedLine, offLine } from './features.ts';
 import type { Output, Sys } from './types.ts';
 
 interface Commit {
@@ -34,6 +34,11 @@ export async function prIdentity(sys: Sys, io: Output): Promise<number> {
   const number = pull?.number;
   if (typeof number !== 'number' || !pull?.base || !pull.head) {
     io.out('pr-identity: not a pull request; nothing to check');
+    return 0;
+  }
+  const notAdopted = notAdoptedLine(sys, sys.cwd, 'pr-identity');
+  if (notAdopted) {
+    io.out(notAdopted);
     return 0;
   }
   const { agent } = loadSettings(sys, sys.cwd);

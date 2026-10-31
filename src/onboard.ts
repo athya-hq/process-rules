@@ -341,10 +341,12 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
   }
 
   let reach = await access(sys, slug, token);
-  if (reach.kind === 'none') {
+  // A public repository, or an organisation's base permission, lets the agent read without pushing.
+  if (reach.kind === 'none' || reach.kind === 'read') {
     let invite = await invitation(sys, slug, token);
     if (invite === undefined) {
-      if (!(await confirm(`${agent} cannot see ${slug}. Give it write access, as you, through gh?`))) {
+      const sees = reach.kind === 'none' ? 'cannot see' : 'can read but not push to';
+      if (!(await confirm(`${agent} ${sees} ${slug}. Give it write access, as you, through gh?`))) {
         return stop('agent access');
       }
       const added = sys.exec('gh', ['api', '-X', 'PUT', `repos/${slug}/collaborators/${agent}`, '-f', 'permission=push']);
@@ -355,7 +357,7 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
       }
       // An organisation member gets access at once; anyone else gets an invitation.
       reach = await access(sys, slug, token);
-      invite = reach.kind === 'none' ? await invitation(sys, slug, token) : undefined;
+      invite = reach.kind === 'push' ? undefined : await invitation(sys, slug, token);
     }
     if (invite !== undefined) {
       if (!(await confirm(`Accept ${agent}'s invitation to ${slug}, as ${agent}?`))) return stop('agent access');
@@ -370,7 +372,7 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
   if (reach.kind !== 'push') {
     const why = {
       none: `${agent} still cannot see ${slug}; check the invitation reached ${agent}`,
-      read: `${agent} can read ${slug} but not push; give it the Write role`,
+      read: `${agent} can read ${slug} but still not push; check the invitation reached ${agent}, or give it the Write role`,
     };
     io.err(`onboard: ${reach.kind === 'refused' ? reach.reason : why[reach.kind]}`);
     return 1;
