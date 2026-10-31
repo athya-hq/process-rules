@@ -1,0 +1,21 @@
+README.md
+  s_3434435b07bf56::t_91807a97a2c5ef 236
+package.json
+  s_3434435b07bf56::t_bd7c6fbcadbc65 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f2b814782b9fbb17c7979b6a97b5b789b34dc7c9",
+  "prompts": {},
+  "sessions": {
+    "s_3434435b07bf56": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "058a99ad-f73b-477f-b151-34751044a989",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Alok Bansal <alokagrawal8@gmail.com>"
+    }
+  }
+}
