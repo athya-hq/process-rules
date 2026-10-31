@@ -223,9 +223,9 @@ export async function setUpBoard(
       `${lost.length > 0 ? ` (not ${lost.join(', ')}, which the template lacks)` : ''}, and close it as "${title} (old)"?`;
     if (await confirm(question)) {
       // Renamed first, so a rerun after a failure finds the copy by the title, not the old Project.
-      await retitle(sys, token, old.id, `${title} (old)`, false);
+      await retitle(sys, token, old.id, `${title} (old)`);
       const copy = await copyTemplate(sys, io, token, holderId as string, title, 'keeping the Project as it is');
-      if (!copy) await retitle(sys, token, old.id, title, false);
+      if (!copy) await retitle(sys, token, old.id, title);
       else {
         await moveItems(sys, token, moving.items, copy.id);
         await retitle(sys, token, old.id, `${title} (old)`, true);
@@ -277,12 +277,13 @@ export async function setUpBoard(
   return project.url;
 }
 
-async function retitle(sys: Sys, token: string, projectId: string, title: string, closed: boolean): Promise<void> {
+/** Renames a Project, and closes it when asked; otherwise it stays open or closed as it was. */
+async function retitle(sys: Sys, token: string, projectId: string, title: string, close = false): Promise<void> {
   await graphql(
     sys,
     token,
-    'mutation($project: ID!, $title: String!, $closed: Boolean!) { updateProjectV2(input: { projectId: $project, title: $title, closed: $closed }) { projectV2 { id } } }',
-    { project: projectId, title, closed },
+    `mutation($project: ID!, $title: String!) { updateProjectV2(input: { projectId: $project, title: $title${close ? ', closed: true' : ''} }) { projectV2 { id } } }`,
+    { project: projectId, title },
   );
 }
 

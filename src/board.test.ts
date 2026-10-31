@@ -211,7 +211,7 @@ describe('setUpBoard', () => {
     board.template = 'refused';
     const { url, out } = await setUp(sys, ['y']);
     assert.equal(url, URL);
-    assert.deepEqual({ title: board.project?.title, closed: board.project?.closed }, { title: 'example-app work', closed: false });
+    assert.deepEqual({ title: board.project?.title, closed: board.project?.closed }, { title: 'example-app work', closed: undefined }, 'renamed back, its closed state untouched');
     assert.ok(out.includes("- the process-rules template could not be copied (GitHub's GraphQL API refused: Resource not accessible by integration); keeping the Project as it is"));
     assert.deepEqual(out.slice(-4), viewsChecklist(URL));
   });

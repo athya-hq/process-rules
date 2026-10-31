@@ -236,7 +236,7 @@ export class Board {
         return data({ updateProjectV2ItemFieldValue: { projectV2Item: { id: variables.item } } });
       }
       case 'updateProjectV2(': {
-        Object.assign(this.at(variables.project), { title: variables.title, closed: variables.closed });
+        Object.assign(this.at(variables.project), { title: variables.title, ...(query.includes('closed: true') ? { closed: true } : {}) });
         return data({ updateProjectV2: { projectV2: { id: variables.project } } });
       }
       case 'views(first': {
