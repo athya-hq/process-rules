@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { AGENT, FakeSys, capture } from './fake.test.ts';
+import { AGENT, FakeSys, ROOT, capture } from './fake.test.ts';
 import { reviewThread, threadArgs } from './review-thread.ts';
 
 const THREAD = 'PRRT_kwDOabc123';
@@ -110,6 +110,25 @@ describe('reviewThread', () => {
     delete none.env.GH_TOKEN;
     assert.deepEqual((await run(none, [THREAD, '--resolve'])).err, ['✗ this session has no token; run process-rules doctor', 'review-thread: refused']);
     assert.equal(owner.requests.filter((r) => r.url.endsWith('/graphql')).length, 0);
+  });
+
+  it('with two agents, answers as either on a pull request either opened, and refuses an owner', async () => {
+    const team = (login: string, author: string): FakeSys => {
+      const sys = session({ author: { login: author } });
+      sys.files.set(`${ROOT}/.github/process-rules.json`, JSON.stringify({ owner: ['example-owner', 'Second-Owner'], agent: [AGENT, 'OtherBot'] }));
+      sys.acceptToken('ghp_good', login);
+      return sys;
+    };
+    assert.equal((await run(team('OtherBot', AGENT), [THREAD, '--resolve'])).code, 0);
+    assert.equal((await run(team(AGENT, 'otherbot'), [THREAD, '--resolve'])).code, 0);
+    assert.deepEqual((await run(team('OtherBot', 'Second-Owner'), [THREAD, '--resolve'])).err, [
+      `✗ ${THREAD} is on #40, which Second-Owner opened, not ${AGENT} or OtherBot`,
+      'review-thread: refused',
+    ]);
+    assert.deepEqual((await run(team('Second-Owner', AGENT), [THREAD, '--resolve'])).err, [
+      `✗ review-thread answers as ${AGENT} or OtherBot, but this session's token is Second-Owner`,
+      'review-thread: refused',
+    ]);
   });
 
   it('throws when GitHub refuses, naming what it refused', async () => {

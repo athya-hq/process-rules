@@ -49,7 +49,7 @@ describe('pushIdentityProblem', () => {
   ]) {
     it(`refuses SSH, which a host alias can make GitHub: ${url}`, async () => {
       assert.equal(
-        await pushIdentityProblem(new FakeSys(), ROOT, url, AGENT),
+        await pushIdentityProblem(new FakeSys(), ROOT, url, [AGENT]),
         `this push goes over SSH, with this Mac's SSH keys, which are its owner's, not ${AGENT}'s: ${NOT_SET_UP}`,
       );
     });
@@ -64,29 +64,29 @@ describe('pushIdentityProblem', () => {
     };
 
     it('asks GitHub, through the proxy, who the session pushes as', async () => {
-      assert.equal(await pushIdentityProblem(cloud('examplebot'), ROOT, HTTPS, AGENT), undefined);
+      assert.equal(await pushIdentityProblem(cloud('examplebot'), ROOT, HTTPS, [AGENT]), undefined);
       assert.equal(
-        await pushIdentityProblem(cloud('example-owner'), ROOT, HTTPS, AGENT),
+        await pushIdentityProblem(cloud('example-owner'), ROOT, HTTPS, [AGENT]),
         `this cloud session pushes as example-owner, not ${AGENT}; claude.ai's GitHub connection must be ${AGENT} for agent sessions`,
       );
       assert.equal(
-        await pushIdentityProblem(cloud(null), ROOT, HTTPS, AGENT),
+        await pushIdentityProblem(cloud(null), ROOT, HTTPS, [AGENT]),
         `GitHub answered HTTP 401 when asked who this session is, so this push cannot be checked as ${AGENT}`,
       );
     });
 
     it('still refuses SSH', async () => {
-      assert.match((await pushIdentityProblem(cloud(AGENT), ROOT, 'git@github.com:example-org/example-app.git', AGENT)) ?? '', /goes over SSH/);
+      assert.match((await pushIdentityProblem(cloud(AGENT), ROOT, 'git@github.com:example-org/example-app.git', [AGENT])) ?? '', /goes over SSH/);
     });
   });
 
   it('refuses a push git gave no URL for', async () => {
-    assert.equal(await pushIdentityProblem(new FakeSys(), ROOT, '', AGENT), 'git gave the pre-push hook no remote URL, so this push cannot be checked');
+    assert.equal(await pushIdentityProblem(new FakeSys(), ROOT, '', [AGENT]), 'git gave the pre-push hook no remote URL, so this push cannot be checked');
   });
 
   it('lets a push through when git would push with the agent\'s token', async () => {
     const sys = withCredentials('ghp_agent', 'examplebot');
-    assert.equal(await pushIdentityProblem(sys, ROOT, HTTPS, AGENT), undefined);
+    assert.equal(await pushIdentityProblem(sys, ROOT, HTTPS, [AGENT]), undefined);
     const fill = sys.calls.find((c) => c.args[0] === 'credential');
     assert.deepEqual({ cwd: fill?.cwd, input: fill?.input, prompt: fill?.env?.GIT_TERMINAL_PROMPT, askpass: fill?.env?.GIT_ASKPASS }, {
       cwd: ROOT,
@@ -99,7 +99,7 @@ describe('pushIdentityProblem', () => {
 
   it("refuses a push with the owner's credentials, naming whose they are", async () => {
     assert.equal(
-      await pushIdentityProblem(withCredentials('gho_owner', 'example-owner'), ROOT, HTTPS, AGENT),
+      await pushIdentityProblem(withCredentials('gho_owner', 'example-owner'), ROOT, HTTPS, [AGENT]),
       `this push would reach GitHub as example-owner, not ${AGENT}; agent sessions push only as ${AGENT}: ${NOT_SET_UP}`,
     );
   });
@@ -107,25 +107,25 @@ describe('pushIdentityProblem', () => {
   for (const url of ['https://ExampleBot:gho_owner@github.com/example-org/example-app.git', 'https://GitHub.com:443/example-org/example-app.git']) {
     it(`asks git about the whole URL, a user or password in it included: ${url}`, async () => {
       const sys = withCredentials('ghp_agent', AGENT);
-      await pushIdentityProblem(sys, ROOT, url, AGENT);
+      await pushIdentityProblem(sys, ROOT, url, [AGENT]);
       assert.equal(sys.calls.find((c) => c.args[0] === 'credential')?.input, `url=${url}\n\n`);
     });
   }
 
   it('refuses when git has no credentials, or GitHub refuses them, or cannot be asked', async () => {
-    assert.match((await pushIdentityProblem(withCredentials(undefined), ROOT, HTTPS, AGENT)) ?? '', /^git has no credentials for github\.com here/);
-    assert.match((await pushIdentityProblem(withCredentials('process-rules-no-agent-token'), ROOT, HTTPS, AGENT)) ?? '', /^GitHub does not accept the credentials git would push with/);
+    assert.match((await pushIdentityProblem(withCredentials(undefined), ROOT, HTTPS, [AGENT])) ?? '', /^git has no credentials for github\.com here/);
+    assert.match((await pushIdentityProblem(withCredentials('process-rules-no-agent-token'), ROOT, HTTPS, [AGENT])) ?? '', /^GitHub does not accept the credentials git would push with/);
     const down = withCredentials('ghp_agent');
     down.http = () => Promise.reject(new Error('offline'));
-    assert.equal(await pushIdentityProblem(down, ROOT, HTTPS, AGENT), 'GitHub cannot be asked who this push is from (offline)');
+    assert.equal(await pushIdentityProblem(down, ROOT, HTTPS, [AGENT]), 'GitHub cannot be asked who this push is from (offline)');
     down.http = () => Promise.reject('offline');
-    assert.equal(await pushIdentityProblem(down, ROOT, HTTPS, AGENT), 'GitHub cannot be asked who this push is from (offline)');
+    assert.equal(await pushIdentityProblem(down, ROOT, HTTPS, [AGENT]), 'GitHub cannot be asked who this push is from (offline)');
   });
 
   it('leaves remotes that are not GitHub alone', async () => {
     const sys = new FakeSys();
     for (const url of ['https://gitlab.com/a/b.git', '/srv/git/a.git', './a.git', 'file:///srv/git/a.git']) {
-      assert.equal(await pushIdentityProblem(sys, ROOT, url, AGENT), undefined, url);
+      assert.equal(await pushIdentityProblem(sys, ROOT, url, [AGENT]), undefined, url);
     }
     assert.deepEqual(sys.calls, []);
   });

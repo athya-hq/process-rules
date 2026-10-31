@@ -282,6 +282,59 @@ describe('sessionStart', () => {
     assert.deepEqual((await start(sys)).out, ['process-rules: this session works as ExampleBot on GitHub.']);
   });
 
+  describe('with two owners and two agents', () => {
+    const TEAM = JSON.stringify({ owner: ['example-owner', 'Second-Owner'], agent: ['OtherBot', AGENT] });
+    const OTHER_SESSION = pathsFor(HOME, 'OtherBot').session;
+    const team = (): FakeSys => {
+      const sys = ready();
+      sys.files.set(`${ROOT}/.github/process-rules.json`, TEAM);
+      return sys;
+    };
+    const locked = (reason: string): string =>
+      `process-rules: GitHub is locked out of this session: ${reason}. Do not work around the lock; ask example-owner to run process-rules machine <agent> for one of them.`;
+
+    it('works as the one agent machine set up on this Mac', async () => {
+      const { out, env } = await start(team());
+      assert.deepEqual(out, ['process-rules: this session works as ExampleBot on GitHub.']);
+      assert.equal(env, `\n${lockScript(HOME)}\n${SCRIPT}`);
+    });
+
+    it('stays locked, naming both, when machine set up neither', async () => {
+      const sys = team();
+      sys.files.delete(SESSION);
+      const { out, env } = await start(sys);
+      assert.equal(env, `\n${lockScript(HOME)}`);
+      assert.deepEqual(out, [locked('.github/process-rules.json names the agents OtherBot or ExampleBot, and process-rules machine has set up none of them on this machine')]);
+    });
+
+    it('stays locked rather than guess when machine set up both', async () => {
+      const sys = team();
+      sys.files.set(OTHER_SESSION, sessionScript('OtherBot', 43, pathsFor(HOME, 'OtherBot')));
+      const { out, env } = await start(sys);
+      assert.equal(env, `\n${lockScript(HOME)}`);
+      assert.deepEqual(out, [
+        locked(
+          '.github/process-rules.json names the agents OtherBot or ExampleBot, and process-rules machine has set up OtherBot and ExampleBot on this machine, so which one this session works as cannot be told; remove the others\' folders under ~/.config/process-rules',
+        ),
+      ]);
+    });
+
+    it('in a cloud session, works as whichever agent claude.ai connects, and tells the first owner otherwise', async () => {
+      const cloud = (login: string): FakeSys => {
+        const sys = new FakeSys();
+        sys.env = { CLAUDE_ENV_FILE: ENV, CLAUDE_CODE_REMOTE: 'true', GH_TOKEN: NO_TOKEN };
+        sys.files.set(`${ROOT}/.github/process-rules.json`, TEAM);
+        sys.acceptToken(PROXY_TOKEN, login);
+        return sys;
+      };
+      assert.deepEqual((await start(cloud('OtherBot'))).out, ['process-rules: this cloud session works as OtherBot on GitHub.']);
+      assert.deepEqual((await start(cloud(AGENT))).out, ['process-rules: this cloud session works as ExampleBot on GitHub.']);
+      assert.deepEqual((await start(cloud('Second-Owner'))).out, [
+        "process-rules: STOP. This cloud session reaches GitHub as Second-Owner, not OtherBot or ExampleBot: claude.ai's GitHub connection must be OtherBot or ExampleBot for agent sessions. Do not push, fetch, or run gh in this session; tell example-owner.",
+      ]);
+    });
+  });
+
   it('keeps GitHub locked out on a platform with no token store', async () => {
     const sys = Object.assign(ready(), { platform: 'linux' });
     const { out, env } = await start(sys);

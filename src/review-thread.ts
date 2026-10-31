@@ -1,4 +1,4 @@
-import { API, loadSettings, repoAt, sameLogin } from './agent.ts';
+import { API, anyLogin, either, loadSettings, repoAt } from './agent.ts';
 import type { Output, Sys } from './types.ts';
 import { sessionToken } from './work.ts';
 
@@ -37,17 +37,18 @@ async function graphql(sys: Sys, token: string, query: string, variables: Record
 }
 
 /**
- * Answers one review thread on one of the agent's own pull requests in the
- * repository here, as the agent: a reply, then resolving it, or either.
+ * Answers one review thread on a pull request an agent opened in the
+ * repository here, as the session's agent: a reply, then resolving it, or either.
  * Only this, so the client's Claude Code settings can allow it without a
  * prompt: answering review findings is routine agent work, like pushing to
- * its branch. Refused unless the session's token is the agent's and the
- * thread is on a pull request the agent opened in this repository.
+ * its branch. Refused unless the session's token is an agent's and the
+ * thread is on a pull request any of the agents opened in this repository.
  */
 export async function reviewThread(sys: Sys, io: Output, args: readonly string[]): Promise<number> {
   const { thread, reply, resolve } = threadArgs(args);
   const { root, slug } = repoAt(sys);
-  const { agent } = loadSettings(sys, root);
+  const { agents } = loadSettings(sys, root);
+  const agent = either(agents);
   const refused = (problem: string): number => {
     io.err(`✗ ${problem}`);
     io.err('review-thread: refused');
@@ -57,7 +58,7 @@ export async function reviewThread(sys: Sys, io: Output, args: readonly string[]
   if (!token) return refused('this session has no token; run process-rules doctor');
   const user = await sys.http(`${API}/user`, { token });
   const login = (user.json as { login?: string } | null)?.login;
-  if (user.status !== 200 || !sameLogin(login, agent)) return refused(`review-thread answers as ${agent}, but this session's token is ${login ?? 'refused'}`);
+  if (user.status !== 200 || !anyLogin(agents, login)) return refused(`review-thread answers as ${agent}, but this session's token is ${login ?? 'refused'}`);
 
   const found = (await graphql(
     sys,
@@ -69,7 +70,7 @@ export async function reviewThread(sys: Sys, io: Output, args: readonly string[]
   const pull = found.node?.pullRequest;
   if (!pull) return refused(`${thread} is not a review thread GitHub shows ${agent}`);
   if (pull.repository.nameWithOwner.toLowerCase() !== slug.toLowerCase()) return refused(`${thread} is on ${pull.repository.nameWithOwner}#${pull.number}, not a pull request in ${slug}`);
-  if (!sameLogin(pull.author?.login, agent)) return refused(`${thread} is on #${pull.number}, which ${pull.author?.login ?? 'a deleted account'} opened, not ${agent}`);
+  if (!anyLogin(agents, pull.author?.login)) return refused(`${thread} is on #${pull.number}, which ${pull.author?.login ?? 'a deleted account'} opened, not ${agent}`);
 
   if (reply !== undefined) {
     await graphql(

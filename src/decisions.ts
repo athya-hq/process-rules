@@ -1,4 +1,4 @@
-import { API, loadSettings, sameLogin } from './agent.ts';
+import { API, anyLogin, either, loadSettings } from './agent.ts';
 import { PERSONAL_REPO, isOn, isPersonal, offLine } from './features.ts';
 import { expireVetoes } from './reviews.ts';
 import type { Output, Sys } from './types.ts';
@@ -66,12 +66,12 @@ async function openIssues(sys: Sys, token: string, slug: string, filter: string)
  * `cannot-run-here`; any other check runs in the checkout, and when it fails
  * the decision gets a comment and one undo issue for the owner; an Override
  * whose expiry is within 30 days is labeled `expiring`. A check runs only
- * when the owner or the agent wrote the issue and was the last to edit it.
+ * when an owner or an agent wrote the issue and was the last to edit it.
  */
 export async function decisionsWeekly(sys: Sys, io: Output): Promise<number> {
   const { GITHUB_REPOSITORY: slug, GH_TOKEN: token } = sys.env;
   if (!slug || !token) throw new Error('decisions-weekly runs in GitHub Actions: GITHUB_REPOSITORY and GH_TOKEN must be set');
-  const { owner, agent } = loadSettings(sys, sys.cwd);
+  const { owners, agents } = loadSettings(sys, sys.cwd);
   const review = isOn(sys, sys.cwd, 'review');
   const on = isOn(sys, sys.cwd, 'decisions');
   // Decisions and their vetoes are issues of the type Decision, so neither runs where there are no issue types.
@@ -85,7 +85,7 @@ export async function decisionsWeekly(sys: Sys, io: Output): Promise<number> {
     io.out(offLine('decisions-weekly', 'decisions'));
     return 0;
   }
-  const trusted = (login: string | undefined): boolean => sameLogin(login, owner) || sameLogin(login, agent);
+  const trusted = (login: string | undefined): boolean => anyLogin(owners, login) || anyLogin(agents, login);
   const decisions = await openIssues(sys, token, slug, 'type=Decision');
   const undos = await openIssues(sys, token, slug, 'labels=needs-owner');
 
@@ -129,7 +129,7 @@ export async function decisionsWeekly(sys: Sys, io: Output): Promise<number> {
     if (!decision.check) continue;
     const editor = editors.get(issue.number);
     if (!trusted(issue.user?.login) || (editor !== undefined && !trusted(editor))) {
-      io.out(`${where}: not run; only ${owner} or ${agent} may write a decision's check`);
+      io.out(`${where}: not run; only ${either([...owners, ...agents])} may write a decision's check`);
       continue;
     }
     if (LAPTOP_PATH.test(decision.check)) {

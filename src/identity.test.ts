@@ -294,3 +294,49 @@ describe('prIdentity', () => {
     assert.match((await check(sys)).err[0] ?? '', /^✗ no push GitHub has recorded to work brought a1/);
   });
 });
+
+describe('prIdentity with two agents', () => {
+  const OTHER = 'OtherBot';
+  const OTHER_EMAIL = '43+OtherBot@users.noreply.github.com';
+  const other = (sha: string, committer = OTHER): Record<string, unknown> => ({
+    sha,
+    author: { login: OTHER },
+    committer: { login: committer },
+    commit: { author: { email: OTHER_EMAIL }, verification: { verified: true, reason: 'valid' } },
+  });
+  const team = (commits: Record<string, unknown>[], pushes: Push[]): FakeSys => {
+    const sys = actions('opened', AGENT, commits, pushes);
+    sys.files.set(`${ROOT}/.github/process-rules.json`, JSON.stringify({ owner: ['example-owner', 'Second-Owner'], agent: [AGENT, OTHER] }));
+    sys.route('GET', `/users/${OTHER}`, { status: 200, json: { id: 43, login: OTHER } });
+    return sys;
+  };
+
+  it("passes each agent's Verified commits, pushed by either agent", async () => {
+    const sys = team([commit('a1', 'agent'), other('b1')], [created(AGENT, ['a1']), pushed('otherbot', 'h1', 'h2', ['b1'])]);
+    assert.deepEqual(await check(sys), {
+      code: 0,
+      out: ['✓ pr-identity: 2 commits by ExampleBot or OtherBot, each Verified and pushed by ExampleBot or OtherBot'],
+      err: [],
+    });
+    const mixed = team([other('b1')], [created(AGENT, ['b1'])]);
+    assert.equal((await check(mixed)).code, 0, 'one agent may push the other\'s commits');
+  });
+
+  it('fails a commit claiming one agent but committed by the other, and agent work an owner pushed', async () => {
+    const sys = team([other('b1', AGENT), other('b2')], [created('Second-Owner', ['b1', 'b2'])]);
+    assert.deepEqual((await check(sys)).err, [
+      '✗ b1 claims OtherBot but is not Verified as OtherBot (committer ExampleBot, valid)',
+      '✗ Second-Owner pushed b1, b2, which claim OtherBot; agent work must be pushed by ExampleBot or OtherBot',
+      'pr-identity: #7 fails the identity check',
+    ]);
+  });
+
+  it('names every agent the unrecorded commits claim', async () => {
+    const sys = team([commit('a1', 'agent'), other('b1')], []);
+    sys.sleep = () => Promise.resolve();
+    assert.deepEqual((await check(sys)).err, [
+      '✗ no push GitHub has recorded to work brought a1, b1, which claim ExampleBot or OtherBot; re-run once GitHub records the push',
+      'pr-identity: #7 fails the identity check',
+    ]);
+  });
+});

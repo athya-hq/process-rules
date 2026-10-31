@@ -208,6 +208,17 @@ describe('decisionsWeekly', () => {
     assert.equal((await run(sys)).out[0], '#13: holds');
   });
 
+  it('with two owners and two agents, runs a check any of them wrote and last edited, and no one else\'s', async () => {
+    const team = (author: string, editor: string): FakeSys => {
+      const sys = weekly([decision(14, 'Check: `true`', author)], {}, [], { 14: editor });
+      sys.files.set(`${ROOT}/.github/process-rules.json`, JSON.stringify({ owner: ['example-owner', 'Second-Owner'], agent: [AGENT, 'OtherBot'] }));
+      return sys;
+    };
+    assert.equal((await run(team('Second-Owner', 'otherbot'))).out[0], '#14: holds');
+    assert.equal((await run(team('OtherBot', OWNER))).out[0], '#14: holds');
+    assert.equal((await run(team('mallory', 'Second-Owner'))).out[0], `#14: not run; only ${OWNER}, Second-Owner, ${AGENT} or OtherBot may write a decision's check`);
+  });
+
   it('runs with no decisions, asking GitHub nothing more', async () => {
     const sys = weekly([]);
     assert.deepEqual((await run(sys)).out, ['decisions-weekly: 0 open decisions checked']);

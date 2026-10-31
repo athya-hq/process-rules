@@ -30,9 +30,20 @@ export function sameLogin(a: string | undefined, b: string): boolean {
   return a !== undefined && a.toLowerCase() === b.toLowerCase();
 }
 
+/** Whether `login` is one of `logins`. */
+export function anyLogin(logins: readonly string[], login: string | undefined): boolean {
+  return logins.some((one) => sameLogin(login, one));
+}
+
+/** Logins for a message: "A", "A or B", "A, B or C". */
+export function either(logins: readonly string[]): string {
+  return logins.length < 2 ? (logins[0] ?? '') : `${logins.slice(0, -1).join(', ')} or ${logins.at(-1) as string}`;
+}
+
+/** The settings' accounts: each a login or a list of them in the file, always a list here. */
 export interface Settings {
-  owner: string;
-  agent: string;
+  owners: string[];
+  agents: string[];
 }
 
 /** Reads and checks the settings file at `root`; throws with the reason. */
@@ -42,28 +53,58 @@ export function loadSettings(sys: Sys, root: string): Settings {
     throw new Error(`${SETTINGS_PATH} not found in ${root}`);
   }
   const raw: unknown = JSON.parse(sys.read(path));
-  const owner = field(raw, 'owner');
-  const agent = field(raw, 'agent');
-  if (sameLogin(owner, agent)) {
-    throw new Error(`${SETTINGS_PATH}: owner and agent must be different accounts`);
+  const owners = logins(raw, 'owner');
+  const agents = logins(raw, 'agent');
+  const both = owners.find((owner) => anyLogin(agents, owner));
+  if (both) {
+    throw new Error(`${SETTINGS_PATH}: ${both} is named as both owner and agent; they must be different accounts`);
   }
-  return { owner, agent };
+  return { owners, agents };
 }
 
-function field(raw: unknown, name: string): string {
+function logins(raw: unknown, name: string): string[] {
   const value =
     typeof raw === 'object' && raw !== null && name in raw
       ? (raw as Record<string, unknown>)[name]
       : undefined;
-  if (typeof value !== 'string' || !LOGIN.test(value)) {
-    throw new Error(`${SETTINGS_PATH}: "${name}" must be a GitHub login`);
+  const list = Array.isArray(value) ? (value as unknown[]) : [value];
+  if (list.length === 0 || !list.every((login) => typeof login === 'string' && LOGIN.test(login))) {
+    throw new Error(`${SETTINGS_PATH}: "${name}" must be a GitHub login or a non-empty list of them`);
   }
-  return value;
+  // A login listed twice, in any case, is one account.
+  return (list as string[]).filter((login, i) => list.findIndex((other) => sameLogin(login, other as string)) === i);
+}
+
+/** The agent accounts `machine` has set up on this machine, as their session files spell them. */
+export function agentsSetUp(sys: Sys): string[] {
+  const dir = `${sys.home}/.config/process-rules`;
+  return sys.list(dir).flatMap((name) => {
+    const session = `${dir}/${name}/session.sh`;
+    const agent = sys.exists(session) ? sessionNames(sys.read(session))?.agent : undefined;
+    return agent ? [agent] : [];
+  });
+}
+
+/**
+ * The one agent of `agents` sessions on this machine work as: with one in
+ * the list, that one; with more, the one `machine` set up here. None set up,
+ * or more than one, is a problem: never a guess.
+ */
+export function agentHere(sys: Sys, agents: readonly string[]): { agent: string } | { problem: string } {
+  if (agents.length === 1) return { agent: agents[0] as string };
+  const here = agents.filter((agent) => anyLogin(agentsSetUp(sys), agent));
+  if (here.length === 1) return { agent: here[0] as string };
+  return {
+    problem: here.length === 0
+      ? `${SETTINGS_PATH} names the agents ${either(agents)}, and process-rules machine has set up none of them on this machine`
+      : `${SETTINGS_PATH} names the agents ${either(agents)}, and process-rules machine has set up ${here.join(' and ')} on this machine, so which one this session works as cannot be told; remove the others' folders under ~/.config/process-rules`,
+  };
 }
 
 /**
  * The agent account a command acts for: the login named after it, else the
- * one the settings file of the repo around the working directory names.
+ * one of the agents the settings file of the repo around the working
+ * directory names that sessions here work as (`agentHere`).
  */
 export function agentFrom(sys: Sys, named: string | undefined): string {
   if (named !== undefined) {
@@ -75,7 +116,9 @@ export function agentFrom(sys: Sys, named: string | undefined): string {
   if (top.code !== 0 || !sys.exists(`${root}/${SETTINGS_PATH}`)) {
     throw new Error(`name the agent account after the command, or run it in a repo whose ${SETTINGS_PATH} names one`);
   }
-  return loadSettings(sys, root).agent;
+  const here = agentHere(sys, loadSettings(sys, root).agents);
+  if ('problem' in here) throw new Error(`${here.problem}; name the agent account after the command`);
+  return here.agent;
 }
 
 /** Whether `value` can be a GitHub login. */

@@ -7,7 +7,7 @@ import { after, describe, it } from 'node:test';
 
 import { BUILT_IN, Board, COPY_URL, OWNER_TOKEN, repoJson, settledViews } from './fake-board.test.ts';
 import { FIELDS, ISSUE_TYPES, LABELS } from './board.ts';
-import { AGENT, FakeSys, PULL_URL, ROOT, TOKEN, capture } from './fake.test.ts';
+import { AGENT, AGENT_ID, FakeSys, HOME, PULL_URL, ROOT, TOKEN, capture } from './fake.test.ts';
 import type { HttpResult } from './types.ts';
 import { pathsFor, sessionScript } from './agent.ts';
 import { FEATURES } from './features.ts';
@@ -180,6 +180,48 @@ describe('onboard', () => {
       ),
       out.join('\n'),
     );
+  });
+
+  describe('with settings listing two owners and two agents', () => {
+    const TEAM = { owner: ['example-owner', 'Second-Owner'], agent: ['OtherBot', AGENT], features: [...FEATURES] };
+    const team = (): FakeSys => {
+      const sys = fresh();
+      sys.files.set(SETTINGS, `${JSON.stringify(TEAM, null, 2)}\n`);
+      sys.files.set(pathsFor(HOME, AGENT).session, sessionScript(AGENT, AGENT_ID, pathsFor(HOME, AGENT)));
+      return sys;
+    };
+
+    it('works as the first owner and the agent set up on this Mac, leaving the lists as they are', async () => {
+      const sys = team();
+      const codeowners = `${ROOT}/.github/CODEOWNERS`;
+      sys.files.set(codeowners, '* @example-owner @second-owner\n/docs/ @Second-Owner @a\n');
+      const { code, out, err } = await run(sys, []);
+      assert.equal(code, 0, [...out, ...err].join('\n'));
+      assert.ok(out.includes('✓ .github/process-rules.json: owner example-owner, agent ExampleBot; on: ' + FEATURES.join(', ')), out.join('\n'));
+      assert.equal(repo(sys).get(SETTINGS), `${JSON.stringify(TEAM, null, 2)}\n`);
+      assert.ok(sys.asked.includes('Remove example-owner and Second-Owner from those rules in .github/CODEOWNERS, and drop the rule left with no owners, so its paths fall to the rules before? [y/N] '), sys.asked.join('\n'));
+      assert.equal(repo(sys).get(codeowners), '/docs/ @a\n');
+      assert.ok(out.includes('✓ .github/CODEOWNERS: example-owner and Second-Owner removed'));
+    });
+
+    it('takes the owner and agent named, when the lists hold them', async () => {
+      const sys = team();
+      sys.route('GET', '/users/examplebot', { status: 200, json: { id: AGENT_ID, login: AGENT } });
+      assert.equal((await run(sys, ['EXAMPLE-OWNER', 'examplebot'])).code, 0);
+      assert.equal(repo(sys).get(SETTINGS), `${JSON.stringify(TEAM, null, 2)}\n`);
+    });
+
+    it('refuses accounts the lists do not hold, and an agent it cannot tell', async () => {
+      const outside = team();
+      assert.deepEqual((await run(outside, ['someone', AGENT])).err, [
+        'onboard: .github/process-rules.json already names owner example-owner or Second-Owner and agent OtherBot or ExampleBot; edit or delete it to change them',
+      ]);
+      const unset = team();
+      unset.files.delete(pathsFor(HOME, AGENT).session);
+      assert.deepEqual((await run(unset, [])).err, [
+        'onboard: .github/process-rules.json names the agents OtherBot or ExampleBot, and process-rules machine has set up none of them on this machine; name the owner and the agent: process-rules onboard <owner> <agent>',
+      ]);
+    });
   });
 
   it('leaves CODEOWNERS as it is without a yes, and goes on', async () => {
