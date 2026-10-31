@@ -7,7 +7,7 @@ import { machine } from './machine.ts';
 import { reviewsDue } from './reviews.ts';
 import { onboard, onboardArgs } from './onboard.ts';
 import { sessionStart } from './session-start.ts';
-import { prePush, prWorkRules } from './work.ts';
+import { prePush, prWorkRules, propose } from './work.ts';
 import type { Output, Sys } from './types.ts';
 
 import { packageVersion } from './version.ts';
@@ -30,6 +30,7 @@ Commands:
   decisions-weekly Run by the shared workflow weekly: decision checks, undo issues, expiring labels
   reviews-due      For the review routine: open decisions whose review date has come, as JSON lines
   pre-push         Run by the pre-push git hook: the same rules before an agent session pushes
+  propose <issue>  As the agent: ask the owner to approve, with a 👍, a slice added late or a dropped state
   help             Show this text
   version          Print the installed version
 
@@ -46,7 +47,7 @@ export async function run(
   sys: () => Sys | Promise<Sys>,
 ): Promise<number> {
   const [command, ...rest] = args;
-  const allowed = command === 'onboard' ? Infinity : command === 'pre-push' ? 2 : command === 'machine' || command === 'doctor' ? 1 : 0;
+  const allowed = command === 'onboard' ? Infinity : command === 'pre-push' ? 2 : command === 'machine' || command === 'doctor' || command === 'propose' ? 1 : 0;
   const extra = rest[allowed];
   if (extra !== undefined) {
     io.err(`process-rules: unexpected argument "${extra}"`);
@@ -62,6 +63,11 @@ export async function run(
       io.err(USAGE);
       return 2;
     }
+  }
+  if (command === 'propose' && !/^#?\d+$/.test(rest[0] ?? '')) {
+    io.err(`process-rules: propose needs an issue number${rest[0] === undefined ? '' : `, not "${rest[0]}"`}`);
+    io.err(USAGE);
+    return 2;
   }
   switch (command) {
     case undefined:
@@ -95,7 +101,9 @@ export async function run(
     case 'decisions-weekly':
     case 'reviews-due':
     case 'pre-push':
+    case 'propose':
       try {
+        if (command === 'propose') return await propose(await sys(), io, Number((rest[0] as string).replace('#', '')));
         if (command === 'reviews-due') return await reviewsDue(await sys(), io);
         if (command === 'decisions-weekly') return await decisionsWeekly(await sys(), io);
         if (command === 'pr-design') return await prDesign(await sys(), io);

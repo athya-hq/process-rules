@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { AGENT, FakeSys, ROOT, capture } from './fake.test.ts';
-import { prePush, prWorkRules, sliceProblems, slicesNamed } from './work.ts';
+import { AGENT, FakeSys, ROOT, SETTINGS, capture } from './fake.test.ts';
+import { prePush, prWorkRules, propose, sliceProblems, slicesNamed } from './work.ts';
 
 const SLUG = 'example-org/example-app';
 const OWNER = 'example-owner';
+const ACCOUNTS = { owner: OWNER, agent: AGENT };
 const T0 = '2026-10-01T00:00:00Z';
 const APPROVED = '2026-10-02T00:00:00Z';
 const LATER = '2026-10-03T00:00:00Z';
@@ -14,7 +15,7 @@ const LATEST = '2026-10-04T00:00:00Z';
 type Node = Record<string, unknown>;
 
 /** Slice #12 under work item #10, approved by the owner, with nothing else. */
-function graph(): { issue: Node; timeline: Node[]; states: Node[]; comments: Node[] } {
+function graph(): { issue: Node; timeline: Node[]; states: Node[]; comments: Node[]; thumbs: Map<string, Node[]> } {
   const timeline: Node[] = [
     { __typename: 'SubIssueAddedEvent', createdAt: T0, subIssue: { number: 12 } },
     { __typename: 'LabeledEvent', createdAt: APPROVED, actor: { login: OWNER }, label: { name: 'approved' } },
@@ -23,17 +24,25 @@ function graph(): { issue: Node; timeline: Node[]; states: Node[]; comments: Nod
   const comments: Node[] = [];
   const issue: Node = {
     number: 12,
+    title: 'Add the thing',
     issueType: { name: 'Slice' },
     comments: { nodes: comments },
     parent: { id: 'I_10', number: 10, issueType: { name: 'Work item' }, timelineItems: { nodes: timeline } },
     subIssues: { nodes: states },
+    thumbs: new Map<string, Node[]>(),
   };
-  return { issue, timeline, states, comments };
+  return { issue, timeline, states, comments, thumbs: issue.thumbs as Map<string, Node[]> };
 }
 
 function github(sys: FakeSys, issue: Node | null, pulls: Node[] = []): void {
   sys.route('POST', '/graphql', () => {
-    const { query } = sys.requests.at(-1)?.body as { query: string };
+    const { query, variables } = sys.requests.at(-1)?.body as { query: string; variables: { ids?: string[] } };
+    if (query.includes('nodes(ids')) {
+      const thumbs = issue?.thumbs as Map<string, Node[]>;
+      // A deleted comment reads as null.
+      const nodes = (variables.ids ?? []).map((id) => (id === 'gone' ? null : { id, reactions: { nodes: thumbs.get(id) ?? [] } }));
+      return { status: 200, json: { data: { nodes } } };
+    }
     if (!query.includes('timelineItems')) return { status: 200, json: { data: { repository: { issue } } } };
     const nodes = ((issue?.parent as Node).timelineItems as { nodes: Node[] }).nodes;
     return { status: 200, json: { data: { node: { timelineItems: { nodes, pageInfo: { hasNextPage: false, endCursor: null } } } } } };
@@ -41,12 +50,21 @@ function github(sys: FakeSys, issue: Node | null, pulls: Node[] = []): void {
   sys.route('GET', `/repos/${SLUG}/pulls?state=open&per_page=100&page=1`, { status: 200, json: pulls });
 }
 
-const comment = (body: string, createdAt = LATEST, login = OWNER): Node => ({ __typename: 'IssueComment', author: { login }, body, createdAt });
+let ids = 0;
+const comment = (body: string, createdAt = LATEST, login = OWNER, lastEditedAt: string | null = null): Node => ({
+  __typename: 'IssueComment',
+  id: `IC_${++ids}`,
+  author: { login },
+  body,
+  createdAt,
+  lastEditedAt,
+});
+const thumb = (createdAt = LATEST, login = OWNER): Node => ({ user: { login }, createdAt });
 
 async function problems(issue: Node | null, pulls: Node[] = [], mine: { pull?: number; branch?: string } = {}): Promise<string[]> {
   const sys = new FakeSys();
   github(sys, issue, pulls);
-  return sliceProblems(sys, 'tok', SLUG, 12, OWNER, mine);
+  return sliceProblems(sys, 'tok', SLUG, 12, ACCOUNTS, mine);
 }
 
 describe('slicesNamed', () => {
@@ -103,7 +121,9 @@ describe('sliceProblems', () => {
       g.timeline[0] = { __typename: 'SubIssueAddedEvent', createdAt: LATER, subIssue: { number: 12 } };
       return g;
     };
-    const refused = '#12 was added to work item #10 after its approval; example-owner adds a "Decision:" comment naming #12';
+    const refused =
+      '#12 was added to work item #10 after its approval; example-owner reacts 👍 on ExampleBot\'s proposal on #12, or adds a "Decision:" comment naming #12; ExampleBot proposes it with: process-rules propose 12';
+    const proposed = '#12 was added to work item #10 after its approval; example-owner reacts 👍 on ExampleBot\'s proposal on #12, or adds a "Decision:" comment naming #12';
 
     it('is refused without the owner\'s decision', async () => {
       assert.deepEqual(await problems(added().issue), [refused]);
@@ -146,6 +166,66 @@ describe('sliceProblems', () => {
       g.timeline.push({ __typename: 'SubIssueAddedEvent', createdAt: LATER, subIssue: null });
       assert.deepEqual(await problems(g.issue), []);
     });
+
+    describe("the owner's 👍 on the agent's proposal", () => {
+      /** Slice #12 added after approval, with the agent's proposal on it and these 👍s. */
+      const withProposal = (thumbs: Node[], made: Node = comment('Proposal: add #12 (Add the thing) to work item #10', LATER, AGENT)): ReturnType<typeof graph> => {
+        const g = added();
+        g.comments.push(made);
+        g.thumbs.set(made.id as string, thumbs);
+        return g;
+      };
+
+      it('passes, made after the slice was added', async () => {
+        assert.deepEqual(await problems(withProposal([thumb(LATEST, AGENT), thumb()]).issue), []);
+      });
+
+      it('passes, made after the proposal was last edited', async () => {
+        const made = comment('Proposal: add #12', LATER, AGENT, LATER);
+        assert.deepEqual(await problems(withProposal([thumb()], made).issue), []);
+      });
+
+      // The refusal names the propose command while the agent's proposal is missing.
+      for (const [name, thumbs, made, expected] of [
+        ['by the agent', [thumb(LATEST, AGENT)], undefined, proposed],
+        ['by anyone else', [thumb(LATEST, 'someone'), { user: null, createdAt: LATEST }], undefined, proposed],
+        ['made before the slice was added', [thumb(APPROVED)], undefined, proposed],
+        ['on a proposal edited after it', [thumb(LATER)], comment('Proposal: add #12', LATER, AGENT, LATEST), proposed],
+        ["on the owner's own proposal", [thumb()], comment('Proposal: add #12', LATER, OWNER), refused],
+        ['on an agent comment that is not a proposal', [thumb()], comment('Added #12 for the owner', LATER, AGENT), refused],
+        ['on a proposal for another issue', [thumb()], comment('Proposal: drop state #30 (of #12)', LATER, AGENT), refused],
+      ] as const) {
+        it(`does not pass when ${name}`, async () => {
+          assert.deepEqual(await problems(withProposal([...thumbs], made).issue), [expected]);
+        });
+      }
+
+      it('reads no reactions when a Decision: settles it, or nothing was proposed', async () => {
+        const sys = new FakeSys();
+        const g = withProposal([thumb()]);
+        g.comments.push(comment('Decision: keep it'));
+        github(sys, g.issue);
+        assert.deepEqual(await sliceProblems(sys, 'tok', SLUG, 12, ACCOUNTS, {}), []);
+        const none = new FakeSys();
+        github(none, added().issue);
+        await sliceProblems(none, 'tok', SLUG, 12, ACCOUNTS, {});
+        for (const run of [sys, none]) assert.ok(!run.requests.some((r) => (r.body as { query?: string } | undefined)?.query?.includes('nodes(ids')));
+      });
+
+      it('reads reactions 100 proposals at a time, skipping a deleted comment', async () => {
+        const sys = new FakeSys();
+        const g = added();
+        for (let i = 0; i < 100; i++) g.comments.push(comment('Proposal: add #12', LATER, AGENT));
+        g.comments.push({ ...comment('Proposal: add #12', LATER, AGENT), id: 'gone' });
+        const last = comment('Proposal: add #12', LATER, AGENT);
+        g.comments.push(last);
+        g.thumbs.set(last.id as string, [thumb()]);
+        github(sys, g.issue);
+        assert.deepEqual(await sliceProblems(sys, 'tok', SLUG, 12, ACCOUNTS, {}), []);
+        const reads = sys.requests.filter((r) => (r.body as { query?: string } | undefined)?.query?.includes('nodes(ids'));
+        assert.deepEqual(reads.map((r) => (r.body as { variables: { ids: string[] } }).variables.ids.length), [100, 2]);
+      });
+    });
   });
 
   describe('a dropped state', () => {
@@ -157,7 +237,8 @@ describe('sliceProblems', () => {
       comments: { nodes: [] },
       ...extra,
     });
-    const refused = 'state #30 was closed as not planned after approval; example-owner adds a "Decision:" comment to it';
+    const refused =
+      'state #30 was closed as not planned after approval; example-owner reacts 👍 on ExampleBot\'s proposal for it on #12, or adds a "Decision:" comment to it; ExampleBot proposes it with: process-rules propose 30';
 
     it('is refused without the owner\'s decision', async () => {
       const g = graph();
@@ -173,6 +254,17 @@ describe('sliceProblems', () => {
       h.states.push(state());
       h.comments.push(comment('Decision: drop #30'));
       assert.deepEqual(await problems(h.issue), []);
+    });
+
+    it("passes with the owner's 👍 on the agent's proposal for it on the slice", async () => {
+      const g = graph();
+      g.states.push(state());
+      const made = comment('Proposal: drop state #30 (Empty list), closed as not planned', LATER, AGENT);
+      g.comments.push(made);
+      g.thumbs.set(made.id as string, [thumb()]);
+      assert.deepEqual(await problems(g.issue), []);
+      g.thumbs.set(made.id as string, [thumb(LATEST, AGENT)]);
+      assert.deepEqual(await problems(g.issue), [refused.replace(/; ExampleBot proposes it with: .*$/, '')]);
     });
 
     for (const [name, extra] of [
@@ -218,7 +310,7 @@ describe('sliceProblems', () => {
       const sys = new FakeSys();
       github(sys, graph().issue, Array.from({ length: 100 }, (_, i) => pull(100 + i, 'none')));
       sys.route('GET', `/repos/${SLUG}/pulls?state=open&per_page=100&page=2`, { status: 200, json: [pull(9, 'Slice: #12')] });
-      assert.deepEqual(await sliceProblems(sys, 'tok', SLUG, 12, OWNER, {}), ['#12 already has pull request #9; one slice, one pull request']);
+      assert.deepEqual(await sliceProblems(sys, 'tok', SLUG, 12, ACCOUNTS, {}), ['#12 already has pull request #9; one slice, one pull request']);
     });
   });
 
@@ -235,25 +327,25 @@ describe('sliceProblems', () => {
       const nodes = first ? [g.timeline[0]] : [g.timeline[1]];
       return { status: 200, json: { data: { node: { timelineItems: { nodes, pageInfo: { hasNextPage: first, endCursor: first ? 'c1' : null } } } } } };
     });
-    assert.deepEqual(await sliceProblems(sys, 'tok', SLUG, 12, OWNER, {}), []);
+    assert.deepEqual(await sliceProblems(sys, 'tok', SLUG, 12, ACCOUNTS, {}), []);
     assert.equal(page, 2);
   });
 
   it('says how to fix a client workflow without issues: read', async () => {
     const sys = new FakeSys();
     sys.route('POST', '/graphql', { status: 200, json: { errors: [{ message: 'Resource not accessible by integration' }] } });
-    await assert.rejects(sliceProblems(sys, 'tok', SLUG, 12, OWNER, {}), /needs issues: read, so run process-rules onboard to update it/);
+    await assert.rejects(sliceProblems(sys, 'tok', SLUG, 12, ACCOUNTS, {}), /needs issues: read, so run process-rules onboard to update it/);
   });
 
   it('throws when GitHub will not answer', async () => {
     const sys = new FakeSys();
     sys.route('POST', '/graphql', { status: 200, json: { errors: [{ message: 'no access' }] } });
-    await assert.rejects(sliceProblems(sys, 'tok', SLUG, 12, OWNER, {}), /cannot read #12: no access/);
+    await assert.rejects(sliceProblems(sys, 'tok', SLUG, 12, ACCOUNTS, {}), /cannot read #12: no access/);
     sys.route('POST', '/graphql', { status: 502, json: null });
-    await assert.rejects(sliceProblems(sys, 'tok', SLUG, 12, OWNER, {}), /cannot read #12: HTTP 502/);
+    await assert.rejects(sliceProblems(sys, 'tok', SLUG, 12, ACCOUNTS, {}), /cannot read #12: HTTP 502/);
     github(sys, graph().issue);
     sys.route('GET', `/repos/${SLUG}/pulls?state=open&per_page=100&page=1`, { status: 403, json: null });
-    await assert.rejects(sliceProblems(sys, 'tok', SLUG, 12, OWNER, {}), /cannot list open pull requests \(HTTP 403\)/);
+    await assert.rejects(sliceProblems(sys, 'tok', SLUG, 12, ACCOUNTS, {}), /cannot list open pull requests \(HTTP 403\)/);
   });
 });
 
@@ -446,5 +538,135 @@ describe('prePush', () => {
     const sys = session('');
     sys.execOverride = (call) => (call.args[0] === 'log' ? { code: 128, stdout: '', stderr: 'bad revision\n' } : undefined);
     await assert.rejects(push(sys, `refs/heads/work ${LOCAL} refs/heads/work ${REMOTE}`), /git log failed: bad revision/);
+  });
+});
+
+describe('propose', () => {
+  const ISSUE = `/repos/${SLUG}/issues/12`;
+  /** An agent session, slice #12 added after approval, and state #30 of it dropped after approval. */
+  function session(g = graph()): { sys: FakeSys; g: ReturnType<typeof graph> } {
+    const sys = new FakeSys();
+    sys.env = { PROCESS_RULES_AGENT: AGENT, GH_TOKEN: 'ghp_good' };
+    sys.acceptToken('ghp_good', AGENT);
+    github(sys, g.issue);
+    const slice = sys.routes.get('POST https://api.github.com/graphql') as () => { status: number; json: unknown };
+    sys.route('POST', '/graphql', () => {
+      const { variables } = sys.requests.at(-1)?.body as { variables: { number?: number } };
+      if (variables.number !== 30) return slice();
+      const state = { number: 30, title: 'Empty list', issueType: { name: 'State' }, parent: { id: 'I_12', number: 12, issueType: { name: 'Slice' } } };
+      return { status: 200, json: { data: { repository: { issue: state } } } };
+    });
+    sys.route('POST', `${ISSUE}/comments`, { status: 201, json: { html_url: 'https://github.com/example-org/example-app/issues/12#issuecomment-1' } });
+    sys.route('POST', `${ISSUE}/labels`, { status: 200, json: [] });
+    sys.route('DELETE', `${ISSUE}/labels/needs-owner`, { status: 200, json: [] });
+    return { sys, g };
+  }
+  const owing = (): ReturnType<typeof graph> => {
+    const g = graph();
+    g.timeline[0] = { __typename: 'SubIssueAddedEvent', createdAt: LATER, subIssue: { number: 12 } };
+    g.states.push({ number: 30, title: 'Empty list', issueType: { name: 'State' }, stateReason: 'NOT_PLANNED', closedAt: LATER, comments: { nodes: [] } });
+    return g;
+  };
+  async function run(sys: FakeSys, number = 12): Promise<{ code: number; out: string[]; err: string[] }> {
+    const { io, out, err } = capture();
+    return { code: await propose(sys, io, number), out, err };
+  }
+  const posted = (sys: FakeSys): string[] =>
+    sys.requests.filter((r) => r.method === 'POST' && r.url.endsWith('/comments')).map((r) => (r.body as { body: string }).body);
+
+  it("proposes each decision the slice owes, as the agent, and labels it for the owner's Needs you view", async () => {
+    const { sys } = session(owing());
+    assert.deepEqual(await run(sys), {
+      code: 0,
+      out: [
+        '✓ #12: proposed on #12: https://github.com/example-org/example-app/issues/12#issuecomment-1',
+        '✓ state #30: proposed on #12: https://github.com/example-org/example-app/issues/12#issuecomment-1',
+        "#12 is labeled needs-owner, so it shows in example-owner's Needs you view",
+      ],
+      err: [],
+    });
+    assert.deepEqual(posted(sys), [
+      'Proposal: add #12 (Add the thing) to work item #10, after its approval.\n\n@example-owner: react 👍 to this comment to approve it, or comment "Decision:".',
+      "Proposal: drop state #30 (Empty list), closed as not planned after work item #10's approval.\n\n@example-owner: react 👍 to this comment to approve it, or comment \"Decision:\".",
+    ]);
+    assert.deepEqual(sys.requests.find((r) => r.url.endsWith('/labels'))?.body, { labels: ['needs-owner'] });
+  });
+
+  it('proposes a state alone, given the state', async () => {
+    const { sys } = session(owing());
+    const { out } = await run(sys, 30);
+    assert.equal(out[0], '✓ state #30: proposed on #12: https://github.com/example-org/example-app/issues/12#issuecomment-1');
+    assert.equal(posted(sys).length, 1);
+  });
+
+  it('posts nothing twice, and keeps the label while the owner has not decided', async () => {
+    const g = owing();
+    g.comments.push(comment('Proposal: add #12', LATER, AGENT));
+    // On the slice, any Decision: also settles its addition.
+    ((g.states[0] as Node).comments as { nodes: Node[] }).nodes.push(comment('Decision: drop it'));
+    const { sys } = session(g);
+    assert.deepEqual((await run(sys)).out, [
+      "#12: proposed on #12, waiting on example-owner's 👍",
+      '✓ state #30: example-owner has decided',
+      "#12 is labeled needs-owner, so it shows in example-owner's Needs you view",
+    ]);
+    assert.deepEqual(posted(sys), []);
+  });
+
+  it("takes the label off once the owner's 👍 settles everything", async () => {
+    const g = owing();
+    g.states.pop();
+    const made = comment('Proposal: add #12', LATER, AGENT);
+    g.comments.push(made);
+    g.thumbs.set(made.id as string, [thumb()]);
+    const { sys } = session(g);
+    assert.deepEqual((await run(sys)).out, ['✓ #12: example-owner has decided', '✓ #12: nothing waits on example-owner']);
+    assert.ok(sys.requests.some((r) => r.method === 'DELETE'));
+    sys.route('DELETE', `${ISSUE}/labels/needs-owner`, { status: 404, json: null });
+    assert.equal((await run(sys)).code, 0);
+    sys.route('DELETE', `${ISSUE}/labels/needs-owner`, { status: 403, json: null });
+    await assert.rejects(run(sys), /cannot take needs-owner off #12 \(HTTP 403\)/);
+  });
+
+  it('says when the issue owes the owner nothing', async () => {
+    assert.deepEqual(await run(session().sys), { code: 0, out: ['propose: #12 needs no decision from example-owner'], err: [] });
+  });
+
+  it('refuses a slice the work rules stop outright', async () => {
+    const g = graph();
+    g.timeline.splice(1, 1);
+    assert.deepEqual(await run(session(g).sys), {
+      code: 1,
+      out: [],
+      err: ['✗ work item #10 is not approved: example-owner adds the approved label before any slice starts', 'propose: refused by the work rules'],
+    });
+  });
+
+  it('refuses a session with no token, or not working as the agent', async () => {
+    const { sys } = session();
+    sys.env = { GH_TOKEN: 'process-rules-no-agent-token' };
+    assert.equal((await run(sys)).err[0], '✗ this session has no token; run process-rules doctor');
+    sys.env = { GH_TOKEN: 'ghp_owner' };
+    assert.equal((await run(sys)).err[0], "✗ propose posts as ExampleBot, but this session's token is refused");
+    sys.acceptToken('ghp_owner', OWNER);
+    assert.equal((await run(sys)).err[0], "✗ propose posts as ExampleBot, but this session's token is example-owner");
+  });
+
+  it('throws when GitHub will not take the comment or the label', async () => {
+    const { sys } = session(owing());
+    sys.route('POST', `${ISSUE}/comments`, { status: 403, json: null });
+    await assert.rejects(run(sys), /cannot comment on #12 \(HTTP 403\)/);
+    const other = session(owing()).sys;
+    other.route('POST', `${ISSUE}/comments`, { status: 201, json: null });
+    other.route('POST', `${ISSUE}/labels`, { status: 404, json: null });
+    await assert.rejects(run(other), /cannot label #12 needs-owner \(HTTP 404\)/);
+  });
+
+  it('passes when the work rules are off', async () => {
+    const { sys } = session();
+    sys.files.set(`${ROOT}/.github/process-rules.json`, JSON.stringify({ ...JSON.parse(SETTINGS), features: ['identity'] }));
+    const { code, out } = await run(sys);
+    assert.equal(code, 0);
+    assert.match(out[0] ?? '', /^propose: .*work-rules/);
   });
 });

@@ -114,3 +114,23 @@
   client; a Project made before it is offered a move to a copy. It is a
   plain public Project, not one marked as a template: marking it turned its
   workflows off, and copies kept them off.
+- **2026-10-31 — Record: P-20, the owner approves with a reaction.** The
+  owner, on the Work item #22: "Decision: add #66 (P-19) and #67 (P-20) to
+  roadmap v1." Typing a `Decision:` comment was the only way to approve a
+  slice added after its work item's approval, or a State dropped after it.
+  Now the agent runs `process-rules propose <issue>`, which posts a
+  `Proposal:` comment as the agent, mentioning the owner, and labels the
+  slice `needs-owner`; the owner's 👍 on it counts as a `Decision:` does.
+  The choices: proposals go on the slice, for a dropped State too, because
+  the Needs you view shows open issues only and a dropped State is closed;
+  a proposal approves the issue its first line names first (`#N`), so a 👍
+  on a state's proposal cannot approve the slice's addition; GraphQL gives
+  each reaction's user and time, so a 👍 counts only after the slice's latest
+  addition, as a `Decision:` does, and only after the proposal's last edit,
+  so the agent cannot change what was approved; and reactions are read only
+  for proposals that could still settle something, so a check costs no more
+  when nothing is owed. `propose` refuses to post unless the session's token
+  is the agent's, since only the agent's proposals count, and takes
+  `needs-owner` off once nothing waits. A reaction triggers no workflow, so
+  the pull request's Work rules check sees a 👍 made after it ran only when
+  it runs again.
