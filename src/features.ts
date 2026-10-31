@@ -67,3 +67,44 @@ export function notAdoptedLine(sys: Sys, root: string, command: string): string 
   if (sys.exists(`${root}/${SETTINGS_PATH}`)) return undefined;
   return `${command}: the base branch has no ${SETTINGS_PATH}, so the repo is not adopted on its base yet; nothing to check`;
 }
+
+/** When the weekly decisions job runs, unless the settings say otherwise: Mondays, 06:17 UTC. */
+export const DEFAULT_SCHEDULE = '17 6 * * 1';
+
+const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+const DAYS = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+/** Each cron field's lowest and highest value, and the names it takes for them. */
+const CRON_FIELDS: { low: number; high: number; names?: string[] }[] = [
+  { low: 0, high: 59 },
+  { low: 0, high: 23 },
+  { low: 1, high: 31 },
+  { low: 1, high: 12, names: MONTHS },
+  { low: 0, high: 6, names: DAYS },
+];
+
+/** Whether one cron field is a list of `*`, values or ranges, each with an optional `/step`, within its bounds. */
+function cronField(text: string, { low, high, names }: { low: number; high: number; names?: string[] }): boolean {
+  const value = (part: string): number | undefined => {
+    const index = names?.indexOf(part.toUpperCase()) ?? -1;
+    if (index >= 0) return index + low;
+    return /^\d+$/.test(part) && Number(part) >= low && Number(part) <= high ? Number(part) : undefined;
+  };
+  return text.split(',').every((item) => {
+    const match = /^(\*|[^-/]+(?:-[^-/]+)?)(?:\/(\d+))?$/.exec(item);
+    if (!match || (match[2] !== undefined && Number(match[2]) < 1)) return false;
+    if (match[1] === '*') return true;
+    const [from, to] = (match[1] as string).split('-').map(value);
+    return from !== undefined && (to === undefined ? !(match[1] as string).includes('-') : to >= from);
+  });
+}
+
+/** The decisions job's schedule the parsed settings set, checked as a five-field cron, or the default. */
+export function scheduleIn(raw: unknown): string {
+  const schedule = (raw as { schedule?: unknown } | null)?.schedule;
+  if (schedule === undefined) return DEFAULT_SCHEDULE;
+  const fields = typeof schedule === 'string' ? schedule.trim().split(/\s+/) : [];
+  if (fields.length !== 5 || !fields.every((field, index) => cronField(field, CRON_FIELDS[index] as (typeof CRON_FIELDS)[number]))) {
+    throw new Error(`${SETTINGS_PATH}: "schedule" must be a five-field cron, such as "${DEFAULT_SCHEDULE}" (Mondays, 06:17 UTC)`);
+  }
+  return fields.join(' ');
+}

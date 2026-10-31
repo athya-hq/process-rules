@@ -41,6 +41,10 @@ describe('setUpBoard', () => {
       { id: 'V_4', name: 'Decisions', layout: 'TABLE_LAYOUT', filter: 'type:Decision', visible: ['Title', 'Status'] },
       { id: 'V_5', name: 'Reviews due', layout: 'TABLE_LAYOUT', filter: '"Review date":<=@today', visible: ['Title', 'Status'] },
     ]);
+    assert.equal(
+      sys.asked[0],
+      'Issue types are an organisation-wide setting, so they apply to every repository in example-org, not only example-app. Add the issue types Work item, Slice, State, Decision, Brief to the example-org organisation?',
+    );
     assert.ok(sys.asked.includes('Set up the views Needs you, Board, Work items, Decisions, Reviews due in "example-app work" (renaming "View 1" to "Needs you")?'));
     assert.ok(sys.requests.filter((r) => r.url.includes('/orgs/') || r.url.includes('/labels') || r.url.endsWith('/graphql')).every((r) => r.token === OWNER_TOKEN));
     const step = sys.requests.find((r) => (r.body as { variables?: { name?: string } } | undefined)?.variables?.name === 'Step');
@@ -74,6 +78,19 @@ describe('setUpBoard', () => {
     assert.equal(url, URL);
     assert.deepEqual(sys.asked, []);
     assert.ok(!board.operations.includes('createProjectV2('));
+  });
+
+  it('names only the issue types the organisation lacks, saying they reach every repository in it', async () => {
+    const sys = new FakeSys();
+    const board = new Board(sys);
+    board.issueTypes = ['Task', 'Work item', 'Slice', 'State'];
+    board.labels = LABELS.map((l) => l.name);
+    board.project = { fields: [...BUILT_IN, ...FIELDS.map((f) => f.name)], linked: true, views: settledViews(), grouped: true };
+    await setUp(sys, ['y']);
+    assert.deepEqual(sys.asked, [
+      'Issue types are an organisation-wide setting, so they apply to every repository in example-org, not only example-app. Add the issue types Decision, Brief to the example-org organisation?',
+    ]);
+    assert.deepEqual(board.issueTypes, ['Task', 'Work item', 'Slice', 'State', 'Decision', 'Brief']);
   });
 
   it('skips issue types for a personal repository', async () => {

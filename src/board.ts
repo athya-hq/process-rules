@@ -125,7 +125,9 @@ export async function setUpBoard(
     const have = await list(sys, token, `${API}/orgs/${repo.ownerLogin}/issue-types`);
     const absent = ISSUE_TYPES.filter((type) => !have.some((had) => had.name.toLowerCase() === type.name.toLowerCase()));
     if (absent.length > 0) {
-      if (!(await confirm(`Add the issue types ${absent.map((t) => t.name).join(', ')} to the ${repo.ownerLogin} organisation?`))) {
+      // Said before asking, since GitHub keeps issue types for the whole organisation, not this repository.
+      const names = absent.map((t) => t.name).join(', ');
+      if (!(await confirm(`Issue types are an organisation-wide setting, so they apply to every repository in ${repo.ownerLogin}, not only ${repo.name}. Add the issue types ${names} to the ${repo.ownerLogin} organisation?`))) {
         return stopped(io, 'issue types');
       }
       for (const type of absent) {

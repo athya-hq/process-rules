@@ -19,7 +19,7 @@ import { setUpBoard } from './board.ts';
 import { type OwnerToken, asOwner, isOrganisation, ownerScopes, signInOnce } from './owner-login.ts';
 import { ownerRules, ownerRulesProblem } from './codeowners.ts';
 import { appendToArray, replaceValues, setMember } from './jsonedit.ts';
-import { type Feature, FEATURES, FIGMA_FILE_KEY, featuresIn, parseFeatures, renamedLines } from './features.ts';
+import { DEFAULT_SCHEDULE, type Feature, FEATURES, FIGMA_FILE_KEY, featuresIn, parseFeatures, renamedLines, scheduleIn } from './features.ts';
 import { packageVersion } from './version.ts';
 import type { Output, Sys } from './types.ts';
 
@@ -156,8 +156,15 @@ export const OLDER_GUARD_COMMANDS = [
     'echo "process-rules: refused, because the process-rules CLI did not run here to check this command. Do not work around it; tell the owner." >&2; exit 2',
 ];
 
+/** The comment above the workflow's schedule, naming when the decisions job runs. */
+function scheduleComment(schedule: string): string {
+  return schedule === DEFAULT_SCHEDULE
+    ? '  # The weekly decisions job: Mondays, 06:17 UTC.'
+    : `  # The decisions job: cron ${schedule}, UTC, as "schedule" in ${SETTINGS_PATH} sets it.`;
+}
+
 /** The workflow's head, down to its jobs, which every template shares. */
-function workflowHead(branch: string, version: string, comments: string[]): string[] {
+function workflowHead(branch: string, version: string, comments: string[], schedule = DEFAULT_SCHEDULE): string[] {
   return [
     `# Written by process-rules onboard: the shared process-rules checks at v${version}.`,
     ...comments,
@@ -169,9 +176,9 @@ function workflowHead(branch: string, version: string, comments: string[]): stri
     '    types: [opened, synchronize, reopened, edited]',
     '  push:',
     `    branches: [${JSON.stringify(branch)}]`,
-    '  # The weekly decisions job: Mondays, 06:17 UTC.',
+    scheduleComment(schedule),
     '  schedule:',
-    "    - cron: '17 6 * * 1'",
+    `    - cron: '${schedule}'`,
     '  workflow_dispatch:',
     '',
     'permissions:',
@@ -221,15 +228,21 @@ function callChecks(version: string, secrets: string[]): string[] {
  * to the default branch and weekly, at the process-rules release `version`.
  * Pull request and push runs are read-only; the weekly job alone writes to
  * issues. Upgrading is changing that version, which each job names twice.
- * The Figma secrets are passed only when the figma feature is on.
+ * The Figma secrets are passed only when the figma feature is on; the
+ * weekly job runs on the settings' `schedule`.
  */
-export function workflow(branch: string, version: string, figma: boolean): string {
+export function workflow(branch: string, version: string, figma: boolean, schedule = DEFAULT_SCHEDULE): string {
   const secrets = figma ? FIGMA_SECRETS : [];
   return [
-    ...workflowHead(branch, version, [
-      '# To upgrade, change the version on every line that names it (two per job).',
-      '# The weekly job is split out so pull request and push runs stay read-only.',
-    ]),
+    ...workflowHead(
+      branch,
+      version,
+      [
+        '# To upgrade, change the version on every line that names it (two per job).',
+        '# The weekly job is split out so pull request and push runs stay read-only.',
+      ],
+      schedule,
+    ),
     '  # Pull request and push runs: read-only.',
     '  process-rules:',
     "    if: github.event_name == 'pull_request' || github.event_name == 'push'",
@@ -280,6 +293,13 @@ export function workflowPins(text: string): string[] {
 const PUSH_BRANCH = /^( {2}push:\n {4}branches: \[\s*)(['"]?)([^,'"\]\s]+)\2(\s*\])$/m;
 
 /**
+ * The one cron a workflow's `schedule:` trigger names, as `onboard` writes it,
+ * quoted or not, with the comment `onboard` writes above it when it is there:
+ * no other item follows it, past blank and comment lines.
+ */
+const SCHEDULE = /^( {2}# The (?:weekly )?decisions job:[^\n]*\n)?( {2}schedule:\n {4}- cron: )(['"]?)([^'"#\n]+?)\3([ \t]*)$(?!(?:\n[ \t]*(?:#[^\n]*)?)*\n {4}- )/m;
+
+/**
  * `value` as a YAML flow scalar in the `quote` style the line already uses:
  * single quotes double themselves; double quotes, and a bare value YAML would
  * not read as that string (a number, a date, true or null), are written as
@@ -296,20 +316,22 @@ function flowScalar(value: string, quote: string): string {
  * What onboard does with the client's workflow: write it, replace an older
  * release's template, or, in a workflow already split into a read-only
  * `process-rules` job and a `process-rules-weekly` job, move the version pins,
- * the one branch pushes run on when the default branch has changed, and each
- * job's Figma secrets to what the figma feature needs, leaving the rest as
- * the client has it.
+ * the one branch pushes run on when the default branch has changed, the one
+ * cron the weekly job runs on when the settings' schedule has changed, and
+ * each job's Figma secrets to what the figma feature needs, leaving the rest
+ * as the client has it.
  */
 export function workflowUpdate(
   before: string | undefined,
   branch: string,
   version: string,
   figma: boolean,
+  schedule = DEFAULT_SCHEDULE,
 ):
   | { kind: 'same' }
   | { kind: 'write' | 'replace-older' | 'replace'; text: string; from?: string }
-  | { kind: 'repin'; text: string; from?: string; branch?: string; secrets?: true } {
-  const wanted = workflow(branch, version, figma);
+  | { kind: 'repin'; text: string; from?: string; branch?: string; schedule?: string; secrets?: true } {
+  const wanted = workflow(branch, version, figma, schedule);
   if (before === undefined) return { kind: 'write', text: wanted };
   if (before === wanted) return { kind: 'same' };
   const pins = workflowPins(before);
@@ -321,18 +343,23 @@ export function workflowUpdate(
   const split = /^ {2}process-rules:\s*$/m.test(before) && /^ {2}process-rules-weekly:\s*$/m.test(before);
   if (split && pins.length === 4) {
     const moved = pushed !== undefined && pushed !== branch;
+    const cron = SCHEDULE.exec(before)?.[4]?.trim();
+    const rescheduled = cron !== undefined && cron.split(/\s+/).join(' ') !== schedule;
     const pinned = before
       .replace(CHECKS_PIN, (_, head: string) => `${head}${version}`)
       .replace(REF_PIN, (_, head: string) => `${head}${version}`)
       .replace(HEADER_PIN, (_, head: string, _old: string, dot: string) => `${head}${version}${dot}`)
       .replace(PUSH_BRANCH, (line: string, head: string, quote: string, _old: string, tail: string) =>
         moved ? `${head}${flowScalar(branch, quote)}${tail}` : line,
+      )
+      .replace(SCHEDULE, (line: string, comment: string | undefined, head: string, quote: string, _old: string, tail: string) =>
+        rescheduled ? `${comment === undefined ? '' : `${scheduleComment(schedule)}\n`}${head}${quote || "'"}${schedule}${quote || "'"}${tail}` : line,
       );
     const secrets = figma ? `${FIGMA_SECRETS.join('\n')}\n` : '';
     const text = pinned.replace(SECRETS_AFTER_REF, (_, ref: string) => `${ref}${secrets}`);
     if (text === before) return { kind: 'same' };
     const stale = pins.find((pin) => pin !== version);
-    return { kind: 'repin', text, ...(stale ? { from: stale } : {}), ...(moved ? { branch } : {}), ...(text !== pinned ? { secrets: true as const } : {}) };
+    return { kind: 'repin', text, ...(stale ? { from: stale } : {}), ...(moved ? { branch } : {}), ...(rescheduled ? { schedule } : {}), ...(text !== pinned ? { secrets: true as const } : {}) };
   }
   return { kind: 'replace', text: wanted };
 }
@@ -536,6 +563,7 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
   let agent: string;
   let features: Feature[];
   let pendingSettings: string | undefined;
+  let schedule = DEFAULT_SCHEDULE;
   if (sys.exists(settingsFile)) {
     const settings = loadSettings(sys, root);
     if (chosen) {
@@ -552,6 +580,7 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     agent = (await account(sys, settings.agent)).login;
     let raw = JSON.parse(sys.read(settingsFile)) as Record<string, unknown>;
     features = featuresIn(raw);
+    schedule = scheduleIn(raw);
     // Settings an older release wrote: a feature by its older name, or the Figma library key, which belongs in a secret.
     const renamed = renamedLines(raw).length > 0;
     if (renamed || raw.figma !== undefined) {
@@ -676,7 +705,7 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
   if (workflowNeeded) {
     const workflowFile = `${root}/${WORKFLOW_PATH}`;
     const version = packageVersion();
-    const update = workflowUpdate(sys.exists(workflowFile) ? sys.read(workflowFile) : undefined, reach.branch, version, on('figma'));
+    const update = workflowUpdate(sys.exists(workflowFile) ? sys.read(workflowFile) : undefined, reach.branch, version, on('figma'), schedule);
     if (update.kind !== 'same') {
       const what = {
         write: `Write ${WORKFLOW_PATH}, which runs the shared process-rules checks`,
@@ -685,6 +714,7 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
         repin: `In ${WORKFLOW_PATH}, ${[
           ...(update.kind === 'repin' && update.from ? [`move the version pins from v${update.from} to v${version}`] : []),
           ...(update.kind === 'repin' && update.branch ? [`run pushes on the default branch, ${update.branch}`] : []),
+          ...(update.kind === 'repin' && update.schedule ? [`run the weekly decisions job on the schedule ${SETTINGS_PATH} sets, cron ${update.schedule} UTC`] : []),
           ...(update.kind === 'repin' && update.secrets ? [on('figma') ? 'pass the FIGMA_TOKEN and FIGMA_LIBRARY secrets' : 'stop passing Figma secrets, with figma off'] : []),
         ].join(' and ') || `set the version in its header comment to v${version}`}, leaving the rest as it is`,
       }[update.kind];
