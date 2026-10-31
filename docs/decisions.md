@@ -343,3 +343,18 @@
   asking first and leaving a schedule the client has made its own (more
   crons, or a comment on the line) alone. Renaming the types, labels, field
   options and markers waits for adoption outside Athya.
+- **2026-11-01 — Record: P-24, personal repos refused what they cannot
+  run.** The owner's decision of 2026-10-31 on #48: `onboard` and the
+  checks refuse `work-rules`, `decisions` and `figma` on a repository a
+  personal account owns, saying why: GitHub has issue types for
+  organisations only. The work rules need a Slice under a Work item, the
+  weekly job and `reviews-due` list issues by type, and the design check
+  reads State sub-issues, so none can run there. `onboard` refuses them in
+  `--features` and `--add`, and with no `--features` turns on the rest and
+  names what it left off; it asks GitHub whether the owner is an
+  organisation once per run. The checks that need issue types ask GitHub
+  the repository's `owner.type` once per run and, on a personal account's
+  repository, pass with the line a feature that is off prints, giving the
+  reason, rather than failing every pull request; the weekly job leaves
+  vetoes alone there too, since they sit on Decision issues. Labels as a
+  substitute for issue types wait for adoption outside Athya.

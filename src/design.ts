@@ -1,7 +1,7 @@
 import { API, SETTINGS_PATH, loadSettings, sameLogin } from './agent.ts';
 import type { Output, Sys } from './types.ts';
 import { slicesNamed } from './work.ts';
-import { FIGMA_FILE_KEY, isOn, notAdoptedLine, offLine, renamedLines } from './features.ts';
+import { FIGMA_FILE_KEY, PERSONAL_REPO, isOn, isPersonal, notAdoptedLine, offLine, renamedLines } from './features.ts';
 
 const FIGMA = 'https://api.figma.com/v1';
 /** A Figma link to one node: the file's key and the node's id. */
@@ -110,6 +110,10 @@ export async function prDesign(sys: Sys, io: Output): Promise<number> {
   for (const line of renamedLines(JSON.parse(sys.read(`${sys.cwd}/${SETTINGS_PATH}`)))) io.out(`::warning::${line}`);
   if (!isOn(sys, sys.cwd, 'figma')) {
     io.out(offLine('pr-design', 'figma'));
+    return 0;
+  }
+  if (await isPersonal(sys, slug, token)) {
+    io.out(offLine('pr-design', 'figma', PERSONAL_REPO));
     return 0;
   }
   const { library, warnings } = designLibrary(sys, sys.cwd);

@@ -617,6 +617,77 @@ describe('onboard', () => {
     }
   });
 
+  describe('a personal repository', () => {
+    /** A repository a personal account owns: GitHub gives it no issue types. */
+    function personal(): FakeSys {
+      const sys = fresh();
+      sys.route('GET', '/users/example-org', { status: 200, json: { login: 'example-org', type: 'User' } });
+      sys.route('GET', REPO, { status: 200, json: repoJson(false) });
+      sys.acceptToken(OWNER_TOKEN, 'example-owner', { 'x-oauth-scopes': 'repo, project' });
+      return sys;
+    }
+    const WHY = 'example-org/example-app is owned by a personal account, and GitHub has issue types for organisations only';
+
+    it('gets the features it can run when none are named, saying which it left off', async () => {
+      const sys = personal();
+      const { code, out } = await run(sys);
+      assert.equal(code, 0);
+      assert.ok(out.includes(`! ${WHY}, so onboard leaves work-rules, figma, decisions off`));
+      assert.deepEqual(JSON.parse(repo(sys).get(SETTINGS) ?? '').features, ['identity', 'pr-identity', 'board', 'review']);
+      assert.equal(repo(sys).get(WORKFLOW), workflow('main', packageVersion(), false));
+    });
+
+    it('refuses --features that need issue types, writing nothing', async () => {
+      const sys = personal();
+      const { code, err } = await run(sys, ['example-owner', AGENT, '--features', 'board,work-rules']);
+      assert.deepEqual({ code, err }, { code: 1, err: [`onboard: ${WHY}, so work-rules cannot run here; leave it out of --features`] });
+      assert.equal(repo(sys).get(SETTINGS), undefined);
+      const both = personal();
+      assert.deepEqual((await run(both, ['example-owner', AGENT, '--features', 'decisions,figma'])).err, [`onboard: ${WHY}, so figma, decisions cannot run here; leave them out of --features`]);
+    });
+
+    it('takes --features that need no issue types', async () => {
+      const sys = personal();
+      assert.equal((await run(sys, ['example-owner', AGENT, '--features', 'pr-identity'])).code, 0);
+      assert.deepEqual(JSON.parse(repo(sys).get(SETTINGS) ?? '').features, ['identity', 'pr-identity']);
+    });
+
+    for (const feature of ['work-rules', 'figma', 'decisions']) {
+      it(`refuses --add ${feature}, changing nothing`, async () => {
+        const sys = personal();
+        const settings = JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity'] });
+        sys.files.set(SETTINGS, settings);
+        const { code, err } = await run(sys, ['--add', feature]);
+        assert.deepEqual({ code, err }, { code: 1, err: [`onboard: ${WHY}, so ${feature} cannot run here`] });
+        assert.equal(repo(sys).get(SETTINGS), settings);
+        assert.deepEqual(sys.asked, []);
+      });
+    }
+
+    it('refuses --add before renaming an older feature, changing nothing', async () => {
+      const sys = personal();
+      const settings = JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity', 'design'] });
+      sys.files.set(SETTINGS, settings);
+      assert.equal((await run(sys, ['--add', 'work-rules'])).code, 1);
+      assert.equal(repo(sys).get(SETTINGS), settings);
+      assert.deepEqual(sys.asked, []);
+    });
+
+    it('names the features its settings list that cannot run there', async () => {
+      const sys = personal();
+      sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity', 'decisions'] }));
+      const { code, out } = await run(sys, []);
+      assert.equal(code, 0);
+      assert.ok(out.includes(`! ${WHY}, so decisions cannot run here; their checks pass, saying so. Take them out of .github/process-rules.json's features`));
+    });
+
+    it('asks GitHub once whether an organisation owns it', async () => {
+      const sys = personal();
+      await run(sys);
+      assert.equal(sys.requests.filter((r) => r.url.endsWith('/users/example-org')).length, 1);
+    });
+  });
+
   describe("keeping the client's settings layout", () => {
     it('adds only its entries to an existing file', async () => {
       const sys = fresh();

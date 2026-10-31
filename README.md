@@ -350,6 +350,18 @@ as a five-field cron in UTC (by default `"17 6 * * 1"`, Mondays at 06:17);
 `onboard` refuses one that is not a cron and writes it into the workflow, so
 run `onboard` again after changing it.
 
+GitHub has issue types for organisations only, so on a repository a personal
+account owns, `work-rules`, `decisions` and `figma` cannot run: the work rules
+need a Slice under a Work item, the weekly job and `reviews-due` list
+Decision issues, and the design check reads a slice's State sub-issues.
+`onboard` refuses to turn them on there, with `--features` or `--add`, saying
+why; with no `--features`, it turns on the rest and names the ones it left
+off. Should the settings list them anyway, `pr-work-rules`, `pr-design`, the
+weekly job, `reviews-due` and the pre-push hook's work rules pass, saying the
+feature is off on a personal account's repository and why, rather than
+failing every pull request. They ask GitHub whose the repository is once per
+run.
+
 ### Claude cloud sessions
 
 A Claude cloud session has no keychain and no session file: it reaches
