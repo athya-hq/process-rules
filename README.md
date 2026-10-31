@@ -86,15 +86,39 @@ github.com only, commits as the agent's no-reply address and signs with its
 key.
 
 The lock lives in the session's environment, which a session that ignores it
-could change, so `machine` ends by offering to lock the owner away: to sign
-`gh` out of every account other than the agent's, active or not, and to remove a git password for
-github.com saved in the macOS keychain. It warns about SSH keys in `~/.ssh`
-with no passphrase, and names the account SSH reaches GitHub as without
-asking (a key in the SSH agent or the keychain). Declining leaves them, and
-`doctor` keeps naming them. The owner's SSH access is left alone, since it is
-the owner's own way to GitHub (docs/decisions.md); agent sessions send GitHub
+could change. So `machine` ends by offering to lock the owner away, as
+optional hardening for a machine that runs agents: to sign `gh` out of every
+account other than the agent's, active or not, and to remove a git password
+for github.com saved in the macOS keychain. On a laptop you also use for your
+own work, accepting signs you out of your own GitHub tooling. The stronger
+alternative is a separate macOS user that runs only the agent sessions: none
+of your logins, keychain or SSH keys are in it, and nothing of yours is signed
+out. `machine` also warns about SSH keys in `~/.ssh` with no passphrase, and
+names the account SSH reaches GitHub as without asking (a key in the SSH
+agent or the keychain). The owner's SSH access is left alone, since it is the
+owner's own way to GitHub (docs/decisions.md); agent sessions send GitHub
 over HTTPS and refuse SSH, and the pre-push hook refuses their pushes over
 SSH.
+
+Declining leaves the `gh` logins and the git password in place and records
+which ones in `~/.config/process-rules/<agent, lowercased>/lockout-declined.json`;
+`doctor` then reports them as your choice instead of warning. An account
+signed in later is still a warning. Each `machine` run offers again, and
+accepting clears that part of the record.
+
+The owner is never signed in to `gh`, and needs no sign-in kept anywhere on
+the Mac. When a run of `onboard` (or `onboard --add`) reaches a step that
+acts as the owner (giving the agent access, or setting up the board), it
+asks for one browser approval, which serves the rest of that run; a run
+with no such step asks for none. It runs `gh auth login --web` into a
+fresh temporary `gh` folder, asking for gh's own scopes (`repo`,
+`read:org`, `gist`) plus only those the run's features add (`project` for
+the board, and `admin:org` in an organisation), reads the token from
+there, refuses it unless it is the owner's, and deletes the folder
+whatever happens. The
+token lives in the command's memory for that run; the owner's own `gh`
+config and keychain are never read or written, so there is nothing to sign
+out of afterwards.
 
 `process-rules doctor` re-checks the key, the token and its scopes, the key's
 registration, the session file and that the launcher runs, names the step to re-run, and warns 14
@@ -105,7 +129,7 @@ repo's CODEOWNERS names the owner.
 
 1. On each Mac that runs agent sessions: `process-rules machine <agent>`.
 2. In the client repository, as its owner: `process-rules onboard`. It
-   suggests the owner from your `gh` login and the agent from the accounts
+   suggests the owner from the run's browser sign-in (below) and the agent from the accounts
    `machine` set up on this Mac, for you to confirm (or name them:
    `process-rules onboard <owner> <agent>`). It writes `.github/process-rules.json`, adds to `.claude/settings.json`
    the lock in `env`, a SessionStart hook running `process-rules
@@ -117,11 +141,11 @@ repo's CODEOWNERS names the owner.
    weekly run, the only one that writes to issues. It checks the agent can
    push. With no access, or read access only (a public repo, or an
    organisation's base permission), `onboard` offers to give it write access
-   through your `gh` and to accept the invitation as the agent; and it names
+   as you and to accept the invitation as the agent; and it names
    an organisation that
-   requires SAML authorisation or blocks classic tokens. Through your `gh`
-   login as the owner (which needs the `project` scope, and `admin:org` in an
-   organisation), it sets up the work board: the organisation's issue types
+   requires SAML authorisation or blocks classic tokens. As the owner (with
+   the `project` scope, and `admin:org` in an organisation), it sets up the
+   work board: the organisation's issue types
    (Work item, Slice, State, Decision, Brief), the repo's labels (`approved`,
    `needs-owner`, `mechanical`, `veto`, `expiring`, `cannot-run-here`), and a
    Project "<repo> work" linked to the repo. It makes that Project by copying
@@ -139,7 +163,9 @@ repo's CODEOWNERS names the owner.
    cannot set: the grouping and the auto-archive workflow. Last, it pushes
    one signed test commit as the agent to a throwaway branch, checks GitHub
    shows it Verified by the agent (asking again when the network or GitHub
-   fails for a moment), and deletes the branch. Each change waits
+   fails for a moment), and deletes the branch. The steps that act as you
+   (giving the agent access, the board) share one browser approval, for
+   that run only. Each change waits
    for a yes; commit the files afterwards. When a rule in the repo's
    CODEOWNERS (the file GitHub uses: `.github/CODEOWNERS`, else `CODEOWNERS`,
    else `docs/CODEOWNERS`) names the owner, GitHub will ask the owner to
@@ -326,7 +352,7 @@ release, attaching the CLI package it built and tested. Install that package on
 each machine with pnpm; nothing is built on install:
 
 ```bash
-pnpm add -g https://github.com/athya-hq/process-rules/releases/download/v0.5.6/athya-hq-process-rules-0.5.6.tgz
+pnpm add -g https://github.com/athya-hq/process-rules/releases/download/v0.5.7/athya-hq-process-rules-0.5.7.tgz
 ```
 
 `onboard` pins the client's workflow to one version, the release of the CLI

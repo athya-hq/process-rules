@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { AGENT, FakeSys, HOME, capture } from './fake.test.ts';
-import { exposure, exposureLines, lockOwnerAway } from './lockout.ts';
+import { declinedPath, exposure, exposureLines, lockOwnerAway, readDeclined, setAside } from './lockout.ts';
 
 const OWNER_KEY = `${HOME}/.ssh/id_ed25519`;
 
@@ -117,6 +117,31 @@ describe('lockOwnerAway', () => {
     assert.equal(sys.gitPassword, true);
   });
 
+  it('records what was declined, beside the session file and private', async () => {
+    const sys = exposed();
+    const out = await lock(sys, ['y', 'n', 'n']);
+    const path = declinedPath(HOME, AGENT);
+    assert.equal(path, `${HOME}/.config/process-rules/examplebot/lockout-declined.json`);
+    assert.deepEqual(JSON.parse(sys.read(path)), { ghLogins: ['old-owner'], gitPassword: true });
+    assert.equal(sys.modes.get(path), 0o600);
+    assert.equal(out[3], `  doctor reports what you declined as your choice (${path}); process-rules machine offers again`);
+  });
+
+  it('offers again, and accepting clears the record', async () => {
+    const sys = exposed();
+    await lock(sys, ['n', 'n', 'n']);
+    const out = await lock(sys, ['y', 'y', 'y']);
+    assert.equal(sys.asked.length, 6, 'asks again on the second run');
+    assert.deepEqual(readDeclined(sys, AGENT), { ghLogins: [], gitPassword: false });
+    assert.ok(!out.some((line) => line.includes('doctor reports')));
+  });
+
+  it('writes no record when nothing was declined', async () => {
+    const sys = exposed();
+    await lock(sys, ['y', 'y', 'y']);
+    assert.equal(sys.exists(declinedPath(HOME, AGENT)), false);
+  });
+
   it('says so when removing fails', async () => {
     const sys = exposed();
     sys.execOverride = (call) => {
@@ -130,5 +155,33 @@ describe('lockOwnerAway', () => {
 
   it('says when there is nothing to lock away', async () => {
     assert.deepEqual(await lock(new FakeSys().ready(), []), ['✓ nothing of the owner here for an agent session to reach']);
+  });
+});
+
+describe('a declined lockout', () => {
+  const found = { ghLogins: ['example-owner', 'new-owner'], gitPassword: true, openKeys: [OWNER_KEY], sshLogin: undefined };
+
+  it('sets aside the declined logins and password, and keeps a login signed in since', () => {
+    const { left, kept } = setAside(found, { ghLogins: ['Example-Owner'], gitPassword: true });
+    assert.deepEqual(left, { ghLogins: ['new-owner'], gitPassword: false, openKeys: [OWNER_KEY], sshLogin: undefined });
+    assert.deepEqual(kept, [
+      'lockout declined: gh stays signed in as example-owner; process-rules machine offers again',
+      'lockout declined: the saved git password for github.com stays; process-rules machine offers again',
+    ]);
+  });
+
+  it('still warns about a git password saved after the owner declined only gh', () => {
+    assert.equal(setAside(found, { ghLogins: ['example-owner'], gitPassword: false }).left.gitPassword, true);
+  });
+
+  it('reads no record, or one it cannot parse, as nothing declined', () => {
+    const sys = new FakeSys().ready();
+    assert.deepEqual(readDeclined(sys, AGENT), { ghLogins: [], gitPassword: false });
+    sys.files.set(declinedPath(HOME, AGENT), '{not json');
+    assert.deepEqual(readDeclined(sys, AGENT), { ghLogins: [], gitPassword: false });
+    sys.files.set(declinedPath(HOME, AGENT), JSON.stringify({ ghLogins: ['a', 3], gitPassword: 'yes' }));
+    assert.deepEqual(readDeclined(sys, AGENT), { ghLogins: ['a'], gitPassword: false });
+    sys.files.set(declinedPath(HOME, AGENT), JSON.stringify({ ghLogins: 'a' }));
+    assert.deepEqual(readDeclined(sys, AGENT), { ghLogins: [], gitPassword: false });
   });
 });

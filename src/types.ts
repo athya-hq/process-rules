@@ -27,7 +27,14 @@ export interface Sys {
   exec(
     command: string,
     args: readonly string[],
-    options?: { cwd?: string; env?: Record<string, string | undefined>; input?: string; timeoutMs?: number },
+    options?: {
+      cwd?: string;
+      env?: Record<string, string | undefined>;
+      input?: string;
+      timeoutMs?: number;
+      /** The command talks to the person at the terminal; its output is not captured. */
+      interactive?: boolean;
+    },
   ): ExecResult;
   exists(path: string): boolean;
   read(path: string): string;
@@ -36,6 +43,10 @@ export interface Sys {
   mkdir(path: string): void;
   /** The names in a folder, or none when it does not exist. */
   list(path: string): string[];
+  /** A new empty folder only this user can read, for the caller to remove. */
+  tempDir(): string;
+  /** Deletes a file or folder and all in it; nothing there is fine. */
+  remove(path: string): void;
   http(
     url: string,
     options?: { method?: string; token?: string; body?: unknown; headers?: Record<string, string> },

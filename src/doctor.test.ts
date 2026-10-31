@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 
 import { launcherPath, pathsFor, sessionScript } from './agent.ts';
 import { doctor } from './doctor.ts';
+import { declinedPath } from './lockout.ts';
 import { AGENT, AGENT_ID, CLASSIC, FakeSys, HOME, KEY, TOKEN, capture } from './fake.test.ts';
 
 const SESSION = `${HOME}/.config/process-rules/examplebot/session.sh`;
@@ -98,6 +99,18 @@ describe('doctor', () => {
       '! gh is signed in as example-owner; an agent session that ignores the lock could use it',
       '! the macOS keychain holds a saved git password for github.com; an agent session could use it',
     ]);
+  });
+
+  it('reports a declined lockout as chosen, and warns about an account signed in since', async () => {
+    const sys = healthy();
+    sys.ghAccounts = ['example-owner', 'new-owner'];
+    sys.gitPassword = true;
+    sys.files.set(declinedPath(HOME, AGENT), JSON.stringify({ ghLogins: ['example-owner'], gitPassword: true }));
+    const { code, out, err } = await check(sys);
+    assert.equal(code, 0);
+    assert.ok(out.includes('✓ lockout declined: gh stays signed in as example-owner; process-rules machine offers again'));
+    assert.ok(out.includes('✓ lockout declined: the saved git password for github.com stays; process-rules machine offers again'));
+    assert.deepEqual(err, ['! gh is signed in as new-owner; an agent session that ignores the lock could use it']);
   });
 
   it('checks a named agent outside any repository', async () => {

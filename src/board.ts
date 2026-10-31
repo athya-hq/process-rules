@@ -1,4 +1,4 @@
-import { API, sameLogin } from './agent.ts';
+import { API } from './agent.ts';
 import type { Output, Sys } from './types.ts';
 
 /** The issue types the work model uses; an organisation-wide setting. */
@@ -24,9 +24,6 @@ export const FIELDS = [
   { name: 'Decision', options: ['Needs owner', 'Tripped', 'Decided by the routine'] },
   { name: 'Review date' },
 ];
-
-/** What the owner's `gh` login needs for the board: projects, and issue types in an organisation. */
-const OWNER_SCOPES = ['project', 'admin:org'];
 
 /** The Project's views; onboard makes them, or updates the view that has the name. */
 export const VIEWS = [
@@ -94,9 +91,9 @@ async function list(sys: Sys, token: string, url: string): Promise<{ name: strin
 }
 
 /**
- * Sets up the client's work board as the owner, through the owner's `gh`
- * login: the organisation's issue types, the repo's labels, and a Project
- * linked to the repo with the work model's fields. Creates only what is
+ * Sets up the client's work board as the owner, with the owner's token for
+ * this run (owner-login.ts): the organisation's issue types, the repo's
+ * labels, and a Project linked to the repo with the work model's fields. Creates only what is
  * missing; every change waits for a yes. Returns the Project's URL, or
  * undefined when it stopped.
  */
@@ -106,22 +103,11 @@ export async function setUpBoard(
   confirm: (question: string) => Promise<boolean>,
   slug: string,
   owner: string,
+  /** The owner's token, with the project scope, and admin:org for an organisation's repository. */
+  token: string,
   /** The Project's title; `<repo> work` when the settings name none. */
   projectTitle?: string,
 ): Promise<string | undefined> {
-  const login = sys.exec('gh', ['auth', 'token']);
-  const token = login.stdout.trim();
-  if (login.code !== 0 || !token) {
-    io.err(`onboard: gh is not signed in; sign in as ${owner} with: gh auth login -s project`);
-    return undefined;
-  }
-  const me = await sys.http(`${API}/user`, { token });
-  const who = (me.json as { login?: unknown } | null)?.login;
-  if (me.status !== 200 || typeof who !== 'string' || !sameLogin(who, owner)) {
-    io.err(`onboard: gh is signed in as ${typeof who === 'string' ? who : 'nobody GitHub accepts'}, not the owner ${owner}`);
-    return undefined;
-  }
-
   const found = await sys.http(`${API}/repos/${slug}`, { token });
   const raw = found.json as { node_id?: unknown; name?: unknown; owner?: { login?: unknown; type?: unknown } } | null;
   if (found.status !== 200 || typeof raw?.node_id !== 'string' || typeof raw.name !== 'string' || typeof raw.owner?.login !== 'string') {
@@ -134,14 +120,6 @@ export async function setUpBoard(
     ownerLogin: raw.owner.login,
     organisation: raw.owner.type === 'Organization',
   };
-
-  const scopes = (me.headers?.['x-oauth-scopes'] ?? '').split(',').map((scope) => scope.trim());
-  const needed = repo.organisation ? OWNER_SCOPES : ['project'];
-  const missing = needed.filter((scope) => !scopes.includes(scope));
-  if (missing.length > 0) {
-    io.err(`onboard: your gh login lacks ${missing.join(', ')}; run: gh auth refresh -h github.com -s ${missing.join(',')}`);
-    return undefined;
-  }
 
   if (repo.organisation) {
     const have = await list(sys, token, `${API}/orgs/${repo.ownerLogin}/issue-types`);

@@ -217,6 +217,38 @@
   to what `figma` needs and leaves a secrets block holding the client's own
   secrets as it is, saying which job that leaves without FIGMA_LIBRARY.
   Released as v0.5.6, a patch release.
+- **2026-11-01 — Record: P-35, owner commands sign in for one run only.**
+  `machine` signs the owner out of `gh` so agent sessions cannot use the
+  owner's account, but `onboard` read the owner's stored `gh` login (with
+  `project` and `admin:org`) for the board and the agent's access, so the
+  owner was told again and again to sign in and out of `gh`. Decided: the
+  owner stays signed out of `gh` for good, and no process-rules command,
+  message or doc tells the owner to sign in to or out of `gh`. A command
+  that needs the owner's GitHub rights runs `gh auth login --web` with the
+  scopes its features need into a fresh temporary `GH_CONFIG_DIR` (no
+  `GH_TOKEN` or `GITHUB_TOKEN`, plain-text storage there, SSH as the
+  protocol with no key so gh does not set up git), reads the token with
+  `gh auth token` from that folder, refuses it unless its login is the
+  owner's, and deletes the folder in a `finally`. One browser approval per
+  run serves every step that acts as the owner; the token is held in
+  memory only. GitHub keeps the gh app's authorisation on the owner's
+  account, which the owner can revoke under Settings → Applications; no
+  token is left on the Mac. Approval: the owner's 👍 on #83. Released as
+  v0.5.7, a patch release.
+- **2026-11-01 — Record: P-27, a declined lockout stays declined.** The
+  owner's decision of 2026-10-31 on #57: keep offering the lockout. On a
+  team member's laptop or a shared machine, accepting it signs that person
+  out of their own GitHub tooling, and declining left `doctor` warning on
+  every run. So `machine` records what the owner declined, the `gh` logins
+  it named and the saved git password, in the agent's folder beside the
+  session file, and `doctor` reports those as a passing line. The record
+  names each finding, so an account signed in after the owner declined is
+  still a warning; each `machine` run offers again and rewrites the record
+  from that run's answers, so accepting clears it. Keys with no passphrase
+  and the SSH route are not offered, so they are not recorded. The docs
+  present the lockout as optional hardening for a machine that runs agents,
+  and a separate macOS user for the agent sessions as the stronger
+  alternative.
 - **2026-11-01 — Record: P-31, the classic token trade-off documented.**
   The owner's decision of 2026-10-31 on #52: "keep the one classic token
   for now (Athya's organisation allows it)". The README records the
