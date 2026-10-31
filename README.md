@@ -196,7 +196,11 @@ The shared checks run five jobs. **Settings** validates
 `.github/process-rules.json`. **PR identity** runs on pull requests: every
 commit that claims the agent (its login or its no-reply address) must be
 Verified as the agent, and agent commits must be pushed by the agent, so agent
-work pushed with the owner's login fails. **Work rules** runs on the agent's
+work pushed with the owner's login fails. Who pushed comes only from GitHub's
+record of the pushes to the pull request's branch (the fork's, for a fork),
+never from whoever started the run, so an edit, a reopen or a re-run by anyone
+gives the result the push gave. A push GitHub has not recorded yet is waited
+for about a minute, then fails until a re-run finds it. **Work rules** runs on the agent's
 pull requests: each names exactly one slice, as a line `Slice: #N`, and that
 slice may be built:
 
@@ -367,7 +371,7 @@ release, attaching the CLI package it built and tested. Install that package on
 each machine with pnpm; nothing is built on install:
 
 ```bash
-pnpm add -g https://github.com/athya-hq/process-rules/releases/download/v0.5.7/athya-hq-process-rules-0.5.7.tgz
+pnpm add -g https://github.com/athya-hq/process-rules/releases/download/v0.5.8/athya-hq-process-rules-0.5.8.tgz
 ```
 
 `onboard` pins the client's workflow to one version, the release of the CLI
