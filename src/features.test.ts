@@ -4,7 +4,7 @@ import { describe, it } from 'node:test';
 import { decisionsWeekly } from './decisions.ts';
 import { prDesign } from './design.ts';
 import { AGENT, FakeSys, ROOT, capture } from './fake.test.ts';
-import { FEATURES, featuresIn, isOn, notAdoptedLine, offLine, parseFeatures, renamedLines } from './features.ts';
+import { DEFAULT_SCHEDULE, FEATURES, featuresIn, isOn, notAdoptedLine, offLine, parseFeatures, renamedLines, scheduleIn } from './features.ts';
 import { prIdentity } from './identity.ts';
 import { reviewsDue } from './reviews.ts';
 import { prePush, prWorkRules } from './work.ts';
@@ -37,6 +37,41 @@ describe('features', () => {
     assert.deepEqual(renamedLines({ features: ['constructor'] }), []);
     assert.throws(() => featuresIn({ features: ['constructor'] }), /unknown feature "constructor"/);
     assert.throws(() => parseFeatures('design'), /unknown feature design/);
+  });
+
+  it('reads the decisions schedule, Mondays 06:17 UTC by default', () => {
+    assert.equal(scheduleIn({ owner: 'o', agent: 'a' }), DEFAULT_SCHEDULE);
+    assert.equal(DEFAULT_SCHEDULE, '17 6 * * 1');
+    assert.equal(scheduleIn(null), DEFAULT_SCHEDULE);
+    assert.equal(scheduleIn({ schedule: '  30 7 * * 3 ' }), '30 7 * * 3');
+    assert.equal(scheduleIn({ schedule: '0  9\t*  *  1-5' }), '0 9 * * 1-5');
+    for (const cron of ['*/15 * * * *', '0,30 8-18/2 1 jan-jun MON', '59 23 31 12 6', '0 0 1-15/3 DEC sun-sat', '5 4 * * 0']) {
+      assert.equal(scheduleIn({ schedule: cron }), cron);
+    }
+  });
+
+  it('refuses a schedule that is not a five-field cron', () => {
+    for (const schedule of [
+      '',
+      '17 6 * *',
+      '17 6 * * 1 2026',
+      '60 6 * * 1',
+      '17 24 * * 1',
+      '17 6 0 * 1',
+      '17 6 * 13 1',
+      '17 6 * * 7',
+      '17 6 * * MO',
+      '17 6 * * 5-1',
+      '17 6 * * 1-',
+      '*/0 * * * *',
+      '1-2-3 * * * *',
+      '17 6 * * ,1',
+      '@weekly',
+      7,
+      ['17 6 * * 1'],
+    ]) {
+      assert.throws(() => scheduleIn({ schedule }), /"schedule" must be a five-field cron, such as "17 6 \* \* 1" \(Mondays, 06:17 UTC\)/, JSON.stringify(schedule));
+    }
   });
 
   it('reads whether a feature is on from the settings file', () => {

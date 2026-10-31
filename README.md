@@ -155,7 +155,9 @@ repo's CODEOWNERS names the owner.
    Work items (`type:"Work item"`, grouped by Step), Decisions
    (`type:Decision`, grouped by Decision) and Reviews due (`"Review
    date":<=@today`), with its workflows; so the board needs nothing done by
-   hand. If a copy's workflows arrive off, `onboard` names the ones to turn on. A Project of that title made before the template is offered a move
+   hand. Issue types are an organisation-wide setting: before adding any,
+   `onboard` says they apply to every repository in the organisation and
+   names the ones it would add; it says nothing when they are all there. If a copy's workflows arrive off, `onboard` names the ones to turn on. A Project of that title made before the template is offered a move
    to a copy: its open items move with their Status, Step, Decision and Review
    date, and the old one is closed as "<title> (old)". When GitHub refuses the
    copy, or the owner keeps the old Project, `onboard` adds the fields and
@@ -244,7 +246,8 @@ a `"figma": { "library": ... }` setting is read when `FIGMA_LIBRARY` is not
 set, each with a warning; `onboard` renames the feature, takes the key out
 and prints the `gh secret set FIGMA_LIBRARY` command that puts it back.
 
-**Decisions, weekly** runs on Mondays (and by hand). A Decision issue carries
+**Decisions, weekly** runs on Mondays at 06:17 UTC (and by hand), or on the
+`schedule` the settings set. A Decision issue carries
 its fields one per line: `Kind:` (Override, Risk or Bet), `Review:`,
 `Expires:`, `Check:` (a command in backticks; exit 0 means the decision still
 holds) and `Undo:`. For each open Decision issue, a check that reads laptop
@@ -292,8 +295,9 @@ pull request's description is edited. After upgrading process-rules, run
 the workflow. An older release's workflow, one job that let every run write
 to issues, is replaced; a workflow already split into `process-rules` and
 `process-rules-weekly` keeps everything but its version pins, which move to the
-new release, and the one branch pushes run on, which follows a changed default
-branch; any other workflow is offered a replacement. Make the checks of the
+new release, the one branch pushes run on, which follows a changed default
+branch, and the one cron the weekly job runs on, which follows a changed
+`schedule`; any other workflow is offered a replacement. Make the checks of the
 features a client has turned on required on its default branch, such as
 `process-rules / PR identity` with `pr-identity` and `process-rules / Work
 rules` with `work-rules`; a check of a feature that is off still runs and
@@ -316,7 +320,10 @@ it up. Settings with no `features` key keep every feature on, as before;
 `"features": []` means identity alone. The shared checks,
 the weekly job, `reviews-due` and the pre-push hook each pass, saying so, when
 their feature is off; `onboard` writes the workflow only once a check needs it. `project` names the board's
-Project (by default `<repo> work`).
+Project (by default `<repo> work`). `schedule` sets when the weekly job runs,
+as a five-field cron in UTC (by default `"17 6 * * 1"`, Mondays at 06:17);
+`onboard` refuses one that is not a cron and writes it into the workflow, so
+run `onboard` again after changing it.
 
 ### Claude cloud sessions
 

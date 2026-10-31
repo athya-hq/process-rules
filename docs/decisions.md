@@ -257,3 +257,17 @@
   enterprise that blocks classic tokens cannot adopt yet. A fine-grained
   token or a GitHub App waits for adoption outside Athya. Docs only; no
   release.
+- **2026-11-01 — Record: P-28, org-wide issue types announced; schedule a
+  setting.** The owner's decision of 2026-10-31 on #55. Issue types are an
+  organisation-wide setting, so the ones `onboard` adds reach every
+  repository in the organisation, not only the one being onboarded. Before
+  adding any, `onboard`'s question now says so and names the types it
+  would add; it says nothing when they all exist. The weekly decisions
+  schedule, fixed at Mondays 06:17 UTC, becomes `"schedule"` in
+  `.github/process-rules.json`: a five-field cron in UTC, checked before
+  `onboard` changes anything, defaulting to `17 6 * * 1`. `onboard` writes
+  it into the workflow's `schedule:`, and in a workflow it repins moves the
+  one cron there as it moves the push branch, asking first and leaving a
+  schedule the client has made its own (more crons, or a comment on the
+  line) alone. Renaming the types,
+  labels, field options and markers waits for adoption outside Athya.

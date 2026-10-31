@@ -1148,6 +1148,61 @@ describe('workflowUpdate', () => {
     assert.deepEqual(update, { kind: 'repin', text: workflow('trunk', '0.5.3', true), from: '0.5.2', branch: 'trunk' });
   });
 
+  it('writes the schedule the settings set into the workflow', async () => {
+    const sys = fresh();
+    sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, schedule: '0 9 * * 1-5' }));
+    const { code } = await run(sys, []);
+    assert.equal(code, 0);
+    const text = sys.files.get(WORKFLOW) ?? '';
+    assert.equal(text, workflow('main', packageVersion(), true, '0 9 * * 1-5'));
+    assert.ok(text.includes(`  # The decisions job: cron 0 9 * * 1-5, UTC, as "schedule" in .github/process-rules.json sets it.\n  schedule:\n    - cron: '0 9 * * 1-5'\n`));
+    assert.ok(workflow('main', packageVersion(), true).includes("  # The weekly decisions job: Mondays, 06:17 UTC.\n  schedule:\n    - cron: '17 6 * * 1'\n"));
+  });
+
+  it('refuses a settings schedule that is not a cron before changing anything', async () => {
+    const sys = fresh();
+    sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, schedule: 'Mondays' }));
+    await assert.rejects(run(sys, []), /"schedule" must be a five-field cron/);
+    assert.deepEqual(sys.asked, []);
+    assert.ok(!sys.files.has(WORKFLOW));
+  });
+
+  it('asks to move a split workflow to a changed schedule, leaving the rest as it is', async () => {
+    const sys = fresh();
+    sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, schedule: '30 5 * * 2' }));
+    sys.files.set(HOOKS, JSON.stringify(CLAUDE));
+    sys.files.set(PRE_PUSH, PRE_PUSH_HOOK);
+    const own = workflow('main', packageVersion(), true).replace('name: process-rules\n', 'name: process-rules\n# Our own note.\n');
+    sys.files.set(WORKFLOW, own);
+    const { code } = await run(sys, []);
+    assert.equal(code, 0);
+    assert.equal(
+      sys.asked[0],
+      `In ${WORKFLOW_PATH}, run the weekly decisions job on the schedule .github/process-rules.json sets, cron 30 5 * * 2 UTC, leaving the rest as it is? [y/N] `,
+    );
+    assert.equal(sys.files.get(WORKFLOW), workflow('main', packageVersion(), true, '30 5 * * 2').replace('name: process-rules\n', 'name: process-rules\n# Our own note.\n'));
+  });
+
+  it('follows a changed schedule in a split workflow, keeping its quotes and leaving a cron of its own', () => {
+    const plain = workflow('main', '0.5.3', true);
+    assert.deepEqual(workflowUpdate(plain, 'main', '0.5.3', true, '0 9 * * 1-5'), { kind: 'repin', text: workflow('main', '0.5.3', true, '0 9 * * 1-5'), schedule: '0 9 * * 1-5' });
+    assert.deepEqual(workflowUpdate(workflow('main', '0.5.3', true, '0 9 * * 1-5'), 'main', '0.5.3', true), { kind: 'repin', text: plain, schedule: '17 6 * * 1' });
+    const quoted = plain.replace("- cron: '17 6 * * 1'", '- cron: "17  6 * * 1"');
+    assert.deepEqual(workflowUpdate(quoted, 'main', '0.5.3', true), { kind: 'same' });
+    const moved = workflowUpdate(quoted, 'main', '0.5.3', true, '0 9 * * 1');
+    assert.ok(moved.kind === 'repin' && moved.text.includes('    - cron: "0 9 * * 1"\n'));
+    const bare = plain.replace("- cron: '17 6 * * 1'", '- cron: 17 6 * * 1');
+    const unquoted = workflowUpdate(bare, 'main', '0.5.3', true, '0 9 * * 1');
+    assert.ok(unquoted.kind === 'repin' && unquoted.text.includes("    - cron: '0 9 * * 1'\n"));
+    const uncommented = plain.replace('  # The weekly decisions job: Mondays, 06:17 UTC.\n', '');
+    const kept = workflowUpdate(uncommented, 'main', '0.5.3', true, '0 9 * * 1');
+    assert.ok(kept.kind === 'repin' && kept.text === uncommented.replace("'17 6 * * 1'", "'0 9 * * 1'"));
+    const two = plain.replace("    - cron: '17 6 * * 1'\n", "    - cron: '17 6 * * 1'\n    - cron: '0 12 * * 5'\n");
+    assert.deepEqual(workflowUpdate(two, 'main', '0.5.3', true, '0 9 * * 1'), { kind: 'same' });
+    const noted = plain.replace("- cron: '17 6 * * 1'", "- cron: '17 6 * * 1' # ours");
+    assert.deepEqual(workflowUpdate(noted, 'main', '0.5.3', true, '0 9 * * 1'), { kind: 'same' });
+  });
+
   for (const [quote, written] of [
     ['"', '"it\'s \\"new\\""'],
     ["'", "'it''s \"new\"'"],
