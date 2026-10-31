@@ -1,4 +1,4 @@
-# Written by process-rules onboard: the shared process-rules checks at v0.5.4.
+# Written by process-rules onboard: the shared process-rules checks at v0.5.6.
 # To upgrade, change the version on every line that names it (two per job).
 # The weekly job is split out so pull request and push runs stay read-only.
 name: process-rules
@@ -23,11 +23,9 @@ jobs:
   # Pull request and push runs: read-only.
   process-rules:
     if: github.event_name == 'pull_request' || github.event_name == 'push'
-    uses: athya-hq/process-rules/.github/workflows/checks.yml@v0.5.4
+    uses: athya-hq/process-rules/.github/workflows/checks.yml@v0.5.6
     with:
-      process-rules-ref: v0.5.4
-    secrets:
-      FIGMA_TOKEN: ${{ secrets.FIGMA_TOKEN }}
+      process-rules-ref: v0.5.6
 
   # The weekly run alone writes to issues: it comments and opens undo issues.
   process-rules-weekly:
@@ -36,8 +34,6 @@ jobs:
       contents: read
       issues: write
       pull-requests: read
-    uses: athya-hq/process-rules/.github/workflows/checks.yml@v0.5.4
+    uses: athya-hq/process-rules/.github/workflows/checks.yml@v0.5.6
     with:
-      process-rules-ref: v0.5.4
-    secrets:
-      FIGMA_TOKEN: ${{ secrets.FIGMA_TOKEN }}
+      process-rules-ref: v0.5.6

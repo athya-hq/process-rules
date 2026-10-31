@@ -43,5 +43,10 @@
     "GIT_CONFIG_VALUE_4": "ssh://git@github.com:22/",
     "GIT_CONFIG_KEY_5": "url.https://github.com/.insteadOf",
     "GIT_CONFIG_VALUE_5": "ssh://git@ssh.github.com:443/"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(process-rules review-thread *)"
+    ]
   }
 }
