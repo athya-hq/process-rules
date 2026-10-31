@@ -85,7 +85,8 @@ SSH.
 
 `process-rules doctor` re-checks the key, the token and its scopes, the key's
 registration, the session file and that the launcher runs, names the step to re-run, and warns 14
-days before the token ends.
+days before the token ends. Run in an adopting repo, it also warns when the
+repo's CODEOWNERS names the owner.
 
 ## Adopting
 
@@ -123,7 +124,14 @@ days before the token ends.
    one signed test commit as the agent to a throwaway branch, checks GitHub
    shows it Verified by the agent (asking again when the network or GitHub
    fails for a moment), and deletes the branch. Each change waits
-   for a yes; commit the files afterwards. An existing `.claude/settings.json`
+   for a yes; commit the files afterwards. When a rule in the repo's
+   CODEOWNERS (the file GitHub uses: `.github/CODEOWNERS`, else `CODEOWNERS`,
+   else `docs/CODEOWNERS`) names the owner, GitHub will ask the owner to
+   review every agent pull request, since the agent authors them and GitHub
+   never asks a pull request's author; `onboard` says so and offers to remove
+   the owner's handle from those rules, dropping a rule left with no owners.
+   Teams, other owners and comments stay, and without a yes the file stays
+   as it is. An existing `.claude/settings.json`
    keeps its layout: `onboard` adds only its entries, and replaces the hook
    entries an older release wrote where they stand. The repository needs at
    least one commit. The pull request checks read the settings from the base
@@ -250,7 +258,7 @@ release, attaching the CLI package it built and tested. Install that package on
 each machine with pnpm; nothing is built on install:
 
 ```bash
-pnpm add -g https://github.com/athya-hq/process-rules/releases/download/v0.5.2/athya-hq-process-rules-0.5.2.tgz
+pnpm add -g https://github.com/athya-hq/process-rules/releases/download/v0.5.4/athya-hq-process-rules-0.5.4.tgz
 ```
 
 `onboard` pins the client's workflow to one version, the release of the CLI

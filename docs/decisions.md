@@ -134,3 +134,18 @@
   `needs-owner` off once nothing waits. A reaction triggers no workflow, so
   the pull request's Work rules check sees a 👍 made after it ran only when
   it runs again.
+- **2026-11-01 — Record: P-33, onboard warns about a CODEOWNERS naming the
+  owner.** The owner, in chat, answered "OK." to: "process-rules release:
+  onboard warns about such a CODEOWNERS file and offers the fix. This is the
+  product's job, and every client would get it." Once the agent authors the
+  pull requests, a CODEOWNERS rule naming the owner makes GitHub ask the
+  owner to review every agent pull request, shown as coming from the agent,
+  since GitHub never asks a pull request's author. `onboard` reads the file
+  GitHub uses (the first of `.github/CODEOWNERS`, `CODEOWNERS` and
+  `docs/CODEOWNERS`), says so, and offers to remove the owner's handle from
+  those rules and drop a rule left with no owners; the default is no, and
+  declining leaves the file and goes on, since a client may want the
+  requests. Only the owner's own handle counts: a team the owner belongs to
+  is the client's to change, and GitHub's API does not say who a team's
+  review would reach without more scopes. `doctor`, in an adopting repo,
+  warns about the same rules and changes nothing.

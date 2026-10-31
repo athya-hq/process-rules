@@ -12,6 +12,7 @@ import {
   signingKeys,
   tokenInfo,
 } from './agent.ts';
+import { ownerRulesHere } from './codeowners.ts';
 import { exposure, exposureLines } from './lockout.ts';
 import type { Output, Sys } from './types.ts';
 
@@ -92,6 +93,8 @@ export async function doctor(sys: Sys, io: Output, named?: string): Promise<numb
     else io.out(`✓ ${name}`);
   }
   warnings.push(...exposureLines(exposure(sys, agent)));
+  const codeowners = ownerRulesHere(sys, agent);
+  if (codeowners) warnings.push(codeowners);
   for (const warning of warnings) io.err(`! ${warning}`);
   if (checks.some((check) => check.problem)) {
     io.err(`doctor: agent sessions must not push as ${agent} until fixed; run process-rules machine`);
