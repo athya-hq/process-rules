@@ -1,0 +1,21 @@
+README.md
+  s_e145c03b9bb021::t_09fdc1cd9089ba 437
+package.json
+  s_e145c03b9bb021::t_ff9fb338c7167a 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f164eed53f8cd0b782a482c3e31eb3440896eb77",
+  "prompts": {},
+  "sessions": {
+    "s_e145c03b9bb021": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3f0862b3-07b5-4cfe-8c9a-aefc1129d2d0",
+        "model": "unknown"
+      },
+      "human_author": "Alok Bansal <alokagrawal8@gmail.com>"
+    }
+  }
+}
