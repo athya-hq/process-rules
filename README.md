@@ -216,19 +216,35 @@ slice may be built:
 
 - it is a Slice issue under a Work item the owner labeled `approved`;
 - if it was added to the work item after the approval, the owner approved
-  it: a 👍 on the agent's proposal for it, made after it was added, or a
-  comment starting `Decision:` naming it;
+  it: a 👍 on the agent's proposal for it, made after it was added, a
+  comment starting `Decision:` naming it, or the owner's own request: a
+  comment they wrote on the work item before the slice was added, which the
+  slice's body links (`…/issues/<work item>#issuecomment-<id>`) and they
+  have not edited since;
 - each of its State sub-issues closed as not planned after the approval
   carries the owner's approval: a 👍 on the agent's proposal for it, or a
   `Decision:` comment;
 - no other open pull request names it.
+
+**What needs the owner.** A request the owner made on the work item is its
+own approval, linked as above. A fix needs none: it restores what the owner
+approved and changes nothing they would see beyond it, so it is filed as a
+State under the slice it fixes and its pull request names that slice, which
+already passes. A request made in chat is filed as a slice quoting the
+owner's words and proposed once. Anything else the agent adds, a fix filed
+as its own slice included, waits for the owner's 👍.
 
 **Approving with one tap.** In an agent session, `process-rules propose
 <issue>` asks the owner for what a slice owes: given the slice, it comments
 on it as the agent, one `Proposal:` comment for its addition after the
 approval and one for each State dropped after it (given a State, for that
 state alone), mentioning the owner, and labels the slice `needs-owner`, so it
-shows in the owner's Needs you view and their GitHub notifications. The owner
+shows in the owner's Needs you view and their GitHub notifications. Each
+proposal stands alone: what changes and why, from the slice's `**You will
+see:**` and `**Why:**` sections (a dropped State's own `**Why:**`), what it
+costs (a `**Cost:**` section, if any) and what happens if the owner
+declines. `propose` refuses, posting nothing, while a body lacks those
+sections, and names them. The owner
 approves a proposal by reacting 👍 to it, from the phone or the web; a typed
 `Decision:` comment still works. A 👍 counts only from the owner, only on the
 agent's comment starting `Proposal:` whose first `#N` is the slice or state
