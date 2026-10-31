@@ -60,3 +60,4 @@ Slices added since v1 live in their issues; these rows only point to them.
 | id   | issue | title | you will see | status |
 | ---- | ----- | ----- | ------------ | ------ |
 | P-35 | [#83](https://github.com/athya-hq/process-rules/issues/83) | Owner commands sign in for one run only | `onboard` and `onboard --add` ask for one browser approval per run, into a temporary `gh` folder deleted afterwards; the owner stays signed out of `gh`, and nothing tells the owner to sign in or out of it | shipped |
+| P-39 | [#94](https://github.com/athya-hq/process-rules/issues/94) | Work rules read a slice's parent as CI can | the work rules read a slice's parent from GitHub's parent endpoint, which a workflow's token can read on a private repository; a parent that cannot be read fails closed naming the failed read, never "not a sub-issue of a Work item" | in progress |

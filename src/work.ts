@@ -28,7 +28,6 @@ interface Issue {
   type: { name: string } | null;
   state_reason: string | null;
   closed_at: string | null;
-  parent_issue_url?: string | null;
   pull_request?: unknown;
 }
 
@@ -128,9 +127,18 @@ async function readIssue(sys: Sys, token: string, slug: string, number: number):
   return issue && !issue.pull_request ? issue : undefined;
 }
 
-/** The issue `issue` is a sub-issue of, or undefined. */
-async function parentOf(sys: Sys, token: string, slice: number, issue: Issue): Promise<Issue | undefined> {
-  return issue.parent_issue_url ? ((await rest(sys, token, slice, issue.parent_issue_url, true)) as Issue | undefined) : undefined;
+/**
+ * The issue `issue` is a sub-issue of, none, or why it could not be read.
+ * Read from the parent endpoint, not the issue's `parent_issue_url`: on a
+ * private repository a workflow's GITHUB_TOKEN gets that field back as null.
+ */
+async function parentOf(sys: Sys, token: string, issue: Issue): Promise<{ parent?: Issue; problem?: string }> {
+  const { status, json } = await sys.http(`${issue.url}/parent`, { token });
+  if (status === 200) return { parent: json as Issue };
+  const message = (json as { message?: string } | null)?.message;
+  // GitHub answers an issue with no parent so; any other failure is a read that failed, not a missing parent.
+  if (status === 404 && message && /no parent/i.test(message)) return {};
+  return { problem: `could not read #${issue.number}'s parent (HTTP ${status}${message ? `: ${message}` : ''})` };
 }
 
 /**
@@ -148,7 +156,8 @@ async function readSlice(
   const issue = await readIssue(sys, token, slug, slice);
   if (!issue) return { problems: [`#${slice} is not an issue in ${slug}`], owed: [] };
   if (issue.type?.name !== 'Slice') return { problems: [`#${slice} is not a Slice (its type is ${issue.type?.name ?? 'none'})`], owed: [] };
-  const parent = await parentOf(sys, token, slice, issue);
+  const { parent, problem } = await parentOf(sys, token, issue);
+  if (problem) return { problems: [problem], owed: [] };
   if (parent?.type?.name !== 'Work item') return { problems: [`#${slice} is not a sub-issue of a Work item`], owed: [] };
 
   const events = await every<TimelineEvent>(sys, token, slice, `${parent.url}/timeline`);
@@ -417,7 +426,8 @@ export async function propose(sys: Sys, io: Output, number: number): Promise<num
   }
 
   const issue = await readIssue(sys, token, slug, number);
-  const parent = issue?.type?.name === 'State' ? await parentOf(sys, token, number, issue) : undefined;
+  const { parent, problem } = issue?.type?.name === 'State' ? await parentOf(sys, token, issue) : {};
+  if (problem) return report(io, 'propose', [problem]);
   const state = parent?.type?.name === 'Slice';
   const slice = state ? parent.number : number;
   const read = await readSlice(sys, token, slug, slice, accounts);

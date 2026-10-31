@@ -49,14 +49,18 @@ function answer(issue: Node | null, url: string): { status: number; json: unknow
   };
   if (!issue) return undefined;
   const parent = issue.parent as Node | null;
-  const states = (issue.states as Node[]).map((state): Node => ({ ...state, url: `${ISSUES}/${state.number}`, parent_issue_url: `${ISSUES}/12` }));
-  if (path === '/12') return { status: 200, json: { ...issue, url: `${ISSUES}/12`, parent_issue_url: parent ? `${ISSUES}/10` : null } };
-  if (path === '/10' && parent) return { status: 200, json: { ...parent, url: `${ISSUES}/10` } };
+  const states = (issue.states as Node[]).map((state): Node => ({ ...state, url: `${ISSUES}/${state.number}` }));
+  // As a workflow's GITHUB_TOKEN reads a private repository: no parent_issue_url, the parent from its endpoint alone.
+  if (path === '/12') return { status: 200, json: { ...issue, url: `${ISSUES}/12`, parent_issue_url: null } };
+  if (path === '/12/parent') {
+    return parent ? { status: 200, json: { ...parent, url: `${ISSUES}/10` } } : { status: 404, json: { message: 'No parent issue found' } };
+  }
   if (path === '/10/timeline') return page(issue.timeline as Node[]);
   if (path === '/12/comments') return page(issue.comments as Node[]);
   if (path === '/12/sub_issues') return page(states);
-  const own = /^\/(\d+)(\/comments)?$/.exec(path);
+  const own = /^\/(\d+)(\/comments|\/parent)?$/.exec(path);
   const state = states.find((one) => one.number === Number(own?.[1]));
+  if (state && own?.[2] === '/parent') return { status: 200, json: { ...issue, url: `${ISSUES}/12` } };
   if (state) return own?.[2] ? page(state.comments as Node[]) : { status: 200, json: state };
   const reactions = /^\/comments\/([^/]+)\/reactions\?content=%2B1$/.exec(path);
   // A deleted comment reads as 404.
@@ -110,11 +114,23 @@ describe('sliceProblems', () => {
     ['a missing issue', () => null, '#12 is not an issue in example-org/example-app'],
     ['an issue that is not a Slice', (g: ReturnType<typeof graph>) => ({ ...g.issue, type: null }), '#12 is not a Slice (its type is none)'],
     ['a slice with no work item', (g: ReturnType<typeof graph>) => ({ ...g.issue, parent: null }), '#12 is not a sub-issue of a Work item'],
+    ['a slice under an issue that is not a Work item', (g: ReturnType<typeof graph>) => ({ ...g.issue, parent: { number: 10, type: { name: 'Slice' } } }), '#12 is not a sub-issue of a Work item'],
   ] as const) {
     it(`refuses ${name}`, async () => {
       assert.deepEqual(await problems(change(graph())), [problem]);
     });
   }
+
+  it('fails closed, saying so, when the parent cannot be read', async () => {
+    const sys = new FakeSys();
+    github(sys, graph().issue);
+    sys.route('GET', `/repos/${SLUG}/issues/12/parent`, { status: 403, json: { message: 'Resource not accessible by integration' } });
+    assert.deepEqual(await sliceProblems(sys, 'tok', SLUG, 12, ACCOUNTS, {}), ["could not read #12's parent (HTTP 403: Resource not accessible by integration)"]);
+    sys.route('GET', `/repos/${SLUG}/issues/12/parent`, { status: 404, json: { message: 'Not Found' } });
+    assert.deepEqual(await sliceProblems(sys, 'tok', SLUG, 12, ACCOUNTS, {}), ["could not read #12's parent (HTTP 404: Not Found)"]);
+    sys.route('GET', `/repos/${SLUG}/issues/12/parent`, { status: 502, json: null });
+    assert.deepEqual(await sliceProblems(sys, 'tok', SLUG, 12, ACCOUNTS, {}), ["could not read #12's parent (HTTP 502)"]);
+  });
 
   it('refuses an unapproved start', async () => {
     const g = graph();
@@ -650,6 +666,17 @@ describe('propose', () => {
     const { out } = await run(sys, 30);
     assert.equal(out[0], '✓ state #30: proposed on #12: https://github.com/example-org/example-app/issues/12#issuecomment-1');
     assert.equal(posted(sys).length, 1);
+  });
+
+  it("refuses a state whose slice cannot be read, saying so", async () => {
+    const { sys } = session(owing());
+    sys.route('GET', `/repos/${SLUG}/issues/30/parent`, { status: 403, json: { message: 'Resource not accessible by integration' } });
+    assert.deepEqual(await run(sys, 30), {
+      code: 1,
+      out: [],
+      err: ["✗ could not read #30's parent (HTTP 403: Resource not accessible by integration)", 'propose: refused by the work rules'],
+    });
+    assert.deepEqual(posted(sys), []);
   });
 
   it('posts nothing twice, and keeps the label while the owner has not decided', async () => {
