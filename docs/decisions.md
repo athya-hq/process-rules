@@ -217,6 +217,24 @@
   to what `figma` needs and leaves a secrets block holding the client's own
   secrets as it is, saying which job that leaves without FIGMA_LIBRARY.
   Released as v0.5.6, a patch release.
+- **2026-11-01 — Record: P-37, onboard sets the FIGMA_LIBRARY secret
+  itself.** Since P-23, `onboard` took the Figma library key out of older
+  settings and printed `gh secret set FIGMA_LIBRARY …` for the owner to run,
+  but the owner stays signed out of `gh` for good (P-35). Decided: `onboard`
+  sets the secrets it needs itself, as the owner for one run. With the
+  run's one browser approval it reads the repository's Actions public key,
+  seals the key as a libsodium sealed box and PUTs the secret through the
+  REST API; a value that is not a Figma file key is not stored, and the
+  owner is told where in the repository's settings to set the right one.
+  The key never appears in onboard's output or in a request in the clear.
+  The sealing uses `libsodium-wrappers` (with its `libsodium`), the
+  reference implementation of `crypto_box_seal` and the package GitHub's
+  own documentation uses: `tweetnacl`, smaller, has no sealed box and no
+  BLAKE2b for its nonce and has had no release since 2020, and the
+  `@noble` packages would mean assembling the sealed box from primitives
+  here. It is loaded only when a secret is set, since the shared checks run
+  the CLI from its source with no packages installed. Approval: the
+  owner's 👍 on #88. Released in the next 0.5.x patch release.
 - **2026-11-01 — Record: P-36, onboard opens its changes as the agent's
   pull request.** `onboard` wrote `.github/process-rules.json`,
   `.claude/settings.json`, the workflow and CODEOWNERS into the owner's

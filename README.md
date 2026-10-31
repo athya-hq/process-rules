@@ -265,7 +265,10 @@ so a public repository does not publish its design file, and the workflow
 an older release wrote still work: a `design` feature is read as `figma`, and
 a `"figma": { "library": ... }` setting is read when `FIGMA_LIBRARY` is not
 set, each with a warning; `onboard` renames the feature, takes the key out
-and prints the `gh secret set FIGMA_LIBRARY` command that puts it back.
+and sets it as the `FIGMA_LIBRARY` secret itself, as you, with the run's one
+browser approval: it seals the key with the repository's Actions public key
+(a libsodium sealed box, as GitHub requires) and stores it through GitHub's
+API, never printing it.
 
 **Decisions, weekly** runs on Mondays at 06:17 UTC (and by hand), or on the
 `schedule` the settings set. A Decision issue carries

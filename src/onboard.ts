@@ -21,6 +21,7 @@ import { ownerRules, ownerRulesProblem } from './codeowners.ts';
 import { appendToArray, replaceValues, setMember } from './jsonedit.ts';
 import { DEFAULT_SCHEDULE, type Feature, FEATURES, FIGMA_FILE_KEY, featuresIn, parseFeatures, renamedLines, scheduleIn } from './features.ts';
 import { type Change, HOOKS_PATH, WORKFLOW_PATH, openPull } from './onboard-pull.ts';
+import { setSecret } from './secrets.ts';
 import { packageVersion } from './version.ts';
 import type { Output, Sys } from './types.ts';
 
@@ -561,7 +562,8 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
   let signedIn: Promise<OwnerToken | { problem: string }> | undefined;
   const signIn = (): Promise<OwnerToken | { problem: string }> =>
     (signedIn ??= (async () => {
-      scopes = ownerScopes(features, await isOrganisation(sys, slug.split('/')[0] as string));
+      // The features the run ends with: the sign-in can come before --add's feature is turned on.
+      scopes = ownerScopes(add ? [...features, add] : features, await isOrganisation(sys, slug.split('/')[0] as string));
       io.out(`Sign in to GitHub as the owner in the browser, for this run only (${['repo', ...scopes].join(', ')}); nothing is kept.`);
       return signInOnce(sys, scopes);
     })());
@@ -598,19 +600,31 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     const renamed = renamedLines(raw).length > 0;
     if (renamed || raw.figma !== undefined) {
       const library = (raw.figma as { library?: unknown } | null)?.library;
+      // Set as the secret only when it is a file key, so nothing else is stored as one.
+      const fileKey = typeof library === 'string' && FIGMA_FILE_KEY.test(library) ? library : undefined;
       const updates = [
         ...(renamed ? ['rename the design feature to figma'] : []),
-        ...(raw.figma !== undefined ? ['take out "figma", since the library key belongs in the FIGMA_LIBRARY Actions secret'] : []),
+        ...(raw.figma === undefined
+          ? []
+          : [fileKey ? 'take out "figma" and set its library key as the FIGMA_LIBRARY Actions secret, as you' : 'take out "figma", since the library key belongs in the FIGMA_LIBRARY Actions secret']),
       ];
       if (!(await confirm(`Update ${SETTINGS_PATH}: ${updates.join(' and ')}?`))) return stop('settings file');
       const { figma: _figma, ...rest } = raw;
       raw = { ...rest, ...(rest.features === undefined ? {} : { features }) };
       change(SETTINGS_PATH, `${JSON.stringify(raw, null, 2)}\n`, updates.join(' and '));
-      // Printed as a command only when it is a file key, so copying it runs nothing else.
-      if (typeof library === 'string' && FIGMA_FILE_KEY.test(library)) {
-        io.out(`! set the FIGMA_LIBRARY Actions secret to the key taken out: gh secret set FIGMA_LIBRARY --repo ${slug} --body ${library}`);
+      if (fileKey) {
+        const mine = await ownerToken();
+        if (!mine) return 1;
+        const problem = await setSecret(sys, slug, mine, 'FIGMA_LIBRARY', fileKey);
+        if (problem) {
+          io.err(`onboard: ${problem}`);
+          return 1;
+        }
+        io.out('✓ FIGMA_LIBRARY Actions secret: the library key taken out');
       } else if (library !== undefined) {
-        io.out('! the "figma.library" taken out was not a Figma file key; set the FIGMA_LIBRARY Actions secret to the design library\'s file key');
+        io.out(
+          `! the "figma.library" taken out was not a Figma file key; set the FIGMA_LIBRARY Actions secret to the design library's file key under ${slug} → Settings → Secrets and variables → Actions`,
+        );
       }
     }
     if (add && !features.includes(add)) {
