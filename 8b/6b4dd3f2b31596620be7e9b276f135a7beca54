@@ -1,0 +1,32 @@
+src/work.ts
+  s_9b185e6118ff5a::t_c3f17bdbd51838 27-46,52,54,58-59,65,86-90,96,159-171,220-225,227-228,249,256,265,267-272
+src/decisions.test.ts
+  s_9b185e6118ff5a::t_794dc7d977f6b6 116-123
+  s_9b185e6118ff5a::t_3929b836fb8f0c 40,108,126,144
+src/work.test.ts
+  s_9b185e6118ff5a::t_5da5e5074dc64c 39,49-57,306-326
+  s_9b185e6118ff5a::t_7444cf8db36986 43-46,191-197
+  s_9b185e6118ff5a::t_95df4934653559 198,327-328
+src/decisions.ts
+  s_9b185e6118ff5a::t_336ab03638c983 158-165
+src/design.ts
+  s_9b185e6118ff5a::t_336ab03638c983 121,123-138
+src/design.test.ts
+  s_9b185e6118ff5a::t_794dc7d977f6b6 176-188
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8b6b4dd3f2b31596620be7e9b276f135a7beca54",
+  "prompts": {},
+  "sessions": {
+    "s_9b185e6118ff5a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b31c93b2-78bd-42ed-9758-c38dcbcb3338",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Alok Bansal <alokagrawal8@gmail.com>"
+    }
+  }
+}
