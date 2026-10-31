@@ -5,10 +5,43 @@
         "hooks": [
           {
             "type": "command",
-            "command": "if [ \"$CLAUDE_CODE_REMOTE\" = true ]; then :; elif command -v process-rules >/dev/null 2>&1 && process-rules session-start; then :; else echo \"process-rules: STOP. The process-rules CLI is missing or did not run here, so this session cannot be given the agent identity and gh and git would act as the owner. Do not push, fetch, or run gh in this session; tell the owner.\"; fi"
+            "command": "cli=\"$HOME/.config/process-rules/bin/process-rules\"; [ -x \"$cli\" ] || cli=process-rules; if said=$(\"$cli\" session-start 2>&1); then printf '%s\\n' \"$said\"; else printf '%s\\n' \"process-rules: STOP. process-rules session-start did not run here ($said), so this session cannot be given the agent identity and GitHub is locked out of it. Do not push, fetch, or run gh in this session; tell the owner.\"; fi"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "input=$(cat); cmd=$(printf '%s' \"$input\" | sed -nE 's/.*\"command\"[[:space:]]*:[[:space:]]*\"(([^\"\\\\]|\\\\.)*)\".*/\\1/p'); printf '%s' \"$cmd\" | grep -Eq '(^|[^[:alnum:]_-])(gh|git)([^[:alnum:]_-]|$)' || exit 0; cli=\"$HOME/.config/process-rules/bin/process-rules\"; [ -x \"$cli\" ] || cli=process-rules; printf '%s' \"$input\" | \"$cli\" guard && exit 0; [ $? -eq 2 ] && exit 2; echo \"process-rules: refused, because the process-rules CLI did not run here to check this command. Do not work around it; tell the owner.\" >&2; exit 2"
           }
         ]
       }
     ]
+  },
+  "env": {
+    "GH_TOKEN": "process-rules-no-agent-token",
+    "GITHUB_TOKEN": "process-rules-no-agent-token",
+    "GIT_CONFIG_PARAMETERS": "",
+    "GIT_ASKPASS": "",
+    "SSH_ASKPASS": "",
+    "GIT_TERMINAL_PROMPT": "0",
+    "GIT_SSH_COMMAND": "echo 'process-rules: SSH is off in agent sessions; GitHub goes over HTTPS' >&2; false",
+    "GIT_CONFIG_COUNT": "6",
+    "GIT_CONFIG_KEY_0": "credential.helper",
+    "GIT_CONFIG_VALUE_0": "",
+    "GIT_CONFIG_KEY_1": "core.askpass",
+    "GIT_CONFIG_VALUE_1": "",
+    "GIT_CONFIG_KEY_2": "url.https://github.com/.insteadOf",
+    "GIT_CONFIG_VALUE_2": "git@github.com:",
+    "GIT_CONFIG_KEY_3": "url.https://github.com/.insteadOf",
+    "GIT_CONFIG_VALUE_3": "ssh://git@github.com/",
+    "GIT_CONFIG_KEY_4": "url.https://github.com/.insteadOf",
+    "GIT_CONFIG_VALUE_4": "ssh://git@github.com:22/",
+    "GIT_CONFIG_KEY_5": "url.https://github.com/.insteadOf",
+    "GIT_CONFIG_VALUE_5": "ssh://git@ssh.github.com:443/"
   }
 }
