@@ -7,6 +7,7 @@ import { TOKEN_PAGE, machine, tokenInstructions } from './machine.ts';
 
 const SESSION = `${HOME}/.config/process-rules/examplebot/session.sh`;
 const LAUNCHER = launcherPath(HOME);
+const INSTALLED = '/home/u/Library/pnpm/global/5/node_modules/@athya-hq/process-rules/dist/cli.js';
 
 /** A machine with nothing set up, answering yes to everything. */
 function fresh(): FakeSys {
@@ -253,20 +254,28 @@ describe('machine', () => {
     });
   }
 
-  it('writes the launcher, which runs the package manager\'s command for the CLI with this node', async () => {
+  it('writes the launcher, which runs the package manager\'s command for an installed CLI with this node', async () => {
     const sys = fresh();
+    sys.runtime = { node: NODE, cli: INSTALLED };
     sys.execOverride = (call) =>
       call.command === '/bin/sh' ? { code: 0, stdout: '/home/u/Library/pnpm/bin/process-rules\n', stderr: '' } : undefined;
     assert.equal((await setUp(sys)).code, 0);
-    assert.equal(sys.files.get(LAUNCHER), launcherScript(NODE, CLI, '/home/u/Library/pnpm/bin/process-rules'));
+    assert.equal(sys.files.get(LAUNCHER), launcherScript(NODE, INSTALLED, '/home/u/Library/pnpm/bin/process-rules'));
     assert.equal(sys.modes.get(LAUNCHER), 0o755);
     assert.match(sys.files.get(LAUNCHER) ?? '', /^PATH='\/opt\/node\/bin':"\$PATH"$/m);
     assert.ok(sys.dirs.includes(`${HOME}/.config/process-rules/bin`));
   });
 
-  it("runs the CLI's own script when the package manager has no command for it", async () => {
+  it("runs the CLI's own script from a checkout, whatever is on PATH, or when nothing is", async () => {
     const sys = fresh();
+    sys.execOverride = (call) =>
+      call.command === '/bin/sh' ? { code: 0, stdout: '/home/u/Library/pnpm/bin/process-rules\n', stderr: '' } : undefined;
     assert.equal((await setUp(sys)).code, 0);
+    assert.ok(!sys.calls.some((c) => c.command === '/bin/sh'), 'an installed CLI on PATH may be another version');
+    const bare = fresh();
+    bare.runtime = { node: NODE, cli: INSTALLED };
+    assert.equal((await setUp(bare)).code, 0);
+    assert.equal(bare.files.get(LAUNCHER), launcherScript(NODE, INSTALLED));
     assert.match(sys.files.get(LAUNCHER) ?? '', /^exec '\/opt\/node\/bin\/node' '\/opt\/process-rules\/dist\/cli\.js' "\$@"$/m);
   });
 

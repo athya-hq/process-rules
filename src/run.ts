@@ -77,10 +77,15 @@ export async function run(
       return 0;
     case 'session-start':
       return sessionStart(await sys(), io);
-    case 'guard': {
-      const real = await sys();
-      return guard(real, io, real.readStdin());
-    }
+    case 'guard':
+      // Any failure refuses: Claude Code runs the command when a PreToolUse hook exits 1.
+      try {
+        const real = await sys();
+        return guard(real, io, real.readStdin());
+      } catch (error) {
+        io.err(`process-rules guard: refused, because the check failed: ${error instanceof Error ? error.message : String(error)}`);
+        return 2;
+      }
     case 'machine':
     case 'doctor':
     case 'onboard':

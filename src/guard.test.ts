@@ -17,10 +17,10 @@ function check(sys: FakeSys, command: unknown, sessionId: unknown = 'abc-123'): 
 const REFUSED = 'process-rules: refused, because this session does not work as the agent on GitHub:';
 
 describe('reachesGitHub', () => {
-  for (const command of ['gh pr list', 'cd x && gh api user', 'git push', 'git -C /repo fetch origin', 'git pull --rebase', 'git clone url', 'git ls-remote origin', 'git remote update', 'git submodule update', 'echo; git push -u origin HEAD', '(gh issue view 1)']) {
+  for (const command of ['/usr/local/bin/gh pr list', '~/bin/git push', 'git -c a=b fetch', 'git --git-dir=.git push', 'gh pr list', 'cd x && gh api user', 'git push', 'git -C /repo fetch origin', 'git pull --rebase', 'git clone url', 'git ls-remote origin', 'git remote update', 'git submodule update', 'echo; git push -u origin HEAD', '(gh issue view 1)']) {
     it(`finds ${command}`, () => assert.equal(reachesGitHub(command), true));
   }
-  for (const command of ['ls', 'git status', 'git commit -m fix', 'git log --oneline', 'cat .github/x', 'pnpm check', 'node gh.js', 'ghq list', '/usr/bin/sigh now']) {
+  for (const command of ['git commit -m "fix push"', 'git log --grep pull', 'ls', 'git status', 'git commit -m fix', 'git log --oneline', 'cat .github/x', 'pnpm check', 'node gh.js', 'ghq list', '/usr/bin/sigh now']) {
     it(`passes ${command}`, () => assert.equal(reachesGitHub(command), false));
   }
 });

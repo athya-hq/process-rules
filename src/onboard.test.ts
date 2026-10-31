@@ -197,6 +197,10 @@ describe('onboard', () => {
       rmSync(launcher, { force: true });
       cli(join(bin, 'process-rules'), 'echo "ran $* with $(cat)"');
       assert.equal(shell(HOOK_COMMAND, { PATH: `${bin}:/usr/bin:/bin`, CLAUDE_CODE_REMOTE: 'true' }).stdout, '');
+      const envFile = join(home, 'env.sh');
+      shell(HOOK_COMMAND, { CLAUDE_CODE_REMOTE: 'true', CLAUDE_ENV_FILE: envFile, ...BASE_ENV });
+      const cloud = spawnSync('bash', ['-c', `. ${envFile}; env`], { encoding: 'utf8', env: { PATH: '/usr/bin:/bin', ...BASE_ENV } }).stdout;
+      assert.ok(Object.keys(BASE_ENV).every((name) => !cloud.includes(`${name}=`)), `a cloud session loses the lock: ${cloud}`);
       assert.equal(shell(HOOK_COMMAND, { PATH: `${bin}:/usr/bin:/bin` }, '{"session_id":"s"}').stdout, 'ran session-start with {"session_id":"s"}\n');
       assert.match(
         shell(HOOK_COMMAND, {}).stdout,
@@ -212,6 +216,8 @@ describe('onboard', () => {
       rmSync(launcher, { force: true });
       const input = (command: string): string => JSON.stringify({ session_id: 's', tool_input: { command } });
       assert.equal(shell(GUARD_COMMAND, {}, input('ls')).status, 0);
+      assert.equal(shell(GUARD_COMMAND, {}, input('ls .github && echo high')).status, 0, 'gh and git as words only');
+      assert.equal(shell(GUARD_COMMAND, {}, input('/usr/bin/gh pr list')).status, 2);
       const described = JSON.stringify({ session_id: 's', cwd: '/x/github', tool_input: { command: 'echo "git"x', description: 'Run gh' } });
       assert.equal(shell(GUARD_COMMAND, {}, described.replace('echo \\"git\\"x', 'ls')).status, 0, 'only the command counts');
       assert.equal(shell(GUARD_COMMAND, {}, described).status, 2, 'escaped quotes inside the command');

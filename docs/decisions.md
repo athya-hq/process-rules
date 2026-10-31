@@ -76,7 +76,9 @@
   `CLAUDE_ENV_FILE`, so nothing can check them before a command; three
   layers instead. The client's `.claude/settings.json` holds the lock in
   `env`, which Claude Code gives every session before any hook runs, so a
-  session nothing set up reaches GitHub as nobody. A PreToolUse guard refuses
+  session nothing set up reaches GitHub as nobody; a cloud session's
+  SessionStart hook unsets it, as cloud sessions reach GitHub as the account
+  connected to them. A PreToolUse guard refuses
   `gh` and git's remote commands unless session-start recorded, for that
   session id, that it gave the agent identity, repeating why it did not; a
   session whose shells lost the variables after it recorded success still

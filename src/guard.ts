@@ -1,9 +1,13 @@
 import { sessionRecord } from './agent.ts';
 import type { Output, Sys } from './types.ts';
 
+/** Where a command word starts, and an optional folder before it, as in /usr/bin/gh. */
+const WORD = String.raw`(?:^|[\s;&|()\`'"$])(?:[\w.~-]*/)*`;
+/** git's options before its subcommand: -C and -c take a value. */
+const GIT_OPTIONS = String.raw`(?:\s+(?:-[Cc]\s+\S+|--[\w-]+(?:=\S+)?|-\w))*`;
 /** `gh` as a command, and the git commands that reach a remote. */
-const GH = /(?:^|[^\w./-])gh(?:\s|$)/;
-const GIT_NETWORK = /(?:^|[^\w./-])git\s(?:[^;&|\n]*\s)?(?:push|fetch|pull|clone|ls-remote|remote|submodule)(?:\s|$)/;
+const GH = new RegExp(`${WORD}gh(?:\\s|$)`);
+const GIT_NETWORK = new RegExp(`${WORD}git${GIT_OPTIONS}\\s+(?:push|fetch|pull|clone|ls-remote|remote|submodule)(?:\\s|$)`);
 
 /** Whether a shell command runs gh or a git command that reaches a remote. */
 export function reachesGitHub(command: string): boolean {

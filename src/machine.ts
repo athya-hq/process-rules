@@ -159,10 +159,11 @@ export async function machine(sys: Sys, io: Output, named?: string): Promise<num
 
 /**
  * The package manager's command for the CLI on this shell's PATH, which
- * stays put when the CLI is upgraded; undefined when there is none, as when
- * the CLI runs from a checkout.
+ * stays put when the CLI is upgraded; undefined when there is none, or when
+ * this CLI runs from a checkout, whatever an installed one on PATH is.
  */
 function cliCommand(sys: Sys, launcher: string): string | undefined {
+  if (!sys.runtime.cli.includes('/node_modules/')) return undefined;
   const found = sys.exec('/bin/sh', ['-c', 'command -v process-rules']);
   const command = found.stdout.trim();
   return found.code === 0 && command.startsWith('/') && command !== launcher ? command : undefined;

@@ -171,6 +171,7 @@ export function replaceValues(text: string, path: string[], replace: (value: unk
  * Refuses, changing nothing, when a value on the way is not an object.
  */
 export function setMember(text: string, path: string[], key: string, value: unknown): string {
+  if (value === undefined) throw new Error(`${[...path, key].join('.')} cannot be set to undefined`);
   const layout = layoutOf(text);
   let objectStart = skipSpace(text, 0);
   for (const [i, name] of path.entries()) {
@@ -181,5 +182,5 @@ export function setMember(text: string, path: string[], key: string, value: unkn
   }
   const member = memberSpan(text, objectStart, key);
   if (!member) return addMember(text, objectStart, key, value, layout);
-  return `${text.slice(0, member.start)}${JSON.stringify(value)}${text.slice(member.end)}`;
+  return `${text.slice(0, member.start)}${indented(value, lineIndent(text, member.start), layout)}${text.slice(member.end)}`;
 }

@@ -31,7 +31,9 @@ classic-token page with the scopes filled in (`repo`, `workflow`, `read:org`,
 into the keychain (service `process-rules`), refusing a fine-grained token,
 missing scopes or no expiry. It then registers the key as the agent's signing key, writes
 `~/.config/process-rules/<agent, lowercased>/session.sh`, and writes the
-launcher `~/.config/process-rules/bin/process-rules`, which the hooks run. The
+launcher `~/.config/process-rules/bin/process-rules`, which the Claude Code
+hooks run (the pre-push git hook still runs `process-rules` from the agent
+session's `PATH`). The
 launcher names the node that ran `machine` by its real path (not a version
 manager's per-shell one, which the Claude app's hooks may not have), so the
 hooks need no node on their `PATH`. Each change waits for a yes. Why a classic token: [docs/decisions.md](docs/decisions.md).
@@ -40,7 +42,8 @@ A client's `.claude/settings.json` locks GitHub out of every session before
 any hook runs: its `env` holds the lock's variables (a `GH_TOKEN` GitHub
 refuses, no credential helper, GitHub's SSH remotes on HTTPS and every other
 SSH remote refused), so a session whose hook never ran or failed reaches
-GitHub as nobody, never as the owner.
+GitHub as nobody, never as the owner. In a cloud session the SessionStart
+hook unsets it, so the session reaches GitHub as the account connected to it.
 
 In Claude Code, the client's SessionStart hook runs `process-rules
 session-start`. It appends a lock to `CLAUDE_ENV_FILE`: a token GitHub refuses,
@@ -61,7 +64,7 @@ unless session-start gave this session the agent identity. Hooks cannot see
 the variables session-start gives the session's shells, so session-start
 records how it left each session in
 `~/.config/process-rules/sessions/<session id>.json` and the guard reads that.
-A command naming neither `gh` nor `git` goes ahead without starting the CLI;
+A command not naming `gh` or `git` as a word goes ahead without starting the CLI;
 when the CLI cannot run, every command naming either is refused.
 
 The session file holds no secret: `GH_TOKEN` is read from the keychain on each
@@ -224,7 +227,7 @@ below it under `with:`, `process-rules-ref: vX.Y.Z`, because a called
 workflow cannot read its own ref from GitHub's contexts. Upgrading is one
 step: install the new CLI and run `onboard` again, which rewrites both lines
 together (it offers to replace the workflow). Editing the version by hand
-means changing both lines. The hooks run the
+means changing both lines. The Claude Code hooks run the
 launcher `machine` writes, else `process-rules` from the `PATH`; without
 either the session-start hook tells the session to stop, and the guard refuses
 `gh` and `git`. Run `machine` again after removing the node it names.

@@ -42,14 +42,14 @@ export const PRE_PUSH_HOOK = [
 const FIND_CLI = 'cli="$HOME/.config/process-rules/bin/process-rules"; [ -x "$cli" ] || cli=process-rules; ';
 
 /**
- * What the client's SessionStart hook runs. Cloud sessions are left alone,
- * before anything else: they reach GitHub as the account connected to them
- * and have no CLI. When the CLI is missing or fails, what it printed reaches
- * the session inside a line telling it to stop; the settings' `env` has
- * already locked GitHub out.
+ * What the client's SessionStart hook runs. Cloud sessions reach GitHub as
+ * the account connected to them and have no CLI, so before anything else
+ * their hook unsets the lock the settings' `env` gave them. Elsewhere, when
+ * the CLI is missing or fails, what it printed reaches the session inside a
+ * line telling it to stop; the settings' `env` has already locked GitHub out.
  */
 export const HOOK_COMMAND =
-  'if [ "$CLAUDE_CODE_REMOTE" = true ]; then :; else ' +
+  `if [ "$CLAUDE_CODE_REMOTE" = true ]; then [ -z "$CLAUDE_ENV_FILE" ] || echo 'unset ${Object.keys(BASE_ENV).join(' ')}' >> "$CLAUDE_ENV_FILE"; else ` +
   FIND_CLI +
   'if said=$("$cli" session-start 2>&1); then printf \'%s\\n\' "$said"; ' +
   'else printf \'%s\\n\' "process-rules: STOP. process-rules session-start did not run here ($said), so this session cannot be given the agent identity and GitHub is locked out of it. Do not push, fetch, or run gh in this session; tell the owner."; fi; fi';
@@ -57,14 +57,14 @@ export const HOOK_COMMAND =
 /**
  * What the client's PreToolUse hook runs before each Bash command: `guard`
  * refuses gh and git's remote commands outside the agent identity. A command
- * naming neither goes ahead without starting the CLI. When the CLI cannot
+ * not naming either as a word goes ahead without starting the CLI. When the CLI cannot
  * run, every command naming either is refused, so a broken CLI fails closed.
  */
 export const GUARD_COMMAND =
   '[ "$CLAUDE_CODE_REMOTE" = true ] && exit 0; input=$(cat); ' +
   // The command alone, not the rest of the input, such as its description and paths.
   'cmd=$(printf \'%s\' "$input" | sed -nE \'s/.*"command"[[:space:]]*:[[:space:]]*"(([^"\\\\]|\\\\.)*)".*/\\1/p\'); ' +
-  'case "$cmd" in *gh*|*git*) ;; *) exit 0 ;; esac; ' +
+  'printf \'%s\' "$cmd" | grep -Eq \'(^|[^[:alnum:]_-])(gh|git)([^[:alnum:]_-]|$)\' || exit 0; ' +
   FIND_CLI +
   'printf \'%s\' "$input" | "$cli" guard && exit 0; [ $? -eq 2 ] && exit 2; ' +
   'echo "process-rules: refused, because the process-rules CLI did not run here to check this command. Do not work around it; tell the owner." >&2; exit 2';

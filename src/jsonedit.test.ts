@@ -89,7 +89,12 @@ describe('setMember', () => {
     assert.deepEqual(JSON.parse(setMember('{ "x": 1 }', ['a', 'b'], 'c', 2)), { x: 1, a: { b: { c: 2 } } });
   });
 
-  it('refuses a value on the way that is not an object', () => {
+  it('refuses a value on the way that is not an object, and undefined', () => {
     assert.throws(() => setMember('{ "env": [] }', ['env'], 'A', '1'), /^Error: env is not an object$/);
+    assert.throws(() => setMember('{}', ['env'], 'A', undefined), /^Error: env\.A cannot be set to undefined$/);
+  });
+
+  it('swaps in an object in the file\'s layout', () => {
+    assert.equal(setMember('{\n    "a": {\n        "b": 1\n    }\n}\n', ['a'], 'b', { c: 2 }), '{\n    "a": {\n        "b": {\n            "c": 2\n        }\n    }\n}\n');
   });
 });

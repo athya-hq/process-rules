@@ -179,11 +179,16 @@ function identityVars(agent: string, id: number, paths: Paths): [string, string]
  * settings: every session there starts locked out of GitHub before any hook
  * runs, so a session whose hook never ran or failed reaches GitHub as nobody.
  * The settings file is shared by every machine, so nothing in it names a
- * home folder; GH_TOKEN alone keeps gh off its stored logins.
+ * home folder; GH_TOKEN alone keeps gh off its stored logins. Cloud sessions
+ * get it too, and their SessionStart hook unsets it (`onboard`'s HOOK_COMMAND).
  */
 export const BASE_ENV: Record<string, string> = Object.fromEntries([
   ['GH_TOKEN', NO_TOKEN],
   ['GITHUB_TOKEN', NO_TOKEN],
+  // Settings cannot unset a variable; empty, these bring back no helper and ask no program.
+  ['GIT_CONFIG_PARAMETERS', ''],
+  ['GIT_ASKPASS', ''],
+  ['SSH_ASKPASS', ''],
   ['GIT_TERMINAL_PROMPT', '0'],
   ['GIT_SSH_COMMAND', NO_SSH],
   ...configVars(LOCKED_CONFIG),
