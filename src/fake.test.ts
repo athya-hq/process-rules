@@ -295,8 +295,16 @@ export class FakeSys implements Sys {
       (url.includes('/users/')
         ? [...this.routes].find(([key]) => key.toLowerCase() === wanted.toLowerCase())?.[1]
         : undefined);
-    const result = typeof route === 'function' ? route() : route ?? { status: 404, json: { message: 'Not Found' } };
+    const result = typeof route === 'function' ? route() : route ?? this.unrouted(url);
     return Promise.resolve(result);
+  }
+
+  /** The repository's owner's account type, which a check reads when no test routes the repository. */
+  ownerType: 'Organization' | 'User' = 'Organization';
+  private unrouted(url: string): HttpResult {
+    if (url === 'https://api.github.com/repos/example-org/example-app') return { status: 200, json: { owner: { login: 'example-org', type: this.ownerType } } };
+    if (url === 'https://api.github.com/users/example-org') return { status: 200, json: { login: 'example-org', type: this.ownerType } };
+    return { status: 404, json: { message: 'Not Found' } };
   }
 
   stdin = '';

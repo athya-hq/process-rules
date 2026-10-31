@@ -1,4 +1,4 @@
-import { SETTINGS_PATH } from './agent.ts';
+import { API, SETTINGS_PATH } from './agent.ts';
 import type { Sys } from './types.ts';
 
 /**
@@ -52,9 +52,44 @@ export function isOn(sys: Sys, root: string, feature: Feature): boolean {
   return featuresIn(JSON.parse(sys.read(`${root}/${SETTINGS_PATH}`))).includes(feature);
 }
 
-/** The line a check prints when its feature is off. */
-export function offLine(command: string, feature: Feature): string {
-  return `${command}: ${feature} is off in ${SETTINGS_PATH}; nothing to check`;
+/**
+ * The line a check prints when its feature is off: off in the settings, or,
+ * given `why`, off for that reason whatever the settings say.
+ */
+export function offLine(command: string, feature: Feature, why?: string): string {
+  return `${command}: ${feature} is off ${why ?? `in ${SETTINGS_PATH}`}; nothing to check`;
+}
+
+/**
+ * Features that need GitHub's issue types: the work rules need a Slice under
+ * a Work item, the weekly job and reviews-due list issues by type, and the
+ * design check reads a slice's State sub-issues.
+ */
+export const NEEDS_ISSUE_TYPES: readonly Feature[] = ['work-rules', 'figma', 'decisions'];
+
+/** Why a feature that needs issue types cannot run on a repository a personal account owns. */
+export const PERSONAL_REPO = 'on a repository owned by a personal account, since GitHub has issue types for organisations only';
+
+/** Whether a repository is a personal account's, by repository, asked of GitHub once per run. */
+const personal = new WeakMap<Sys, Map<string, Promise<boolean>>>();
+
+/** Whether a personal account owns repository `slug`, from GitHub's `owner.type`; throws when GitHub will not say. */
+export function isPersonal(sys: Sys, slug: string, token: string): Promise<boolean> {
+  const asked = personal.get(sys) ?? new Map<string, Promise<boolean>>();
+  personal.set(sys, asked);
+  let answer = asked.get(slug);
+  if (!answer) {
+    answer = (async () => {
+      const { status, json } = await sys.http(`${API}/repos/${slug}`, { token });
+      const type = (json as { owner?: { type?: unknown } } | null)?.owner?.type;
+      if (status !== 200 || typeof type !== 'string') throw new Error(`cannot tell whether a personal account owns ${slug} (HTTP ${status})`);
+      if (type === 'Organization') return false;
+      if (type === 'User') return true;
+      throw new Error(`cannot tell whether a personal account owns ${slug}: GitHub names its owner a ${JSON.stringify(type)}`);
+    })();
+    asked.set(slug, answer);
+  }
+  return answer;
 }
 
 /**

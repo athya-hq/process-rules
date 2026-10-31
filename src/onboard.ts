@@ -19,7 +19,7 @@ import { setUpBoard } from './board.ts';
 import { type OwnerToken, asOwner, isOrganisation, ownerScopes, signInOnce } from './owner-login.ts';
 import { ownerRules, ownerRulesProblem } from './codeowners.ts';
 import { appendToArray, replaceValues, setMember } from './jsonedit.ts';
-import { DEFAULT_SCHEDULE, type Feature, FEATURES, FIGMA_FILE_KEY, featuresIn, parseFeatures, renamedLines, scheduleIn } from './features.ts';
+import { DEFAULT_SCHEDULE, type Feature, FEATURES, FIGMA_FILE_KEY, NEEDS_ISSUE_TYPES, featuresIn, parseFeatures, renamedLines, scheduleIn } from './features.ts';
 import { type Change, HOOKS_PATH, WORKFLOW_PATH, openPull } from './onboard-pull.ts';
 import { packageVersion } from './version.ts';
 import type { Output, Sys } from './types.ts';
@@ -543,6 +543,10 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     io.err(`onboard: stopped at "${step}"; nothing after it was changed, and no pull request was opened`);
     return 1;
   };
+  // Whether an organisation owns the repository, asked of GitHub once in this run.
+  let organisation: Promise<boolean> | undefined;
+  const byOrganisation = (): Promise<boolean> => (organisation ??= isOrganisation(sys, slug.split('/')[0] as string));
+  const personal = `${slug} is owned by a personal account, and GitHub has issue types for organisations only`;
   // The repository's files are changed only through the agent's pull request at the end: until then each
   // change is held here, and read back from here, so the owner's checkout is never modified.
   const changes = new Map<string, Change>();
@@ -561,7 +565,7 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
   let signedIn: Promise<OwnerToken | { problem: string }> | undefined;
   const signIn = (): Promise<OwnerToken | { problem: string }> =>
     (signedIn ??= (async () => {
-      scopes = ownerScopes(features, await isOrganisation(sys, slug.split('/')[0] as string));
+      scopes = ownerScopes(features, await byOrganisation());
       io.out(`Sign in to GitHub as the owner in the browser, for this run only (${['repo', ...scopes].join(', ')}); nothing is kept.`);
       return signInOnce(sys, scopes);
     })());
@@ -594,6 +598,11 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     let raw = JSON.parse(fileAt(SETTINGS_PATH) as string) as Record<string, unknown>;
     features = featuresIn(raw);
     schedule = scheduleIn(raw);
+    // Before any change, so a refused --add leaves the settings as they were.
+    if (add && !features.includes(add) && NEEDS_ISSUE_TYPES.includes(add) && !(await byOrganisation())) {
+      io.err(`onboard: ${personal}, so ${add} cannot run here`);
+      return 1;
+    }
     // Settings an older release wrote: a feature by its older name, or the Figma library key, which belongs in a secret.
     const renamed = renamedLines(raw).length > 0;
     if (renamed || raw.figma !== undefined) {
@@ -612,6 +621,10 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
       } else if (library !== undefined) {
         io.out('! the "figma.library" taken out was not a Figma file key; set the FIGMA_LIBRARY Actions secret to the design library\'s file key');
       }
+    }
+    const typed = features.filter((feature) => NEEDS_ISSUE_TYPES.includes(feature));
+    if (typed.length > 0 && !(await byOrganisation())) {
+      io.out(`! ${personal}, so ${typed.join(', ')} cannot run here; their checks pass, saying so. Take them out of ${SETTINGS_PATH}'s features`);
     }
     if (add && !features.includes(add)) {
       if (!(await confirm(`Turn ${add} on in ${SETTINGS_PATH}, once its setup below is done?`))) return stop('settings file');
@@ -640,6 +653,16 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
       io.err('onboard: the owner and the agent must be different accounts');
       return 1;
     }
+    const typed = features.filter((feature) => NEEDS_ISSUE_TYPES.includes(feature));
+    const refused = typed.length > 0 && !(await byOrganisation());
+    if (refused) {
+      if (chosen) {
+        io.err(`onboard: ${personal}, so ${typed.join(', ')} cannot run here; leave ${typed.length === 1 ? 'it' : 'them'} out of --features`);
+        return 1;
+      }
+      io.out(`! ${personal}, so onboard leaves ${typed.join(', ')} off`);
+    }
+    if (refused) features = features.filter((feature) => !typed.includes(feature));
     if (!(await confirm(`Write ${SETTINGS_PATH}: owner ${owner} approves, agent ${agent} builds, with ${features.join(', ')} on?`))) {
       return stop('settings file');
     }

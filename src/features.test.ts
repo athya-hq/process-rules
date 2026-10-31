@@ -4,10 +4,10 @@ import { describe, it } from 'node:test';
 import { decisionsWeekly } from './decisions.ts';
 import { prDesign } from './design.ts';
 import { AGENT, FakeSys, ROOT, capture } from './fake.test.ts';
-import { DEFAULT_SCHEDULE, FEATURES, featuresIn, isOn, notAdoptedLine, offLine, parseFeatures, renamedLines, scheduleIn } from './features.ts';
+import { DEFAULT_SCHEDULE, FEATURES, PERSONAL_REPO, featuresIn, isOn, isPersonal, notAdoptedLine, offLine, parseFeatures, renamedLines, scheduleIn } from './features.ts';
 import { prIdentity } from './identity.ts';
 import { reviewsDue } from './reviews.ts';
-import { prePush, prWorkRules } from './work.ts';
+import { prePush, prWorkRules, propose } from './work.ts';
 
 const SETTINGS = `${ROOT}/.github/process-rules.json`;
 
@@ -178,5 +178,107 @@ describe('checks of features that are off', () => {
     sys.route('GET', '/repos/example-org/example-app/issues?state=open&labels=needs-owner&per_page=100&page=1', { status: 200, json: [] });
     assert.equal(await decisionsWeekly(sys, capture().io), 0);
     assert.ok(!sys.requests.some((r) => r.url.includes('labels=veto')));
+  });
+});
+
+describe('checks on a personal repository', () => {
+  /** A client with every feature on, in a repository a personal account owns, in Actions or in an agent session. */
+  function personal(): FakeSys {
+    const sys = new FakeSys();
+    sys.ownerType = 'User';
+    sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT }));
+    sys.files.set('/tmp/event.json', JSON.stringify({ action: 'opened', pull_request: { number: 7, body: 'Slice: #1', user: { login: AGENT }, base: { sha: 'b' }, head: { ref: 'w', repo: null } } }));
+    sys.env = {
+      GITHUB_EVENT_PATH: '/tmp/event.json',
+      GITHUB_ACTOR: AGENT,
+      GITHUB_REPOSITORY: 'example-org/example-app',
+      GH_TOKEN: 'ghs_run',
+      FIGMA_TOKEN: 'figd',
+      FIGMA_LIBRARY: 'abc',
+      PROCESS_RULES_AGENT: AGENT,
+    };
+    return sys;
+  }
+  const WHY = 'on a repository owned by a personal account, since GitHub has issue types for organisations only';
+  /** Only the repository was asked about, once, with the run's token. */
+  const askedOnce = (sys: FakeSys): void =>
+    assert.deepEqual(sys.requests.filter((r) => r.url.startsWith('https://api.github.com/repos/')), [{ url: 'https://api.github.com/repos/example-org/example-app', method: 'GET', token: 'ghs_run' }]);
+
+  it('says why', () => {
+    assert.equal(offLine('pr-work-rules', 'work-rules', PERSONAL_REPO), `pr-work-rules: work-rules is off ${WHY}; nothing to check`);
+  });
+
+  for (const [command, check, line] of [
+    ['pr-work-rules', prWorkRules, `pr-work-rules: work-rules is off ${WHY}; nothing to check`],
+    ['pr-design', prDesign, `pr-design: figma is off ${WHY}; nothing to check`],
+    ['decisions-weekly', decisionsWeekly, `decisions-weekly: decisions is off ${WHY}; nothing to check`],
+  ] as const) {
+    it(`${command} passes, saying why, and asks GitHub only whose the repository is`, async () => {
+      const sys = personal();
+      const { io, out } = capture();
+      assert.equal(await check(sys, io), 0);
+      assert.deepEqual(out, [line]);
+      askedOnce(sys);
+    });
+  }
+
+  it('the weekly job leaves vetoes alone when review is on and decisions are off', async () => {
+    const sys = personal();
+    sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['review'] }));
+    const { io, out } = capture();
+    assert.equal(await decisionsWeekly(sys, io), 0);
+    assert.deepEqual(out, [`decisions-weekly: review is off ${WHY}; nothing to check`]);
+    askedOnce(sys);
+  });
+
+  it('the weekly job asks GitHub nothing when review and decisions are off', async () => {
+    const sys = personal();
+    sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity'] }));
+    assert.equal(await decisionsWeekly(sys, capture().io), 0);
+    assert.deepEqual(sys.requests, []);
+  });
+
+  it('reviews-due lists nothing, saying why', async () => {
+    const sys = personal();
+    const { io, out, err } = capture();
+    assert.equal(await reviewsDue(sys, io), 0);
+    assert.deepEqual({ out, err }, { out: [], err: [`reviews-due: review is off ${WHY}; nothing to check`] });
+    askedOnce(sys);
+  });
+
+  it('pre-push checks only that an agent pushes as the agent, saying why the work rules cannot run', async () => {
+    const sys = personal();
+    sys.acceptToken('ghs_run', AGENT);
+    const { io, err } = capture();
+    assert.equal(await prePush(sys, io, `refs/heads/w ${'a'.repeat(40)} refs/heads/w ${'b'.repeat(40)}`, 'https://github.com/example-org/example-app.git'), 0);
+    assert.deepEqual(err, [`pre-push: work-rules is off ${WHY}; nothing to check`]);
+    askedOnce(sys);
+  });
+
+  it('propose posts nothing, saying why', async () => {
+    const sys = personal();
+    const { io, out } = capture();
+    assert.equal(await propose(sys, io, 1), 0);
+    assert.deepEqual(out, [`propose: work-rules is off ${WHY}; nothing to check`]);
+    askedOnce(sys);
+  });
+});
+
+describe('isPersonal', () => {
+  it("reads the repository's owner type once per run", async () => {
+    const sys = new FakeSys();
+    assert.equal(await isPersonal(sys, 'example-org/example-app', 'ghs_run'), false);
+    assert.equal(await isPersonal(sys, 'example-org/example-app', 'ghs_run'), false);
+    assert.equal(sys.requests.length, 1);
+    const mine = new FakeSys();
+    mine.ownerType = 'User';
+    assert.equal(await isPersonal(mine, 'example-org/example-app', 'ghs_run'), true);
+  });
+
+  it('throws when GitHub will not say', async () => {
+    const sys = new FakeSys().route('GET', '/repos/example-org/example-app', { status: 403, json: { message: 'Forbidden' } });
+    await assert.rejects(isPersonal(sys, 'example-org/example-app', 'ghs_run'), /cannot tell whether a personal account owns example-org\/example-app \(HTTP 403\)/);
+    const odd = new FakeSys().route('GET', '/repos/example-org/example-app', { status: 200, json: { owner: { type: 'Enterprise' } } });
+    await assert.rejects(isPersonal(odd, 'example-org/example-app', 'ghs_run'), /cannot tell whether a personal account owns example-org\/example-app: GitHub names its owner a "Enterprise"/);
   });
 });
