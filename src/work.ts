@@ -257,8 +257,8 @@ function report(io: Output, where: string, problems: string[]): number {
  * The work rules on a pull request, run by the shared workflow. The owner's
  * pull requests pass; an agent's must name exactly one slice, as a line
  * `Slice: #N`, that may be built, but for onboard's own: from ONBOARD_BRANCH
- * in this repository, changing only the files onboard writes, which the
- * owner confirmed at the terminal and merges.
+ * in this repository, changing only the files onboard writes and deleting
+ * none, which the owner confirmed at the terminal and merges.
  */
 export async function prWorkRules(sys: Sys, io: Output): Promise<number> {
   const { GITHUB_EVENT_PATH: eventPath, GITHUB_REPOSITORY: slug, GH_TOKEN: token } = sys.env;
@@ -288,9 +288,10 @@ export async function prWorkRules(sys: Sys, io: Output): Promise<number> {
     return 0;
   }
   if (pull.head.ref === ONBOARD_BRANCH && pull.head.repo?.full_name.toLowerCase() === slug.toLowerCase()) {
-    const files = await every<{ filename: string; previous_filename?: string }>(sys, token, pull.number, `${API}/repos/${slug}/pulls/${pull.number}/files`);
+    const files = await every<{ filename: string; status?: string; previous_filename?: string }>(sys, token, pull.number, `${API}/repos/${slug}/pulls/${pull.number}/files`);
     const names = files.flatMap((file) => [file.filename, ...(file.previous_filename ? [file.previous_filename] : [])]);
-    if (names.every((name) => ONBOARD_FILES.includes(name))) {
+    // onboard writes its files and never deletes one: a deleted workflow or settings file would switch the checks off.
+    if (names.every((name) => ONBOARD_FILES.includes(name)) && !files.some((file) => file.status === 'removed')) {
       io.out(`✓ pr-work-rules: #${pull.number} is onboard's, changing only the files onboard writes, so it names no slice`);
       return 0;
     }

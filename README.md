@@ -175,11 +175,11 @@ repo's CODEOWNERS names the owner.
    fails for a moment), and deletes the branch. The steps that act as you
    (giving the agent access, the board) share one browser approval, for
    that run only. Each change waits
-   for a yes. Your checkout is never modified: once every step has run,
+   for a yes. The files git tracks in your checkout are never changed: once every step has run,
    `onboard` commits the files it changes as the agent, signed, on the
    branch `process-rules/onboard` from the default branch's tip, in a
    temporary repository it deletes afterwards, pushes it as the agent and
-   opens the agent's pull request (or updates the one a run before opened),
+   opens the agent's pull request (or updates the one an earlier run opened),
    printing its link; merge it to finish. A run that changes no file, or
    that stops, opens none. A file the default branch has otherwise than your
    checkout is refused, so bring the checkout up to date first. The pre-push

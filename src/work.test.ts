@@ -457,7 +457,7 @@ describe('prWorkRules', () => {
 
     it('passes one changing only the files onboard writes, naming no slice', async () => {
       const sys = actions(onboardPull('Example-Org/Example-App'));
-      files(sys, [{ filename: '.github/process-rules.json' }, { filename: '.claude/settings.json' }, { filename: '.github/workflows/process-rules.yml' }, { filename: 'CODEOWNERS' }]);
+      files(sys, [{ filename: '.github/process-rules.json', status: 'modified' }, { filename: '.claude/settings.json', status: 'added' }, { filename: '.github/workflows/process-rules.yml' }, { filename: 'CODEOWNERS' }]);
       assert.deepEqual(await check(sys), { code: 0, out: ["✓ pr-work-rules: #42 is onboard's, changing only the files onboard writes, so it names no slice"], err: [] });
       assert.equal(sys.requests[0]?.token, 'ghs_run');
     });
@@ -465,6 +465,7 @@ describe('prWorkRules', () => {
     for (const [name, list] of [
       ['changes another file', [{ filename: '.github/process-rules.json' }, { filename: 'src/app.ts' }]],
       ['moves another file into one onboard writes', [{ filename: 'CODEOWNERS', previous_filename: 'src/owners' }]],
+      ['deletes one onboard writes', [{ filename: '.github/workflows/process-rules.yml', status: 'removed' }]],
     ] as const) {
       it(`holds one that ${name} to the work rules`, async () => {
         const sys = actions(onboardPull());
