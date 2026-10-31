@@ -1,0 +1,43 @@
+src/machine.test.ts
+  s_3434435b07bf56::t_a2603d425fe0e4 10,257,259,263,269,271-272,274-278
+src/onboard.test.ts
+  s_3434435b07bf56::t_a2603d425fe0e4 200-203,219-220
+src/jsonedit.ts
+  s_3434435b07bf56::t_7a66b79c4997fa 174,185
+src/run.test.ts
+  s_3434435b07bf56::t_17c349c5f69dfb 110-121
+README.md
+  s_3434435b07bf56::t_4f37364d486a72 34-36,45-46,67,230
+src/run.ts
+  s_3434435b07bf56::t_7a66b79c4997fa 80-88
+src/guard.ts
+  s_3434435b07bf56::t_7a66b79c4997fa 4-7,9-10
+src/guard.test.ts
+  s_3434435b07bf56::t_a2603d425fe0e4 20,23
+src/jsonedit.test.ts
+  s_3434435b07bf56::t_a2603d425fe0e4 92,94-98
+src/onboard.ts
+  s_3434435b07bf56::t_4f37364d486a72 45-49,52,60,67
+src/machine.ts
+  s_3434435b07bf56::t_7a66b79c4997fa 162-163,166
+src/agent.ts
+  s_3434435b07bf56::t_7a66b79c4997fa 182-183,188-191
+docs/decisions.md
+  s_3434435b07bf56::t_3ae2f84df8402d 79-81
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "1fca576ca9ad97954f42d1a5db0776853f24678e",
+  "prompts": {},
+  "sessions": {
+    "s_3434435b07bf56": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "058a99ad-f73b-477f-b151-34751044a989",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Alok Bansal <alokagrawal8@gmail.com>"
+    }
+  }
+}
