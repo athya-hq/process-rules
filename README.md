@@ -218,9 +218,11 @@ slice may be built:
 - if it was added to the work item after the approval, the owner approved
   it: a 👍 on the agent's proposal for it, made after it was added, a
   comment starting `Decision:` naming it, or the owner's own request: a
-  comment they wrote on the work item before the slice was added, which the
-  slice's body links (`…/issues/<work item>#issuecomment-<id>`) and they
-  have not edited since;
+  comment they wrote on the work item before the slice was last added,
+  which the slice's body links (`…/issues/<work item>#issuecomment-<id>`)
+  and they have not edited since. Which comment asked for the slice is the
+  agent's claim, shown in the slice's body: the comment came first, so it
+  cannot name the slice;
 - each of its State sub-issues closed as not planned after the approval
   carries the owner's approval: a 👍 on the agent's proposal for it, or a
   `Decision:` comment;
@@ -229,8 +231,9 @@ slice may be built:
 **What needs the owner.** A request the owner made on the work item is its
 own approval, linked as above. A fix needs none: it restores what the owner
 approved and changes nothing they would see beyond it, so it is filed as a
-State under the slice it fixes and its pull request names that slice, which
-already passes. A request made in chat is filed as a slice quoting the
+State under the slice it fixes and its pull request names that slice. The
+State needs no approval, though that slice's own approval rules still apply,
+as for any pull request naming it. A request made in chat is filed as a slice quoting the
 owner's words and proposed once. Anything else the agent adds, a fix filed
 as its own slice included, waits for the owner's 👍.
 

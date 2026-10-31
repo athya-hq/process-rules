@@ -355,11 +355,15 @@
     link to the work item's comments as GitHub returns them, so the author,
     the issue and the time are GitHub's, not the link's. A comment edited
     since it was written does not count: REST does not say who edited it,
-    and the agent, with write access, can edit another's comment.
+    and the agent, with write access, can edit another's comment. The
+    comment cannot name the slice, which it came before, so which comment
+    asked for it is the agent's claim, in the slice's body for the owner
+    to see; the owner accepted that check (author, work item, time).
   - **Fixes need no approval, and need no new rule.** A fix restores what
     the owner approved and changes nothing they would see beyond it. It is
     filed as a State under the slice it fixes, and its pull request names
-    that slice (`Slice: #N`), closed or not. A State added after approval
+    that slice (`Slice: #N`), closed or not; the slice's own approval
+    rules still apply. A State added after approval
     already owes the owner nothing; only a slice added late, or a State
     dropped, does. Anything filed as its own slice, called a fix or not,
     keeps the 👍: whether a change goes beyond what was approved is a

@@ -340,14 +340,6 @@ describe('sliceProblems', () => {
     });
   });
 
-  it('passes a fix: a State filed after approval under the slice it fixes, built after the slice closed', async () => {
-    const g = graph();
-    g.issue.state = 'closed';
-    g.issue.closed_at = LATER;
-    g.states.push({ number: 31, title: 'Fix: the thing on narrow pages', type: { name: 'State' }, state_reason: null, closed_at: null, comments: [] });
-    assert.deepEqual(await problems(g.issue), []);
-  });
-
   describe('a dropped state', () => {
     const state = (extra: Node = {}): Node => ({
       number: 30,
@@ -505,6 +497,16 @@ describe('prWorkRules', () => {
     github(sys, graph().issue, [{ number: 40, body: 'Slice: #12', head: { ref: 'work' } }]);
     assert.deepEqual(await check(sys), { code: 0, out: ['✓ pr-work-rules: #40 builds slice #12, which may be built'], err: [] });
     assert.equal(sys.requests[0]?.token, 'ghs_run');
+  });
+
+  it('passes a fix: a pull request naming the closed slice it fixes, with a State filed under it after approval', async () => {
+    const g = graph();
+    g.issue.state = 'closed';
+    g.issue.closed_at = LATER;
+    g.states.push({ number: 31, title: 'Fix: the thing on narrow pages', type: { name: 'State' }, state_reason: null, closed_at: null, comments: [] });
+    const sys = actions(agentPull('Fixes state #31.\n\nSlice: #12'));
+    github(sys, g.issue);
+    assert.deepEqual(await check(sys), { code: 0, out: ['✓ pr-work-rules: #40 builds slice #12, which may be built'], err: [] });
   });
 
   it('refuses an agent pull request whose slice may not be built', async () => {
