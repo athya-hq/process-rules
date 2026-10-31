@@ -10,10 +10,10 @@ export const FEATURES = ['identity', 'pr-identity', 'board', 'work-rules', 'figm
 export type Feature = (typeof FEATURES)[number];
 
 /** Features renamed since older releases wrote them, still read as their new name. */
-const RENAMED: Record<string, Feature> = { design: 'figma' };
+const RENAMED = new Map<string, Feature>([['design', 'figma']]);
 
 const isFeature = (name: string): name is Feature => (FEATURES as readonly string[]).includes(name);
-const named = (name: string): string => RENAMED[name.trim()] ?? name.trim();
+const named = (name: string): string => RENAMED.get(name.trim()) ?? name.trim();
 
 /** A comma-separated list of features, checked, with identity always among them. */
 export function parseFeatures(list: string): Feature[] {
@@ -40,7 +40,7 @@ export function renamedLines(raw: unknown): string[] {
   const listed = (raw as { features?: unknown } | null)?.features;
   if (!Array.isArray(listed)) return [];
   return listed.flatMap((name) =>
-    typeof name === 'string' && RENAMED[name.trim()] ? [`${SETTINGS_PATH} lists "${name.trim()}", which is now named "${RENAMED[name.trim()]}"; run process-rules onboard to rename it`] : [],
+    typeof name === 'string' && RENAMED.has(name.trim()) ? [`${SETTINGS_PATH} lists "${name.trim()}", which is now named "${RENAMED.get(name.trim())}"; run process-rules onboard to rename it`] : [],
   );
 }
 

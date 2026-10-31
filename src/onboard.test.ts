@@ -12,7 +12,7 @@ import type { HttpResult } from './types.ts';
 import { pathsFor, sessionScript } from './agent.ts';
 import { FEATURES } from './features.ts';
 import { packageVersion } from './version.ts';
-import { GUARD_COMMAND, HOOK_COMMAND, HOOKS_PATH, OLDER_HOOK_COMMANDS, OLDER_PRE_PUSH_HOOKS, PRE_PUSH_HOOK, WORKFLOW_PATH, claudeSettings, olderWorkflows, onboard, onboardArgs, workflow, workflowPins, workflowUpdate } from './onboard.ts';
+import { GUARD_COMMAND, HOOK_COMMAND, HOOKS_PATH, OLDER_HOOK_COMMANDS, OLDER_PRE_PUSH_HOOKS, PRE_PUSH_HOOK, WORKFLOW_PATH, claudeSettings, jobsWithoutLibrary, olderWorkflows, onboard, onboardArgs, workflow, workflowPins, workflowUpdate } from './onboard.ts';
 import { BASE_ENV } from './agent.ts';
 
 const SETTINGS = `${ROOT}/.github/process-rules.json`;
@@ -896,7 +896,26 @@ describe('staged adoption', () => {
     sys.answers = ['y'];
     const { out } = await run(sys);
     assert.equal(sys.files.get(WORKFLOW), own);
-    assert.ok(out.includes("! .github/workflows/process-rules.yml passes the shared checks no FIGMA_LIBRARY secret, so the design check stays off; add FIGMA_LIBRARY: ${{ secrets.FIGMA_LIBRARY }} under each job's secrets"));
+    assert.ok(out.includes("! In .github/workflows/process-rules.yml, process-rules and process-rules-weekly pass the shared checks no FIGMA_LIBRARY secret, so the design check stays off there; add FIGMA_LIBRARY: ${{ secrets.FIGMA_LIBRARY }} under their secrets"));
+  });
+
+  it('names each job that passes no FIGMA_LIBRARY, and takes `secrets: inherit` as passing it', () => {
+    const both = workflow('main', '0.5.5', true);
+    assert.deepEqual(jobsWithoutLibrary(both), []);
+    const [head = '', weekly = ''] = both.split('  process-rules-weekly:');
+    const prOnly = `${head.replace('      FIGMA_LIBRARY: ${{ secrets.FIGMA_LIBRARY }}\n', '      OTHER: ${{ secrets.OTHER }}\n')}  process-rules-weekly:${weekly}`;
+    assert.deepEqual(jobsWithoutLibrary(prOnly), ['process-rules']);
+    assert.deepEqual(jobsWithoutLibrary(prOnly.replace(/ {4}secrets:\n(?: {6}.*\n)+/, '    secrets: inherit\n')), []);
+    assert.deepEqual(jobsWithoutLibrary(workflow('main', '0.5.5', false)), ['process-rules', 'process-rules-weekly']);
+  });
+
+  it('prints no command for an older library value that is not a file key', async () => {
+    const sys = fresh();
+    sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity'], figma: { library: 'x; rm -rf ~' } }));
+    sys.answers = ['y'];
+    const { out } = await run(sys);
+    assert.ok(out.includes('! the "figma.library" taken out was not a Figma file key; set the FIGMA_LIBRARY Actions secret to the design library\'s file key'));
+    assert.ok(!out.some((line) => line.includes('gh secret set')));
   });
 
   it('writes the workflow and pre-push hook once work rules are on', async () => {
@@ -1012,8 +1031,7 @@ describe('workflowUpdate', () => {
     const before = workflow('main', '0.5.2', true)
       .replace("branches: [\"main\"]", "branches: ['main']")
       .replace('name: process-rules\n', 'name: process-rules\n# Our own note: split by hand at v0.5.2.\n')
-      .replace('process-rules-ref: v0.5.2\n    secrets', "process-rules-ref: 'v0.5.2'\n    secrets")
-      .replace('    secrets:\n      FIGMA_TOKEN: ${{ secrets.FIGMA_TOKEN }}\n\n', '\n');
+      .replace('process-rules-ref: v0.5.2\n    secrets', "process-rules-ref: 'v0.5.2'\n    secrets");
     const update = workflowUpdate(before, 'main', '0.5.3', true);
     assert.equal(update.kind, 'repin');
     assert.ok(update.kind === 'repin');

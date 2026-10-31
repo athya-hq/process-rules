@@ -186,6 +186,21 @@ const OLDER_SECRETS = ['    secrets:', '      FIGMA_TOKEN: ${{ secrets.FIGMA_TOK
  */
 const SECRETS_AFTER_REF = /^( {6}process-rules-ref:[^\n]*\n)(?: {4}secrets:\n(?: {6}FIGMA_(?:TOKEN|LIBRARY): \$\{\{ secrets\.FIGMA_(?:TOKEN|LIBRARY) \}\}\n)+(?! {6})|(?! {4}secrets:))/gm;
 
+/** A Figma file key, as FIGMA_LIBRARY and the older `figma.library` hold it. */
+export const FIGMA_FILE_KEY = /^[A-Za-z0-9]+$/;
+
+/**
+ * The jobs of a workflow that call the shared checks without passing them
+ * FIGMA_LIBRARY, by name: each job's own block is read, so one job missing it
+ * is found though another passes it.
+ */
+export function jobsWithoutLibrary(text: string): string[] {
+  const jobs = text.slice(Math.max(0, text.search(/^jobs:\s*$/m)));
+  return [...jobs.matchAll(/^ {2}([\w-]+):\s*\n((?:(?: {3,}.*)?\n|(?: {3,}.*)$)*)/gm)].flatMap(([, name, body = '']) =>
+    /checks\.yml@/.test(body) && !/secrets\.FIGMA_LIBRARY\b|^ {4}secrets:\s*inherit\s*$/m.test(body) ? [name as string] : [],
+  );
+}
+
 /** One job's call of the shared checks at `version`, passing `secrets`. */
 function callChecks(version: string, secrets: string[]): string[] {
   return [
@@ -527,7 +542,12 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
       const { figma: _figma, ...rest } = raw;
       raw = { ...rest, ...(rest.features === undefined ? {} : { features }) };
       sys.write(settingsFile, `${JSON.stringify(raw, null, 2)}\n`);
-      if (typeof library === 'string') io.out(`! set the FIGMA_LIBRARY Actions secret to the key taken out: gh secret set FIGMA_LIBRARY --repo ${slug} --body ${library}`);
+      // Printed as a command only when it is a file key, so copying it runs nothing else.
+      if (typeof library === 'string' && FIGMA_FILE_KEY.test(library)) {
+        io.out(`! set the FIGMA_LIBRARY Actions secret to the key taken out: gh secret set FIGMA_LIBRARY --repo ${slug} --body ${library}`);
+      } else if (library !== undefined) {
+        io.out('! the "figma.library" taken out was not a Figma file key; set the FIGMA_LIBRARY Actions secret to the design library\'s file key');
+      }
     }
     if (add && !features.includes(add)) {
       if (!(await confirm(`Turn ${add} on in ${SETTINGS_PATH}, once its setup below is done?`))) return stop('settings file');
@@ -650,8 +670,9 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
       sys.write(workflowFile, update.text);
     }
     io.out(`✓ ${WORKFLOW_PATH}`);
-    if (on('figma') && !sys.read(workflowFile).includes('secrets.FIGMA_LIBRARY')) {
-      io.out(`! ${WORKFLOW_PATH} passes the shared checks no FIGMA_LIBRARY secret, so the design check stays off; add FIGMA_LIBRARY: \${{ secrets.FIGMA_LIBRARY }} under each job's secrets`);
+    const unpassed = on('figma') ? jobsWithoutLibrary(sys.read(workflowFile)) : [];
+    if (unpassed.length > 0) {
+      io.out(`! In ${WORKFLOW_PATH}, ${unpassed.join(' and ')} pass${unpassed.length === 1 ? 'es' : ''} the shared checks no FIGMA_LIBRARY secret, so the design check stays off there; add FIGMA_LIBRARY: \${{ secrets.FIGMA_LIBRARY }} under ${unpassed.length === 1 ? 'its' : 'their'} secrets`);
     }
   }
 

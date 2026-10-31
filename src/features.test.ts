@@ -34,6 +34,8 @@ describe('features', () => {
     assert.deepEqual(renamedLines({ features: ['design', 'figma'] }), ['.github/process-rules.json lists "design", which is now named "figma"; run process-rules onboard to rename it']);
     assert.deepEqual(renamedLines({ features: ['figma', 2] }), []);
     assert.deepEqual(renamedLines({}), []);
+    assert.deepEqual(renamedLines({ features: ['constructor'] }), []);
+    assert.throws(() => featuresIn({ features: ['constructor'] }), /unknown feature "constructor"/);
     assert.throws(() => parseFeatures('design'), /unknown feature design/);
   });
 

@@ -1,4 +1,5 @@
 import { API, SETTINGS_PATH, loadSettings, sameLogin } from './agent.ts';
+import { FIGMA_FILE_KEY } from './onboard.ts';
 import type { Output, Sys } from './types.ts';
 import { slicesNamed } from './work.ts';
 import { isOn, notAdoptedLine, offLine, renamedLines } from './features.ts';
@@ -9,8 +10,6 @@ const FRAME_LINK = /https:\/\/(?:www\.)?figma\.com\/(?:design|file)\/([A-Za-z0-9
 /** An image covering at least this share of a frame makes it a capture, not a design. */
 const CAPTURED_SHARE = 0.5;
 
-const FILE_KEY = /^[A-Za-z0-9]+$/;
-
 /**
  * The client's design library, as the FIGMA_LIBRARY Actions secret names it,
  * with lines to warn with. Older releases read it from the committed
@@ -20,16 +19,16 @@ const FILE_KEY = /^[A-Za-z0-9]+$/;
 export function designLibrary(sys: Sys, root: string): { library?: string; warnings: string[] } {
   const secret = sys.env.FIGMA_LIBRARY?.trim();
   if (secret) {
-    if (!FILE_KEY.test(secret)) throw new Error('the FIGMA_LIBRARY secret must be the file key of the design library');
+    if (!FIGMA_FILE_KEY.test(secret)) throw new Error('the FIGMA_LIBRARY secret must be the file key of the design library');
     return { library: secret, warnings: [] };
   }
-  const raw = JSON.parse(sys.read(`${root}/${SETTINGS_PATH}`)) as { figma?: { library?: unknown } };
+  const raw = JSON.parse(sys.read(`${root}/${SETTINGS_PATH}`)) as { figma?: { library?: unknown } | null };
   if (raw.figma === undefined) return { warnings: [] };
-  const library = raw.figma.library;
-  if (typeof library !== 'string' || !FILE_KEY.test(library)) {
+  const library = raw.figma?.library;
+  if (typeof library !== 'string' || !FIGMA_FILE_KEY.test(library)) {
     throw new Error(`${SETTINGS_PATH}: "figma.library" must be the file key of the design library`);
   }
-  return { library, warnings: [`${SETTINGS_PATH} names the Figma library; move it to the FIGMA_LIBRARY Actions secret and take "figma" out of the settings`] };
+  return { library, warnings: [`${SETTINGS_PATH} names the Figma library; move it to the FIGMA_LIBRARY Actions secret and take the top-level "figma" object out of the settings (the figma feature stays)`] };
 }
 
 interface FigmaNode {

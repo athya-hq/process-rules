@@ -103,12 +103,14 @@ describe('designLibrary', () => {
     sys.files.set(`${ROOT}/.github/process-rules.json`, JSON.stringify({ owner: 'example-owner', agent: AGENT, figma: { library: 'LIB1' } }));
     assert.deepEqual(designLibrary(sys, ROOT), {
       library: 'LIB1',
-      warnings: ['.github/process-rules.json names the Figma library; move it to the FIGMA_LIBRARY Actions secret and take "figma" out of the settings'],
+      warnings: ['.github/process-rules.json names the Figma library; move it to the FIGMA_LIBRARY Actions secret and take the top-level "figma" object out of the settings (the figma feature stays)'],
     });
     sys.env.FIGMA_LIBRARY = 'LIB2';
     assert.deepEqual(designLibrary(sys, ROOT), { library: 'LIB2', warnings: [] });
     delete sys.env.FIGMA_LIBRARY;
     sys.files.set(`${ROOT}/.github/process-rules.json`, JSON.stringify({ figma: { library: 'a/b' } }));
+    assert.throws(() => designLibrary(sys, ROOT), /"figma.library" must be the file key/);
+    sys.files.set(`${ROOT}/.github/process-rules.json`, JSON.stringify({ figma: null }));
     assert.throws(() => designLibrary(sys, ROOT), /"figma.library" must be the file key/);
   });
 });
@@ -168,7 +170,7 @@ describe('prDesign', () => {
     sys.files.set(`${ROOT}/.github/process-rules.json`, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity', 'design'], figma: { library: 'LIB1' } }));
     assert.deepEqual((await check(sys)).out, [
       '::warning::.github/process-rules.json lists "design", which is now named "figma"; run process-rules onboard to rename it',
-      '::warning::.github/process-rules.json names the Figma library; move it to the FIGMA_LIBRARY Actions secret and take "figma" out of the settings',
+      '::warning::.github/process-rules.json names the Figma library; move it to the FIGMA_LIBRARY Actions secret and take the top-level "figma" object out of the settings (the figma feature stays)',
       '✓ pr-design: 1 state of #12, each a frame built from the design library',
     ]);
   });
