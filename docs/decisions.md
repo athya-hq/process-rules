@@ -201,3 +201,19 @@
   request the agent opened in the repository here. `onboard` adds the rule
   to `permissions.allow` for every client, as part of identity. Released as
   v0.5.5, a patch release.
+- **2026-11-01 — Record: P-23, Figma settings out of the repo.** The
+  owner's decision of 2026-10-31 on #53: the design library's key moves out
+  of the committed settings into the client's Actions secrets, next to the
+  token; `onboard` writes the Figma lines into the workflow only when the
+  feature is on; and the feature is renamed `figma`, so another design tool
+  would be a feature of its own. The key is a secret (`FIGMA_LIBRARY`), not
+  an Actions variable, so a public repository's run logs mask it too, and the
+  workflow passes it to the shared checks like `FIGMA_TOKEN`. Older settings
+  keep working: `design` is read as `figma` and a committed
+  `figma.library` is read when the secret is not set, each with a warning
+  in the run; `onboard` renames the one and takes out the other, after
+  asking, and prints the `gh secret set` command for the key. In a workflow
+  already split into its two jobs, `onboard` sets each job's Figma secrets
+  to what `figma` needs and leaves a secrets block holding the client's own
+  secrets as it is, saying which job that leaves without FIGMA_LIBRARY.
+  Released as v0.5.6, a patch release.

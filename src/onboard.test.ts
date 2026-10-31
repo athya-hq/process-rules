@@ -12,7 +12,7 @@ import type { HttpResult } from './types.ts';
 import { pathsFor, sessionScript } from './agent.ts';
 import { FEATURES } from './features.ts';
 import { packageVersion } from './version.ts';
-import { GUARD_COMMAND, HOOK_COMMAND, HOOKS_PATH, OLDER_HOOK_COMMANDS, OLDER_PRE_PUSH_HOOKS, PRE_PUSH_HOOK, REVIEW_THREAD_RULE, WORKFLOW_PATH, claudeSettings, olderWorkflows, onboard, onboardArgs, workflow, workflowPins, workflowUpdate } from './onboard.ts';
+import { GUARD_COMMAND, HOOK_COMMAND, HOOKS_PATH, OLDER_HOOK_COMMANDS, OLDER_PRE_PUSH_HOOKS, PRE_PUSH_HOOK, REVIEW_THREAD_RULE, WORKFLOW_PATH, claudeSettings, jobsWithoutLibrary, olderWorkflows, onboard, onboardArgs, workflow, workflowPins, workflowUpdate } from './onboard.ts';
 import { BASE_ENV } from './agent.ts';
 
 const SETTINGS = `${ROOT}/.github/process-rules.json`;
@@ -56,7 +56,7 @@ describe('onboard', () => {
     assert.equal(code, 0);
     assert.deepEqual(JSON.parse(sys.files.get(SETTINGS) ?? ''), { owner: 'example-owner', agent: 'ExampleBot', features: [...FEATURES] });
     assert.deepEqual(JSON.parse(sys.files.get(HOOKS) ?? ''), CLAUDE);
-    assert.equal(sys.files.get(WORKFLOW), workflow('main', packageVersion()));
+    assert.equal(sys.files.get(WORKFLOW), workflow('main', packageVersion(), true));
     assert.equal(sys.files.get(PRE_PUSH), PRE_PUSH_HOOK);
     assert.equal(sys.modes.get(PRE_PUSH), 0o755);
     assert.deepEqual(sys.dirs.filter((d) => d.startsWith(ROOT)), [`${ROOT}/.github`, `${ROOT}/.claude`, `${ROOT}/.github/workflows`]);
@@ -97,7 +97,7 @@ describe('onboard', () => {
     const sys = fresh();
     sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT }));
     sys.files.set(HOOKS, JSON.stringify(CLAUDE));
-    sys.files.set(WORKFLOW, workflow('main', packageVersion()));
+    sys.files.set(WORKFLOW, workflow('main', packageVersion(), true));
     sys.files.set(PRE_PUSH, PRE_PUSH_HOOK);
     const board = new Board(sys);
     board.issueTypes = ISSUE_TYPES.map((t) => t.name);
@@ -404,12 +404,12 @@ describe('onboard', () => {
     sys.files.set(WORKFLOW, olderWorkflows('main', '0.5.2')[0] as string);
     await run(sys);
     assert.ok(sys.asked.some((q) => q.startsWith('Replace the older .github/workflows/process-rules.yml, which lets every run write to issues')));
-    assert.equal(sys.files.get(WORKFLOW), workflow('main', packageVersion()));
+    assert.equal(sys.files.get(WORKFLOW), workflow('main', packageVersion(), true));
   });
 
   it('moves only the version pins of a workflow already split', async () => {
     const sys = fresh();
-    const own = workflow('main', '0.5.2').replace('name: process-rules\n', 'name: process-rules\n# Our own note.\n');
+    const own = workflow('main', '0.5.2', true).replace('name: process-rules\n', 'name: process-rules\n# Our own note.\n');
     sys.files.set(WORKFLOW, own);
     await run(sys);
     assert.ok(sys.asked.some((q) => q === `In .github/workflows/process-rules.yml, move the version pins from v0.5.2 to v${packageVersion()}, leaving the rest as it is? [y/N] `));
@@ -418,7 +418,7 @@ describe('onboard', () => {
 
   it('leaves a split workflow at this release alone', async () => {
     const sys = fresh();
-    const own = workflow('main', packageVersion()).replace('name: process-rules\n', 'name: process-rules\n# Our own note.\n');
+    const own = workflow('main', packageVersion(), true).replace('name: process-rules\n', 'name: process-rules\n# Our own note.\n');
     sys.files.set(WORKFLOW, own);
     await run(sys);
     assert.ok(!sys.asked.some((q) => q.includes(WORKFLOW_PATH)));
@@ -846,7 +846,7 @@ describe('staged adoption', () => {
 
   it('turns one more feature on, keeping the other settings', async () => {
     const sys = fresh();
-    sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity'], project: 'Example work', figma: { library: 'L' } }));
+    sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity'], project: 'Example work', note: 'kept' }));
     sys.files.set(HOOKS, JSON.stringify(CLAUDE));
     const board = new Board(sys);
     sys.answers = Array<string>(8).fill('y');
@@ -858,10 +858,75 @@ describe('staged adoption', () => {
       agent: AGENT,
       features: ['identity', 'board'],
       project: 'Example work',
-      figma: { library: 'L' },
+      note: 'kept',
     });
     assert.ok(sys.asked.some((q) => q.startsWith('Create the Project "Example work"')));
     assert.ok(!sys.files.has(WORKFLOW), 'board alone needs no workflow');
+  });
+
+  it('renames design to figma and takes the library key out of older settings, naming the secret to set', async () => {
+    const sys = fresh();
+    sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity', 'design'], figma: { library: 'LIB1' } }));
+    sys.files.set(HOOKS, JSON.stringify(CLAUDE));
+    sys.files.set(PRE_PUSH, PRE_PUSH_HOOK);
+    sys.answers = Array<string>(5).fill('y');
+    const { code, out } = await run(sys);
+    assert.equal(code, 0);
+    assert.equal(sys.asked[0], 'Update .github/process-rules.json: rename the design feature to figma and take out "figma", since the library key belongs in the FIGMA_LIBRARY Actions secret? [y/N] ');
+    assert.deepEqual(JSON.parse(sys.files.get(SETTINGS) ?? ''), { owner: 'example-owner', agent: AGENT, features: ['identity', 'figma'] });
+    assert.ok(out.includes('! set the FIGMA_LIBRARY Actions secret to the key taken out: gh secret set FIGMA_LIBRARY --repo example-org/example-app --body LIB1'));
+    assert.equal(sys.files.get(WORKFLOW), workflow('main', packageVersion(), true));
+  });
+
+  it('renames design alone, and stops at a no', async () => {
+    const sys = fresh();
+    sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity', 'design'] }));
+    sys.answers = ['n'];
+    const { code } = await run(sys);
+    assert.equal(code, 1);
+    assert.equal(sys.asked[0], 'Update .github/process-rules.json: rename the design feature to figma? [y/N] ');
+    assert.deepEqual(JSON.parse(sys.files.get(SETTINGS) ?? '').features, ['identity', 'design']);
+  });
+
+  it('takes out a library key from settings that list no features', async () => {
+    const sys = fresh();
+    sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, figma: {} }));
+    sys.answers = Array<string>(8).fill('y');
+    const { out } = await run(sys);
+    assert.deepEqual(JSON.parse(sys.files.get(SETTINGS) ?? ''), { owner: 'example-owner', agent: AGENT });
+    assert.ok(!out.some((line) => line.includes('gh secret set')));
+  });
+
+  it('says when a workflow of its own passes no FIGMA_LIBRARY with figma on', async () => {
+    const sys = fresh();
+    sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity', 'figma'] }));
+    sys.files.set(HOOKS, JSON.stringify(CLAUDE));
+    sys.files.set(PRE_PUSH, PRE_PUSH_HOOK);
+    const own = workflow('main', packageVersion(), true).replaceAll('      FIGMA_LIBRARY: ${{ secrets.FIGMA_LIBRARY }}\n', '      OTHER: ${{ secrets.OTHER }}\n');
+    sys.files.set(WORKFLOW, own);
+    sys.answers = ['y'];
+    const { out } = await run(sys);
+    assert.equal(sys.files.get(WORKFLOW), own);
+    assert.ok(out.includes("! In .github/workflows/process-rules.yml, process-rules and process-rules-weekly pass the shared checks no FIGMA_LIBRARY secret, so the design check stays off there; add FIGMA_LIBRARY: ${{ secrets.FIGMA_LIBRARY }} under their secrets"));
+  });
+
+  it('names each job that passes no FIGMA_LIBRARY, and takes `secrets: inherit` as passing it', () => {
+    const both = workflow('main', '0.5.5', true);
+    assert.deepEqual(jobsWithoutLibrary(both), []);
+    const [head = '', weekly = ''] = both.split('  process-rules-weekly:');
+    const prOnly = `${head.replace('      FIGMA_LIBRARY: ${{ secrets.FIGMA_LIBRARY }}\n', '      OTHER: ${{ secrets.OTHER }}\n')}  process-rules-weekly:${weekly}`;
+    assert.deepEqual(jobsWithoutLibrary(prOnly), ['process-rules']);
+    assert.deepEqual(jobsWithoutLibrary(prOnly.replace(/ {4}secrets:\n(?: {6}.*\n)+/, '    secrets: inherit\n')), []);
+    assert.deepEqual(jobsWithoutLibrary(workflow('main', '0.5.5', false)), ['process-rules', 'process-rules-weekly']);
+  });
+
+  it('prints no command for an older library value that is not a file key', async () => {
+    const sys = fresh();
+    sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity'], figma: { library: 'x; rm -rf ~' } }));
+    sys.answers = ['y'];
+    const { out } = await run(sys);
+    assert.ok(out.includes('! the "figma.library" taken out was not a Figma file key; set the FIGMA_LIBRARY Actions secret to the design library\'s file key'));
+    assert.ok(!out.some((line) => line.includes('gh secret set')));
   });
 
   it('writes the workflow and pre-push hook once work rules are on', async () => {
@@ -877,7 +942,7 @@ describe('staged adoption', () => {
     sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity'] }));
     sys.files.set(HOOKS, JSON.stringify(CLAUDE));
     sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity', 'pr-identity'] }));
-    sys.files.set(WORKFLOW, workflow('main', packageVersion()));
+    sys.files.set(WORKFLOW, workflow('main', packageVersion(), false));
     sys.files.set(PRE_PUSH, PRE_PUSH_HOOK);
     const before = sys.files.get(SETTINGS);
     sys.answers = ['y'];
@@ -940,7 +1005,7 @@ describe('onboardArgs', () => {
 
 describe('workflow', () => {
   it("calls the product's shared checks on pull requests and the default branch", () => {
-    const text = workflow('main', '0.1.0');
+    const text = workflow('main', '0.1.0', true);
     assert.match(text, /uses: athya-hq\/process-rules\/\.github\/workflows\/checks\.yml@v0\.1\.0\n {4}with:\n {6}process-rules-ref: v0\.1\.0\n/);
     assert.match(text, /branches: \["main"\]/);
     assert.match(text, /^# To upgrade, change the version on every line that names it \(two per job\)\.$/m);
@@ -948,7 +1013,7 @@ describe('workflow', () => {
   });
 
   it('keeps pull request and push runs read-only and writes to issues on the weekly run alone', () => {
-    const text = workflow('main', '0.1.0');
+    const text = workflow('main', '0.1.0', true);
     assert.match(text, /^permissions:\n {2}contents: read\n {2}issues: read\n {2}pull-requests: read$/m);
     const [, prJob = '', weeklyJob = ''] = text.split(/^ {2}(?:process-rules|process-rules-weekly):$/m);
     assert.match(prJob, /^ {4}if: github\.event_name == 'pull_request' \|\| github\.event_name == 'push'$/m);
@@ -961,25 +1026,24 @@ describe('workflow', () => {
 
 describe('workflowUpdate', () => {
   it('writes a missing workflow and leaves the same one alone', () => {
-    assert.deepEqual(workflowUpdate(undefined, 'main', '0.5.3'), { kind: 'write', text: workflow('main', '0.5.3') });
-    assert.deepEqual(workflowUpdate(workflow('main', '0.5.3'), 'main', '0.5.3'), { kind: 'same' });
+    assert.deepEqual(workflowUpdate(undefined, 'main', '0.5.3', true), { kind: 'write', text: workflow('main', '0.5.3', true) });
+    assert.deepEqual(workflowUpdate(workflow('main', '0.5.3', true), 'main', '0.5.3', true), { kind: 'same' });
   });
 
   for (const from of ['0.4.0', '0.5.2', '0.5.3']) {
     it(`replaces the older single-job template at v${from}`, () => {
       const older = olderWorkflows('trunk', from)[0] as string;
       assert.match(older, /^ {6}issues: write$/m);
-      assert.deepEqual(workflowUpdate(older, 'trunk', '0.5.3'), { kind: 'replace-older', text: workflow('trunk', '0.5.3'), from });
+      assert.deepEqual(workflowUpdate(older, 'trunk', '0.5.3', true), { kind: 'replace-older', text: workflow('trunk', '0.5.3', true), from });
     });
   }
 
   it('moves the pins of a split workflow, quoted or not, and nothing else', () => {
-    const before = workflow('main', '0.5.2')
+    const before = workflow('main', '0.5.2', true)
       .replace("branches: [\"main\"]", "branches: ['main']")
       .replace('name: process-rules\n', 'name: process-rules\n# Our own note: split by hand at v0.5.2.\n')
-      .replace('process-rules-ref: v0.5.2\n    secrets', "process-rules-ref: 'v0.5.2'\n    secrets")
-      .replace('    secrets:\n      FIGMA_TOKEN: ${{ secrets.FIGMA_TOKEN }}\n\n', '\n');
-    const update = workflowUpdate(before, 'main', '0.5.3');
+      .replace('process-rules-ref: v0.5.2\n    secrets', "process-rules-ref: 'v0.5.2'\n    secrets");
+    const update = workflowUpdate(before, 'main', '0.5.3', true);
     assert.equal(update.kind, 'repin');
     assert.ok(update.kind === 'repin');
     assert.equal(update.from, '0.5.2');
@@ -988,11 +1052,43 @@ describe('workflowUpdate', () => {
     assert.deepEqual(workflowPins(update.text), ['0.5.3', '0.5.3', '0.5.3', '0.5.3']);
   });
 
+  it("sets each job's Figma secrets to what figma needs, leaving secrets of the client's own", () => {
+    const older = workflow('main', '0.5.4', false).replaceAll(
+      '      process-rules-ref: v0.5.4\n',
+      '      process-rules-ref: v0.5.4\n    secrets:\n      FIGMA_TOKEN: ${{ secrets.FIGMA_TOKEN }}\n',
+    );
+    assert.deepEqual(workflowUpdate(older, 'main', '0.5.5', true), { kind: 'repin', text: workflow('main', '0.5.5', true), from: '0.5.4', secrets: true });
+    assert.deepEqual(workflowUpdate(older, 'main', '0.5.5', false), { kind: 'repin', text: workflow('main', '0.5.5', false), from: '0.5.4', secrets: true });
+    assert.deepEqual(workflowUpdate(workflow('main', '0.5.5', true), 'main', '0.5.5', false), { kind: 'repin', text: workflow('main', '0.5.5', false), secrets: true });
+    const own = older.replaceAll('FIGMA_TOKEN: ${{ secrets.FIGMA_TOKEN }}\n', 'FIGMA_TOKEN: ${{ secrets.FIGMA_TOKEN }}\n      OTHER: ${{ secrets.OTHER }}\n');
+    const update = workflowUpdate(own, 'main', '0.5.5', false);
+    assert.ok(update.kind === 'repin' && !update.secrets && update.text === own.replaceAll('0.5.4', '0.5.5'));
+    const kept = workflowUpdate(own, 'main', '0.5.5', true);
+    assert.ok(kept.kind === 'repin' && !kept.secrets && kept.text === own.replaceAll('0.5.4', '0.5.5'));
+  });
+
+  it('asks to pass, or stop passing, the Figma secrets', async () => {
+    const sys = fresh();
+    sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity', 'work-rules'] }));
+    sys.files.set(HOOKS, JSON.stringify(CLAUDE));
+    sys.files.set(PRE_PUSH, PRE_PUSH_HOOK);
+    sys.files.set(WORKFLOW, workflow('main', packageVersion(), true));
+    sys.answers = ['y', 'y'];
+    await run(sys);
+    assert.equal(sys.asked[0], `In ${WORKFLOW_PATH}, stop passing Figma secrets, with figma off, leaving the rest as it is? [y/N] `);
+    assert.equal(sys.files.get(WORKFLOW), workflow('main', packageVersion(), false));
+    sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity', 'figma'] }));
+    sys.asked.length = 0;
+    sys.answers = ['y', 'y'];
+    await run(sys);
+    assert.equal(sys.asked[0], `In ${WORKFLOW_PATH}, pass the FIGMA_TOKEN and FIGMA_LIBRARY secrets, leaving the rest as it is? [y/N] `);
+  });
+
   it('follows a changed default branch in a split workflow, keeping its quotes', () => {
-    const before = workflow('main', '0.5.3').replace('branches: ["main"]', "branches: ['main']");
-    assert.deepEqual(workflowUpdate(before, 'trunk', '0.5.3'), { kind: 'repin', text: before.replace("['main']", "['trunk']"), branch: 'trunk' });
-    const update = workflowUpdate(workflow('main', '0.5.2'), 'trunk', '0.5.3');
-    assert.deepEqual(update, { kind: 'repin', text: workflow('trunk', '0.5.3'), from: '0.5.2', branch: 'trunk' });
+    const before = workflow('main', '0.5.3', true).replace('branches: ["main"]', "branches: ['main']");
+    assert.deepEqual(workflowUpdate(before, 'trunk', '0.5.3', true), { kind: 'repin', text: before.replace("['main']", "['trunk']"), branch: 'trunk' });
+    const update = workflowUpdate(workflow('main', '0.5.2', true), 'trunk', '0.5.3', true);
+    assert.deepEqual(update, { kind: 'repin', text: workflow('trunk', '0.5.3', true), from: '0.5.2', branch: 'trunk' });
   });
 
   for (const [quote, written] of [
@@ -1001,8 +1097,8 @@ describe('workflowUpdate', () => {
     ['', '"it\'s \\"new\\""'],
   ] as const) {
     it(`escapes a default branch with quotes in it, ${quote ? `in ${quote} quotes` : 'bare'}`, () => {
-      const before = workflow('main', '0.5.3').replace('branches: ["main"]', `branches: [${quote}main${quote}]`);
-      const update = workflowUpdate(before, 'it\'s "new"', '0.5.3');
+      const before = workflow('main', '0.5.3', true).replace('branches: ["main"]', `branches: [${quote}main${quote}]`);
+      const update = workflowUpdate(before, 'it\'s "new"', '0.5.3', true);
       assert.ok(update.kind === 'repin');
       assert.ok(update.text.includes(`\n    branches: [${written}]\n`));
     });
@@ -1010,23 +1106,23 @@ describe('workflowUpdate', () => {
 
   for (const branch of ['1.0', '2026', '2026-11-01', 'true', 'No', 'null', '0x1F']) {
     it(`quotes a bare default branch YAML would not read as a string, ${branch}`, () => {
-      const before = workflow('main', '0.5.3').replace('branches: ["main"]', 'branches: [main]');
-      const update = workflowUpdate(before, branch, '0.5.3');
+      const before = workflow('main', '0.5.3', true).replace('branches: ["main"]', 'branches: [main]');
+      const update = workflowUpdate(before, branch, '0.5.3', true);
       assert.ok(update.kind === 'repin');
       assert.ok(update.text.includes(`\n    branches: ["${branch}"]\n`));
     });
   }
 
   it('leaves a bare branch bare', () => {
-    const before = workflow('main', '0.5.3').replace('branches: ["main"]', 'branches: [main]');
-    const update = workflowUpdate(before, 'release/2.0', '0.5.3');
+    const before = workflow('main', '0.5.3', true).replace('branches: ["main"]', 'branches: [main]');
+    const update = workflowUpdate(before, 'release/2.0', '0.5.3', true);
     assert.ok(update.kind === 'repin');
     assert.match(update.text, /^ {4}branches: \[release\/2\.0\]$/m);
   });
 
   it('leaves a push trigger listing several branches as it is', () => {
-    const before = workflow('main', '0.5.2').replace('branches: ["main"]', 'branches: ["main", "release"]');
-    const update = workflowUpdate(before, 'trunk', '0.5.3');
+    const before = workflow('main', '0.5.2', true).replace('branches: ["main"]', 'branches: ["main", "release"]');
+    const update = workflowUpdate(before, 'trunk', '0.5.3', true);
     assert.ok(update.kind === 'repin');
     assert.match(update.text, /branches: \["main", "release"\]/);
     assert.equal(update.branch, undefined);
@@ -1034,24 +1130,24 @@ describe('workflowUpdate', () => {
 
   it('asks to follow the default branch alone when the pins are current', async () => {
     const sys = fresh();
-    sys.files.set(WORKFLOW, workflow('main', packageVersion()));
+    sys.files.set(WORKFLOW, workflow('main', packageVersion(), true));
     sys.route('GET', REPO, { status: 200, json: repoJson(true, 'trunk') });
     await run(sys);
     assert.ok(sys.asked.includes('In .github/workflows/process-rules.yml, run pushes on the default branch, trunk, leaving the rest as it is? [y/N] '));
-    assert.equal(sys.files.get(WORKFLOW), workflow('trunk', packageVersion()));
+    assert.equal(sys.files.get(WORKFLOW), workflow('trunk', packageVersion(), true));
   });
 
   it('replaces a workflow it does not recognise, a split one with a pin missing included', () => {
-    assert.deepEqual(workflowUpdate('old', 'main', '0.5.3'), { kind: 'replace', text: workflow('main', '0.5.3') });
-    const halfPinned = workflow('main', '0.5.2').replace(/\n {4}with:\n {6}process-rules-ref: v0\.5\.2\n {4}secrets:/, '\n    secrets:');
+    assert.deepEqual(workflowUpdate('old', 'main', '0.5.3', true), { kind: 'replace', text: workflow('main', '0.5.3', true) });
+    const halfPinned = workflow('main', '0.5.2', true).replace(/\n {4}with:\n {6}process-rules-ref: v0\.5\.2\n {4}secrets:/, '\n    secrets:');
     assert.equal(workflowPins(halfPinned).length, 3);
-    assert.equal(workflowUpdate(halfPinned, 'main', '0.5.3').kind, 'replace');
+    assert.equal(workflowUpdate(halfPinned, 'main', '0.5.3', true).kind, 'replace');
   });
 
   it('replaces the older template written for a default branch since changed', () => {
-    assert.deepEqual(workflowUpdate(olderWorkflows('main', '0.5.2')[0], 'trunk', '0.5.3'), {
+    assert.deepEqual(workflowUpdate(olderWorkflows('main', '0.5.2')[0], 'trunk', '0.5.3', true), {
       kind: 'replace-older',
-      text: workflow('trunk', '0.5.3'),
+      text: workflow('trunk', '0.5.3', true),
       from: '0.5.2',
     });
   });

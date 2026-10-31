@@ -13,6 +13,9 @@ on:
       FIGMA_TOKEN:
         description: A Figma token that reads the design library and the frames states link
         required: false
+      FIGMA_LIBRARY:
+        description: The file key of the Figma design library, kept out of the committed settings
+        required: false
 
 # No workflow-wide permissions: GitHub refuses a whole run, before any job's
 # `if`, when a job here asks for more than the calling job grants. So the
@@ -130,11 +133,12 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
-      # Off unless the settings name a Figma library and FIGMA_TOKEN is set.
+      # Off unless figma is on and FIGMA_LIBRARY and FIGMA_TOKEN are set.
       - run: node .process-rules/src/cli.ts pr-design
         env:
           GH_TOKEN: ${{ github.token }}
           FIGMA_TOKEN: ${{ secrets.FIGMA_TOKEN }}
+          FIGMA_LIBRARY: ${{ secrets.FIGMA_LIBRARY }}
 
   decisions:
     name: Decisions, weekly

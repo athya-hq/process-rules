@@ -89,24 +89,40 @@ describe('frameProblem', () => {
 });
 
 describe('designLibrary', () => {
-  it('reads the library from the settings, or none', () => {
+  it('reads the library from the FIGMA_LIBRARY secret, or none', () => {
     const sys = new FakeSys();
-    assert.equal(designLibrary(sys, ROOT), undefined);
+    assert.deepEqual(designLibrary(sys, ROOT), { warnings: [] });
+    sys.env.FIGMA_LIBRARY = ' LIB2 ';
+    assert.deepEqual(designLibrary(sys, ROOT), { library: 'LIB2', warnings: [] });
+    sys.env.FIGMA_LIBRARY = 'a/b';
+    assert.throws(() => designLibrary(sys, ROOT), /the FIGMA_LIBRARY secret must be the file key/);
+  });
+
+  it('still reads a library the settings name, with a warning, and the secret over it', () => {
+    const sys = new FakeSys();
     sys.files.set(`${ROOT}/.github/process-rules.json`, JSON.stringify({ owner: 'example-owner', agent: AGENT, figma: { library: 'LIB1' } }));
-    assert.equal(designLibrary(sys, ROOT), 'LIB1');
+    assert.deepEqual(designLibrary(sys, ROOT), {
+      library: 'LIB1',
+      warnings: ['.github/process-rules.json names the Figma library; move it to the FIGMA_LIBRARY Actions secret and take the top-level "figma" object out of the settings (the figma feature stays)'],
+    });
+    sys.env.FIGMA_LIBRARY = 'LIB2';
+    assert.deepEqual(designLibrary(sys, ROOT), { library: 'LIB2', warnings: [] });
+    delete sys.env.FIGMA_LIBRARY;
     sys.files.set(`${ROOT}/.github/process-rules.json`, JSON.stringify({ figma: { library: 'a/b' } }));
+    assert.throws(() => designLibrary(sys, ROOT), /"figma.library" must be the file key/);
+    sys.files.set(`${ROOT}/.github/process-rules.json`, JSON.stringify({ figma: null }));
     assert.throws(() => designLibrary(sys, ROOT), /"figma.library" must be the file key/);
   });
 });
 
 describe('prDesign', () => {
   const EVENT = '/tmp/event.json';
-  const SETTINGS = JSON.stringify({ owner: 'example-owner', agent: AGENT, figma: { library: 'LIB1' } });
+  const SETTINGS = JSON.stringify({ owner: 'example-owner', agent: AGENT });
   const state = (number: number, body: string, extra: Record<string, unknown> = {}) => ({ number, issueType: { name: 'State' }, stateReason: null, body, ...extra });
 
   function actions(states: unknown[] | null, user = AGENT, body: string | null = 'Slice: #12'): FakeSys {
     const sys = new FakeSys();
-    sys.env = { GITHUB_EVENT_PATH: EVENT, GITHUB_REPOSITORY: 'example-org/example-app', GH_TOKEN: 'ghs_run', FIGMA_TOKEN: 'figd_tok' };
+    sys.env = { GITHUB_EVENT_PATH: EVENT, GITHUB_REPOSITORY: 'example-org/example-app', GH_TOKEN: 'ghs_run', FIGMA_TOKEN: 'figd_tok', FIGMA_LIBRARY: 'LIB1' };
     sys.files.set(`${ROOT}/.github/process-rules.json`, SETTINGS);
     sys.files.set(EVENT, JSON.stringify({ pull_request: { number: 40, body, user: { login: user } } }));
     sys.route('POST', '/graphql', { status: 200, json: { data: { repository: { issue: states ? { subIssues: { nodes: states } } : null } } } });
@@ -142,10 +158,27 @@ describe('prDesign', () => {
     });
   });
 
-  it('is off when the settings name no library', async () => {
+  it('is off, and says so, without a FIGMA_LIBRARY secret', async () => {
     const sys = actions([]);
-    sys.files.set(`${ROOT}/.github/process-rules.json`, JSON.stringify({ owner: 'example-owner', agent: AGENT }));
-    assert.deepEqual((await check(sys)).out, ['pr-design: the settings name no Figma design library; the design check is off']);
+    delete sys.env.FIGMA_LIBRARY;
+    assert.deepEqual((await check(sys)).out, ['pr-design: no FIGMA_LIBRARY secret names the Figma design library; the design check is off until the owner adds one']);
+  });
+
+  it('warns about older settings: the design feature, and a committed library', async () => {
+    const sys = actions([state(30, LINK)]);
+    delete sys.env.FIGMA_LIBRARY;
+    sys.files.set(`${ROOT}/.github/process-rules.json`, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity', 'design'], figma: { library: 'LIB1' } }));
+    assert.deepEqual((await check(sys)).out, [
+      '::warning::.github/process-rules.json lists "design", which is now named "figma"; run process-rules onboard to rename it',
+      '::warning::.github/process-rules.json names the Figma library; move it to the FIGMA_LIBRARY Actions secret and take the top-level "figma" object out of the settings (the figma feature stays)',
+      '✓ pr-design: 1 state of #12, each a frame built from the design library',
+    ]);
+  });
+
+  it('is off when the figma feature is', async () => {
+    const sys = actions([]);
+    sys.files.set(`${ROOT}/.github/process-rules.json`, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity'] }));
+    assert.deepEqual((await check(sys)).out, ['pr-design: figma is off in .github/process-rules.json; nothing to check']);
   });
 
   it('is off, and says so, without a Figma token', async () => {
