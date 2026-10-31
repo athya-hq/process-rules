@@ -40,13 +40,25 @@ export const VIEWS = [
 /** The name GitHub gives a new Project's first view, which onboard renames rather than leaves. */
 const DEFAULT_VIEW = 'View 1';
 
-/** What GitHub's API still cannot set on the views, so the owner does it by hand. */
+/**
+ * The product's public Project that onboard copies into a client: the views
+ * and fields, with what GitHub's API cannot set (the views' grouping, the
+ * workflows), set once by the product's owner.
+ */
+export const TEMPLATE = { login: 'athya-hq', number: 4 };
+
+/** How a view is grouped in the template, which only GitHub's web page can set. */
+const GROUPING = [
+  { view: 'Work items', field: 'Step' },
+  { view: 'Decisions', field: 'Decision' },
+];
+
+/** What GitHub's API cannot set on a Project not copied from the template, so the owner does it by hand. */
 export function viewsChecklist(url: string): string[] {
   return [
-    `Finish the views in ${url} by hand (GitHub's API cannot):`,
+    `Finish the Project ${url} by hand (GitHub's API cannot):`,
     '  [ ] Work items: group by Step',
     '  [ ] Decisions: group by Decision',
-    '  [ ] Board: columns by Status (Todo, In progress, Done); no "In review" column',
     '  [ ] Workflows → Auto-archive items: is:closed updated:<@today-7d',
   ];
 }
@@ -185,25 +197,49 @@ export async function setUpBoard(
     after = holder.projectsV2.pageInfo.endCursor;
   }
   if (!project) {
-    if (!(await confirm(`Create the Project "${title}" for ${repo.ownerLogin}, linked to ${slug}?`))) {
+    if (!(await confirm(`Create the Project "${title}" for ${repo.ownerLogin} from the process-rules template, linked to ${slug}?`))) {
       return stopped(io, 'project');
     }
-    const made = (await graphql(
-      sys,
-      token,
-      'mutation($owner: ID!, $title: String!, $repo: ID!) { createProjectV2(input: { ownerId: $owner, title: $title, repositoryId: $repo }) { projectV2 { id title url } } }',
-      { owner: holderId, title, repo: repo.nodeId },
-    )) as { createProjectV2: { projectV2: Omit<Project, 'repositories'> } };
-    project = { ...made.createProjectV2.projectV2, repositories: { nodes: [{ id: repo.nodeId }] } };
+    const copy = await copyTemplate(sys, io, token, holderId as string, title);
+    if (copy) {
+      await link(sys, token, copy.id, repo.nodeId);
+      project = { ...copy, repositories: { nodes: [{ id: repo.nodeId }] } };
+    } else {
+      const made = (await graphql(
+        sys,
+        token,
+        'mutation($owner: ID!, $title: String!, $repo: ID!) { createProjectV2(input: { ownerId: $owner, title: $title, repositoryId: $repo }) { projectV2 { id title url } } }',
+        { owner: holderId, title, repo: repo.nodeId },
+      )) as { createProjectV2: { projectV2: Omit<Project, 'repositories'> } };
+      project = { ...made.createProjectV2.projectV2, repositories: { nodes: [{ id: repo.nodeId }] } };
+    }
+  } else if (!(await grouped(sys, token, project.id))) {
+    const old = project;
+    const moving = await itemsOf(sys, token, old.id);
+    const lost = moving.fields.filter((name) => !FIELDS.some((field) => field.name === name) && name !== 'Status');
+    const question =
+      `"${title}" lacks what only the process-rules template sets (the views' grouping, the workflows). ` +
+      `Replace it with a copy of the template, moving its ${moving.items.length} open item${moving.items.length === 1 ? '' : 's'} with their Status, Step, Decision and Review date` +
+      `${lost.length > 0 ? ` (not ${lost.join(', ')}, which the template lacks)` : ''}, and close it as "${title} (old)"?`;
+    if (await confirm(question)) {
+      const copy = await copyTemplate(sys, io, token, holderId as string, title);
+      if (copy) {
+        await moveItems(sys, token, moving.items, copy.id);
+        await graphql(
+          sys,
+          token,
+          'mutation($project: ID!, $title: String!) { updateProjectV2(input: { projectId: $project, title: $title, closed: true }) { projectV2 { id } } }',
+          { project: old.id, title: `${title} (old)` },
+        );
+        await link(sys, token, copy.id, repo.nodeId);
+        io.out(`✓ moved ${moving.items.length} item${moving.items.length === 1 ? '' : 's'} to the copy; closed the old Project as "${title} (old)": ${old.url}`);
+        project = { ...copy, repositories: { nodes: [{ id: repo.nodeId }] } };
+      }
+    }
   }
   if (!project.repositories.nodes.some((linked) => linked.id === repo.nodeId)) {
     if (!(await confirm(`Link the Project "${title}" to ${slug}?`))) return stopped(io, 'project');
-    await graphql(
-      sys,
-      token,
-      'mutation($project: ID!, $repo: ID!) { linkProjectV2ToRepository(input: { projectId: $project, repositoryId: $repo }) { repository { id } } }',
-      { project: project.id, repo: repo.nodeId },
-    );
+    await link(sys, token, project.id, repo.nodeId);
   }
   io.out(`✓ Project "${title}": ${project.url}`);
 
@@ -237,8 +273,163 @@ export async function setUpBoard(
 
   if (!(await setUpViews(sys, token, confirm, project.id, title))) return stopped(io, 'views');
   io.out(`✓ views: ${VIEWS.map((v) => v.name).join(', ')}`);
-  for (const line of viewsChecklist(project.url)) io.out(line);
+  if (!(await grouped(sys, token, project.id))) for (const line of viewsChecklist(project.url)) io.out(line);
   return project.url;
+}
+
+async function link(sys: Sys, token: string, projectId: string, repoId: string): Promise<void> {
+  await graphql(
+    sys,
+    token,
+    'mutation($project: ID!, $repo: ID!) { linkProjectV2ToRepository(input: { projectId: $project, repositoryId: $repo }) { repository { id } } }',
+    { project: projectId, repo: repoId },
+  );
+}
+
+type Copy = { id: string; title: string; url: string };
+
+/** How long onboard waits for a copy's fields, which GitHub adds after the copy returns. */
+const COPY_WAIT = { attempts: 20, ms: 3000 };
+
+/**
+ * Copies the template to the owner as a Project with the title, and waits
+ * for its fields. Returns undefined, saying why, when GitHub refuses the
+ * copy, so onboard builds the Project itself.
+ */
+async function copyTemplate(sys: Sys, io: Output, token: string, ownerId: string, title: string): Promise<Copy | undefined> {
+  let copy: Copy;
+  try {
+    const found = (await graphql(sys, token, 'query($login: String!, $number: Int!) { organization(login: $login) { projectV2(number: $number) { id } } }', TEMPLATE)) as {
+      organization: { projectV2: { id: string } | null } | null;
+    };
+    const template = found.organization?.projectV2;
+    if (!template) throw new Error(`GitHub shows no Project ${TEMPLATE.number} in ${TEMPLATE.login}`);
+    const made = (await graphql(
+      sys,
+      token,
+      'mutation($template: ID!, $owner: ID!, $title: String!) { copyProjectV2(input: { projectId: $template, ownerId: $owner, title: $title, includeDraftIssues: false }) { projectV2 { id title url } } }',
+      { template: template.id, owner: ownerId, title },
+    )) as { copyProjectV2: { projectV2: Copy } };
+    copy = made.copyProjectV2.projectV2;
+  } catch (error) {
+    io.out(`- the process-rules template could not be copied (${(error as Error).message}); building the Project instead`);
+    return undefined;
+  }
+  for (let attempt = 1; ; attempt++) {
+    const read = (await graphql(sys, token, 'query($id: ID!) { node(id: $id) { ... on ProjectV2 { fields(first: 50) { nodes { ... on ProjectV2FieldCommon { name } } } } } }', {
+      id: copy.id,
+    })) as { node: { fields: { nodes: { name?: string }[] } } };
+    const names = read.node.fields.nodes.map((node) => node.name);
+    if (FIELDS.every((field) => names.includes(field.name))) return copy;
+    if (attempt === COPY_WAIT.attempts) throw new Error(`the copy ${copy.url} has no fields ${FIELDS.map((f) => f.name).join(', ')} yet; run onboard again`);
+    await sys.sleep(COPY_WAIT.ms);
+  }
+}
+
+/** Whether the Project's views are grouped as the template's are, which marks a Project copied from it. */
+async function grouped(sys: Sys, token: string, projectId: string): Promise<boolean> {
+  const read = (await graphql(
+    sys,
+    token,
+    'query($id: ID!) { node(id: $id) { ... on ProjectV2 { views(first: 50) { nodes { name groupByFields(first: 5) { nodes { ... on ProjectV2FieldCommon { name } } } } } } } }',
+    { id: projectId },
+  )) as { node: { views: { nodes: { name: string; groupByFields: { nodes: { name?: string }[] } }[] } } };
+  const views = read.node.views.nodes;
+  return GROUPING.every(({ view, field }) => views.some((had) => had.name === view && had.groupByFields.nodes.some((by) => by.name === field)));
+}
+
+type FieldValue = { field: string; option?: string | undefined; date?: string | undefined; text?: string | undefined; number?: number | undefined };
+type Item = { content?: string | undefined; draft?: { title: string; body: string }; values: FieldValue[] };
+
+/** The field kinds whose values move with an item; the others belong to the issue or are GitHub's own. */
+const MOVABLE = ['SINGLE_SELECT', 'DATE', 'TEXT', 'NUMBER'];
+
+/** A Project's open items with their field values, and the names of its fields whose values could move. */
+async function itemsOf(sys: Sys, token: string, projectId: string): Promise<{ items: Item[]; fields: string[] }> {
+  const items: Item[] = [];
+  let fields: string[] = [];
+  for (let after: string | null = null; ; ) {
+    const field = '... on ProjectV2FieldCommon { name }';
+    const page = (await graphql(
+      sys,
+      token,
+      `query($id: ID!, $after: String) { node(id: $id) { ... on ProjectV2 { fields(first: 50) { nodes { ... on ProjectV2FieldCommon { name dataType } } } items(first: 100, after: $after) { nodes { isArchived content { __typename ... on Issue { id } ... on PullRequest { id } ... on DraftIssue { title body } } fieldValues(first: 30) { nodes { ... on ProjectV2ItemFieldSingleSelectValue { name field { ${field} } } ... on ProjectV2ItemFieldDateValue { date field { ${field} } } ... on ProjectV2ItemFieldTextValue { text field { ${field} } } ... on ProjectV2ItemFieldNumberValue { number field { ${field} } } } } } pageInfo { hasNextPage endCursor } } } } }`,
+      { id: projectId, after },
+    )) as {
+      node: {
+        fields: { nodes: { name?: string; dataType?: string }[] };
+        items: {
+          nodes: {
+            isArchived: boolean;
+            content: { __typename: string; id?: string; title?: string; body?: string } | null;
+            fieldValues: { nodes: { name?: string; date?: string; text?: string; number?: number; field?: { name?: string } }[] };
+          }[];
+          pageInfo: { hasNextPage: boolean; endCursor: string | null };
+        };
+      };
+    };
+    fields = page.node.fields.nodes.filter((f) => MOVABLE.includes(f.dataType ?? '')).map((f) => f.name ?? '');
+    for (const node of page.node.items.nodes) {
+      if (node.isArchived || !node.content) continue;
+      const values = node.fieldValues.nodes
+        .filter((value) => fields.includes(value.field?.name ?? ''))
+        .map((value) => ({ field: value.field?.name ?? '', option: value.name, date: value.date, text: value.text, number: value.number }));
+      items.push(
+        node.content.__typename === 'DraftIssue'
+          ? { draft: { title: node.content.title ?? '', body: node.content.body ?? '' }, values }
+          : { content: node.content.id, values },
+      );
+    }
+    if (!page.node.items.pageInfo.hasNextPage) return { items, fields };
+    after = page.node.items.pageInfo.endCursor;
+  }
+}
+
+/** Adds the items to the Project, setting each value on a field of the same name, by option name (in any case) for a single select. */
+async function moveItems(sys: Sys, token: string, items: Item[], projectId: string): Promise<void> {
+  const read = (await graphql(
+    sys,
+    token,
+    'query($id: ID!) { node(id: $id) { ... on ProjectV2 { fields(first: 50) { nodes { ... on ProjectV2FieldCommon { id name } ... on ProjectV2SingleSelectField { options { id name } } } } } } }',
+    { id: projectId },
+  )) as { node: { fields: { nodes: { id?: string; name?: string; options?: { id: string; name: string }[] }[] } } };
+  const fields = read.node.fields.nodes;
+  for (const item of items) {
+    const added = item.draft
+      ? ((await graphql(
+          sys,
+          token,
+          'mutation($project: ID!, $title: String!, $body: String) { addProjectV2DraftIssue(input: { projectId: $project, title: $title, body: $body }) { projectItem { id } } }',
+          { project: projectId, ...item.draft },
+        )) as { addProjectV2DraftIssue: { projectItem: { id: string } } }).addProjectV2DraftIssue.projectItem.id
+      : ((await graphql(
+          sys,
+          token,
+          'mutation($project: ID!, $content: ID!) { addProjectV2ItemById(input: { projectId: $project, contentId: $content }) { item { id } } }',
+          { project: projectId, content: item.content },
+        )) as { addProjectV2ItemById: { item: { id: string } } }).addProjectV2ItemById.item.id;
+    for (const value of item.values) {
+      const field = fields.find((had) => had.name === value.field);
+      const option = field?.options?.find((had) => had.name.toLowerCase() === value.option?.toLowerCase())?.id;
+      const set =
+        option !== undefined
+          ? { singleSelectOptionId: option }
+          : value.date !== undefined
+            ? { date: value.date }
+            : value.text !== undefined
+              ? { text: value.text }
+              : value.number !== undefined
+                ? { number: value.number }
+                : undefined;
+      if (!field?.id || !set) continue;
+      await graphql(
+        sys,
+        token,
+        'mutation($project: ID!, $item: ID!, $field: ID!, $value: ProjectV2FieldValue!) { updateProjectV2ItemFieldValue(input: { projectId: $project, itemId: $item, fieldId: $field, value: $value }) { projectV2Item { id } } }',
+        { project: projectId, item: added, field: field.id, value: set },
+      );
+    }
+  }
 }
 
 type View = { id: string; name: string; layout: string; filter: string | null; configuration: { visibleFields: { nodes: { id?: string }[] } } };

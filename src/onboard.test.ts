@@ -5,8 +5,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, describe, it } from 'node:test';
 
-import { BUILT_IN, Board, repoJson, settledViews } from './fake-board.test.ts';
-import { FIELDS, ISSUE_TYPES, LABELS, viewsChecklist } from './board.ts';
+import { BUILT_IN, Board, COPY_URL, repoJson, settledViews } from './fake-board.test.ts';
+import { FIELDS, ISSUE_TYPES, LABELS } from './board.ts';
 import { AGENT, FakeSys, ROOT, TOKEN, capture } from './fake.test.ts';
 import type { HttpResult } from './types.ts';
 import { pathsFor, sessionScript } from './agent.ts';
@@ -38,7 +38,7 @@ function fresh(): FakeSys {
   sys.route('GET', REPO, PUSH);
   sys.route('GET', `${REPO}/commits/abc123`, VERIFIED);
   new Board(sys);
-  // Settings, hook, workflow; issue types, labels, Project, fields, views; test commit.
+  // Settings, hook, workflow, pre-push hook; issue types, labels, Project; test commit; and spares.
   sys.answers = Array<string>(12).fill('y');
   return sys;
 }
@@ -82,7 +82,8 @@ describe('onboard', () => {
     const reads = sys.requests.filter((r) => r.url === `https://api.github.com${REPO}`);
     assert.equal(reads[0]?.token, TOKEN, 'checks access as the agent');
     assert.ok(out.includes('✓ fields: Step, Decision, Review date'));
-    assert.ok(out.includes(viewsChecklist('https://github.com/orgs/example-org/projects/3')[0] ?? ''));
+    assert.ok(out.includes(`✓ Project "example-app work": ${COPY_URL}`));
+    assert.ok(!out.some((line) => line.startsWith('Finish the Project')), 'a copy of the template leaves nothing to do by hand');
   });
 
   it("uses GitHub's spelling of logins typed in another case", async () => {
@@ -101,7 +102,7 @@ describe('onboard', () => {
     const board = new Board(sys);
     board.issueTypes = ISSUE_TYPES.map((t) => t.name);
     board.labels = LABELS.map((l) => l.name);
-    board.project = { fields: [...BUILT_IN, ...FIELDS.map((f) => f.name)], linked: true, views: settledViews() };
+    board.project = { fields: [...BUILT_IN, ...FIELDS.map((f) => f.name)], linked: true, views: settledViews(), grouped: true };
     const { code } = await run(sys, []);
     assert.equal(code, 0);
     assert.deepEqual(sys.asked.map((q) => q.split(' ')[0]), ['Push']);
@@ -713,7 +714,7 @@ describe('onboard', () => {
     }
   });
 
-  for (const [index, step] of [[0, 'settings file'], [1, 'hook entry'], [2, 'workflow'], [3, 'pre-push hook'], [9, 'test commit']] as const) {
+  for (const [index, step] of [[0, 'settings file'], [1, 'hook entry'], [2, 'workflow'], [3, 'pre-push hook'], [7, 'test commit']] as const) {
     it(`stops without changing anything more when "${step}" is declined`, async () => {
       const sys = fresh();
       sys.answers = [...Array<string>(index).fill('y'), 'n'];
