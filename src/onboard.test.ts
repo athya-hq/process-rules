@@ -108,6 +108,57 @@ describe('onboard', () => {
     assert.deepEqual(sys.asked.map((q) => q.split(' ')[0]), ['Push']);
   });
 
+  it("offers to remove the owner from CODEOWNERS, which would ask them to review every agent pull request", async () => {
+    const sys = fresh();
+    const codeowners = `${ROOT}/.github/CODEOWNERS`;
+    sys.files.set(codeowners, '# Owners\n* @example-owner\n/app/ @example-org/core @EXAMPLE-OWNER # app team\n');
+    const { code, out } = await run(sys);
+    assert.equal(code, 0);
+    assert.ok(
+      out.includes(
+        '! .github/CODEOWNERS names example-owner in 2 rules (lines 2, 3): GitHub will ask example-owner to review every pull request ExampleBot opens that changes a file they match, ' +
+          "because ExampleBot authors them and GitHub never asks a pull request's author",
+      ),
+      out.join('\n'),
+    );
+    assert.ok(sys.asked.includes('Remove example-owner from those rules in .github/CODEOWNERS, and drop the rule left with no owners, so its paths fall to the rules before? [y/N] '), sys.asked.join('\n'));
+    assert.equal(sys.files.get(codeowners), '# Owners\n/app/ @example-org/core # app team\n');
+    assert.ok(out.includes('✓ .github/CODEOWNERS: example-owner removed'));
+    assert.ok(
+      out.includes(
+        'onboard: done. Commit .github/process-rules.json, .claude/settings.json, .github/workflows/process-rules.yml and .github/CODEOWNERS; agent sessions then work as ExampleBot.',
+      ),
+      out.join('\n'),
+    );
+  });
+
+  it('leaves CODEOWNERS as it is without a yes, and goes on', async () => {
+    for (const answer of ['', 'n']) {
+      const sys = fresh();
+      const codeowners = `${ROOT}/CODEOWNERS`;
+      const text = '* @example-owner @a\n';
+      sys.files.set(codeowners, text);
+      // The CODEOWNERS question comes last, after the test commit.
+      const before = fresh();
+      await run(before);
+      sys.answers = [...Array<string>(before.asked.length).fill('y'), answer];
+      const { code, out } = await run(sys);
+      assert.equal(code, 0);
+      assert.ok(sys.asked.includes('Remove example-owner from that rule in CODEOWNERS? [y/N] '), sys.asked.join('\n'));
+      assert.equal(sys.files.get(codeowners), text);
+      assert.ok(out.includes('! CODEOWNERS left as it is'));
+      assert.equal(sys.asked.at(-1), 'Remove example-owner from that rule in CODEOWNERS? [y/N] ');
+      assert.ok(out.some((line) => line.startsWith('onboard: done.') && !line.includes('CODEOWNERS')));
+    }
+  });
+
+  it('asks nothing about a CODEOWNERS that does not name the owner', async () => {
+    const sys = fresh();
+    sys.files.set(`${ROOT}/.github/CODEOWNERS`, '* @example-org/core\n');
+    await run(sys);
+    assert.ok(!sys.asked.some((q) => q.includes('CODEOWNERS')));
+  });
+
   for (const [release, older] of OLDER_HOOK_COMMANDS.entries()) {
     it(`upgrades an older release's hooks in place (${release})`, async () => {
       const sys = fresh();

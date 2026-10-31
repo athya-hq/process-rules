@@ -16,6 +16,7 @@ import {
   tokenInfo,
 } from './agent.ts';
 import { setUpBoard } from './board.ts';
+import { ownerRules, ownerRulesProblem } from './codeowners.ts';
 import { appendToArray, replaceValues, setMember } from './jsonedit.ts';
 import { type Feature, FEATURES, featuresIn, parseFeatures } from './features.ts';
 import { packageVersion } from './version.ts';
@@ -642,7 +643,21 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
   const { id } = await account(sys, agent);
   const verified = await testCommit(sys, io, { agent, id, token, slug });
   if (verified !== 0) return verified;
-  const files = [SETTINGS_PATH, HOOKS_PATH, ...(workflowNeeded ? [WORKFLOW_PATH] : [])];
+  // Optional, and last, so a run stopped earlier and run again still lists the file to commit.
+  const rules = ownerRules(sys, root, owner);
+  let codeowners: string | undefined;
+  if (rules) {
+    io.out(`! ${ownerRulesProblem(rules, owner, agent)}`);
+    const drop = rules.dropped > 0 ? `, and drop ${rules.dropped === 1 ? 'the rule' : `the ${rules.dropped} rules`} left with no owners, so ${rules.dropped === 1 ? 'its' : 'their'} paths fall to the rules before` : '';
+    if (await confirm(`Remove ${owner} from ${rules.lines.length === 1 ? 'that rule' : 'those rules'} in ${rules.path}${drop}?`)) {
+      sys.write(`${root}/${rules.path}`, rules.text);
+      codeowners = rules.path;
+      io.out(`✓ ${rules.path}: ${owner} removed`);
+    } else {
+      io.out(`! ${rules.path} left as it is`);
+    }
+  }
+  const files = [SETTINGS_PATH, HOOKS_PATH, ...(workflowNeeded ? [WORKFLOW_PATH] : []), ...(codeowners ? [codeowners] : [])];
   io.out(`onboard: done. Commit ${files.slice(0, -1).join(', ')} and ${files.at(-1)}; agent sessions then work as ${agent}.`);
   io.out(`For Claude cloud sessions: connect claude.ai's GitHub as ${agent}, and put what process-rules cloud-setup prints in the cloud environment's Setup script.`);
   return 0;

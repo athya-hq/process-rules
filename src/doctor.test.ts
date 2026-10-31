@@ -28,6 +28,17 @@ describe('doctor', () => {
     });
   });
 
+  it("warns when the repo's CODEOWNERS names the owner, and still passes", async () => {
+    const sys = healthy();
+    sys.files.set('/repo/.github/CODEOWNERS', '* @example-owner\n');
+    const { code, err } = await check(sys);
+    assert.equal(code, 0);
+    assert.deepEqual(err, [
+      '! .github/CODEOWNERS names example-owner in a rule (line 1): GitHub will ask example-owner to review every pull request ExampleBot opens that changes a file it matches, ' +
+        "because ExampleBot authors them and GitHub never asks a pull request's author; run process-rules onboard to remove example-owner from them",
+    ]);
+  });
+
   it('refuses a machine never set up, naming every step', async () => {
     const { code, err } = await check(new FakeSys());
     assert.equal(code, 1);
