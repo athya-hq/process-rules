@@ -115,7 +115,8 @@ accepting clears that part of the record.
 
 The owner is never signed in to `gh`, and needs no sign-in kept anywhere on
 the Mac. When a run of `onboard` (or `onboard --add`) reaches a step that
-acts as the owner (giving the agent access, or setting up the board), it
+acts as the owner (giving the agent access, setting up the board, or
+setting the `FIGMA_LIBRARY` secret from an older setting), it
 asks for one browser approval, which serves the rest of that run; a run
 with no such step asks for none. It runs `gh auth login --web` into a
 fresh temporary `gh` folder, asking for gh's own scopes (`repo`,
@@ -173,7 +174,7 @@ repo's CODEOWNERS names the owner.
    one signed test commit as the agent to a throwaway branch, checks GitHub
    shows it Verified by the agent (asking again when the network or GitHub
    fails for a moment), and deletes the branch. The steps that act as you
-   (giving the agent access, the board) share one browser approval, for
+   (giving the agent access, the board, the `FIGMA_LIBRARY` secret) share one browser approval, for
    that run only. Each change waits
    for a yes. The files git tracks in your checkout are never changed: once every step has run,
    `onboard` commits the files it changes as the agent, signed, on the
@@ -265,7 +266,10 @@ so a public repository does not publish its design file, and the workflow
 an older release wrote still work: a `design` feature is read as `figma`, and
 a `"figma": { "library": ... }` setting is read when `FIGMA_LIBRARY` is not
 set, each with a warning; `onboard` renames the feature, takes the key out
-and prints the `gh secret set FIGMA_LIBRARY` command that puts it back.
+and sets it as the `FIGMA_LIBRARY` secret itself, as you, with the run's one
+browser approval: it seals the key with the repository's Actions public key
+(a libsodium sealed box, as GitHub requires) and stores it through GitHub's
+API, never printing it.
 
 **Decisions, weekly** runs on Mondays at 06:17 UTC (and by hand), or on the
 `schedule` the settings set. A Decision issue carries

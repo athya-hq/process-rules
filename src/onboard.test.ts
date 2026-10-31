@@ -14,6 +14,7 @@ import { FEATURES } from './features.ts';
 import { packageVersion } from './version.ts';
 import { GUARD_COMMAND, HOOK_COMMAND, HOOKS_PATH, OLDER_HOOK_COMMANDS, OLDER_PRE_PUSH_HOOKS, PRE_PUSH_HOOK, REVIEW_THREAD_RULE, WORKFLOW_PATH, claudeSettings, jobsWithoutLibrary, olderWorkflows, onboard, onboardArgs, workflow, workflowPins, workflowUpdate } from './onboard.ts';
 import { BASE_ENV } from './agent.ts';
+import { actionsKey, sealedValue } from './fake-secrets.test.ts';
 
 const SETTINGS = `${ROOT}/.github/process-rules.json`;
 const HOOKS = `${ROOT}/${HOOKS_PATH}`;
@@ -1041,18 +1042,50 @@ describe('staged adoption', () => {
     assert.ok(!repo(sys).has(WORKFLOW), 'board alone needs no workflow');
   });
 
-  it('renames design to figma and takes the library key out of older settings, naming the secret to set', async () => {
+  it('renames design to figma, takes the library key out of older settings and sets it as the FIGMA_LIBRARY secret', async () => {
     const sys = fresh();
-    sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity', 'design'], figma: { library: 'LIB1' } }));
+    sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity', 'design'], figma: { library: 'LibKey0123abc' } }));
     sys.files.set(HOOKS, JSON.stringify(CLAUDE));
     sys.files.set(PRE_PUSH, PRE_PUSH_HOOK);
+    const pair = await actionsKey(sys);
     sys.answers = Array<string>(5).fill('y');
-    const { code, out } = await run(sys);
-    assert.equal(code, 0);
-    assert.equal(sys.asked[0], 'Update .github/process-rules.json: rename the design feature to figma and take out "figma", since the library key belongs in the FIGMA_LIBRARY Actions secret? [y/N] ');
+    const { code, out, err } = await run(sys);
+    assert.deepEqual([code, err], [0, []]);
+    assert.equal(
+      sys.asked[0],
+      'Update .github/process-rules.json: rename the design feature to figma and take out "figma" and set its library key as the FIGMA_LIBRARY Actions secret? [y/N] ',
+    );
     assert.deepEqual(JSON.parse(repo(sys).get(SETTINGS) ?? ''), { owner: 'example-owner', agent: AGENT, features: ['identity', 'figma'] });
-    assert.ok(out.includes('! set the FIGMA_LIBRARY Actions secret to the key taken out: gh secret set FIGMA_LIBRARY --repo example-org/example-app --body LIB1'));
+    const sent = sealedValue(sys, pair);
+    assert.deepEqual([sent.value, sent.keyId, sent.token], ['LibKey0123abc', 'key-1', OWNER_TOKEN], "sealed with the repository's key, as the owner for this run");
+    assert.equal(signIns(sys), 1);
+    assert.ok(out.includes('✓ FIGMA_LIBRARY Actions secret: the library key taken out'));
+    const said = [...out, ...err, ...sys.asked];
+    assert.ok(!said.some((line) => line.includes('LibKey0123abc')), 'the key never appears in the output');
+    assert.ok(!said.some((line) => /\bgh (secret|auth|api)\b/.test(line)), 'the owner is never told to run gh');
     assert.equal(repo(sys).get(WORKFLOW), workflow('main', packageVersion(), true));
+  });
+
+  it('stops when the FIGMA_LIBRARY secret cannot be set, saying why without the key', async () => {
+    const sys = fresh();
+    sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity'], figma: { library: 'LibKey0123abc' } }));
+    await actionsKey(sys, { status: 403, json: { message: 'Must have admin rights to Repository.' } });
+    sys.answers = ['y'];
+    const { code, out, err } = await run(sys);
+    assert.equal(code, 1);
+    assert.deepEqual(err, ['onboard: GitHub did not set the FIGMA_LIBRARY secret (HTTP 403: Must have admin rights to Repository.)']);
+    assert.ok(![...out, ...err].some((line) => line.includes('LibKey0123abc')));
+    assert.ok(!sys.requests.some((r) => r.url.endsWith('/pulls')));
+  });
+
+  it('stops when the owner does not sign in to set the FIGMA_LIBRARY secret', async () => {
+    const sys = fresh();
+    sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity'], figma: { library: 'LibKey0123abc' } }));
+    sys.ghToken = undefined;
+    sys.answers = ['y'];
+    const { code, err } = await run(sys);
+    assert.deepEqual([code, err], [1, ['onboard: the GitHub sign-in in the browser did not finish']]);
+    assert.ok(!sys.requests.some((r) => r.method === 'PUT'));
   });
 
   it('renames design alone, and stops at a no', async () => {
@@ -1102,8 +1135,13 @@ describe('staged adoption', () => {
     sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity'], figma: { library: 'x; rm -rf ~' } }));
     sys.answers = ['y'];
     const { out } = await run(sys);
-    assert.ok(out.includes('! the "figma.library" taken out was not a Figma file key; set the FIGMA_LIBRARY Actions secret to the design library\'s file key'));
+    assert.ok(
+      out.includes(
+        '! the "figma.library" taken out was not a Figma file key; set the FIGMA_LIBRARY Actions secret to the design library\'s file key under example-org/example-app → Settings → Secrets and variables → Actions',
+      ),
+    );
     assert.ok(!out.some((line) => line.includes('gh secret set')));
+    assert.ok(!sys.requests.some((r) => r.url.includes('/actions/secrets')), 'nothing that is not a file key is stored as one');
   });
 
   it('writes the workflow and pre-push hook once work rules are on', async () => {
@@ -1236,11 +1274,15 @@ describe("onboard's pull request", () => {
     sys.files.set(HOOKS, JSON.stringify(CLAUDE));
     sys.files.set(PRE_PUSH, PRE_PUSH_HOOK);
     new Board(sys);
+    await actionsKey(sys);
     const { code } = await run(sys, ['--add', 'board']);
     assert.equal(code, 0);
     assert.deepEqual([...sys.committed.keys()], ['.github/process-rules.json']);
     const { body } = sys.requests.find((r) => r.method === 'POST' && r.url.endsWith('/pulls'))?.body as { body: string };
-    assert.match(body, /^- `\.github\/process-rules\.json`: take out "figma", .*; turn board on$/m);
+    assert.match(body, /^- `\.github\/process-rules\.json`: take out "figma" .*; turn board on$/m);
+    assert.equal(signIns(sys), 1, 'one sign-in, for the secret and the board');
+    const login = sys.calls.find((call) => call.command === 'gh' && call.args[1] === 'login')?.args ?? [];
+    assert.equal(login[login.indexOf('-s') + 1], 'project,admin:org', "the sign-in for the secret asks for the board's scopes too");
   });
 });
 
