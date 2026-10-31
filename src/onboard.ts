@@ -15,7 +15,7 @@ import {
   tokenInfo,
 } from './agent.ts';
 import { setUpBoard } from './board.ts';
-import { appendToArray } from './jsonedit.ts';
+import { appendToArray, replaceValues } from './jsonedit.ts';
 import { type Feature, FEATURES, featuresIn, parseFeatures } from './features.ts';
 import { packageVersion } from './version.ts';
 import type { Output, Sys } from './types.ts';
@@ -146,7 +146,7 @@ function hasHook(settings: object): boolean {
   return sessionStartHooks(settings).some((hook) => hook.command === HOOK_COMMAND);
 }
 
-/** The command entries under SessionStart, as written in the settings object (so they can be changed in place). */
+/** The command entries under SessionStart, as written in the settings object. */
 function sessionStartHooks(settings: object): { command?: unknown }[] {
   const groups = (settings as { hooks?: { SessionStart?: unknown } }).hooks?.SessionStart;
   if (!Array.isArray(groups)) return [];
@@ -300,28 +300,34 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
   if (typeof hooks !== 'object' || hooks === null || Array.isArray(hooks)) {
     throw new Error(`${HOOKS_PATH} is not a JSON object`);
   }
-  // An entry an older release wrote is replaced where it stands, not added to.
-  const older = sessionStartHooks(hooks).filter((hook) => typeof hook.command === 'string' && OLDER_HOOK_COMMANDS.includes(hook.command));
-  if (older.length > 0) {
+  // An entry an older release wrote is replaced where it stands, not added to;
+  // both edits are made in the text itself, so the rest of the client's file keeps its layout.
+  const older = sys.exists(hooksFile)
+    ? replaceValues(sys.read(hooksFile), ['hooks', 'SessionStart', '*', 'hooks', '*', 'command'], (command) =>
+        typeof command === 'string' && OLDER_HOOK_COMMANDS.includes(command) ? HOOK_COMMAND : undefined,
+      )
+    : { text: '', replaced: 0 };
+  if (older.replaced > 0) {
     if (!(await confirm(`Replace the older process-rules SessionStart hook in ${HOOKS_PATH} with this release's?`))) {
       return stop('hook entry');
     }
-    // Swapped in the text itself, so the rest of the client's file keeps its layout.
-    let text = sys.read(hooksFile);
-    for (const command of OLDER_HOOK_COMMANDS) text = text.split(JSON.stringify(command)).join(JSON.stringify(HOOK_COMMAND));
-    sys.write(hooksFile, text);
+    sys.write(hooksFile, older.text);
   } else if (!hasHook(hooks)) {
+    const entry = { hooks: [{ type: 'command', command: HOOK_COMMAND }] };
+    // Worked out before asking, so a file onboard cannot add to is refused before any question.
+    let text = `${JSON.stringify({ hooks: { SessionStart: [entry] } }, null, 2)}\n`;
+    if (sys.exists(hooksFile)) {
+      try {
+        text = appendToArray(sys.read(hooksFile), ['hooks'], 'SessionStart', entry);
+      } catch (error) {
+        throw new Error(`${HOOKS_PATH}: ${(error as Error).message}`);
+      }
+    }
     if (!(await confirm(`Add the SessionStart hook that runs process-rules session-start to ${HOOKS_PATH}?`))) {
       return stop('hook entry');
     }
-    const entry = { hooks: [{ type: 'command', command: HOOK_COMMAND }] };
     sys.mkdir(`${root}/.claude`);
-    sys.write(
-      hooksFile,
-      sys.exists(hooksFile)
-        ? appendToArray(sys.read(hooksFile), ['hooks'], 'SessionStart', entry)
-        : `${JSON.stringify({ hooks: { SessionStart: [entry] } }, null, 2)}\n`,
-    );
+    sys.write(hooksFile, text);
   }
   io.out(`✓ ${HOOKS_PATH}: SessionStart runs process-rules session-start`);
 

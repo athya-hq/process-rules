@@ -114,6 +114,24 @@ describe('onboard', () => {
     ]);
   });
 
+  it("swaps only the older SessionStart command, keeping the file's layout", async () => {
+    const sys = fresh();
+    const older = JSON.stringify(OLDER_HOOK_COMMANDS[0]);
+    const text = `{\r\n    "hooks": {\r\n        "Stop": [ { "hooks": [ { "command": ${older} } ] } ],\r\n        "SessionStart": [ { "hooks": [ { "command": ${older} } ] } ]\r\n    }\r\n}\r\n`;
+    sys.files.set(HOOKS, text);
+    await run(sys);
+    const at = text.lastIndexOf(older);
+    assert.equal(sys.files.get(HOOKS), `${text.slice(0, at)}${JSON.stringify(HOOK_COMMAND)}${text.slice(at + older.length)}`);
+  });
+
+  it('refuses a settings file it cannot add the hook to, before asking', async () => {
+    const sys = fresh();
+    sys.files.set(HOOKS, '{ "hooks": { "SessionStart": "x" } }');
+    await assert.rejects(run(sys), /^Error: \.claude\/settings\.json: hooks\.SessionStart is not an array$/);
+    assert.equal(sys.files.get(HOOKS), '{ "hooks": { "SessionStart": "x" } }');
+    assert.ok(!sys.asked.some((q) => q.startsWith('Add the SessionStart hook')));
+  });
+
   it("leaves a client's own hook that mentions session-start alone", async () => {
     const sys = fresh();
     const own = 'my-wrapper && process-rules session-start';
