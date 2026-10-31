@@ -251,7 +251,7 @@
   so a fork's pull request reads the fork's; a private fork the run's token
   cannot read fails the check. Merge-queue pushes go to the queue's own
   branches, not the pull request's, so they never count. Approval: the
-  owner's 👍 on #91. Released as v0.5.8, a patch release.
+  owner's 👍 on #91. Released in the next 0.5.x patch release.
 - **2026-11-01 — Record: P-27, a declined lockout stays declined.** The
   owner's decision of 2026-10-31 on #57: keep offering the lockout. On a
   team member's laptop or a shared machine, accepting it signs that person
