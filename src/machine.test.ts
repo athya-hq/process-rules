@@ -1,16 +1,17 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { pathsFor, sessionScript } from './agent.ts';
-import { AGENT, AGENT_ID, CLASSIC, FakeSys, HOME, KEY, PRIVATE_KEY, PUBLIC_KEY, TOKEN, capture } from './fake.test.ts';
+import { launcherPath, launcherScript, pathsFor, sessionScript } from './agent.ts';
+import { AGENT, AGENT_ID, CLASSIC, CLI, FakeSys, HOME, NODE, KEY, PRIVATE_KEY, PUBLIC_KEY, TOKEN, capture } from './fake.test.ts';
 import { TOKEN_PAGE, machine, tokenInstructions } from './machine.ts';
 
 const SESSION = `${HOME}/.config/process-rules/examplebot/session.sh`;
+const LAUNCHER = launcherPath(HOME);
 
 /** A machine with nothing set up, answering yes to everything. */
 function fresh(): FakeSys {
   const sys = new FakeSys();
-  sys.answers = ['y', 'y', 'y', 'y'];
+  sys.answers = ['y', 'y', 'y', 'y', 'y', 'y'];
   sys.secrets = [TOKEN];
   sys.acceptToken(TOKEN, AGENT);
   let registered = false;
@@ -115,7 +116,7 @@ describe('machine', () => {
       if (question.startsWith('Press Enter')) added = true;
       return ask(question);
     };
-    sys.answers = ['y', 'y', 'y', '', 'y'];
+    sys.answers = ['y', 'y', 'y', '', 'y', 'y'];
     const { code, out } = await setUp(sys);
     assert.equal(code, 0);
     assert.ok(out.includes("GitHub's API refused (HTTP 403). Add it in the browser, signed in as ExampleBot:"));
@@ -182,7 +183,7 @@ describe('machine', () => {
     const old = 'ghp_old';
     sys.setToken(AGENT, old);
     sys.acceptToken(old, AGENT, { ...CLASSIC, 'github-authentication-token-expiration': '2026-11-05 12:00:00 UTC' });
-    sys.answers = ['y', 'y', 'y', 'y', 'y'];
+    sys.answers = ['y', 'y', 'y', 'y', 'y', 'y'];
     const { code } = await setUp(sys);
     assert.equal(code, 0);
     assert.ok(sys.asked.includes('The stored token ends in 6 days. Replace it with a new one? [y/N] '));
@@ -194,7 +195,7 @@ describe('machine', () => {
     const old = 'ghp_old';
     sys.setToken(AGENT, old);
     sys.acceptToken(old, AGENT, { ...CLASSIC, 'github-authentication-token-expiration': '2026-11-05 12:00:00 UTC' });
-    sys.answers = ['y', 'n', 'y', 'y'];
+    sys.answers = ['y', 'n', 'y', 'y', 'y'];
     assert.equal((await setUp(sys)).code, 0);
     assert.equal(sys.token(AGENT), old);
     assert.deepEqual(sys.opened, []);
@@ -241,15 +242,42 @@ describe('machine', () => {
     assert.deepEqual({ code, err }, { code: 1, err: ['machine: ssh-keygen failed: no space'] });
   });
 
-  for (const [index, step] of ['signing key', 'token', 'register key', 'session file'].entries()) {
+  for (const [index, step] of ['signing key', 'token', 'register key', 'session file', 'launcher'].entries()) {
     it(`stops without changing anything more when "${step}" is declined`, async () => {
       const sys = fresh();
       sys.answers = [...Array<string>(index).fill('y'), 'n'];
       const { code, err } = await setUp(sys);
       assert.deepEqual({ code, err }, { code: 1, err: [`machine: stopped at "${step}"; nothing after it was changed`] });
-      assert.equal(sys.files.has(SESSION), false);
+      assert.equal(sys.files.has(SESSION), index > 3);
+      assert.equal(sys.files.has(LAUNCHER), false);
     });
   }
+
+  it('writes the launcher, which runs the package manager\'s command for the CLI with this node', async () => {
+    const sys = fresh();
+    sys.execOverride = (call) =>
+      call.command === '/bin/sh' ? { code: 0, stdout: '/home/u/Library/pnpm/bin/process-rules\n', stderr: '' } : undefined;
+    assert.equal((await setUp(sys)).code, 0);
+    assert.equal(sys.files.get(LAUNCHER), launcherScript(NODE, CLI, '/home/u/Library/pnpm/bin/process-rules'));
+    assert.equal(sys.modes.get(LAUNCHER), 0o755);
+    assert.match(sys.files.get(LAUNCHER) ?? '', /^PATH='\/opt\/node\/bin':"\$PATH"$/m);
+    assert.ok(sys.dirs.includes(`${HOME}/.config/process-rules/bin`));
+  });
+
+  it("runs the CLI's own script when the package manager has no command for it", async () => {
+    const sys = fresh();
+    assert.equal((await setUp(sys)).code, 0);
+    assert.match(sys.files.get(LAUNCHER) ?? '', /^exec '\/opt\/node\/bin\/node' '\/opt\/process-rules\/dist\/cli\.js' "\$@"$/m);
+  });
+
+  it('replaces a launcher that names another node', async () => {
+    const sys = new FakeSys().ready();
+    sys.files.set(SESSION, sessionScript(AGENT, AGENT_ID, pathsFor(HOME, AGENT)));
+    sys.files.set(LAUNCHER, launcherScript('/gone/bin/node', CLI));
+    sys.answers = ['y'];
+    assert.equal((await setUp(sys)).code, 0);
+    assert.equal(sys.files.get(LAUNCHER), launcherScript(NODE, CLI));
+  });
 });
 
 describe('tokenInstructions', () => {

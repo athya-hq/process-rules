@@ -175,6 +175,49 @@ function identityVars(agent: string, id: number, paths: Paths): [string, string]
 }
 
 /**
+ * The lock as plain values, for the `env` of a client's Claude Code
+ * settings: every session there starts locked out of GitHub before any hook
+ * runs, so a session whose hook never ran or failed reaches GitHub as nobody.
+ * The settings file is shared by every machine, so nothing in it names a
+ * home folder; GH_TOKEN alone keeps gh off its stored logins.
+ */
+export const BASE_ENV: Record<string, string> = Object.fromEntries([
+  ['GH_TOKEN', NO_TOKEN],
+  ['GITHUB_TOKEN', NO_TOKEN],
+  ['GIT_TERMINAL_PROMPT', '0'],
+  ['GIT_SSH_COMMAND', NO_SSH],
+  ...configVars(LOCKED_CONFIG),
+]);
+
+/** Where session-start records how it left one Claude Code session, for the guard to read. */
+export function sessionRecord(home: string, sessionId: string): string | undefined {
+  return /^[A-Za-z0-9_-]{1,128}$/.test(sessionId) ? `${home}/.config/process-rules/sessions/${sessionId}.json` : undefined;
+}
+
+/** The launcher `machine` writes, which hooks run, so they need no node on PATH. */
+export function launcherPath(home: string): string {
+  return `${home}/.config/process-rules/bin/process-rules`;
+}
+
+/**
+ * The launcher's lines: the CLI run with the node that ran `machine`, found
+ * by its real path, not a per-shell one such as a version manager's. With the
+ * package manager's command for the CLI it runs that, which stays put across
+ * upgrades, with that node first on PATH; else the CLI's own script.
+ */
+export function launcherScript(node: string, cli: string, command?: string): string {
+  const dir = node.slice(0, node.lastIndexOf('/'));
+  return [
+    '#!/bin/sh',
+    '# Written by process-rules machine: the CLI for hooks, with the node that ran machine, so they need no node on PATH.',
+    `PATH=${quote(dir)}:"$PATH"`,
+    'export PATH',
+    command ? `exec ${quote(command)} "$@"` : `exec ${quote(node)} ${quote(cli)} "$@"`,
+    '',
+  ].join('\n');
+}
+
+/**
  * The shell lines an agent session sources at start. They hold no secret:
  * the token is read from the keychain each time, and when it is missing
  * GH_TOKEN is a value GitHub refuses, so gh and git fail instead of using

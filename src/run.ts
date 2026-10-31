@@ -1,6 +1,7 @@
 import { decisionsWeekly } from './decisions.ts';
 import { prDesign } from './design.ts';
 import { doctor } from './doctor.ts';
+import { guard } from './guard.ts';
 import { prIdentity } from './identity.ts';
 import { machine } from './machine.ts';
 import { reviewsDue } from './reviews.ts';
@@ -22,6 +23,7 @@ Commands:
   onboard [owner agent] [--features a,b] [--add feature]
                    Set up the client repo here, for the features it turns on
   session-start    Run by a client's SessionStart hook: the agent identity, or GitHub locked out
+  guard            Run by a client's PreToolUse hook: gh and git's remote commands only as the agent
   pr-identity      Run by the shared workflow: agent commits Verified and pushed by the agent
   pr-work-rules    Run by the shared workflow: an agent pull request builds one slice it may build
   pr-design        Run by the shared workflow: each state of the slice links a frame from the design library
@@ -75,6 +77,10 @@ export async function run(
       return 0;
     case 'session-start':
       return sessionStart(await sys(), io);
+    case 'guard': {
+      const real = await sys();
+      return guard(real, io, real.readStdin());
+    }
     case 'machine':
     case 'doctor':
     case 'onboard':

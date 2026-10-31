@@ -22,6 +22,8 @@ export interface Sys {
   env: Readonly<Record<string, string | undefined>>;
   home: string;
   cwd: string;
+  /** The node running the CLI and the CLI's script, both by their real paths. */
+  runtime: { node: string; cli: string };
   exec(
     command: string,
     args: readonly string[],
@@ -44,4 +46,5 @@ export interface Sys {
   askSecret(question: string): Promise<string>;
   open(url: string): void;
   now(): Date;
+  sleep(ms: number): Promise<void>;
 }

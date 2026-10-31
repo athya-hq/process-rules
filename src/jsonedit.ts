@@ -164,3 +164,22 @@ export function replaceValues(text: string, path: string[], replace: (value: unk
   }
   return { text: out, replaced };
 }
+
+/**
+ * The text with `object.key` set to `value`: swapped where it stands when
+ * the key is there, else added last, creating the objects on the way.
+ * Refuses, changing nothing, when a value on the way is not an object.
+ */
+export function setMember(text: string, path: string[], key: string, value: unknown): string {
+  const layout = layoutOf(text);
+  let objectStart = skipSpace(text, 0);
+  for (const [i, name] of path.entries()) {
+    const span = memberSpan(text, objectStart, name);
+    if (!span) return addMember(text, objectStart, name, nest([...path.slice(i + 1), key], value), layout);
+    if (text[span.start] !== '{') throw new Error(`${path.slice(0, i + 1).join('.')} is not an object`);
+    objectStart = span.start;
+  }
+  const member = memberSpan(text, objectStart, key);
+  if (!member) return addMember(text, objectStart, key, value, layout);
+  return `${text.slice(0, member.start)}${JSON.stringify(value)}${text.slice(member.end)}`;
+}

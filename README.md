@@ -8,7 +8,7 @@ hooks and a shared GitHub Actions workflow.
 
 ## Status
 
-Early. The CLI runs `machine`, `doctor`, `session-start` and `onboard`. What comes next, and in what
+Early. The CLI runs `machine`, `doctor`, `session-start`, `guard` and `onboard`. What comes next, and in what
 order: the Slice issues under
 [process-rules roadmap v1](https://github.com/athya-hq/process-rules/issues/22),
 on the Project [process-rules work](https://github.com/orgs/athya-hq/projects/2);
@@ -29,9 +29,18 @@ agent's signing key (`~/.ssh/<agent, lowercased>_signing`), opens GitHub's
 classic-token page with the scopes filled in (`repo`, `workflow`, `read:org`,
 `project`, `write:ssh_signing_key`) and reads the token through a hidden prompt
 into the keychain (service `process-rules`), refusing a fine-grained token,
-missing scopes or no expiry. It then registers the key as the agent's signing key and writes
-`~/.config/process-rules/<agent, lowercased>/session.sh`. Each change waits
-for a yes. Why a classic token: [docs/decisions.md](docs/decisions.md).
+missing scopes or no expiry. It then registers the key as the agent's signing key, writes
+`~/.config/process-rules/<agent, lowercased>/session.sh`, and writes the
+launcher `~/.config/process-rules/bin/process-rules`, which the hooks run. The
+launcher names the node that ran `machine` by its real path (not a version
+manager's per-shell one, which the Claude app's hooks may not have), so the
+hooks need no node on their `PATH`. Each change waits for a yes. Why a classic token: [docs/decisions.md](docs/decisions.md).
+
+A client's `.claude/settings.json` locks GitHub out of every session before
+any hook runs: its `env` holds the lock's variables (a `GH_TOKEN` GitHub
+refuses, no credential helper, GitHub's SSH remotes on HTTPS and every other
+SSH remote refused), so a session whose hook never ran or failed reaches
+GitHub as nobody, never as the owner.
 
 In Claude Code, the client's SessionStart hook runs `process-rules
 session-start`. It appends a lock to `CLAUDE_ENV_FILE`: a token GitHub refuses,
@@ -41,7 +50,19 @@ other SSH remote refused. Then, when this Mac has the session file `machine`
 wrote for the agent the repo's settings name, exactly as `machine` writes it,
 it appends that file, which replaces the lock with the agent's identity. Any
 other outcome leaves GitHub locked out and says why, so a session never falls
-back to the owner's login. Cloud sessions are left alone.
+back to the owner's login. When the CLI is missing or fails, the hook still
+tells the session to stop, with what the CLI printed. Cloud sessions are left
+alone.
+
+Before each Bash command, the client's PreToolUse hook runs `process-rules
+guard`: a command running `gh` or a git command that reaches a remote (push,
+fetch, pull, clone, ls-remote, remote, submodule) is refused, with the reason,
+unless session-start gave this session the agent identity. Hooks cannot see
+the variables session-start gives the session's shells, so session-start
+records how it left each session in
+`~/.config/process-rules/sessions/<session id>.json` and the guard reads that.
+A command naming neither `gh` nor `git` goes ahead without starting the CLI;
+when the CLI cannot run, every command naming either is refused.
 
 The session file holds no secret: `GH_TOKEN` is read from the keychain on each
 use, and is a value GitHub refuses when the keychain has none. Git gets a
@@ -56,7 +77,7 @@ github.com saved in the macOS keychain. It warns about SSH keys in `~/.ssh`
 with no passphrase. Declining leaves them, and `doctor` keeps naming them.
 
 `process-rules doctor` re-checks the key, the token and its scopes, the key's
-registration and the session file, names the step to re-run, and warns 14
+registration, the session file and that the launcher runs, names the step to re-run, and warns 14
 days before the token ends.
 
 ## Adopting
@@ -65,8 +86,9 @@ days before the token ends.
 2. In the client repository, as its owner: `process-rules onboard`. It
    suggests the owner from your `gh` login and the agent from the accounts
    `machine` set up on this Mac, for you to confirm (or name them:
-   `process-rules onboard <owner> <agent>`). It writes `.github/process-rules.json`, adds a SessionStart hook
-   running `process-rules session-start` to `.claude/settings.json`, and
+   `process-rules onboard <owner> <agent>`). It writes `.github/process-rules.json`, adds to `.claude/settings.json`
+   the lock in `env`, a SessionStart hook running `process-rules
+   session-start` and a PreToolUse hook running `process-rules guard`, and
    writes `.github/workflows/process-rules.yml`, which calls this repository's
    shared checks (`.github/workflows/checks.yml`). It checks the agent can
    push. With no access, or read access only (a public repo, or an
@@ -82,9 +104,11 @@ days before the token ends.
    Review date. It prints the views to make by hand, since GitHub's API cannot
    make them. Last, it pushes
    one signed test commit as the agent to a throwaway branch, checks GitHub
-   shows it Verified by the agent, and deletes the branch. Each change waits
+   shows it Verified by the agent (asking again when the network or GitHub
+   fails for a moment), and deletes the branch. Each change waits
    for a yes; commit the files afterwards. An existing `.claude/settings.json`
-   keeps its layout: `onboard` adds only its hook entry. The repository needs at
+   keeps its layout: `onboard` adds only its entries, and replaces the hook
+   entries an older release wrote where they stand. The repository needs at
    least one commit. The pull request checks read the settings from the base
    branch, so a pull request cannot rename the agent it is checked against.
    The pull request that first commits them passes PR identity, Work rules
@@ -150,7 +174,7 @@ global `core.hooksPath`), `onboard` leaves it alone and names the line to add:
 `process-rules pre-push "$@"`. The client workflow re-runs the checks when a
 pull request's description is edited. After upgrading process-rules, run
 `onboard` again: it replaces the workflow when a release needs more
-permissions. Make the checks of the
+permissions, and upgrades the hook entries in `.claude/settings.json`. Make the checks of the
 features a client has turned on required on its default branch, such as
 `process-rules / PR identity` with `pr-identity` and `process-rules / Work
 rules` with `work-rules`; a check of a feature that is off still runs and
@@ -193,9 +217,10 @@ below it under `with:`, `process-rules-ref: vX.Y.Z`, because a called
 workflow cannot read its own ref from GitHub's contexts. Upgrading is one
 step: install the new CLI and run `onboard` again, which rewrites both lines
 together (it offers to replace the workflow). Editing the version by hand
-means changing both lines. The hooks need
-`process-rules` on the machine's `PATH`; without it the session-start hook
-tells the session to stop.
+means changing both lines. The hooks run the
+launcher `machine` writes, else `process-rules` from the `PATH`; without
+either the session-start hook tells the session to stop, and the guard refuses
+`gh` and `git`. Run `machine` again after removing the node it names.
 
 ## Developing
 

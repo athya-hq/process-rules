@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { pathsFor, sessionScript } from './agent.ts';
+import { launcherPath, pathsFor, sessionScript } from './agent.ts';
 import { doctor } from './doctor.ts';
 import { AGENT, AGENT_ID, CLASSIC, FakeSys, HOME, KEY, TOKEN, capture } from './fake.test.ts';
 
 const SESSION = `${HOME}/.config/process-rules/examplebot/session.sh`;
+const LAUNCHER = launcherPath(HOME);
 
 function healthy(): FakeSys {
   const sys = new FakeSys().ready();
@@ -22,7 +23,7 @@ describe('doctor', () => {
   it('passes when the machine is set up', async () => {
     assert.deepEqual(await check(healthy()), {
       code: 0,
-      out: ['✓ signing key', '✓ token', '✓ key registered', '✓ session file', 'doctor: ready; agent sessions work as ExampleBot'],
+      out: ['✓ signing key', '✓ token', '✓ key registered', '✓ session file', '✓ launcher', 'doctor: ready; agent sessions work as ExampleBot'],
       err: [],
     });
   });
@@ -35,6 +36,7 @@ describe('doctor', () => {
       "✗ token: no ExampleBot token in this machine's keychain",
       '✗ key registered: GitHub does not list this key as a signing key of ExampleBot',
       `✗ session file: ${SESSION} is missing`,
+      `✗ launcher: ${LAUNCHER} is missing, so the hooks need process-rules and node on their PATH`,
       'doctor: agent sessions must not push as ExampleBot until fixed; run process-rules machine',
     ]);
   });
@@ -111,6 +113,21 @@ describe('doctor', () => {
     ]);
   });
 
+  it('names a launcher whose node is gone', async () => {
+    const sys = healthy();
+    sys.execOverride = (call) => (call.command === LAUNCHER ? { code: 127, stdout: '', stderr: '/gone/bin/node: not found\n' } : undefined);
+    const { code, err } = await check(sys);
+    assert.equal(code, 1);
+    assert.equal(err[0], `✗ launcher: ${LAUNCHER} does not run (/gone/bin/node: not found); was its node removed?`);
+    assert.equal(sys.calls.find((c) => c.command === LAUNCHER)?.env?.PATH, '/usr/bin:/bin', 'runs it without the PATH of this shell');
+  });
+
+  it('names a launcher that fails without saying why', async () => {
+    const sys = healthy();
+    sys.execOverride = (call) => (call.command === LAUNCHER ? { code: 3, stdout: '', stderr: '' } : undefined);
+    assert.equal((await check(sys)).err[0], `✗ launcher: ${LAUNCHER} does not run (exit 3); was its node removed?`);
+  });
+
   it('accepts a token whose login differs only in case', async () => {
     const sys = healthy();
     sys.acceptToken(TOKEN, 'examplebot');
@@ -122,7 +139,7 @@ describe('doctor', () => {
     sys.http = () => Promise.reject(new Error('rate limited'));
     const { code, out, err } = await check(sys);
     assert.equal(code, 1);
-    assert.deepEqual(out, ['✓ signing key']);
+    assert.deepEqual(out, ['✓ signing key', '✓ launcher']);
     assert.deepEqual(err.slice(0, 3), [
       '✗ token: cannot ask GitHub: rate limited',
       '✗ key registered: cannot ask GitHub: rate limited',

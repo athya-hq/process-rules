@@ -1,17 +1,19 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { describe, it } from 'node:test';
+import { dirname, join } from 'node:path';
+import { after, describe, it } from 'node:test';
 
 import { Board, repoJson } from './fake-board.test.ts';
 import { FIELDS, ISSUE_TYPES, LABELS, viewsChecklist } from './board.ts';
 import { AGENT, FakeSys, ROOT, TOKEN, capture } from './fake.test.ts';
+import type { HttpResult } from './types.ts';
 import { pathsFor, sessionScript } from './agent.ts';
 import { FEATURES } from './features.ts';
 import { packageVersion } from './version.ts';
-import { HOOK_COMMAND, HOOKS_PATH, OLDER_HOOK_COMMANDS, PRE_PUSH_HOOK, WORKFLOW_PATH, onboard, onboardArgs, workflow } from './onboard.ts';
+import { GUARD_COMMAND, HOOK_COMMAND, HOOKS_PATH, OLDER_HOOK_COMMANDS, PRE_PUSH_HOOK, WORKFLOW_PATH, claudeSettings, onboard, onboardArgs, workflow } from './onboard.ts';
+import { BASE_ENV } from './agent.ts';
 
 const SETTINGS = `${ROOT}/.github/process-rules.json`;
 const HOOKS = `${ROOT}/${HOOKS_PATH}`;
@@ -19,6 +21,10 @@ const WORKFLOW = `${ROOT}/${WORKFLOW_PATH}`;
 const PRE_PUSH = `${ROOT}/.git/hooks/pre-push`;
 const REPO = '/repos/example-org/example-app';
 const PUSH = { status: 200, json: repoJson() };
+const SESSION_ENTRY = { hooks: [{ type: 'command', command: HOOK_COMMAND }] };
+const GUARD_ENTRY = { matcher: 'Bash', hooks: [{ type: 'command', command: GUARD_COMMAND }] };
+/** The Claude Code settings this release writes into an empty project. */
+const CLAUDE = { hooks: { SessionStart: [SESSION_ENTRY], PreToolUse: [GUARD_ENTRY] }, env: BASE_ENV };
 const VERIFIED = {
   status: 200,
   json: { committer: { login: AGENT }, commit: { verification: { verified: true, reason: 'valid' } } },
@@ -49,9 +55,7 @@ describe('onboard', () => {
     assert.deepEqual(err, []);
     assert.equal(code, 0);
     assert.deepEqual(JSON.parse(sys.files.get(SETTINGS) ?? ''), { owner: 'example-owner', agent: 'ExampleBot', features: [...FEATURES] });
-    assert.deepEqual(JSON.parse(sys.files.get(HOOKS) ?? ''), {
-      hooks: { SessionStart: [{ hooks: [{ type: 'command', command: HOOK_COMMAND }] }] },
-    });
+    assert.deepEqual(JSON.parse(sys.files.get(HOOKS) ?? ''), CLAUDE);
     assert.equal(sys.files.get(WORKFLOW), workflow('main', packageVersion()));
     assert.equal(sys.files.get(PRE_PUSH), PRE_PUSH_HOOK);
     assert.equal(sys.modes.get(PRE_PUSH), 0o755);
@@ -91,7 +95,7 @@ describe('onboard', () => {
   it('reads the accounts from existing settings, and skips what is done', async () => {
     const sys = fresh();
     sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT }));
-    sys.files.set(HOOKS, JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: HOOK_COMMAND }] }] } }));
+    sys.files.set(HOOKS, JSON.stringify(CLAUDE));
     sys.files.set(WORKFLOW, workflow('main', packageVersion()));
     sys.files.set(PRE_PUSH, PRE_PUSH_HOOK);
     const board = new Board(sys);
@@ -103,15 +107,35 @@ describe('onboard', () => {
     assert.deepEqual(sys.asked.map((q) => q.split(' ')[0]), ['Push']);
   });
 
-  it("replaces an older release's hook where it stands", async () => {
-    const sys = fresh();
-    const older = OLDER_HOOK_COMMANDS[0] as string;
-    sys.files.set(HOOKS, JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: 'echo hi' }, { type: 'command', command: older }] }] } }));
-    await run(sys);
-    assert.ok(sys.asked.some((q) => q.startsWith("Replace the older process-rules SessionStart hook in .claude/settings.json with this release's?")));
-    assert.deepEqual(JSON.parse(sys.files.get(HOOKS) ?? '').hooks.SessionStart, [
-      { hooks: [{ type: 'command', command: 'echo hi' }, { type: 'command', command: HOOK_COMMAND }] },
-    ]);
+  for (const [release, older] of OLDER_HOOK_COMMANDS.entries()) {
+    it(`upgrades an older release's hooks in place (${release})`, async () => {
+      const sys = fresh();
+      sys.files.set(HOOKS, JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: 'echo hi' }, { type: 'command', command: older }] }] } }));
+      await run(sys);
+      assert.ok(
+        sys.asked.includes(
+          "Update .claude/settings.json: replace the older SessionStart hook that runs process-rules session-start with this release's; " +
+            "add the PreToolUse hook that refuses gh and git's remote commands outside the agent identity; " +
+            `set GH_TOKEN, GITHUB_TOKEN and ${Object.keys(BASE_ENV).length - 2} more in env, so GitHub is locked out until session-start gives the agent identity? [y/N] `,
+        ),
+        sys.asked.join('\n'),
+      );
+      assert.deepEqual(JSON.parse(sys.files.get(HOOKS) ?? ''), {
+        hooks: { SessionStart: [{ hooks: [{ type: 'command', command: 'echo hi' }, { type: 'command', command: HOOK_COMMAND }] }], PreToolUse: [GUARD_ENTRY] },
+        env: BASE_ENV,
+      });
+    });
+  }
+
+  it('sets only the lock variables that differ, keeping the client\'s own', () => {
+    const { text, changes } = claudeSettings(JSON.stringify({ ...CLAUDE, env: { ...BASE_ENV, A: '1', GH_TOKEN: 'mine' } }));
+    assert.deepEqual(JSON.parse(text).env, { ...BASE_ENV, A: '1' });
+    assert.deepEqual(changes, ['set GH_TOKEN in env, so GitHub is locked out until session-start gives the agent identity']);
+  });
+
+  it('refuses an env that is not an object, and a file that is not one', () => {
+    assert.throws(() => claudeSettings('{ "env": [] }'), /^Error: \.claude\/settings\.json: env is not an object$/);
+    assert.throws(() => claudeSettings('[]'), /^Error: \.claude\/settings\.json is not a JSON object$/);
   });
 
   it("swaps only the older SessionStart command, keeping the file's layout", async () => {
@@ -121,7 +145,11 @@ describe('onboard', () => {
     sys.files.set(HOOKS, text);
     await run(sys);
     const at = text.lastIndexOf(older);
-    assert.equal(sys.files.get(HOOKS), `${text.slice(0, at)}${JSON.stringify(HOOK_COMMAND)}${text.slice(at + older.length)}`);
+    const swapped = `${text.slice(0, at)}${JSON.stringify(HOOK_COMMAND)}${text.slice(at + older.length)}`;
+    const written = sys.files.get(HOOKS) ?? '';
+    assert.ok(written.startsWith(swapped.slice(0, swapped.lastIndexOf('\r\n    }'))), written);
+    assert.ok(written.includes('\r\n        "PreToolUse": [\r\n            {\r\n                "matcher": "Bash",'), 'added in the file\'s own layout');
+    assert.deepEqual(JSON.parse(written).env, BASE_ENV);
   });
 
   it('refuses a settings file it cannot add the hook to, before asking', async () => {
@@ -129,7 +157,7 @@ describe('onboard', () => {
     sys.files.set(HOOKS, '{ "hooks": { "SessionStart": "x" } }');
     await assert.rejects(run(sys), /^Error: \.claude\/settings\.json: hooks\.SessionStart is not an array$/);
     assert.equal(sys.files.get(HOOKS), '{ "hooks": { "SessionStart": "x" } }');
-    assert.ok(!sys.asked.some((q) => q.startsWith('Add the SessionStart hook')));
+    assert.ok(!sys.asked.some((q) => q.includes('.claude/settings.json')));
   });
 
   it("leaves a client's own hook that mentions session-start alone", async () => {
@@ -149,19 +177,60 @@ describe('onboard', () => {
     assert.deepEqual((await run(sys, [])).err, ['onboard: stopped at "hook entry"; nothing after it was changed']);
   });
 
-  it('runs nothing in a cloud session, says stop without the CLI, and runs session-start with it', () => {
-    const bin = mkdtempSync(join(tmpdir(), 'process-rules-hook-'));
-    writeFileSync(join(bin, 'process-rules'), '#!/bin/sh\necho "ran $*"\n', { mode: 0o755 });
-    const broken = mkdtempSync(join(tmpdir(), 'process-rules-broken-'));
-    writeFileSync(join(broken, 'process-rules'), '#!/bin/sh\nexit 127\n', { mode: 0o755 });
-    const shell = (env: Record<string, string>) => spawnSync('bash', ['-c', HOOK_COMMAND], { encoding: 'utf8', env }).stdout;
-    // With the CLI on PATH, a cloud session still runs nothing.
-    assert.equal(shell({ PATH: `${bin}:/usr/bin:/bin`, CLAUDE_CODE_REMOTE: 'true' }), '');
-    assert.match(shell({ PATH: '/usr/bin:/bin' }), /^process-rules: STOP\. The process-rules CLI is missing or did not run here/);
-    assert.match(shell({ PATH: `${broken}:/usr/bin:/bin` }), /^process-rules: STOP\./);
-    assert.equal(shell({ PATH: `${bin}:/usr/bin:/bin` }), 'ran session-start\n');
-    rmSync(broken, { recursive: true, force: true });
-    rmSync(bin, { recursive: true, force: true });
+  describe('the hook commands, in a real shell', () => {
+    const home = mkdtempSync(join(tmpdir(), 'process-rules-home-'));
+    const bin = mkdtempSync(join(tmpdir(), 'process-rules-bin-'));
+    const launcher = join(home, '.config/process-rules/bin/process-rules');
+    after(() => {
+      rmSync(home, { recursive: true, force: true });
+      rmSync(bin, { recursive: true, force: true });
+    });
+    /** A CLI at `path` that runs `body`. */
+    const cli = (path: string, body: string): void => {
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+    };
+    const shell = (command: string, env: Record<string, string>, input = '') =>
+      spawnSync('bash', ['-c', command], { encoding: 'utf8', input, env: { HOME: home, PATH: '/usr/bin:/bin', ...env } });
+
+    it('session-start: nothing in a cloud session, its output, else STOP with why', () => {
+      rmSync(launcher, { force: true });
+      cli(join(bin, 'process-rules'), 'echo "ran $* with $(cat)"');
+      assert.equal(shell(HOOK_COMMAND, { PATH: `${bin}:/usr/bin:/bin`, CLAUDE_CODE_REMOTE: 'true' }).stdout, '');
+      assert.equal(shell(HOOK_COMMAND, { PATH: `${bin}:/usr/bin:/bin` }, '{"session_id":"s"}').stdout, 'ran session-start with {"session_id":"s"}\n');
+      assert.match(
+        shell(HOOK_COMMAND, {}).stdout,
+        /^process-rules: STOP\. process-rules session-start did not run here \(.*process-rules: (?:command )?not found\), so this session cannot be given the agent identity and GitHub is locked out of it\./,
+      );
+      cli(launcher, 'echo "env: node: No such file or directory" >&2; exit 127');
+      assert.match(shell(HOOK_COMMAND, { PATH: `${bin}:/usr/bin:/bin` }).stdout, /^process-rules: STOP\. process-rules session-start did not run here \(env: node: No such file or directory\)/);
+      cli(launcher, 'echo "launched $*"');
+      assert.equal(shell(HOOK_COMMAND, {}).stdout, 'launched session-start\n', 'the launcher, with nothing on PATH');
+    });
+
+    it('guard: commands naming neither gh nor git go ahead without the CLI; others as the CLI says, refused when it cannot run', () => {
+      rmSync(launcher, { force: true });
+      const input = (command: string): string => JSON.stringify({ session_id: 's', tool_input: { command } });
+      assert.equal(shell(GUARD_COMMAND, {}, input('ls')).status, 0);
+      const described = JSON.stringify({ session_id: 's', cwd: '/x/github', tool_input: { command: 'echo "git"x', description: 'Run gh' } });
+      assert.equal(shell(GUARD_COMMAND, {}, described.replace('echo \\"git\\"x', 'ls')).status, 0, 'only the command counts');
+      assert.equal(shell(GUARD_COMMAND, {}, described).status, 2, 'escaped quotes inside the command');
+      assert.equal(shell(GUARD_COMMAND, {}, '{ "tool_input": { "command": "echo \\"a\\" && gh pr list" } }').status, 2);
+      const missing = shell(GUARD_COMMAND, {}, input('git push'));
+      assert.equal(missing.status, 2);
+      assert.match(missing.stderr, /process-rules: refused, because the process-rules CLI did not run here to check this command\./);
+      assert.equal(shell(GUARD_COMMAND, { CLAUDE_CODE_REMOTE: 'true' }, input('git push')).status, 0);
+      cli(launcher, 'cat > "$HOME/seen"; exit 0');
+      assert.equal(shell(GUARD_COMMAND, {}, input('gh pr list')).status, 0);
+      assert.equal(readFileSync(join(home, 'seen'), 'utf8'), input('gh pr list'));
+      cli(launcher, 'echo "process-rules: refused, why" >&2; exit 2');
+      assert.deepEqual(
+        (({ status, stderr }) => ({ status, stderr }))(shell(GUARD_COMMAND, {}, input('gh pr list'))),
+        { status: 2, stderr: 'process-rules: refused, why\n' },
+      );
+      cli(launcher, 'exit 1');
+      assert.equal(shell(GUARD_COMMAND, {}, input('gh pr list')).status, 2);
+    });
   });
 
   it('adds the hook when the command only appears elsewhere', async () => {
@@ -169,7 +238,7 @@ describe('onboard', () => {
     const lookalike = { hooks: { Stop: [{ hooks: [{ type: 'command', command: HOOK_COMMAND }] }], SessionStart: [{ hooks: [{ command: 'echo process-rules is set up elsewhere' }] }, {}] } };
     sys.files.set(HOOKS, JSON.stringify(lookalike));
     await run(sys);
-    assert.ok(sys.asked.some((q) => q.startsWith('Add the SessionStart hook')));
+    assert.ok(sys.asked.some((q) => q.startsWith('Update .claude/settings.json: add the SessionStart hook')));
     assert.equal(JSON.parse(sys.files.get(HOOKS) ?? '').hooks.SessionStart.length, 3);
   });
 
@@ -197,8 +266,8 @@ describe('onboard', () => {
     sys.files.set(HOOKS, JSON.stringify({ env: { A: '1' }, hooks: { SessionStart: [own], Stop: [own] } }));
     await run(sys);
     assert.deepEqual(JSON.parse(sys.files.get(HOOKS) ?? ''), {
-      env: { A: '1' },
-      hooks: { SessionStart: [own, { hooks: [{ type: 'command', command: HOOK_COMMAND }] }], Stop: [own] },
+      env: { A: '1', ...BASE_ENV },
+      hooks: { SessionStart: [own, SESSION_ENTRY], Stop: [own], PreToolUse: [GUARD_ENTRY] },
     });
   });
 
@@ -326,14 +395,15 @@ describe('onboard', () => {
   });
 
   describe("keeping the client's settings layout", () => {
-    it('adds only the hook entry to an existing file', async () => {
+    it('adds only its entries to an existing file', async () => {
       const sys = fresh();
       const text = '{\n  "env": { "A": "1" },\n  "hooks": {\n    "Stop": [{ "hooks": [] }]\n  }\n}\n';
       sys.files.set(HOOKS, text);
       await run(sys);
       const out = sys.files.get(HOOKS) ?? '';
-      assert.ok(out.startsWith('{\n  "env": { "A": "1" },\n  "hooks": {\n    "Stop": [{ "hooks": [] }],\n    "SessionStart": ['), out);
-      assert.deepEqual(JSON.parse(out).hooks.SessionStart, [{ hooks: [{ type: 'command', command: HOOK_COMMAND }] }]);
+      assert.ok(out.startsWith('{\n  "env": { "A": "1",'), out);
+      assert.ok(out.includes('\n  "hooks": {\n    "Stop": [{ "hooks": [] }],\n    "SessionStart": ['), out);
+      assert.deepEqual(JSON.parse(out), { env: { A: '1', ...BASE_ENV }, hooks: { Stop: [{ hooks: [] }], SessionStart: [SESSION_ENTRY], PreToolUse: [GUARD_ENTRY] } });
     });
 
     it("swaps an older release's command in the text", async () => {
@@ -341,7 +411,7 @@ describe('onboard', () => {
       const older = OLDER_HOOK_COMMANDS[0] as string;
       sys.files.set(HOOKS, `{ "env": { "A": "1" }, "hooks": { "SessionStart": [{ "hooks": [{ "type": "command", "command": ${JSON.stringify(older)} }] }] } }\n`);
       await run(sys);
-      assert.equal(sys.files.get(HOOKS), `{ "env": { "A": "1" }, "hooks": { "SessionStart": [{ "hooks": [{ "type": "command", "command": ${JSON.stringify(HOOK_COMMAND)} }] }] } }\n`);
+      assert.ok((sys.files.get(HOOKS) ?? '').includes(`"SessionStart": [{ "hooks": [{ "type": "command", "command": ${JSON.stringify(HOOK_COMMAND)} }] }]`));
     });
   });
 
@@ -541,10 +611,36 @@ describe('onboard', () => {
       sys.route('GET', `${REPO}/commits/abc123`, () => {
         throw new Error('down');
       });
-      const { io, out } = capture();
-      await assert.rejects(onboard(sys, io, ['example-owner', AGENT]), /down/);
+      const { code, out, err } = await run(sys);
+      assert.equal(code, 1);
+      assert.deepEqual(err, ['onboard: cannot ask GitHub whether the test commit is Verified (down); open the link above to see']);
+      assert.ok(out.includes('Test commit https://github.com/example-org/example-app/commit/abc123'));
       assert.ok(out.includes('Deleted the throwaway branch process-rules/verify-examplebot-1793361600000.'));
+      assert.deepEqual(sys.slept, [2000, 4000, 6000, 8000]);
       assert.equal(sys.calls.at(-1)?.command, 'rm');
+    });
+
+    it('asks again when GitHub cannot be asked for a moment, and prints the result', async () => {
+      const sys = fresh();
+      const answers: (() => HttpResult)[] = [
+        () => {
+          throw new Error('fetch failed');
+        },
+        () => ({ status: 422, json: { message: 'No commit found' } }),
+        () => VERIFIED,
+      ];
+      sys.route('GET', `${REPO}/commits/abc123`, () => (answers.shift() as () => HttpResult)());
+      const { code, out, err } = await run(sys);
+      assert.deepEqual({ code, err }, { code: 0, err: [] });
+      assert.ok(out.includes('✓ GitHub shows the test commit Verified by ExampleBot'));
+      assert.deepEqual(sys.slept, [2000, 4000]);
+    });
+
+    it('names the last answer when GitHub keeps refusing', async () => {
+      const sys = fresh();
+      sys.route('GET', `${REPO}/commits/abc123`, { status: 502, json: null });
+      const { code, err } = await run(sys);
+      assert.deepEqual({ code, err }, { code: 1, err: ['onboard: cannot ask GitHub whether the test commit is Verified (HTTP 502); open the link above to see'] });
     });
 
     it('says so when the branch cannot be deleted', async () => {
@@ -631,13 +727,13 @@ describe('staged adoption', () => {
     assert.ok(!sys.requests.some((r) => r.url.endsWith('/graphql') || r.url.includes('/labels') || r.url.includes('/issue-types')), 'no board');
     assert.equal(out.at(-1), 'onboard: done. Commit .github/process-rules.json and .claude/settings.json; agent sessions then work as ExampleBot.');
     assert.ok(out.includes('✓ GitHub shows the test commit Verified by ExampleBot'));
-    assert.deepEqual(sys.asked.map((q) => q.split(' ')[0]), ['Write', 'Add', 'Push']);
+    assert.deepEqual(sys.asked.map((q) => q.split(' ')[0]), ['Write', 'Write', 'Push']);
   });
 
   it('turns one more feature on, keeping the other settings', async () => {
     const sys = fresh();
     sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity'], project: 'Example work', figma: { library: 'L' } }));
-    sys.files.set(HOOKS, JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: HOOK_COMMAND }] }] } }));
+    sys.files.set(HOOKS, JSON.stringify(CLAUDE));
     const board = new Board(sys);
     sys.answers = ['y', 'y', 'y', 'y', 'y', 'y', 'y'];
     const { code } = await run(sys, ['--add', 'board']);
@@ -665,7 +761,7 @@ describe('staged adoption', () => {
   it('adds nothing when the feature is already on', async () => {
     const sys = fresh();
     sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity'] }));
-    sys.files.set(HOOKS, JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: HOOK_COMMAND }] }] } }));
+    sys.files.set(HOOKS, JSON.stringify(CLAUDE));
     sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity', 'pr-identity'] }));
     sys.files.set(WORKFLOW, workflow('main', packageVersion()));
     const before = sys.files.get(SETTINGS);
@@ -691,7 +787,7 @@ describe('staged adoption', () => {
     const sys = fresh();
     const before = JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity'] });
     sys.files.set(SETTINGS, before);
-    sys.files.set(HOOKS, JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: HOOK_COMMAND }] }] } }));
+    sys.files.set(HOOKS, JSON.stringify(CLAUDE));
     sys.answers = ['y', 'n'];
     const { err } = await run(sys, ['--add', 'board']);
     assert.deepEqual(err, ['onboard: stopped at "issue types"; nothing after it was changed']);

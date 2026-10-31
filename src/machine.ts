@@ -7,6 +7,8 @@ import {
   checkToken,
   keyBody,
   keyPairProblem,
+  launcherPath,
+  launcherScript,
   pathsFor,
   readToken,
   sessionScript,
@@ -139,7 +141,29 @@ export async function machine(sys: Sys, io: Output, named?: string): Promise<num
   }
   io.out(`✓ session file ${paths.session}`);
 
+  const launcher = launcherPath(sys.home);
+  const wanted = launcherScript(sys.runtime.node, sys.runtime.cli, cliCommand(sys, launcher));
+  if (!sys.exists(launcher) || sys.read(launcher) !== wanted) {
+    if (!(await confirm(`Write ${launcher}, which the hooks run with this node (${sys.runtime.node}), so they need no node on PATH?`))) {
+      return stop('launcher');
+    }
+    sys.mkdir(launcher.slice(0, launcher.lastIndexOf('/')));
+    sys.write(launcher, wanted, 0o755);
+  }
+  io.out(`✓ launcher ${launcher}`);
+
   await lockOwnerAway(sys, io, confirm, agent);
   io.out(`machine: done. Agent sessions act as ${agent} once they source ${paths.session}.`);
   return 0;
+}
+
+/**
+ * The package manager's command for the CLI on this shell's PATH, which
+ * stays put when the CLI is upgraded; undefined when there is none, as when
+ * the CLI runs from a checkout.
+ */
+function cliCommand(sys: Sys, launcher: string): string | undefined {
+  const found = sys.exec('/bin/sh', ['-c', 'command -v process-rules']);
+  const command = found.stdout.trim();
+  return found.code === 0 && command.startsWith('/') && command !== launcher ? command : undefined;
 }

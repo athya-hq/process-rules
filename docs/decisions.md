@@ -59,3 +59,20 @@
   read the repo instead of offering the grant; pre-push refused a push that
   brought only a merge of the default branch; and the pull request that first
   commits the settings failed its own PR checks. The slice #40 closes them.
+- **2026-10-31 — Record: P-17, agent sessions fail closed.** The owner, on
+  the Work item #22: "Decision: add #44 (P-16), #45 (P-17) and #46 (P-18) to
+  roadmap v1." The first client
+  found agent sessions reaching GitHub as the owner when session-start left
+  no trace or its variables never reached the session's shells. Claude Code
+  hooks other than SessionStart cannot see the variables it writes to
+  `CLAUDE_ENV_FILE`, so nothing can check them before a command; three
+  layers instead. The client's `.claude/settings.json` holds the lock in
+  `env`, which Claude Code gives every session before any hook runs, so a
+  session nothing set up reaches GitHub as nobody. A PreToolUse guard refuses
+  `gh` and git's remote commands unless session-start recorded, for that
+  session id, that it gave the agent identity, repeating why it did not; a
+  session whose shells lost the variables after it recorded success still
+  has the lock. And the hooks run a launcher `machine` writes, naming node by
+  its real path, since a version manager's per-shell node may be missing
+  from the app's hook environment. The guard matches commands by their text,
+  so it misses what a script runs; the lock and the pre-push hook cover that.
