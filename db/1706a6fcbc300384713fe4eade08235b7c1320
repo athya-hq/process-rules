@@ -1,0 +1,32 @@
+docs/decisions.md
+  s_a8b2c1e821846d::t_a8c0935bb5874a 137-154
+src/onboard.test.ts
+  s_a8b2c1e821846d::t_3477fdd086a574 15,345-370,889-894,896-897,899-938
+  s_a8b2c1e821846d::t_3351bc323ee67d 898
+.github/workflows/checks.yml
+  s_a8b2c1e821846d::t_74faea7f507dca 17-20,24-27,52-55,82-85,111-114,149
+package.json
+  s_a8b2c1e821846d::t_8b7066c338377b 3
+README.md
+  s_a8b2c1e821846d::t_9fa90c8e9ab932 100-102,221-225,262,265-269
+  s_a8b2c1e821846d::t_8b7066c338377b 258
+src/onboard.ts
+  s_a8b2c1e821846d::t_3598caa4f60f06 109-110,113,133-138,144-171,176-195,197-199,201-232,532-541,545
+  s_a8b2c1e821846d::t_aa364cee25dfc6 196,200
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "db1706a6fcbc300384713fe4eade08235b7c1320",
+  "prompts": {},
+  "sessions": {
+    "s_a8b2c1e821846d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d017dddd-01b9-412e-88fb-2638950988f9",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Alok Bansal <alokagrawal8@gmail.com>"
+    }
+  }
+}
