@@ -1,0 +1,38 @@
+src/run.ts
+  s_377e47b1fd3d7e::t_d0e5e8ba3dac11 10,50,67-71,104,106
+  s_377e47b1fd3d7e::t_d4994e7e7ee478 33
+src/work.ts
+  s_377e47b1fd3d7e::t_dd7af53f5437a9 388-459
+  s_377e47b1fd3d7e::t_9df981388ad05d 14,18,28,35,44,48,50,71-74,99-120,122-123,125-149,154-158,160,176,179,183,185,193-201,205-211,214-254,317,354,387
+src/work.test.ts
+  s_377e47b1fd3d7e::t_4eac6f7c3204ea 593-595
+  s_377e47b1fd3d7e::t_6baa67cc17934f 169-187,197-198,200-228,259-267
+  s_377e47b1fd3d7e::t_8d7e350ecb6a2a 188-196,199
+  s_377e47b1fd3d7e::t_e5e935f29ddd9f 4-5,268,532-592,596-660
+  s_377e47b1fd3d7e::t_d4994e7e7ee478 9,67,313,330,337,343,345,348
+  s_377e47b1fd3d7e::t_729e8dd08a0eaa 18,27,32,34,39-45,53-62,124-126,240-241,661
+  s_377e47b1fd3d7e::t_0fd8b7d528e29a 269
+src/run.test.ts
+  s_377e47b1fd3d7e::t_e5e935f29ddd9f 110-118
+docs/decisions.md
+  s_377e47b1fd3d7e::t_e3af0869d8c5cd 89-108
+README.md
+  s_377e47b1fd3d7e::t_e3af0869d8c5cd 11,137-138,141-142,145-158
+  s_377e47b1fd3d7e::t_46bc6351b84268 159
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "5079efaf22cda0ac8d8e155226b7663ff5d99ca5",
+  "prompts": {},
+  "sessions": {
+    "s_377e47b1fd3d7e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "abb167bf-0287-48ec-998d-318ee6817912",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Alok Bansal <alokagrawal8@gmail.com>"
+    }
+  }
+}
