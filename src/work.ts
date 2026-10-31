@@ -136,7 +136,7 @@ async function parentOf(sys: Sys, token: string, issue: Issue): Promise<{ parent
   const { status, json } = await sys.http(`${issue.url}/parent`, { token });
   if (status === 200) return { parent: json as Issue };
   const message = (json as { message?: string } | null)?.message;
-  // GitHub answers an issue with no parent so; any other failure is a read that failed, not a missing parent.
+  // An issue with no parent reads as 404 "No parent issue found"; any other failure is a read that failed, not a missing parent.
   if (status === 404 && message && /no parent/i.test(message)) return {};
   return { problem: `could not read #${issue.number}'s parent (HTTP ${status}${message ? `: ${message}` : ''})` };
 }
