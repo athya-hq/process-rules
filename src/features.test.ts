@@ -4,7 +4,7 @@ import { describe, it } from 'node:test';
 import { decisionsWeekly } from './decisions.ts';
 import { prDesign } from './design.ts';
 import { AGENT, FakeSys, ROOT, capture } from './fake.test.ts';
-import { FEATURES, featuresIn, isOn, notAdoptedLine, offLine, parseFeatures } from './features.ts';
+import { FEATURES, featuresIn, isOn, notAdoptedLine, offLine, parseFeatures, renamedLines } from './features.ts';
 import { prIdentity } from './identity.ts';
 import { reviewsDue } from './reviews.ts';
 import { prePush, prWorkRules } from './work.ts';
@@ -29,12 +29,20 @@ describe('features', () => {
     assert.deepEqual(featuresIn({ features: [] }), ['identity']);
   });
 
+  it('reads design, the older name of figma, and says so', () => {
+    assert.deepEqual(featuresIn({ features: [' design ', 'board'] }), ['identity', 'board', 'figma']);
+    assert.deepEqual(renamedLines({ features: ['design', 'figma'] }), ['.github/process-rules.json lists "design", which is now named "figma"; run process-rules onboard to rename it']);
+    assert.deepEqual(renamedLines({ features: ['figma', 2] }), []);
+    assert.deepEqual(renamedLines({}), []);
+    assert.throws(() => parseFeatures('design'), /unknown feature design/);
+  });
+
   it('reads whether a feature is on from the settings file', () => {
     const sys = new FakeSys();
     sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity'] }));
     assert.equal(isOn(sys, ROOT, 'identity'), true);
     assert.equal(isOn(sys, ROOT, 'board'), false);
-    assert.equal(offLine('pr-design', 'design'), 'pr-design: design is off in .github/process-rules.json; nothing to check');
+    assert.equal(offLine('pr-design', 'figma'), 'pr-design: figma is off in .github/process-rules.json; nothing to check');
   });
 });
 
@@ -83,7 +91,7 @@ describe('checks of features that are off', () => {
   for (const [command, check, line] of [
     ['pr-identity', prIdentity, 'pr-identity: pr-identity is off in .github/process-rules.json; nothing to check'],
     ['pr-work-rules', prWorkRules, 'pr-work-rules: work-rules is off in .github/process-rules.json; nothing to check'],
-    ['pr-design', prDesign, 'pr-design: design is off in .github/process-rules.json; nothing to check'],
+    ['pr-design', prDesign, 'pr-design: figma is off in .github/process-rules.json; nothing to check'],
     ['decisions-weekly', decisionsWeekly, 'decisions-weekly: decisions is off in .github/process-rules.json; nothing to check'],
   ] as const) {
     it(`${command} passes, saying so, and asks GitHub nothing`, async () => {

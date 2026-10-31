@@ -18,7 +18,7 @@ import {
 import { setUpBoard } from './board.ts';
 import { ownerRules, ownerRulesProblem } from './codeowners.ts';
 import { appendToArray, replaceValues, setMember } from './jsonedit.ts';
-import { type Feature, FEATURES, featuresIn, parseFeatures } from './features.ts';
+import { type Feature, FEATURES, featuresIn, parseFeatures, renamedLines } from './features.ts';
 import { packageVersion } from './version.ts';
 import type { Output, Sys } from './types.ts';
 
@@ -175,14 +175,24 @@ function workflowHead(branch: string, version: string, comments: string[]): stri
   ];
 }
 
-/** One job's call of the shared checks at `version`. */
-function callChecks(version: string): string[] {
+/** The Figma secrets a job passes the shared checks, when the figma feature is on. */
+const FIGMA_SECRETS = ['    secrets:', '      FIGMA_TOKEN: ${{ secrets.FIGMA_TOKEN }}', '      FIGMA_LIBRARY: ${{ secrets.FIGMA_LIBRARY }}'];
+/** The secrets every job passed before P-23, whether figma was on or not. */
+const OLDER_SECRETS = ['    secrets:', '      FIGMA_TOKEN: ${{ secrets.FIGMA_TOKEN }}'];
+/**
+ * A job's `process-rules-ref` line and the block of Figma secrets after it, as
+ * either list writes it, or the line alone when no secrets follow: a block
+ * with secrets of the client's own is left as it is.
+ */
+const SECRETS_AFTER_REF = /^( {6}process-rules-ref:[^\n]*\n)(?: {4}secrets:\n(?: {6}FIGMA_(?:TOKEN|LIBRARY): \$\{\{ secrets\.FIGMA_(?:TOKEN|LIBRARY) \}\}\n)+(?! {6})|(?! {4}secrets:))/gm;
+
+/** One job's call of the shared checks at `version`, passing `secrets`. */
+function callChecks(version: string, secrets: string[]): string[] {
   return [
     `    uses: ${PRODUCT}/.github/workflows/checks.yml@v${version}`,
     '    with:',
     `      process-rules-ref: v${version}`,
-    '    secrets:',
-    '      FIGMA_TOKEN: ${{ secrets.FIGMA_TOKEN }}',
+    ...secrets,
   ];
 }
 
@@ -191,8 +201,10 @@ function callChecks(version: string): string[] {
  * to the default branch and weekly, at the process-rules release `version`.
  * Pull request and push runs are read-only; the weekly job alone writes to
  * issues. Upgrading is changing that version, which each job names twice.
+ * The Figma secrets are passed only when the figma feature is on.
  */
-export function workflow(branch: string, version: string): string {
+export function workflow(branch: string, version: string, figma: boolean): string {
+  const secrets = figma ? FIGMA_SECRETS : [];
   return [
     ...workflowHead(branch, version, [
       '# To upgrade, change the version on every line that names it (two per job).',
@@ -201,7 +213,7 @@ export function workflow(branch: string, version: string): string {
     '  # Pull request and push runs: read-only.',
     '  process-rules:',
     "    if: github.event_name == 'pull_request' || github.event_name == 'push'",
-    ...callChecks(version),
+    ...callChecks(version, secrets),
     '',
     '  # The weekly run alone writes to issues: it comments and opens undo issues.',
     '  process-rules-weekly:',
@@ -210,7 +222,7 @@ export function workflow(branch: string, version: string): string {
     '      contents: read',
     '      issues: write',
     '      pull-requests: read',
-    ...callChecks(version),
+    ...callChecks(version, secrets),
     '',
   ].join('\n');
 }
@@ -229,7 +241,7 @@ export function olderWorkflows(branch: string, version: string): string[] {
       '      contents: read',
       '      issues: write',
       '      pull-requests: read',
-      ...callChecks(version),
+      ...callChecks(version, OLDER_SECRETS),
       '',
     ].join('\n'),
   ];
@@ -250,19 +262,21 @@ const PUSH_BRANCH = /^( {2}push:\n {4}branches: \[\s*)(['"]?)([^,'"\]\s]+)\2(\s*
 /**
  * What onboard does with the client's workflow: write it, replace an older
  * release's template, or, in a workflow already split into a read-only
- * `process-rules` job and a `process-rules-weekly` job, move the version pins
- * and, when the default branch has changed, the one branch pushes run on,
- * leaving the rest as the client has it.
+ * `process-rules` job and a `process-rules-weekly` job, move the version pins,
+ * the one branch pushes run on when the default branch has changed, and each
+ * job's Figma secrets to what the figma feature needs, leaving the rest as
+ * the client has it.
  */
 export function workflowUpdate(
   before: string | undefined,
   branch: string,
   version: string,
+  figma: boolean,
 ):
   | { kind: 'same' }
   | { kind: 'write' | 'replace-older' | 'replace'; text: string; from?: string }
-  | { kind: 'repin'; text: string; from?: string; branch?: string } {
-  const wanted = workflow(branch, version);
+  | { kind: 'repin'; text: string; from?: string; branch?: string; secrets?: true } {
+  const wanted = workflow(branch, version, figma);
   if (before === undefined) return { kind: 'write', text: wanted };
   if (before === wanted) return { kind: 'same' };
   const pins = workflowPins(before);
@@ -274,16 +288,18 @@ export function workflowUpdate(
   const split = /^ {2}process-rules:\s*$/m.test(before) && /^ {2}process-rules-weekly:\s*$/m.test(before);
   if (split && pins.length === 4) {
     const moved = pushed !== undefined && pushed !== branch;
-    const text = before
+    const pinned = before
       .replace(CHECKS_PIN, (_, head: string) => `${head}${version}`)
       .replace(REF_PIN, (_, head: string) => `${head}${version}`)
       .replace(HEADER_PIN, (_, head: string, _old: string, dot: string) => `${head}${version}${dot}`)
       .replace(PUSH_BRANCH, (line: string, head: string, quote: string, _old: string, tail: string) =>
         moved ? `${head}${quote}${branch}${quote}${tail}` : line,
       );
+    const secrets = figma ? `${FIGMA_SECRETS.join('\n')}\n` : '';
+    const text = pinned.replace(SECRETS_AFTER_REF, (_, ref: string) => `${ref}${secrets}`);
     if (text === before) return { kind: 'same' };
     const stale = pins.find((pin) => pin !== version);
-    return { kind: 'repin', text, ...(stale ? { from: stale } : {}), ...(moved ? { branch } : {}) };
+    return { kind: 'repin', text, ...(stale ? { from: stale } : {}), ...(moved ? { branch } : {}), ...(text !== pinned ? { secrets: true as const } : {}) };
   }
   return { kind: 'replace', text: wanted };
 }
@@ -484,8 +500,22 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     // GitHub's spelling, which the keychain, the session file and commits use.
     owner = (await account(sys, settings.owner)).login;
     agent = (await account(sys, settings.agent)).login;
-    const raw = JSON.parse(sys.read(settingsFile)) as Record<string, unknown>;
+    let raw = JSON.parse(sys.read(settingsFile)) as Record<string, unknown>;
     features = featuresIn(raw);
+    // Settings an older release wrote: a feature by its older name, or the Figma library key, which belongs in a secret.
+    const renamed = renamedLines(raw).length > 0;
+    if (renamed || raw.figma !== undefined) {
+      const library = (raw.figma as { library?: unknown } | null)?.library;
+      const changes = [
+        ...(renamed ? ['rename the design feature to figma'] : []),
+        ...(raw.figma !== undefined ? ['take out "figma", since the library key belongs in the FIGMA_LIBRARY Actions secret'] : []),
+      ];
+      if (!(await confirm(`Update ${SETTINGS_PATH}: ${changes.join(' and ')}?`))) return stop('settings file');
+      const { figma: _figma, ...rest } = raw;
+      raw = { ...rest, ...(rest.features === undefined ? {} : { features }) };
+      sys.write(settingsFile, `${JSON.stringify(raw, null, 2)}\n`);
+      if (typeof library === 'string') io.out(`! set the FIGMA_LIBRARY Actions secret to the key taken out: gh secret set FIGMA_LIBRARY --repo ${slug} --body ${library}`);
+    }
     if (add && !features.includes(add)) {
       if (!(await confirm(`Turn ${add} on in ${SETTINGS_PATH}, once its setup below is done?`))) return stop('settings file');
       features = FEATURES.filter((feature) => features.includes(feature) || feature === add);
@@ -521,7 +551,7 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
   }
   io.out(`✓ ${SETTINGS_PATH}: owner ${owner}, agent ${agent}; on: ${features.join(', ')}`);
   const on = (feature: Feature): boolean => features.includes(feature);
-  const workflowNeeded = on('pr-identity') || on('work-rules') || on('design') || on('decisions') || on('review');
+  const workflowNeeded = on('pr-identity') || on('work-rules') || on('figma') || on('decisions') || on('review');
 
   const hooksFile = `${root}/${HOOKS_PATH}`;
   const existing = sys.exists(hooksFile) ? sys.read(hooksFile) : undefined;
@@ -588,7 +618,7 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
   if (workflowNeeded) {
     const workflowFile = `${root}/${WORKFLOW_PATH}`;
     const version = packageVersion();
-    const update = workflowUpdate(sys.exists(workflowFile) ? sys.read(workflowFile) : undefined, reach.branch, version);
+    const update = workflowUpdate(sys.exists(workflowFile) ? sys.read(workflowFile) : undefined, reach.branch, version, on('figma'));
     if (update.kind !== 'same') {
       const what = {
         write: `Write ${WORKFLOW_PATH}, which runs the shared process-rules checks`,
@@ -597,6 +627,7 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
         repin: `In ${WORKFLOW_PATH}, ${[
           ...(update.kind === 'repin' && update.from ? [`move the version pins from v${update.from} to v${version}`] : []),
           ...(update.kind === 'repin' && update.branch ? [`run pushes on the default branch, ${update.branch}`] : []),
+          ...(update.kind === 'repin' && update.secrets ? [on('figma') ? 'pass the FIGMA_TOKEN and FIGMA_LIBRARY secrets' : 'stop passing Figma secrets, with figma off'] : []),
         ].join(' and ') || `set the version in its header comment to v${version}`}, leaving the rest as it is`,
       }[update.kind];
       if (!(await confirm(`${what}?`))) {
@@ -606,6 +637,9 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
       sys.write(workflowFile, update.text);
     }
     io.out(`✓ ${WORKFLOW_PATH}`);
+    if (on('figma') && !sys.read(workflowFile).includes('secrets.FIGMA_LIBRARY')) {
+      io.out(`! ${WORKFLOW_PATH} passes the shared checks no FIGMA_LIBRARY secret, so the design check stays off; add FIGMA_LIBRARY: \${{ secrets.FIGMA_LIBRARY }} under each job's secrets`);
+    }
   }
 
   // Every adopter: the identity guard holds where the Claude Code hooks did not run.

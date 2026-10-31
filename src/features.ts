@@ -6,10 +6,14 @@ import type { Sys } from './types.ts';
  * settings, the session-start hook, the agent's access and its Verified
  * commit. Each other feature is one shared check or one part of onboard.
  */
-export const FEATURES = ['identity', 'pr-identity', 'board', 'work-rules', 'design', 'decisions', 'review'] as const;
+export const FEATURES = ['identity', 'pr-identity', 'board', 'work-rules', 'figma', 'decisions', 'review'] as const;
 export type Feature = (typeof FEATURES)[number];
 
+/** Features renamed since older releases wrote them, still read as their new name. */
+const RENAMED: Record<string, Feature> = { design: 'figma' };
+
 const isFeature = (name: string): name is Feature => (FEATURES as readonly string[]).includes(name);
+const named = (name: string): string => RENAMED[name.trim()] ?? name.trim();
 
 /** A comma-separated list of features, checked, with identity always among them. */
 export function parseFeatures(list: string): Feature[] {
@@ -26,9 +30,18 @@ export function featuresIn(raw: unknown): Feature[] {
   if (!Array.isArray(listed) || !listed.every((name): name is string => typeof name === 'string')) {
     throw new Error(`${SETTINGS_PATH}: "features" must be a list of feature names`);
   }
-  const unknown = listed.filter((name) => !isFeature(name.trim()));
+  const unknown = listed.filter((name) => !isFeature(named(name)));
   if (unknown.length > 0) throw new Error(`${SETTINGS_PATH}: unknown feature ${unknown.map((name) => JSON.stringify(name)).join(', ')}; the features are ${FEATURES.join(', ')}`);
-  return FEATURES.filter((feature) => feature === 'identity' || listed.some((name) => name.trim() === feature));
+  return FEATURES.filter((feature) => feature === 'identity' || listed.some((name) => named(name) === feature));
+}
+
+/** A line for each feature the parsed settings list by an older name, saying what it is now. */
+export function renamedLines(raw: unknown): string[] {
+  const listed = (raw as { features?: unknown } | null)?.features;
+  if (!Array.isArray(listed)) return [];
+  return listed.flatMap((name) =>
+    typeof name === 'string' && RENAMED[name.trim()] ? [`${SETTINGS_PATH} lists "${name.trim()}", which is now named "${RENAMED[name.trim()]}"; run process-rules onboard to rename it`] : [],
+  );
 }
 
 /** Whether the settings at `root` turn `feature` on. */

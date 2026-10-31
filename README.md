@@ -175,13 +175,20 @@ once the owner has approved everything it takes `needs-owner` off. A
 reaction does not re-run a pull request's checks: the agent proposes before
 it starts, and pre-push or a re-run of Work rules sees the 👍.
 
-**Design frames** is optional: with `"figma": { "library": "<file key>" }` in
-the settings and a `FIGMA_TOKEN` Actions secret, each State of the slice an
-agent pull request builds, other than one closed as not planned, must link a
-Figma frame (`figma.com/design/...?node-id=...`) that holds at least one
+**Design frames** is the `figma` feature, an optional extension for clients
+that design in Figma: with it on and two Actions secrets, `FIGMA_LIBRARY`
+(the design library's file key) and `FIGMA_TOKEN`, each State of the slice
+an agent pull request builds, other than one closed as not planned, must link
+a Figma frame (`figma.com/design/...?node-id=...`) that holds at least one
 component published by that library and is not a captured image (an image
-covering half the frame or more). Without either, the job says the check is
-off and passes.
+covering half the frame or more). Without either secret, the job says the
+check is off and passes. The library key is a secret, not a committed setting,
+so a public repository does not publish its design file, and the workflow
+`onboard` writes passes the Figma secrets only while `figma` is on. Settings
+an older release wrote still work: a `design` feature is read as `figma`, and
+a `"figma": { "library": ... }` setting is read when `FIGMA_LIBRARY` is not
+set, each with a warning; `onboard` renames the feature, takes the key out
+and prints the `gh secret set FIGMA_LIBRARY` command that puts it back.
 
 **Decisions, weekly** runs on Mondays (and by hand). A Decision issue carries
 its fields one per line: `Kind:` (Override, Risk or Bet), `Review:`,
@@ -242,7 +249,7 @@ passes, but with identity alone there is no workflow at all, so require none.
 
 A client can turn features on one at a time. `identity` is always on: the
 settings, the session-start hook, the agent's access and its Verified commit.
-The others are `pr-identity`, `board`, `work-rules`, `design`, `decisions` and
+The others are `pr-identity`, `board`, `work-rules`, `figma`, `decisions` and
 `review`. The settings list the ones a client has turned on:
 
 ```json

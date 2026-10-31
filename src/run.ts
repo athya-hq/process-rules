@@ -39,7 +39,7 @@ Commands:
 Without [agent], machine and doctor use the agent account .github/process-rules.json names
 in the repo around the working directory.
 onboard suggests the owner and agent the first time (or name them); after that it reads them from that file.
-Features: identity (always on), pr-identity, board, work-rules, design, decisions, review.
+Features: identity (always on), pr-identity, board, work-rules, figma, decisions, review.
 --features lists them the first time (all when left out); --add turns one more on.`;
 
 /** Runs one command and returns its exit code: 0 done, 1 failed, 2 bad usage. */

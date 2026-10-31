@@ -1,7 +1,7 @@
 import { API, SETTINGS_PATH, loadSettings, sameLogin } from './agent.ts';
 import type { Output, Sys } from './types.ts';
 import { slicesNamed } from './work.ts';
-import { isOn, notAdoptedLine, offLine } from './features.ts';
+import { isOn, notAdoptedLine, offLine, renamedLines } from './features.ts';
 
 const FIGMA = 'https://api.figma.com/v1';
 /** A Figma link to one node: the file's key and the node's id. */
@@ -9,15 +9,27 @@ const FRAME_LINK = /https:\/\/(?:www\.)?figma\.com\/(?:design|file)\/([A-Za-z0-9
 /** An image covering at least this share of a frame makes it a capture, not a design. */
 const CAPTURED_SHARE = 0.5;
 
-/** The client's design library, when its settings turn the design check on. */
-export function designLibrary(sys: Sys, root: string): string | undefined {
+const FILE_KEY = /^[A-Za-z0-9]+$/;
+
+/**
+ * The client's design library, as the FIGMA_LIBRARY Actions secret names it,
+ * with lines to warn with. Older releases read it from the committed
+ * settings' `figma.library`, which is still read, with a warning, when the
+ * secret is not set: a committed key is public in a public repository.
+ */
+export function designLibrary(sys: Sys, root: string): { library?: string; warnings: string[] } {
+  const secret = sys.env.FIGMA_LIBRARY?.trim();
+  if (secret) {
+    if (!FILE_KEY.test(secret)) throw new Error('the FIGMA_LIBRARY secret must be the file key of the design library');
+    return { library: secret, warnings: [] };
+  }
   const raw = JSON.parse(sys.read(`${root}/${SETTINGS_PATH}`)) as { figma?: { library?: unknown } };
-  const library = raw.figma?.library;
-  if (raw.figma === undefined) return undefined;
-  if (typeof library !== 'string' || !/^[A-Za-z0-9]+$/.test(library)) {
+  if (raw.figma === undefined) return { warnings: [] };
+  const library = raw.figma.library;
+  if (typeof library !== 'string' || !FILE_KEY.test(library)) {
     throw new Error(`${SETTINGS_PATH}: "figma.library" must be the file key of the design library`);
   }
-  return library;
+  return { library, warnings: [`${SETTINGS_PATH} names the Figma library; move it to the FIGMA_LIBRARY Actions secret and take "figma" out of the settings`] };
 }
 
 interface FigmaNode {
@@ -81,9 +93,10 @@ interface State {
 
 /**
  * The design check on an agent pull request, run by the shared workflow when
- * the client's settings name a Figma design library: each State of the
- * slice it builds, other than one closed as not planned, links a frame built
- * from that library. Off without FIGMA_TOKEN, and says so.
+ * the figma feature is on and the FIGMA_LIBRARY secret names a Figma design
+ * library: each State of the slice it builds, other than one closed as not
+ * planned, links a frame built from that library. Off without FIGMA_TOKEN,
+ * and says so.
  */
 export async function prDesign(sys: Sys, io: Output): Promise<number> {
   const { GITHUB_EVENT_PATH: eventPath, GITHUB_REPOSITORY: slug, GH_TOKEN: token, FIGMA_TOKEN: figmaToken } = sys.env;
@@ -96,13 +109,15 @@ export async function prDesign(sys: Sys, io: Output): Promise<number> {
     return 0;
   }
   loadSettings(sys, sys.cwd);
-  if (!isOn(sys, sys.cwd, 'design')) {
-    io.out(offLine('pr-design', 'design'));
+  for (const line of renamedLines(JSON.parse(sys.read(`${sys.cwd}/${SETTINGS_PATH}`)))) io.out(`::warning::${line}`);
+  if (!isOn(sys, sys.cwd, 'figma')) {
+    io.out(offLine('pr-design', 'figma'));
     return 0;
   }
-  const library = designLibrary(sys, sys.cwd);
+  const { library, warnings } = designLibrary(sys, sys.cwd);
+  for (const line of warnings) io.out(`::warning::${line}`);
   if (!library) {
-    io.out('pr-design: the settings name no Figma design library; the design check is off');
+    io.out('pr-design: no FIGMA_LIBRARY secret names the Figma design library; the design check is off until the owner adds one');
     return 0;
   }
   if (!figmaToken) {
