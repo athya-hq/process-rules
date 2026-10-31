@@ -191,7 +191,7 @@ describe('onboard', () => {
       return sys;
     };
 
-    it('works as the first owner and the agent set up on this Mac, leaving the lists as they are', async () => {
+    it('works as the owner the browser signed in as and the agent set up on this Mac, leaving the lists as they are', async () => {
       const sys = team();
       const codeowners = `${ROOT}/.github/CODEOWNERS`;
       sys.files.set(codeowners, '* @example-owner @second-owner\n/docs/ @Second-Owner @a\n');
@@ -202,6 +202,29 @@ describe('onboard', () => {
       assert.ok(sys.asked.includes('Remove example-owner and Second-Owner from those rules in .github/CODEOWNERS, and drop the rule left with no owners, so its paths fall to the rules before? [y/N] '), sys.asked.join('\n'));
       assert.equal(repo(sys).get(codeowners), '/docs/ @a\n');
       assert.ok(out.includes('✓ .github/CODEOWNERS: example-owner and Second-Owner removed'));
+    });
+
+    it('works as the second owner when the browser signs in as them, with one sign-in', async () => {
+      const sys = team();
+      sys.acceptToken(OWNER_TOKEN, 'Second-Owner', { 'x-oauth-scopes': 'repo, read:org, project, admin:org, workflow' });
+      sys.route('GET', '/users/Second-Owner', { status: 200, json: { id: 2, login: 'Second-Owner' } });
+      const { code, out, err } = await run(sys, []);
+      assert.equal(code, 0, [...out, ...err].join('\n'));
+      assert.ok(out.includes('✓ .github/process-rules.json: owner Second-Owner, agent ExampleBot; on: ' + FEATURES.join(', ')), out.join('\n'));
+      assert.equal(signIns(sys), 1);
+      const login = sys.calls.find((call) => call.command === 'gh' && call.args[1] === 'login')?.args ?? [];
+      assert.equal(login[login.indexOf('-s') + 1], 'project,admin:org', 'the sign-in that names the owner asks for the scopes the features need');
+    });
+
+    it('refuses a sign-in as an account the owners do not hold, or one that fails', async () => {
+      const someone = team();
+      someone.acceptToken(OWNER_TOKEN, 'someone');
+      assert.deepEqual((await run(someone, [])).err, [
+        'onboard: the browser signed in to GitHub as someone, but .github/process-rules.json names the owners example-owner or Second-Owner; sign in there as one of them and run it again',
+      ]);
+      const failed = team();
+      failed.ghToken = undefined;
+      assert.deepEqual((await run(failed, [])).err, ['onboard: the GitHub sign-in in the browser did not finish; name the owner: process-rules onboard <owner>']);
     });
 
     it('takes the owner and agent named, when the lists hold them', async () => {

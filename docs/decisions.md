@@ -446,7 +446,10 @@
   - **`onboard` keeps the one-login form.** It writes
     `{ "owner": "…", "agent": "…" }` as before, so existing settings do not
     change. On settings that list several, it works as the owner named,
-    else the first, and the agent named, else the one set up here; it
-    refuses a login the lists do not hold, and leaves the lists as they
-    are. Its CODEOWNERS offer removes every listed owner a rule names.
+    else the one the run's browser sign-in is, and the agent named, else
+    the one set up here; it refuses a login the lists do not hold, a
+    sign-in as anyone they do not hold included, and leaves the lists as
+    they are. (At first it took the first owner, so only that owner could
+    run plain `onboard`; the sign-in, which `onboard` needs anyway, says
+    which owner is at the terminal.) Its CODEOWNERS offer removes every listed owner a rule names.
   Teams as approvers are out of scope.

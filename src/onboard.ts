@@ -590,19 +590,34 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
       io.err(`onboard: ${SETTINGS_PATH} already names owner ${either(settings.owners)} and agent ${either(settings.agents)}; edit or delete it to change them`);
       return 1;
     }
-    // With several owners, the one named, else the first; with several agents, the one named, else the one set up here.
+    // With several agents, the one named, else the one set up here.
     const here = namedAgent ? { agent: namedAgent } : agentHere(sys, settings.agents);
     if ('problem' in here) {
       io.err(`onboard: ${here.problem}; name the owner and the agent: process-rules onboard <owner> <agent>`);
       return 1;
     }
-    owners = settings.owners;
-    // GitHub's spelling, which the keychain, the session file and commits use.
-    owner = (await account(sys, namedOwner ?? (settings.owners[0] as string))).login;
-    agent = (await account(sys, here.agent)).login;
     let raw = JSON.parse(fileAt(SETTINGS_PATH) as string) as Record<string, unknown>;
     features = featuresIn(raw);
     schedule = scheduleIn(raw);
+    // With several owners, the one named, else the one the run's sign-in is, which must be listed: after the
+    // features are read, which the sign-in's scopes depend on.
+    let chosenOwner = namedOwner ?? (settings.owners.length === 1 ? settings.owners[0] : undefined);
+    if (!chosenOwner) {
+      const signed = await signIn();
+      if ('problem' in signed) {
+        io.err(`onboard: ${signed.problem}; name the owner: process-rules onboard <owner>`);
+        return 1;
+      }
+      if (!anyLogin(settings.owners, signed.login)) {
+        io.err(`onboard: the browser signed in to GitHub as ${signed.login}, but ${SETTINGS_PATH} names the owners ${either(settings.owners)}; sign in there as one of them and run it again`);
+        return 1;
+      }
+      chosenOwner = signed.login;
+    }
+    owners = settings.owners;
+    // GitHub's spelling, which the keychain, the session file and commits use.
+    owner = (await account(sys, chosenOwner)).login;
+    agent = (await account(sys, here.agent)).login;
     // Before any change, so a refused --add leaves the settings as they were.
     if (add && !features.includes(add) && NEEDS_ISSUE_TYPES.includes(add) && !(await byOrganisation())) {
       io.err(`onboard: ${personal}, so ${add} cannot run here`);
