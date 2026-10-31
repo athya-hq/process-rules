@@ -5,11 +5,13 @@ const SSH_GITHUB = /^(?:git@github\.com:|ssh:\/\/(?:[^@/\s]+@)?(?:ssh\.)?github\
 const HTTPS_GITHUB = /^https:\/\/(?:([^@/\s:]+)(?::[^@/\s]*)?@)?github\.com\//;
 
 /**
- * Whether this shell is an agent session's: one session-start gave the agent
- * identity, or any shell Claude Code runs (it sets CLAUDECODE), so a session
- * whose hooks never ran is one too.
+ * Whether this shell is an agent session's on this Mac: one session-start
+ * gave the agent identity, or any shell Claude Code runs (it sets
+ * CLAUDECODE), so a session whose hooks never ran is one too. Cloud sessions
+ * are left alone; they reach GitHub as the account connected to them.
  */
 export function agentSession(sys: Sys): boolean {
+  if (sys.env.CLAUDE_CODE_REMOTE === 'true') return false;
   return !!sys.env.PROCESS_RULES_AGENT || sys.env.CLAUDECODE === '1';
 }
 

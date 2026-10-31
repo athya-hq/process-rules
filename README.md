@@ -32,8 +32,7 @@ into the keychain (service `process-rules`), refusing a fine-grained token,
 missing scopes or no expiry. It then registers the key as the agent's signing key, writes
 `~/.config/process-rules/<agent, lowercased>/session.sh`, and writes the
 launcher `~/.config/process-rules/bin/process-rules`, which the Claude Code
-hooks run (the pre-push git hook still runs `process-rules` from the agent
-session's `PATH`). The
+hooks and the pre-push git hook run. The
 launcher names the node that ran `machine` by its real path (not a version
 manager's per-shell one, which the Claude app's hooks may not have), so the
 hooks need no node on their `PATH`. Each change waits for a yes. Why a classic token: [docs/decisions.md](docs/decisions.md).
@@ -238,7 +237,7 @@ below it under `with:`, `process-rules-ref: vX.Y.Z`, because a called
 workflow cannot read its own ref from GitHub's contexts. Upgrading is one
 step: install the new CLI and run `onboard` again, which rewrites both lines
 together (it offers to replace the workflow). Editing the version by hand
-means changing both lines. The Claude Code hooks run the
+means changing both lines. The hooks run the
 launcher `machine` writes, else `process-rules` from the `PATH`; without
 either the session-start hook tells the session to stop, and the guard refuses
 `gh` and `git`. Run `machine` again after removing the node it names.

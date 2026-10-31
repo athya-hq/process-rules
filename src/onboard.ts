@@ -34,6 +34,7 @@ export const PRE_PUSH_HOOK = [
   '#!/bin/sh',
   '# Written by process-rules onboard: before an agent session pushes, that it pushes as the agent, then the work rules.',
   '# Anyone else\'s push goes ahead. Without the CLI nothing can check an agent session\'s push, so it is refused.',
+  '[ "$CLAUDE_CODE_REMOTE" = true ] && exit 0',
   '[ -z "$PROCESS_RULES_AGENT" ] && [ "$CLAUDECODE" != 1 ] && exit 0',
   'cli="$HOME/.config/process-rules/bin/process-rules"',
   '[ -x "$cli" ] || cli=process-rules',

@@ -31,6 +31,8 @@ describe('agentSession', () => {
     assert.equal(agentSession(sys), true);
     sys.env = { PROCESS_RULES_AGENT: AGENT };
     assert.equal(agentSession(sys), true);
+    sys.env = { CLAUDECODE: '1', CLAUDE_CODE_REMOTE: 'true' };
+    assert.equal(agentSession(sys), false, 'cloud sessions are left alone');
   });
 });
 

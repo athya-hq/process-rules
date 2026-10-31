@@ -216,6 +216,7 @@ describe('onboard', () => {
       rmSync(launcher, { force: true });
       const hook = (env: Record<string, string>) => spawnSync('sh', ['-c', `${PRE_PUSH_HOOK}`, 'pre-push', 'origin', 'url'], { encoding: 'utf8', env: { HOME: home, PATH: '/usr/bin:/bin', ...env } });
       assert.equal(hook({}).status, 0);
+      assert.equal(hook({ CLAUDECODE: '1', CLAUDE_CODE_REMOTE: 'true' }).status, 0, 'cloud sessions are left alone');
       for (const env of [{ CLAUDECODE: '1' }, { PROCESS_RULES_AGENT: AGENT }]) {
         const refused = hook(env);
         assert.deepEqual({ status: refused.status, stderr: refused.stderr }, { status: 1, stderr: 'process-rules: the CLI is not installed, so this agent push cannot be checked\n' });
