@@ -24,32 +24,45 @@ type TimelineItem =
   | { __typename: 'SubIssueAddedEvent'; createdAt: string; subIssue: { number: number } | null }
   | ({ __typename: 'IssueComment' } & Comment);
 
+interface Page {
+  hasNextPage?: boolean;
+  endCursor?: string | null;
+}
+
+interface EarlierPage {
+  hasPreviousPage: boolean;
+  startCursor: string | null;
+}
+
+interface StateNode {
+  id: string;
+  number: number;
+  title: string;
+  issueType: { name: string } | null;
+  stateReason: string | null;
+  closedAt: string | null;
+  comments: { nodes: Comment[]; pageInfo?: EarlierPage };
+}
+
 interface SliceGraph {
   id: string;
   number: number;
   title: string;
   issueType: { name: string } | null;
-  comments: { nodes: Comment[]; pageInfo?: { hasPreviousPage: boolean; startCursor: string | null } };
+  comments: { nodes: Comment[]; pageInfo?: EarlierPage };
   parent: { id: string; number: number; issueType: { name: string } | null } | null;
-  subIssues: {
-    nodes: {
-      number: number;
-      title: string;
-      issueType: { name: string } | null;
-      stateReason: string | null;
-      closedAt: string | null;
-      comments: { nodes: Comment[] };
-    }[];
-  };
+  subIssues: { nodes: StateNode[]; pageInfo?: Page };
 }
 
 const COMMENT = 'id author { login } body createdAt lastEditedAt';
+/** A slice's sub-issues, with their latest comments; earlier ones are read only for the states that need them. */
+const STATE = `id number title issueType { name } stateReason closedAt comments(last: 100) { nodes { ${COMMENT} } pageInfo { hasPreviousPage startCursor } }`;
 const SLICE_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     issue(number: $number) {
       id number title issueType { name } comments(last: 100) { nodes { ${COMMENT} } pageInfo { hasPreviousPage startCursor } }
       parent { id number issueType { name } }
-      subIssues(first: 100) { nodes { number title issueType { name } stateReason closedAt comments(last: 50) { nodes { ${COMMENT} } } } }
+      subIssues(first: 100) { nodes { ${STATE} } pageInfo { hasNextPage endCursor } }
     }
   }
 }`;
@@ -70,13 +83,17 @@ const TIMELINE_QUERY = `query($id: ID!, $after: String) {
     }
   }
 }`;
-/** The slice's earlier comments, 100 a page, newest page first. */
+/** A slice's further sub-issues, 100 a page. */
+const SUB_ISSUES_QUERY = `query($id: ID!, $after: String) {
+  node(id: $id) { ... on Issue { subIssues(first: 100, after: $after) { nodes { ${STATE} } pageInfo { hasNextPage endCursor } } } }
+}`;
+/** An issue's earlier comments, 100 a page, newest page first. */
 const COMMENTS_QUERY = `query($id: ID!, $before: String) {
   node(id: $id) { ... on Issue { comments(last: 100, before: $before) { nodes { ${COMMENT} } pageInfo { hasPreviousPage startCursor } } } }
 }`;
 /** The 👍 reactions on some comments, by comment id; GitHub reads 100 ids at a time. */
 const THUMBS_UP_QUERY = `query($ids: [ID!]!) {
-  nodes(ids: $ids) { ... on IssueComment { id reactions(content: THUMBS_UP, first: 100) { nodes { user { login } createdAt } } } }
+  nodes(ids: $ids) { ... on IssueComment { id reactions(content: THUMBS_UP, first: 100) { nodes { user { login } createdAt } pageInfo { hasNextPage } } } }
 }`;
 
 async function graphql(sys: Sys, token: string, slice: number, query: string, variables: Record<string, unknown>): Promise<unknown> {
@@ -139,6 +156,19 @@ function thumbsUp(proposals: Comment[], reactions: Map<string, { user: { login: 
   );
 }
 
+/** All of an issue's comments: `latest`, the newest page read already, and every page before it. */
+async function allComments(sys: Sys, token: string, slice: number, id: string, latest: { nodes: Comment[]; pageInfo?: EarlierPage }): Promise<Comment[]> {
+  const comments = [...latest.nodes];
+  for (let info = latest.pageInfo; info?.hasPreviousPage; ) {
+    const page = (await graphql(sys, token, slice, COMMENTS_QUERY, { id, before: info.startCursor })) as {
+      node: { comments: { nodes: Comment[]; pageInfo: EarlierPage } };
+    };
+    comments.unshift(...page.node.comments.nodes);
+    info = page.node.comments.pageInfo;
+  }
+  return comments;
+}
+
 async function sliceGraph(sys: Sys, token: string, slug: string, number: number): Promise<SliceGraph | undefined> {
   const [repoOwner, name] = slug.split('/');
   const data = (await graphql(sys, token, number, SLICE_QUERY, { owner: repoOwner, name, number })) as {
@@ -187,13 +217,15 @@ async function readSlice(
   const approvedAt = approval.createdAt;
   const parentComments = events.filter((event): event is { __typename: 'IssueComment' } & Comment => event.__typename === 'IssueComment');
   // Every comment on the slice, so a proposal or decision that later discussion pushed back still counts.
-  const comments = [...issue.comments.nodes];
-  for (let info = issue.comments.pageInfo; info?.hasPreviousPage; ) {
-    const page = (await graphql(sys, token, slice, COMMENTS_QUERY, { id: issue.id, before: info.startCursor })) as {
-      node: { comments: { nodes: Comment[]; pageInfo: { hasPreviousPage: boolean; startCursor: string | null } } };
+  const comments = await allComments(sys, token, slice, issue.id, issue.comments);
+  // Every state, however many: one past the first page can be a dropped one.
+  const states = [...issue.subIssues.nodes];
+  for (let info = issue.subIssues.pageInfo; info?.hasNextPage; ) {
+    const page = (await graphql(sys, token, slice, SUB_ISSUES_QUERY, { id: issue.id, after: info.endCursor })) as {
+      node: { subIssues: { nodes: StateNode[]; pageInfo: Page } };
     };
-    comments.unshift(...page.node.comments.nodes);
-    info = page.node.comments.pageInfo;
+    states.push(...page.node.subIssues.nodes);
+    info = page.node.subIssues.pageInfo;
   }
 
   const owed: Owed[] = [];
@@ -214,14 +246,14 @@ async function readSlice(
       settled: decided(parentComments, owner, added.createdAt, `#${slice}`) || decided(comments, owner, added.createdAt),
     });
   }
-  for (const state of issue.subIssues.nodes) {
+  for (const state of states) {
     if (state.issueType?.name !== 'State' || state.stateReason !== 'NOT_PLANNED' || !state.closedAt || state.closedAt < approvedAt) continue;
     owed.push({
       kind: 'dropped',
       number: state.number,
       title: state.title,
       proposals: proposalsFor(comments, agent, state.number),
-      settled: decided(state.comments.nodes, owner) || decided(comments, owner, undefined, `#${state.number}`),
+      settled: decided(comments, owner, undefined, `#${state.number}`) || decided(await allComments(sys, token, slice, state.id, state.comments), owner),
     });
   }
 
@@ -230,9 +262,14 @@ async function readSlice(
   const reactions = new Map<string, { user: { login: string } | null; createdAt: string }[]>();
   for (let i = 0; i < ids.length; i += 100) {
     const data = (await graphql(sys, token, slice, THUMBS_UP_QUERY, { ids: ids.slice(i, i + 100) })) as {
-      nodes: ({ id: string; reactions: { nodes: { user: { login: string } | null; createdAt: string }[] } } | null)[];
+      nodes: ({ id: string; reactions: { nodes: { user: { login: string } | null; createdAt: string }[]; pageInfo?: Page } } | null)[];
     };
-    for (const node of data.nodes) if (node) reactions.set(node.id, node.reactions.nodes);
+    for (const node of data.nodes) {
+      if (!node) continue;
+      // GitHub reads one comment's reactions at a time past the first 100; a proposal with that many is refused, never half read.
+      if (node.reactions.pageInfo?.hasNextPage) throw new Error(`cannot read #${slice}: a proposal on it has more than 100 👍 reactions, more than the work rules read`);
+      reactions.set(node.id, node.reactions.nodes);
+    }
   }
   for (const one of owed) one.settled ||= thumbsUp(one.proposals, reactions, owner, one.since);
   return { problems: [], parent: parent.number, owed };
