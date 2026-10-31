@@ -29,14 +29,13 @@ export const WORKFLOW_PATH = '.github/workflows/process-rules.yml';
 /**
  * The pre-push git hook: before a local agent session pushes, that it
  * reaches GitHub as the agent, then the work rules. It needs no Claude Code
- * hook to have run: any shell Claude Code runs sets CLAUDECODE. Cloud
- * sessions are left alone; they reach GitHub as the account connected to them.
+ * hook to have run: any shell Claude Code runs sets CLAUDECODE, in a Claude
+ * cloud session too.
  */
 export const PRE_PUSH_HOOK = [
   '#!/bin/sh',
   '# Written by process-rules onboard: before an agent session pushes, that it pushes as the agent, then the work rules.',
   '# Anyone else\'s push goes ahead. Without the CLI nothing can check an agent session\'s push, so it is refused.',
-  '[ "$CLAUDE_CODE_REMOTE" = true ] && exit 0',
   '[ -z "$PROCESS_RULES_AGENT" ] && [ "$CLAUDECODE" != 1 ] && exit 0',
   'cli="$HOME/.config/process-rules/bin/process-rules"',
   '[ -x "$cli" ] || cli=process-rules',
@@ -52,6 +51,21 @@ export const PRE_PUSH_HOOK = [
 export const OLDER_PRE_PUSH_HOOKS = [
   [
     '#!/bin/sh',
+    '# Written by process-rules onboard: before an agent session pushes, that it pushes as the agent, then the work rules.',
+    '# Anyone else\'s push goes ahead. Without the CLI nothing can check an agent session\'s push, so it is refused.',
+    '[ "$CLAUDE_CODE_REMOTE" = true ] && exit 0',
+    '[ -z "$PROCESS_RULES_AGENT" ] && [ "$CLAUDECODE" != 1 ] && exit 0',
+    'cli="$HOME/.config/process-rules/bin/process-rules"',
+    '[ -x "$cli" ] || cli=process-rules',
+    'if ! command -v "$cli" >/dev/null 2>&1; then',
+    '  echo "process-rules: the CLI is not installed, so this agent push cannot be checked" >&2',
+    '  exit 1',
+    'fi',
+    'exec "$cli" pre-push "$@"',
+    '',
+  ].join('\n'),
+  [
+    '#!/bin/sh',
     '# Written by process-rules onboard: the work rules before an agent session pushes.',
     '# Without the CLI nothing can check an agent session\'s push, so it is refused; anyone else\'s goes ahead.',
     'if ! command -v process-rules >/dev/null 2>&1; then',
@@ -64,21 +78,36 @@ export const OLDER_PRE_PUSH_HOOKS = [
   ].join('\n'),
 ];
 
+/**
+ * The pre-push git hook git runs in the repository at `root`, and how it
+ * stands: outside the repository (a shared hooks folder, the owner's to
+ * change), missing, one an older release wrote, this release's or one that
+ * runs the CLI, or the client's own.
+ */
+export function prePushHook(sys: Sys, root: string): { path: string; file: string; state: 'outside' | 'missing' | 'older' | 'ours' | 'own' } {
+  const path = sys.exec('git', ['rev-parse', '--git-path', 'hooks/pre-push'], { cwd: root }).stdout.trim();
+  const file = path.startsWith('/') ? path : `${root}/${path}`;
+  const gitDir = sys.exec('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd: root }).stdout.trim();
+  if (!file.startsWith(`${root}/`) && !file.startsWith(`${gitDir}/`)) return { path, file, state: 'outside' };
+  if (!sys.exists(file)) return { path, file, state: 'missing' };
+  const text = sys.read(file);
+  if (OLDER_PRE_PUSH_HOOKS.includes(text)) return { path, file, state: 'older' };
+  return { path, file, state: /^\s*(?:exec\s+)?(?:"\$cli"|process-rules)\s+pre-push\b/m.test(text) ? 'ours' : 'own' };
+}
+
 /** How a hook finds the CLI: the launcher `machine` writes, else whatever PATH has. */
 const FIND_CLI = 'cli="$HOME/.config/process-rules/bin/process-rules"; [ -x "$cli" ] || cli=process-rules; ';
 
 /**
- * What the client's SessionStart hook runs. Cloud sessions reach GitHub as
- * the account connected to them and have no CLI, so before anything else
- * their hook unsets the lock the settings' `env` gave them. Elsewhere, when
- * the CLI is missing or fails, what it printed reaches the session inside a
- * line telling it to stop; the settings' `env` has already locked GitHub out.
+ * What the client's SessionStart hook runs, on a Mac and in a Claude cloud
+ * session alike. When the CLI is missing or fails, what it printed reaches
+ * the session inside a line telling it to stop; the settings' `env` has
+ * already locked GitHub out.
  */
 export const HOOK_COMMAND =
-  `if [ "$CLAUDE_CODE_REMOTE" = true ]; then [ -z "$CLAUDE_ENV_FILE" ] || echo 'unset ${Object.keys(BASE_ENV).join(' ')}' >> "$CLAUDE_ENV_FILE"; else ` +
   FIND_CLI +
   'if said=$("$cli" session-start 2>&1); then printf \'%s\\n\' "$said"; ' +
-  'else printf \'%s\\n\' "process-rules: STOP. process-rules session-start did not run here ($said), so this session cannot be given the agent identity and GitHub is locked out of it. Do not push, fetch, or run gh in this session; tell the owner."; fi; fi';
+  'else printf \'%s\\n\' "process-rules: STOP. process-rules session-start did not run here ($said), so this session cannot be given the agent identity and GitHub is locked out of it. Do not push, fetch, or run gh in this session; tell the owner."; fi';
 
 /**
  * What the client's PreToolUse hook runs before each Bash command: `guard`
@@ -87,7 +116,7 @@ export const HOOK_COMMAND =
  * run, every command naming either is refused, so a broken CLI fails closed.
  */
 export const GUARD_COMMAND =
-  '[ "$CLAUDE_CODE_REMOTE" = true ] && exit 0; input=$(cat); ' +
+  'input=$(cat); ' +
   // The command alone, not the rest of the input, such as its description and paths.
   'cmd=$(printf \'%s\' "$input" | sed -nE \'s/.*"command"[[:space:]]*:[[:space:]]*"(([^"\\\\]|\\\\.)*)".*/\\1/p\'); ' +
   'printf \'%s\' "$cmd" | grep -Eq \'(^|[^[:alnum:]_-])(gh|git)([^[:alnum:]_-]|$)\' || exit 0; ' +
@@ -97,6 +126,10 @@ export const GUARD_COMMAND =
 
 /** The hook commands older releases wrote, which onboard replaces with this release's. */
 export const OLDER_HOOK_COMMANDS = [
+  `if [ "$CLAUDE_CODE_REMOTE" = true ]; then [ -z "$CLAUDE_ENV_FILE" ] || echo 'unset ${Object.keys(BASE_ENV).join(' ')}' >> "$CLAUDE_ENV_FILE"; else ` +
+    FIND_CLI +
+    'if said=$("$cli" session-start 2>&1); then printf \'%s\\n\' "$said"; ' +
+    'else printf \'%s\\n\' "process-rules: STOP. process-rules session-start did not run here ($said), so this session cannot be given the agent identity and GitHub is locked out of it. Do not push, fetch, or run gh in this session; tell the owner."; fi; fi',
   'command -v process-rules >/dev/null 2>&1 && process-rules session-start || ' +
     'echo "process-rules: STOP. The process-rules CLI is not installed here, so this session cannot be given the agent identity and gh and git would act as the owner. Do not push, fetch, or run gh in this session; tell the owner."',
   'if [ "$CLAUDE_CODE_REMOTE" = true ]; then :; ' +
@@ -104,18 +137,22 @@ export const OLDER_HOOK_COMMANDS = [
     'else echo "process-rules: STOP. The process-rules CLI is missing or did not run here, so this session cannot be given the agent identity and gh and git would act as the owner. Do not push, fetch, or run gh in this session; tell the owner."; fi',
 ];
 
-/** The guard commands older releases wrote; none yet. */
-export const OLDER_GUARD_COMMANDS: string[] = [];
+/** The guard commands older releases wrote, which onboard replaces with this release's. */
+export const OLDER_GUARD_COMMANDS = [
+  '[ "$CLAUDE_CODE_REMOTE" = true ] && exit 0; input=$(cat); ' +
+    // The command alone, not the rest of the input, such as its description and paths.
+    'cmd=$(printf \'%s\' "$input" | sed -nE \'s/.*"command"[[:space:]]*:[[:space:]]*"(([^"\\\\]|\\\\.)*)".*/\\1/p\'); ' +
+    'printf \'%s\' "$cmd" | grep -Eq \'(^|[^[:alnum:]_-])(gh|git)([^[:alnum:]_-]|$)\' || exit 0; ' +
+    FIND_CLI +
+    'printf \'%s\' "$input" | "$cli" guard && exit 0; [ $? -eq 2 ] && exit 2; ' +
+    'echo "process-rules: refused, because the process-rules CLI did not run here to check this command. Do not work around it; tell the owner." >&2; exit 2',
+];
 
-/**
- * The client's workflow: the shared checks on every pull request, on pushes
- * to the default branch and weekly, at the process-rules release `version`.
- * Upgrading is changing that version, which appears twice, two lines apart.
- */
-export function workflow(branch: string, version: string): string {
+/** The workflow's head, down to its jobs, which every template shares. */
+function workflowHead(branch: string, version: string, comments: string[]): string[] {
   return [
     `# Written by process-rules onboard: the shared process-rules checks at v${version}.`,
-    '# To upgrade, change the version on both lines that name it.',
+    ...comments,
     'name: process-rules',
     '',
     'on:',
@@ -135,19 +172,120 @@ export function workflow(branch: string, version: string): string {
     '  pull-requests: read',
     '',
     'jobs:',
-    '  process-rules:',
-    '    # Write to issues for this job only: the weekly run comments and opens undo issues.',
-    '    permissions:',
-    '      contents: read',
-    '      issues: write',
-    '      pull-requests: read',
+  ];
+}
+
+/** One job's call of the shared checks at `version`. */
+function callChecks(version: string): string[] {
+  return [
     `    uses: ${PRODUCT}/.github/workflows/checks.yml@v${version}`,
     '    with:',
     `      process-rules-ref: v${version}`,
     '    secrets:',
     '      FIGMA_TOKEN: ${{ secrets.FIGMA_TOKEN }}',
+  ];
+}
+
+/**
+ * The client's workflow: the shared checks on every pull request, on pushes
+ * to the default branch and weekly, at the process-rules release `version`.
+ * Pull request and push runs are read-only; the weekly job alone writes to
+ * issues. Upgrading is changing that version, which each job names twice.
+ */
+export function workflow(branch: string, version: string): string {
+  return [
+    ...workflowHead(branch, version, [
+      '# To upgrade, change the version on every line that names it (two per job).',
+      '# The weekly job is split out so pull request and push runs stay read-only.',
+    ]),
+    '  # Pull request and push runs: read-only.',
+    '  process-rules:',
+    "    if: github.event_name == 'pull_request' || github.event_name == 'push'",
+    ...callChecks(version),
+    '',
+    '  # The weekly run alone writes to issues: it comments and opens undo issues.',
+    '  process-rules-weekly:',
+    "    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'",
+    '    permissions:',
+    '      contents: read',
+    '      issues: write',
+    '      pull-requests: read',
+    ...callChecks(version),
     '',
   ].join('\n');
+}
+
+/**
+ * The workflows older releases wrote, at `version`, which onboard replaces
+ * with this release's: one job that wrote to issues on every run.
+ */
+export function olderWorkflows(branch: string, version: string): string[] {
+  return [
+    [
+      ...workflowHead(branch, version, ['# To upgrade, change the version on both lines that name it.']),
+      '  process-rules:',
+      '    # Write to issues for this job only: the weekly run comments and opens undo issues.',
+      '    permissions:',
+      '      contents: read',
+      '      issues: write',
+      '      pull-requests: read',
+      ...callChecks(version),
+      '',
+    ].join('\n'),
+  ];
+}
+
+const CHECKS_PIN = new RegExp(`(${PRODUCT.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/\\.github/workflows/checks\\.yml@v)([^\\s'"#]+)`, 'g');
+const REF_PIN = /^(\s+process-rules-ref:\s*['"]?v)([^\s'"#]+)/gm;
+const HEADER_PIN = /^(# Written by process-rules onboard: the shared process-rules checks at v)(\S+?)(\.?)$/m;
+
+/** The versions a workflow pins: each `checks.yml@v…`, then each `process-rules-ref: v…`. */
+export function workflowPins(text: string): string[] {
+  return [...text.matchAll(CHECKS_PIN), ...text.matchAll(REF_PIN)].map((match) => match[2] as string);
+}
+
+/** The one branch a workflow's `push:` trigger names, as `onboard` writes it, quoted or not. */
+const PUSH_BRANCH = /^( {2}push:\n {4}branches: \[\s*)(['"]?)([^,'"\]\s]+)\2(\s*\])$/m;
+
+/**
+ * What onboard does with the client's workflow: write it, replace an older
+ * release's template, or, in a workflow already split into a read-only
+ * `process-rules` job and a `process-rules-weekly` job, move the version pins
+ * and, when the default branch has changed, the one branch pushes run on,
+ * leaving the rest as the client has it.
+ */
+export function workflowUpdate(
+  before: string | undefined,
+  branch: string,
+  version: string,
+):
+  | { kind: 'same' }
+  | { kind: 'write' | 'replace-older' | 'replace'; text: string; from?: string }
+  | { kind: 'repin'; text: string; from?: string; branch?: string } {
+  const wanted = workflow(branch, version);
+  if (before === undefined) return { kind: 'write', text: wanted };
+  if (before === wanted) return { kind: 'same' };
+  const pins = workflowPins(before);
+  const from = pins[0];
+  const pushed = PUSH_BRANCH.exec(before)?.[3];
+  if (from !== undefined && pushed !== undefined && olderWorkflows(pushed, from).includes(before)) {
+    return { kind: 'replace-older', text: wanted, from };
+  }
+  const split = /^ {2}process-rules:\s*$/m.test(before) && /^ {2}process-rules-weekly:\s*$/m.test(before);
+  if (split && pins.length === 4) {
+    const moved = pushed !== undefined && pushed !== branch;
+    const text = before
+      .replace(CHECKS_PIN, (_, head: string) => `${head}${version}`)
+      .replace(REF_PIN, (_, head: string) => `${head}${version}`)
+      .replace(HEADER_PIN, (_, head: string, _old: string, dot: string) => `${head}${version}${dot}`)
+      .replace(PUSH_BRANCH, (line: string, head: string, quote: string, _old: string, tail: string) =>
+        moved ? `${head}${quote}${branch}${quote}${tail}` : line,
+      );
+    if (text === before) return { kind: 'same' };
+    const stale = pins.find((pin) => pin !== version);
+    return { kind: 'repin', text, ...(stale ? { from: stale } : {}), ...(moved ? { branch } : {}) };
+  }
+  return { kind: 'replace', text: wanted };
 }
 
 /** What GitHub says about the agent's access to a repository. */
@@ -449,39 +587,46 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
   // The shared checks run only for features that need them.
   if (workflowNeeded) {
     const workflowFile = `${root}/${WORKFLOW_PATH}`;
-    const wanted = workflow(reach.branch, packageVersion());
-    if (!sys.exists(workflowFile) || sys.read(workflowFile) !== wanted) {
-      const verb = sys.exists(workflowFile) ? 'Replace' : 'Write';
-      if (!(await confirm(`${verb} ${WORKFLOW_PATH}, which runs the shared process-rules checks?`))) {
+    const version = packageVersion();
+    const update = workflowUpdate(sys.exists(workflowFile) ? sys.read(workflowFile) : undefined, reach.branch, version);
+    if (update.kind !== 'same') {
+      const what = {
+        write: `Write ${WORKFLOW_PATH}, which runs the shared process-rules checks`,
+        'replace-older': `Replace the older ${WORKFLOW_PATH}, which lets every run write to issues, with this release's, which lets the weekly run alone`,
+        replace: `Replace ${WORKFLOW_PATH}, which runs the shared process-rules checks`,
+        repin: `In ${WORKFLOW_PATH}, ${[
+          ...(update.kind === 'repin' && update.from ? [`move the version pins from v${update.from} to v${version}`] : []),
+          ...(update.kind === 'repin' && update.branch ? [`run pushes on the default branch, ${update.branch}`] : []),
+        ].join(' and ') || `set the version in its header comment to v${version}`}, leaving the rest as it is`,
+      }[update.kind];
+      if (!(await confirm(`${what}?`))) {
         return stop('workflow');
       }
       sys.mkdir(`${root}/.github/workflows`);
-      sys.write(workflowFile, wanted);
+      sys.write(workflowFile, update.text);
     }
     io.out(`✓ ${WORKFLOW_PATH}`);
   }
 
   // Every adopter: the identity guard holds where the Claude Code hooks did not run.
   {
-    const hookPath = sys.exec('git', ['rev-parse', '--git-path', 'hooks/pre-push'], { cwd: root }).stdout.trim();
-    const hookFile = hookPath.startsWith('/') ? hookPath : `${root}/${hookPath}`;
-    const gitDir = sys.exec('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd: root }).stdout.trim();
+    const hook = prePushHook(sys, root);
     const line = 'process-rules pre-push "$@"';
     const what = 'which checks an agent session pushes to GitHub as the agent, and the work rules';
-    if (!hookFile.startsWith(`${root}/`) && !hookFile.startsWith(`${gitDir}/`)) {
+    if (hook.state === 'outside') {
       // A hooks folder shared by other repositories (a global core.hooksPath) is the owner's to change.
-      io.out(`! git runs hooks from ${hookPath}, outside this repository; add this line to its pre-push hook: ${line}`);
-    } else if (!sys.exists(hookFile) || OLDER_PRE_PUSH_HOOKS.includes(sys.read(hookFile))) {
-      const verb = sys.exists(hookFile) ? 'Replace the older process-rules pre-push git hook' : 'Write the pre-push git hook';
-      if (!(await confirm(`${verb} ${hookPath}, ${what}?`))) {
+      io.out(`! git runs hooks from ${hook.path}, outside this repository; add this line to its pre-push hook: ${line}`);
+    } else if (hook.state === 'missing' || hook.state === 'older') {
+      const verb = hook.state === 'older' ? 'Replace the older process-rules pre-push git hook' : 'Write the pre-push git hook';
+      if (!(await confirm(`${verb} ${hook.path}, ${what}?`))) {
         return stop('pre-push hook');
       }
-      sys.write(hookFile, PRE_PUSH_HOOK, 0o755);
-      io.out(`✓ pre-push hook ${hookPath}`);
-    } else if (/^\s*(?:exec\s+)?(?:"\$cli"|process-rules)\s+pre-push\b/m.test(sys.read(hookFile))) {
-      io.out(`✓ pre-push hook ${hookPath}`);
+      sys.write(hook.file, PRE_PUSH_HOOK, 0o755);
+      io.out(`✓ pre-push hook ${hook.path}`);
+    } else if (hook.state === 'ours') {
+      io.out(`✓ pre-push hook ${hook.path}`);
     } else {
-      io.out(`! ${hookPath} is your own; add this line to it: ${line}`);
+      io.out(`! ${hook.path} is your own; add this line to it: ${line}`);
     }
   }
 
@@ -514,6 +659,7 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
   }
   const files = [SETTINGS_PATH, HOOKS_PATH, ...(workflowNeeded ? [WORKFLOW_PATH] : []), ...(codeowners ? [codeowners] : [])];
   io.out(`onboard: done. Commit ${files.slice(0, -1).join(', ')} and ${files.at(-1)}; agent sessions then work as ${agent}.`);
+  io.out(`For Claude cloud sessions: connect claude.ai's GitHub as ${agent}, and put what process-rules cloud-setup prints in the cloud environment's Setup script.`);
   return 0;
 }
 

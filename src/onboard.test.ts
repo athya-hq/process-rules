@@ -12,7 +12,7 @@ import type { HttpResult } from './types.ts';
 import { pathsFor, sessionScript } from './agent.ts';
 import { FEATURES } from './features.ts';
 import { packageVersion } from './version.ts';
-import { GUARD_COMMAND, HOOK_COMMAND, HOOKS_PATH, OLDER_HOOK_COMMANDS, OLDER_PRE_PUSH_HOOKS, PRE_PUSH_HOOK, WORKFLOW_PATH, claudeSettings, onboard, onboardArgs, workflow } from './onboard.ts';
+import { GUARD_COMMAND, HOOK_COMMAND, HOOKS_PATH, OLDER_HOOK_COMMANDS, OLDER_PRE_PUSH_HOOKS, PRE_PUSH_HOOK, WORKFLOW_PATH, claudeSettings, olderWorkflows, onboard, onboardArgs, workflow, workflowPins, workflowUpdate } from './onboard.ts';
 import { BASE_ENV } from './agent.ts';
 
 const SETTINGS = `${ROOT}/.github/process-rules.json`;
@@ -63,10 +63,10 @@ describe('onboard', () => {
     assert.ok(out.includes('✓ ExampleBot can push to example-org/example-app'));
     assert.ok(out.includes('✓ GitHub shows the test commit Verified by ExampleBot'));
     assert.ok(out.includes('Deleted the throwaway branch process-rules/verify-examplebot-1793361600000.'));
-    assert.equal(
-      out.at(-1),
+    assert.deepEqual(out.slice(-2), [
       'onboard: done. Commit .github/process-rules.json, .claude/settings.json and .github/workflows/process-rules.yml; agent sessions then work as ExampleBot.',
-    );
+      "For Claude cloud sessions: connect claude.ai's GitHub as ExampleBot, and put what process-rules cloud-setup prints in the cloud environment's Setup script.",
+    ]);
     const git = sys.calls.filter((c) => c.command === 'git' && c.env);
     assert.deepEqual(git.map((c) => c.args.slice(0, 2).join(' ')), [
       'ls-remote https://github.com/example-org/example-app.git',
@@ -124,9 +124,11 @@ describe('onboard', () => {
     assert.ok(sys.asked.includes('Remove example-owner from those rules in .github/CODEOWNERS, and drop the rule left with no owners, so its paths fall to the rules before? [y/N] '), sys.asked.join('\n'));
     assert.equal(sys.files.get(codeowners), '# Owners\n/app/ @example-org/core # app team\n');
     assert.ok(out.includes('✓ .github/CODEOWNERS: example-owner removed'));
-    assert.equal(
-      out.at(-1),
-      'onboard: done. Commit .github/process-rules.json, .claude/settings.json, .github/workflows/process-rules.yml and .github/CODEOWNERS; agent sessions then work as ExampleBot.',
+    assert.ok(
+      out.includes(
+        'onboard: done. Commit .github/process-rules.json, .claude/settings.json, .github/workflows/process-rules.yml and .github/CODEOWNERS; agent sessions then work as ExampleBot.',
+      ),
+      out.join('\n'),
     );
   });
 
@@ -146,7 +148,7 @@ describe('onboard', () => {
       assert.equal(sys.files.get(codeowners), text);
       assert.ok(out.includes('! CODEOWNERS left as it is'));
       assert.equal(sys.asked.at(-1), 'Remove example-owner from that rule in CODEOWNERS? [y/N] ');
-      assert.ok(!out.at(-1)?.includes('CODEOWNERS'));
+      assert.ok(out.some((line) => line.startsWith('onboard: done.') && !line.includes('CODEOWNERS')));
     }
   });
 
@@ -243,14 +245,10 @@ describe('onboard', () => {
     const shell = (command: string, env: Record<string, string>, input = '') =>
       spawnSync('bash', ['-c', command], { encoding: 'utf8', input, env: { HOME: home, PATH: '/usr/bin:/bin', ...env } });
 
-    it('session-start: nothing in a cloud session, its output, else STOP with why', () => {
+    it('session-start: its output, in a cloud session too, else STOP with why', () => {
       rmSync(launcher, { force: true });
       cli(join(bin, 'process-rules'), 'echo "ran $* with $(cat)"');
-      assert.equal(shell(HOOK_COMMAND, { PATH: `${bin}:/usr/bin:/bin`, CLAUDE_CODE_REMOTE: 'true' }).stdout, '');
-      const envFile = join(home, 'env.sh');
-      shell(HOOK_COMMAND, { CLAUDE_CODE_REMOTE: 'true', CLAUDE_ENV_FILE: envFile, ...BASE_ENV });
-      const cloud = spawnSync('bash', ['-c', `. ${envFile}; env`], { encoding: 'utf8', env: { PATH: '/usr/bin:/bin', ...BASE_ENV } }).stdout;
-      assert.ok(Object.keys(BASE_ENV).every((name) => !cloud.includes(`${name}=`)), `a cloud session loses the lock: ${cloud}`);
+      assert.equal(shell(HOOK_COMMAND, { PATH: `${bin}:/usr/bin:/bin`, CLAUDE_CODE_REMOTE: 'true' }, '{}').stdout, 'ran session-start with {}\n');
       assert.equal(shell(HOOK_COMMAND, { PATH: `${bin}:/usr/bin:/bin` }, '{"session_id":"s"}').stdout, 'ran session-start with {"session_id":"s"}\n');
       assert.match(
         shell(HOOK_COMMAND, {}).stdout,
@@ -266,8 +264,7 @@ describe('onboard', () => {
       rmSync(launcher, { force: true });
       const hook = (env: Record<string, string>) => spawnSync('sh', ['-c', `${PRE_PUSH_HOOK}`, 'pre-push', 'origin', 'url'], { encoding: 'utf8', env: { HOME: home, PATH: '/usr/bin:/bin', ...env } });
       assert.equal(hook({}).status, 0);
-      assert.equal(hook({ CLAUDECODE: '1', CLAUDE_CODE_REMOTE: 'true' }).status, 0, 'cloud sessions are left alone');
-      for (const env of [{ CLAUDECODE: '1' }, { PROCESS_RULES_AGENT: AGENT }]) {
+      for (const env of [{ CLAUDECODE: '1' }, { PROCESS_RULES_AGENT: AGENT }, { CLAUDECODE: '1', CLAUDE_CODE_REMOTE: 'true' }]) {
         const refused = hook(env);
         assert.deepEqual({ status: refused.status, stderr: refused.stderr }, { status: 1, stderr: 'process-rules: the CLI is not installed, so this agent push cannot be checked\n' });
       }
@@ -290,7 +287,7 @@ describe('onboard', () => {
       const missing = shell(GUARD_COMMAND, {}, input('git push'));
       assert.equal(missing.status, 2);
       assert.match(missing.stderr, /process-rules: refused, because the process-rules CLI did not run here to check this command\./);
-      assert.equal(shell(GUARD_COMMAND, { CLAUDE_CODE_REMOTE: 'true' }, input('git push')).status, 0);
+      assert.equal(shell(GUARD_COMMAND, { CLAUDE_CODE_REMOTE: 'true' }, input('git push')).status, 2, 'in a cloud session too');
       cli(launcher, 'cat > "$HOME/seen"; exit 0');
       assert.equal(shell(GUARD_COMMAND, {}, input('gh pr list')).status, 0);
       assert.equal(readFileSync(join(home, 'seen'), 'utf8'), input('gh pr list'));
@@ -389,6 +386,32 @@ describe('onboard', () => {
     await run(sys);
     assert.ok(sys.asked.some((q) => q.startsWith('Replace .github/workflows/process-rules.yml')));
     assert.match(sys.files.get(WORKFLOW) ?? '', /branches: \["trunk"\]/);
+  });
+
+  it("replaces an older release's single-job workflow, saying why", async () => {
+    const sys = fresh();
+    sys.files.set(WORKFLOW, olderWorkflows('main', '0.5.2')[0] as string);
+    await run(sys);
+    assert.ok(sys.asked.some((q) => q.startsWith('Replace the older .github/workflows/process-rules.yml, which lets every run write to issues')));
+    assert.equal(sys.files.get(WORKFLOW), workflow('main', packageVersion()));
+  });
+
+  it('moves only the version pins of a workflow already split', async () => {
+    const sys = fresh();
+    const own = workflow('main', '0.5.2').replace('name: process-rules\n', 'name: process-rules\n# Our own note.\n');
+    sys.files.set(WORKFLOW, own);
+    await run(sys);
+    assert.ok(sys.asked.some((q) => q === `In .github/workflows/process-rules.yml, move the version pins from v0.5.2 to v${packageVersion()}, leaving the rest as it is? [y/N] `));
+    assert.equal(sys.files.get(WORKFLOW), own.replaceAll('0.5.2', packageVersion()));
+  });
+
+  it('leaves a split workflow at this release alone', async () => {
+    const sys = fresh();
+    const own = workflow('main', packageVersion()).replace('name: process-rules\n', 'name: process-rules\n# Our own note.\n');
+    sys.files.set(WORKFLOW, own);
+    await run(sys);
+    assert.ok(!sys.asked.some((q) => q.includes(WORKFLOW_PATH)));
+    assert.equal(sys.files.get(WORKFLOW), own);
   });
 
   it('refuses inside an agent session', async () => {
@@ -805,7 +828,7 @@ describe('staged adoption', () => {
     assert.ok(!sys.files.has(WORKFLOW));
     assert.equal(sys.files.get(PRE_PUSH), PRE_PUSH_HOOK, 'the identity guard, for every adopter');
     assert.ok(!sys.requests.some((r) => r.url.endsWith('/graphql') || r.url.includes('/labels') || r.url.includes('/issue-types')), 'no board');
-    assert.equal(out.at(-1), 'onboard: done. Commit .github/process-rules.json and .claude/settings.json; agent sessions then work as ExampleBot.');
+    assert.equal(out.at(-2), 'onboard: done. Commit .github/process-rules.json and .claude/settings.json; agent sessions then work as ExampleBot.');
     assert.ok(out.includes('✓ GitHub shows the test commit Verified by ExampleBot'));
     assert.deepEqual(sys.asked.map((q) => q.split(' ')[0]), ['Write', 'Write', 'Write', 'Push']);
   });
@@ -909,7 +932,87 @@ describe('workflow', () => {
     const text = workflow('main', '0.1.0');
     assert.match(text, /uses: athya-hq\/process-rules\/\.github\/workflows\/checks\.yml@v0\.1\.0\n {4}with:\n {6}process-rules-ref: v0\.1\.0\n/);
     assert.match(text, /branches: \["main"\]/);
+    assert.match(text, /^# To upgrade, change the version on every line that names it \(two per job\)\.$/m);
+    assert.deepEqual(workflowPins(text), ['0.1.0', '0.1.0', '0.1.0', '0.1.0']);
+  });
+
+  it('keeps pull request and push runs read-only and writes to issues on the weekly run alone', () => {
+    const text = workflow('main', '0.1.0');
     assert.match(text, /^permissions:\n {2}contents: read\n {2}issues: read\n {2}pull-requests: read$/m);
-    assert.match(text, /^ {4}permissions:\n {6}contents: read\n {6}issues: write\n {6}pull-requests: read$/m);
+    const [, prJob = '', weeklyJob = ''] = text.split(/^ {2}(?:process-rules|process-rules-weekly):$/m);
+    assert.match(prJob, /^ {4}if: github\.event_name == 'pull_request' \|\| github\.event_name == 'push'$/m);
+    assert.doesNotMatch(prJob, /permissions:|: write/);
+    assert.match(weeklyJob, /^ {4}if: github\.event_name == 'schedule' \|\| github\.event_name == 'workflow_dispatch'$/m);
+    assert.match(weeklyJob, /^ {4}permissions:\n {6}contents: read\n {6}issues: write\n {6}pull-requests: read$/m);
+    assert.equal(text.match(/issues: write/g)?.length, 1);
+  });
+});
+
+describe('workflowUpdate', () => {
+  it('writes a missing workflow and leaves the same one alone', () => {
+    assert.deepEqual(workflowUpdate(undefined, 'main', '0.5.3'), { kind: 'write', text: workflow('main', '0.5.3') });
+    assert.deepEqual(workflowUpdate(workflow('main', '0.5.3'), 'main', '0.5.3'), { kind: 'same' });
+  });
+
+  for (const from of ['0.4.0', '0.5.2', '0.5.3']) {
+    it(`replaces the older single-job template at v${from}`, () => {
+      const older = olderWorkflows('trunk', from)[0] as string;
+      assert.match(older, /^ {6}issues: write$/m);
+      assert.deepEqual(workflowUpdate(older, 'trunk', '0.5.3'), { kind: 'replace-older', text: workflow('trunk', '0.5.3'), from });
+    });
+  }
+
+  it('moves the pins of a split workflow, quoted or not, and nothing else', () => {
+    const before = workflow('main', '0.5.2')
+      .replace("branches: [\"main\"]", "branches: ['main']")
+      .replace('name: process-rules\n', 'name: process-rules\n# Our own note: split by hand at v0.5.2.\n')
+      .replace('process-rules-ref: v0.5.2\n    secrets', "process-rules-ref: 'v0.5.2'\n    secrets")
+      .replace('    secrets:\n      FIGMA_TOKEN: ${{ secrets.FIGMA_TOKEN }}\n\n', '\n');
+    const update = workflowUpdate(before, 'main', '0.5.3');
+    assert.equal(update.kind, 'repin');
+    assert.ok(update.kind === 'repin');
+    assert.equal(update.from, '0.5.2');
+    assert.equal(update.text, before.replaceAll('0.5.2', '0.5.3').replace('split by hand at v0.5.3', 'split by hand at v0.5.2'));
+    assert.match(update.text, /^# Our own note: split by hand at v0\.5\.2\.$/m);
+    assert.deepEqual(workflowPins(update.text), ['0.5.3', '0.5.3', '0.5.3', '0.5.3']);
+  });
+
+  it('follows a changed default branch in a split workflow, keeping its quotes', () => {
+    const before = workflow('main', '0.5.3').replace('branches: ["main"]', "branches: ['main']");
+    assert.deepEqual(workflowUpdate(before, 'trunk', '0.5.3'), { kind: 'repin', text: before.replace("['main']", "['trunk']"), branch: 'trunk' });
+    const update = workflowUpdate(workflow('main', '0.5.2'), 'trunk', '0.5.3');
+    assert.deepEqual(update, { kind: 'repin', text: workflow('trunk', '0.5.3'), from: '0.5.2', branch: 'trunk' });
+  });
+
+  it('leaves a push trigger listing several branches as it is', () => {
+    const before = workflow('main', '0.5.2').replace('branches: ["main"]', 'branches: ["main", "release"]');
+    const update = workflowUpdate(before, 'trunk', '0.5.3');
+    assert.ok(update.kind === 'repin');
+    assert.match(update.text, /branches: \["main", "release"\]/);
+    assert.equal(update.branch, undefined);
+  });
+
+  it('asks to follow the default branch alone when the pins are current', async () => {
+    const sys = fresh();
+    sys.files.set(WORKFLOW, workflow('main', packageVersion()));
+    sys.route('GET', REPO, { status: 200, json: repoJson(true, 'trunk') });
+    await run(sys);
+    assert.ok(sys.asked.includes('In .github/workflows/process-rules.yml, run pushes on the default branch, trunk, leaving the rest as it is? [y/N] '));
+    assert.equal(sys.files.get(WORKFLOW), workflow('trunk', packageVersion()));
+  });
+
+  it('replaces a workflow it does not recognise, a split one with a pin missing included', () => {
+    assert.deepEqual(workflowUpdate('old', 'main', '0.5.3'), { kind: 'replace', text: workflow('main', '0.5.3') });
+    const halfPinned = workflow('main', '0.5.2').replace(/\n {4}with:\n {6}process-rules-ref: v0\.5\.2\n {4}secrets:/, '\n    secrets:');
+    assert.equal(workflowPins(halfPinned).length, 3);
+    assert.equal(workflowUpdate(halfPinned, 'main', '0.5.3').kind, 'replace');
+  });
+
+  it('replaces the older template written for a default branch since changed', () => {
+    assert.deepEqual(workflowUpdate(olderWorkflows('main', '0.5.2')[0], 'trunk', '0.5.3'), {
+      kind: 'replace-older',
+      text: workflow('trunk', '0.5.3'),
+      from: '0.5.2',
+    });
   });
 });

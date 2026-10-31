@@ -41,8 +41,9 @@ A client's `.claude/settings.json` locks GitHub out of every session before
 any hook runs: its `env` holds the lock's variables (a `GH_TOKEN` GitHub
 refuses, no credential helper, GitHub's SSH remotes on HTTPS and every other
 SSH remote refused), so a session whose hook never ran or failed reaches
-GitHub as nobody, never as the owner. In a cloud session the SessionStart
-hook unsets it, so the session reaches GitHub as the account connected to it.
+GitHub as nobody, never as the owner. In a Claude cloud session the
+SessionStart hook lifts it only once GitHub says the session is the agent
+(see Claude cloud sessions below).
 
 In Claude Code, the client's SessionStart hook runs `process-rules
 session-start`. It appends a lock to `CLAUDE_ENV_FILE`: a token GitHub refuses,
@@ -53,8 +54,7 @@ wrote for the agent the repo's settings name, exactly as `machine` writes it,
 it appends that file, which replaces the lock with the agent's identity. Any
 other outcome leaves GitHub locked out and says why, so a session never falls
 back to the owner's login. When the CLI is missing or fails, the hook still
-tells the session to stop, with what the CLI printed. Cloud sessions are left
-alone.
+tells the session to stop, with what the CLI printed.
 
 Before each Bash command, the client's PreToolUse hook runs `process-rules
 guard`: a command running `gh` or a git command that reaches a remote (push,
@@ -98,7 +98,9 @@ repo's CODEOWNERS names the owner.
    the lock in `env`, a SessionStart hook running `process-rules
    session-start` and a PreToolUse hook running `process-rules guard`, and
    writes `.github/workflows/process-rules.yml`, which calls this repository's
-   shared checks (`.github/workflows/checks.yml`). It checks the agent can
+   shared checks (`.github/workflows/checks.yml`) from two jobs: `process-rules`
+   on pull requests and pushes, read-only, and `process-rules-weekly` on the
+   weekly run, the only one that writes to issues. It checks the agent can
    push. With no access, or read access only (a public repo, or an
    organisation's base permission), `onboard` offers to give it write access
    through your `gh` and to accept the invitation as the agent; and it names
@@ -212,9 +214,9 @@ where the Claude Code hooks never ran) it is the pre-push identity guard: a
 push over SSH is refused, whatever the host, since it would use this Mac's
 SSH keys, the owner's; over HTTPS to GitHub, git is asked for the
 credentials it would push with (one in the URL included) and GitHub for
-whose they are, and only the agent's push goes ahead. The owner's pushes
-from their own terminal are not checked, and neither are cloud sessions',
-which reach GitHub as the account connected to them. With `work-rules` on, it then applies the same rules before an
+whose they are, and only the agent's push goes ahead; in a Claude cloud
+session, GitHub is asked through its proxy whose account the session is. The
+owner's pushes from their own terminal are not checked. With `work-rules` on, it then applies the same rules before an
 agent session pushes: all the commits
 one push brings, on one branch, name one slice between them as a
 `Slice: #N` trailer. Commits a remote already has, such as the default
@@ -225,8 +227,12 @@ pre-push hook, or git runs hooks from a folder outside the repository (a
 global `core.hooksPath`), `onboard` leaves it alone and names the line to add:
 `process-rules pre-push "$@"`. The client workflow re-runs the checks when a
 pull request's description is edited. After upgrading process-rules, run
-`onboard` again: it replaces the workflow when a release needs more
-permissions, and upgrades the hook entries in `.claude/settings.json`. Make the checks of the
+`onboard` again: it upgrades the hook entries in `.claude/settings.json` and
+the workflow. An older release's workflow, one job that let every run write
+to issues, is replaced; a workflow already split into `process-rules` and
+`process-rules-weekly` keeps everything but its version pins, which move to the
+new release, and the one branch pushes run on, which follows a changed default
+branch; any other workflow is offered a replacement. Make the checks of the
 features a client has turned on required on its default branch, such as
 `process-rules / PR identity` with `pr-identity` and `process-rules / Work
 rules` with `work-rules`; a check of a feature that is off still runs and
@@ -251,6 +257,32 @@ the weekly job, `reviews-due` and the pre-push hook each pass, saying so, when
 their feature is off; `onboard` writes the workflow only once a check needs it. `project` names the board's
 Project (by default `<repo> work`).
 
+### Claude cloud sessions
+
+A Claude cloud session has no keychain and no session file: it reaches
+GitHub through Claude's GitHub proxy, as the account connected to claude.ai.
+So for agent sessions there, that connection is the agent account. Its
+`session-start` asks GitHub, through the proxy, which account the session
+is. When it is the agent, it writes the pre-push git hook (a fresh clone
+has none), lifts the lock and records the session for the guard; `gh` gets
+the proxy's placeholder token (`proxy-injected`), which the proxy swaps for
+the connected account's. As anyone else, GitHub stays locked out and the
+session is told to stop. The pre-push hook asks GitHub the same through
+the proxy before each push.
+
+The proxy refuses GitHub's GraphQL API, so the work rules read only its
+REST API, here and everywhere else. The cloud environment's Setup script,
+which runs as root before each session, installs the CLI:
+`process-rules cloud-setup` prints one for the installed release. It
+unpacks Node, once it matches the sha256 the release pins, and the CLI
+under `/opt/process-rules` and puts
+`process-rules` on `PATH`, leaving the image's own Node alone. The
+environment needs the network to reach nodejs.org and GitHub's release
+downloads.
+
+claude.ai has one GitHub connection per account, so it is the agent's for
+every cloud session that account starts.
+
 ### Releases and upgrading
 
 Each release is a tag `vX.Y.Z` on `main`, matching `package.json`; the
@@ -263,12 +295,14 @@ pnpm add -g https://github.com/athya-hq/process-rules/releases/download/v0.5.4/a
 ```
 
 `onboard` pins the client's workflow to one version, the release of the CLI
-that ran it. The pin is written twice, `checks.yml@vX.Y.Z` and, two lines
+that ran it. Each job writes the pin twice, `checks.yml@vX.Y.Z` and, two lines
 below it under `with:`, `process-rules-ref: vX.Y.Z`, because a called
 workflow cannot read its own ref from GitHub's contexts. Upgrading is one
-step: install the new CLI and run `onboard` again, which rewrites both lines
-together (it offers to replace the workflow). Editing the version by hand
-means changing both lines. The hooks run the
+step: install the new CLI and run `onboard` again, which moves all four pins
+together. Editing the version by hand means changing all four lines, two per
+job. A split workflow needs v0.5.3 or later: GitHub refuses a whole run, before
+any job's `if:`, when the called workflow asks for more than the calling job
+grants, and before v0.5.3 `checks.yml` asked for `issues: write` itself. The hooks run the
 launcher `machine` writes, else `process-rules` from the `PATH`; without
 either the session-start hook tells the session to stop, and the guard refuses
 `gh` and `git`. Run `machine` again after removing the node it names.

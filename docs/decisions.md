@@ -134,6 +134,41 @@
   `needs-owner` off once nothing waits. A reaction triggers no workflow, so
   the pull request's Work rules check sees a 👍 made after it ran only when
   it runs again.
+- **2026-10-31 — Record: P-22, cloud sessions work as the agent.** The
+  owner, in chat: cloud sessions are "needed": claude.ai's GitHub
+  connection for agent sessions is the agent account, the environment's
+  setup script installs the CLI, and session-start checks the account
+  GitHub sees is the agent, printing STOP otherwise. This replaces the
+  2026-10-31 rule above (P-17) that a cloud session's hook unsets the lock: now it
+  lifts it only for the agent. Claude's GitHub proxy refuses GraphQL
+  (whatever the credentials), so the owner chose the more robust of the
+  ways through: the work rules read GitHub's REST API alone, on a Mac, in
+  a cloud session and in Actions, rather than skipping them before a cloud
+  push or refusing cloud pushes. REST names when a comment was last edited
+  only as `updated_at`, which a reaction does not move, so a 👍 counts only
+  after it. REST pages reactions too, so a proposal with more than 100 👍s
+  is read in full. A cloud clone has no pre-push hook, so session-start
+  writes it there before lifting the lock. The CLI reaches GitHub through
+  `HTTPS_PROXY` when one is set, as gh and git do.
+- **2026-11-01 — Record: pull request and push runs are read-only.** A
+  review of a client's adoption flagged that the workflow `onboard` wrote
+  gave every run `issues: write`, though only the weekly decisions run
+  writes to issues; so did upgrading, since `onboard` replaced a client's own
+  split with its one job. `onboard` now writes two jobs calling
+  `checks.yml`: `process-rules` on pull requests and pushes, with the
+  workflow's read-only permissions, and `process-rules-weekly` on the
+  schedule and by hand, with `issues: write`. The pull request checks keep
+  their names, `process-rules / …`, so required checks need no change.
+  Splitting alone was not enough: GitHub refuses a whole run, before any
+  job's `if:`, when a called job asks for more than its caller grants, and
+  `checks.yml`'s weekly job asked for `issues: write` itself, so a split
+  workflow at v0.5.2 or earlier fails to start on every pull request and
+  push. From v0.5.3 `checks.yml` sets no workflow-wide permissions, its
+  read-only jobs set their own, and its weekly job takes what the calling
+  job grants. `onboard` replaces the older single-job template, moves only
+  the version pins of a workflow already split (and its push branch, when the
+  default branch has changed), and offers to replace any other workflow, as
+  before. Released as v0.5.3, a patch release.
 - **2026-11-01 — Record: P-33, onboard warns about a CODEOWNERS naming the
   owner.** The owner, in chat, answered "OK." to: "process-rules release:
   onboard warns about such a CODEOWNERS file and offers the fix. This is the
