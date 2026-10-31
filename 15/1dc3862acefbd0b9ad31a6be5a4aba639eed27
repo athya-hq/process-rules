@@ -1,0 +1,29 @@
+.claude/settings.json
+  s_74e2df94ac078c::t_a8ae73452c6a16 8-19,24-45
+.github/workflows/process-rules.yml
+  s_9b185e6118ff5a::t_c17a2d8c8314a8 1-3,23,25-34,39,41
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "151dc3862acefbd0b9ad31a6be5a4aba639eed27",
+  "prompts": {},
+  "sessions": {
+    "s_74e2df94ac078c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0eb7248e-a915-46ea-b186-980008777ac6",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Alok Bansal <alokagrawal8@gmail.com>"
+    },
+    "s_9b185e6118ff5a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b31c93b2-78bd-42ed-9758-c38dcbcb3338",
+        "model": "unknown"
+      },
+      "human_author": "Alok Bansal <alokagrawal8@gmail.com>"
+    }
+  }
+}
