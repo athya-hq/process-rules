@@ -4,8 +4,8 @@ import type { Output, Sys } from './types.ts';
 /**
  * What of the owner's on this Mac an agent session could reach if it ignored
  * session-start's lock: `gh` accounts other than the agent's (active or
- * not), a git password for github.com saved in the macOS keychain, and SSH
- * keys with no passphrase. Only removing them closes that; the lock lives in
+ * not), a git password for github.com saved in the macOS keychain, SSH
+ * keys with no passphrase, and the account SSH reaches GitHub as. Only removing them closes that; the lock lives in
  * the session's environment, which a session can change.
  */
 export interface Exposure {
@@ -14,6 +14,8 @@ export interface Exposure {
   gitPassword: boolean;
   /** Private keys in ~/.ssh that open with no passphrase, other than agents' signing keys. */
   openKeys: string[];
+  /** The account other than the agent that `ssh git@github.com` reaches without asking: a key loaded or open. */
+  sshLogin: string | undefined;
 }
 
 /**
@@ -42,7 +44,29 @@ export function exposure(sys: Sys, agent: string): Exposure {
     .filter((name) => !name.endsWith('.pub') && !agentKeys.has(name))
     .map((name) => `${ssh}/${name}`)
     .filter((key) => sys.exec('ssh-keygen', ['-y', '-P', '', '-f', key]).code === 0);
-  return { ghLogins, gitPassword, openKeys };
+  return { ghLogins, gitPassword, openKeys, sshLogin: sshLogin(sys, agent) };
+}
+
+/**
+ * Who GitHub greets over SSH with this Mac's keys, asking for nothing: a key
+ * in the SSH agent or the macOS keychain, or one with no passphrase. Undefined
+ * when that is nobody, the agent, or GitHub cannot be reached.
+ */
+function sshLogin(sys: Sys, agent: string): string | undefined {
+  const tried = sys.exec('ssh', ['-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', 'git@github.com'], { env: ownerEnv(sys), timeoutMs: 15_000 });
+  const login = /^Hi ([A-Za-z0-9-]+)!/m.exec(`${tried.stdout}\n${tried.stderr}`)?.[1];
+  return login && !sameLogin(login, agent) ? login : undefined;
+}
+
+/**
+ * Why process-rules leaves the owner's SSH route to GitHub in place, and what
+ * covers it in agent sessions (docs/decisions.md).
+ */
+export function sshLine(login: string): string {
+  return (
+    `ssh reaches GitHub as ${login} with this Mac's keys; process-rules leaves your SSH access alone. ` +
+    'Agent sessions send GitHub over HTTPS and refuse SSH, and the pre-push hook refuses their pushes over SSH'
+  );
 }
 
 /** One line per exposure, for `doctor` and `machine`. */
@@ -51,6 +75,7 @@ export function exposureLines(found: Exposure): string[] {
     ...found.ghLogins.map((login) => `gh is signed in as ${login}; an agent session that ignores the lock could use it`),
     ...(found.gitPassword ? ["the macOS keychain holds a saved git password for github.com; an agent session could use it"] : []),
     ...found.openKeys.map((key) => `${key} has no passphrase; add one with: ssh-keygen -p -f ${key}`),
+    ...(found.sshLogin ? [sshLine(found.sshLogin)] : []),
   ];
 }
 
@@ -84,7 +109,8 @@ export async function lockOwnerAway(
     }
   }
   for (const key of found.openKeys) io.out(`! ${key} has no passphrase; add one with: ssh-keygen -p -f ${key}`);
-  if (found.ghLogins.length === 0 && !found.gitPassword && found.openKeys.length === 0) {
+  if (found.sshLogin) io.out(`! ${sshLine(found.sshLogin)}`);
+  if (found.ghLogins.length === 0 && !found.gitPassword && found.openKeys.length === 0 && !found.sshLogin) {
     io.out('✓ nothing of the owner here for an agent session to reach');
   }
 }
