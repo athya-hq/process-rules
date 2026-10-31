@@ -259,7 +259,7 @@ function branchBeyondMerges(sys: Sys, root: string, range: string[]): string | u
  * branch's commits that the merges did not bring. Pushes outside agent
  * sessions pass; an agent session with no token is refused.
  */
-export async function prePush(sys: Sys, io: Output, refLines: string, url = ''): Promise<number> {
+export async function prePush(sys: Sys, io: Output, refLines: string, url: string): Promise<number> {
   if (!agentSession(sys)) return 0;
   const { root, slug } = repoAt(sys);
   const { owner, agent } = loadSettings(sys, root);

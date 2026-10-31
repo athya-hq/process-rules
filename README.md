@@ -177,13 +177,15 @@ production is held for the owner with a suggestion and `needs-owner`. The
 weekly job removes `veto` once the week has passed.
 
 `onboard` also writes a pre-push git hook running `process-rules pre-push`,
-for every adopter. In an agent session (one session-start set up, or any
-shell Claude Code runs, which sets `CLAUDECODE`, so it holds where the Claude
-Code hooks never ran) it is the pre-push identity guard: a push to GitHub
-over SSH is refused, since it would use this Mac's SSH keys, the owner's;
-over HTTPS, git is asked for the credentials it would push with and GitHub
-for whose they are, and anyone but the agent is refused. Anyone else's push
-goes ahead. With `work-rules` on, it then applies the same rules before an
+for every adopter. In a local agent session (one session-start set up, or
+any shell Claude Code runs on the Mac, which sets `CLAUDECODE`, so it holds
+where the Claude Code hooks never ran) it is the pre-push identity guard: a
+push over SSH is refused, whatever the host, since it would use this Mac's
+SSH keys, the owner's; over HTTPS to GitHub, git is asked for the
+credentials it would push with (one in the URL included) and GitHub for
+whose they are, and only the agent's push goes ahead. The owner's pushes
+from their own terminal are not checked, and neither are cloud sessions',
+which reach GitHub as the account connected to them. With `work-rules` on, it then applies the same rules before an
 agent session pushes: all the commits
 one push brings, on one branch, name one slice between them as a
 `Slice: #N` trailer. Commits a remote already has, such as the default

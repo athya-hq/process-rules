@@ -1,8 +1,9 @@
 import { API, sameLogin } from './agent.ts';
 import type { Sys } from './types.ts';
 
-const SSH_GITHUB = /^(?:git@github\.com:|ssh:\/\/(?:[^@/\s]+@)?(?:ssh\.)?github\.com(?::\d+)?\/)/;
-const HTTPS_GITHUB = /^https:\/\/(?:([^@/\s:]+)(?::[^@/\s]*)?@)?github\.com\//;
+/** SSH as git reads a URL: an SSH scheme, or the scp-like `[user@]host:path`. */
+const SSH = /^(?:(?:ssh|git\+ssh|ssh\+git):\/\/|[^/:\s]+:(?!\/\/))/i;
+const HTTPS_GITHUB = /^https:\/\/(?:[^@/\s]+@)?github\.com(?::\d+)?\//i;
 
 /**
  * Whether this shell is an agent session's on this Mac: one session-start
@@ -17,21 +18,23 @@ export function agentSession(sys: Sys): boolean {
 
 /**
  * Why an agent session's push to `url` would not reach GitHub as `agent`, or
- * undefined when it would, or when `url` is not GitHub. Over SSH a push uses
- * this Mac's keys, which are the owner's, so it is refused whatever they
- * are; the agent's identity sends GitHub over HTTPS. Over HTTPS the
- * credentials git would push with are asked of git itself, then of GitHub.
+ * undefined when it would, or when `url` is neither SSH nor GitHub. Any push
+ * over SSH is refused, whatever the host, since a host alias can be GitHub:
+ * it uses this Mac's keys, which are the owner's, and the agent's identity
+ * sends GitHub over HTTPS. Over HTTPS the credentials git would push with,
+ * one in the URL included, are asked of git itself, then of GitHub.
  */
 export async function pushIdentityProblem(sys: Sys, root: string, url: string, agent: string): Promise<string | undefined> {
   const notSetUp = 'this session was not given the agent identity, which sends GitHub over HTTPS; tell the owner';
-  if (SSH_GITHUB.test(url)) {
-    return `this push goes to GitHub over SSH, with this Mac's SSH keys, which reach GitHub as their owner, not ${agent}: ${notSetUp}`;
+  if (!url) return 'git gave the pre-push hook no remote URL, so this push cannot be checked';
+  if (SSH.test(url)) {
+    return `this push goes over SSH, with this Mac's SSH keys, which are its owner's, not ${agent}'s: ${notSetUp}`;
   }
-  const https = HTTPS_GITHUB.exec(url);
-  if (!https) return undefined;
+  if (!HTTPS_GITHUB.test(url)) return undefined;
   const filled = sys.exec('git', ['credential', 'fill'], {
     cwd: root,
-    input: `protocol=https\nhost=github.com\n${https[1] ? `username=${https[1]}\n` : ''}\n`,
+    // The whole URL, so a user or password in it is the one checked, as git would push with it.
+    input: `url=${url}\n\n`,
     // Never a prompt: an empty askpass is no program, and the terminal prompt is off.
     env: { ...sys.env, GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: '', SSH_ASKPASS: '' },
     timeoutMs: 20_000,

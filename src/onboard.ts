@@ -26,9 +26,10 @@ export const PRODUCT = 'athya-hq/process-rules';
 export const HOOKS_PATH = '.claude/settings.json';
 export const WORKFLOW_PATH = '.github/workflows/process-rules.yml';
 /**
- * The pre-push git hook: before an agent session pushes, that it reaches
- * GitHub as the agent, then the work rules. It needs no Claude Code hook to
- * have run: any shell Claude Code runs sets CLAUDECODE.
+ * The pre-push git hook: before a local agent session pushes, that it
+ * reaches GitHub as the agent, then the work rules. It needs no Claude Code
+ * hook to have run: any shell Claude Code runs sets CLAUDECODE. Cloud
+ * sessions are left alone; they reach GitHub as the account connected to them.
  */
 export const PRE_PUSH_HOOK = [
   '#!/bin/sh',
