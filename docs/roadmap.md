@@ -10,7 +10,8 @@ account given write access.
 **Version v1 — approved by the owner, 2026-10-30**, in chat: "Approved, mark ready".
 The token choice, later that day, settled P-02's need and P-04's wording
 (docs/decisions.md).
-P-12 was added on 2026-10-31, on the owner's word (docs/decisions.md).
+P-12, P-13 and P-14 were added on 2026-10-31, on the owner's word
+(docs/decisions.md).
 
 ## What a client gets
 
@@ -42,3 +43,5 @@ the **owner**, whose labels and comments count as approvals, and the
 | P-10 | Review routine          | One routine run: Kept and Settled with reasoning and `veto`; a production risk held for the owner                                                                                | shipped  | P-09           |
 | P-11 | Releases                | A tagged version a client pins; `onboard` writes that pin; upgrading is one pin change                                                                                           | shipped  | P-04           |
 | P-12 | Staged adoption         | A client turns on one feature at a time: `onboard <owner> <agent> --features identity` sets up identity alone; `onboard --add <feature>` adds one; checks of features that are off pass, saying so; the Project's title is a setting | shipped  | P-11           |
+| P-13 | Onboard finds the accounts | Plain `process-rules onboard` in a new client suggests the owner from the `gh` login and the agent from the accounts `machine` set up, for the owner to confirm; `.claude/settings.json` keeps its formatting, gaining only the hook entry | todo     | P-12           |
+| P-14 | process-rules adopts itself | process-rules onboarded with `board`, `pr-identity` and `work-rules`: its roadmap slices as Slice issues under a Work item the owner approved, on a Project; an agent PR here, Verified and pushed by the agent, passes its own checks | todo     | P-13           |

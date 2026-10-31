@@ -35,3 +35,13 @@
   checks and the pre-push hook skip features that are off, and the
   Project's title is a setting. Settings that list no features keep every
   feature on, as before. Added to roadmap v1 as P-12, after P-11.
+- **2026-10-31 — Record: P-13, onboard works out the accounts.** The owner,
+  asked whether a third party should be able to run plain `process-rules
+  onboard`: "Yes." `onboard` suggests the owner from the `gh` login and the
+  agent from the accounts `machine` set up on the Mac, for the owner to
+  confirm, and adds its hook to `.claude/settings.json` without rewriting the
+  rest of the file.
+- **2026-10-31 — Record: P-14, process-rules adopts itself.** The owner: "Yes,
+  add P-14". The product's own work moves from these files to issues and a
+  Project, and agent sessions on it work as the agent account, so the product
+  is built under its own rules before its first client moves its work.
