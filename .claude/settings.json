@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [ \"$CLAUDE_CODE_REMOTE\" = true ]; then :; elif command -v process-rules >/dev/null 2>&1 && process-rules session-start; then :; else echo \"process-rules: STOP. The process-rules CLI is missing or did not run here, so this session cannot be given the agent identity and gh and git would act as the owner. Do not push, fetch, or run gh in this session; tell the owner.\"; fi"
+          }
+        ]
+      }
+    ]
+  }
+}

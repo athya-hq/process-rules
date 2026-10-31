@@ -9,7 +9,10 @@ hooks and a shared GitHub Actions workflow.
 ## Status
 
 Early. The CLI runs `machine`, `doctor`, `session-start` and `onboard`. What comes next, and in what
-order: [docs/roadmap.md](docs/roadmap.md). Decisions:
+order: the Slice issues under
+[process-rules roadmap v1](https://github.com/athya-hq/process-rules/issues/22),
+on the Project [process-rules work](https://github.com/orgs/athya-hq/projects/2);
+[docs/roadmap.md](docs/roadmap.md) keeps version v1 as approved. Decisions:
 [docs/decisions.md](docs/decisions.md).
 
 ## Agent identity on a Mac

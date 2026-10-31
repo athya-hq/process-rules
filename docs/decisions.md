@@ -45,3 +45,11 @@
   add P-14". The product's own work moves from these files to issues and a
   Project, and agent sessions on it work as the agent account, so the product
   is built under its own rules before its first client moves its work.
+- **2026-10-31 — Record: the roadmap moves to issues, P-14.** The owner, on
+  P-14: "Yes, add P-14". Onboarding process-rules with `work-rules` means an
+  agent pull request here names a Slice issue under a Work item the owner
+  approved, so the roadmap became the Work item #22 "process-rules roadmap
+  v1", with one Slice sub-issue per row (#23 to #36), on the Project
+  "process-rules work". The issues are the source of truth from then on;
+  `docs/roadmap.md` keeps v1 as approved and links each row to its issue.
+  The shipped slices were closed as completed, each citing its pull request.
