@@ -186,3 +186,18 @@
   is the client's to change, and GitHub's API does not say who a team's
   review would reach without more scopes. `doctor`, in an adopting repo,
   warns about the same rules and changes nothing.
+- **2026-11-01 — Record: P-34, agent sessions answer review threads
+  without asking.** The owner, in chat, when replying to and resolving a
+  review thread waited on approval in auto mode: "This shouldn't be a
+  question. My work shouldn't wait for this. Please ask the product to fix
+  this." The issue asked for permission rules on the replies endpoint and
+  the GraphQL review-thread mutations. Claude Code's permission docs call
+  rules that constrain a command's arguments fragile, and a `*` in a Bash
+  rule matches any text, spaces included, so a rule on `gh api
+  repos/*/pulls/*/comments/*/replies *` would also allow a call to any other
+  endpoint with that text in a field. So the rule allows one CLI command,
+  `process-rules review-thread`, which builds the requests itself and
+  refuses unless the session is the agent's and the thread is on a pull
+  request the agent opened in the repository here. `onboard` adds the rule
+  to `permissions.allow` for every client, as part of identity. Released as
+  v0.5.5, a patch release.

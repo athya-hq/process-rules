@@ -12,7 +12,7 @@ import type { HttpResult } from './types.ts';
 import { pathsFor, sessionScript } from './agent.ts';
 import { FEATURES } from './features.ts';
 import { packageVersion } from './version.ts';
-import { GUARD_COMMAND, HOOK_COMMAND, HOOKS_PATH, OLDER_HOOK_COMMANDS, OLDER_PRE_PUSH_HOOKS, PRE_PUSH_HOOK, WORKFLOW_PATH, claudeSettings, olderWorkflows, onboard, onboardArgs, workflow, workflowPins, workflowUpdate } from './onboard.ts';
+import { GUARD_COMMAND, HOOK_COMMAND, HOOKS_PATH, OLDER_HOOK_COMMANDS, OLDER_PRE_PUSH_HOOKS, PRE_PUSH_HOOK, REVIEW_THREAD_RULE, WORKFLOW_PATH, claudeSettings, olderWorkflows, onboard, onboardArgs, workflow, workflowPins, workflowUpdate } from './onboard.ts';
 import { BASE_ENV } from './agent.ts';
 
 const SETTINGS = `${ROOT}/.github/process-rules.json`;
@@ -24,7 +24,7 @@ const PUSH = { status: 200, json: repoJson() };
 const SESSION_ENTRY = { hooks: [{ type: 'command', command: HOOK_COMMAND }] };
 const GUARD_ENTRY = { matcher: 'Bash', hooks: [{ type: 'command', command: GUARD_COMMAND }] };
 /** The Claude Code settings this release writes into an empty project. */
-const CLAUDE = { hooks: { SessionStart: [SESSION_ENTRY], PreToolUse: [GUARD_ENTRY] }, env: BASE_ENV };
+const CLAUDE = { hooks: { SessionStart: [SESSION_ENTRY], PreToolUse: [GUARD_ENTRY] }, env: BASE_ENV, permissions: { allow: [REVIEW_THREAD_RULE] } };
 const VERIFIED = {
   status: 200,
   json: { committer: { login: AGENT }, commit: { verification: { verified: true, reason: 'valid' } } },
@@ -168,13 +168,15 @@ describe('onboard', () => {
         sys.asked.includes(
           "Update .claude/settings.json: replace the older SessionStart hook that runs process-rules session-start with this release's; " +
             "add the PreToolUse hook that refuses gh and git's remote commands outside the agent identity; " +
-            `set GH_TOKEN, GITHUB_TOKEN and ${Object.keys(BASE_ENV).length - 2} more in env, so GitHub is locked out until session-start gives the agent identity? [y/N] `,
+            `set GH_TOKEN, GITHUB_TOKEN and ${Object.keys(BASE_ENV).length - 2} more in env, so GitHub is locked out until session-start gives the agent identity; ` +
+            'allow process-rules review-thread without a prompt, so agent sessions answer review threads on their own pull requests? [y/N] ',
         ),
         sys.asked.join('\n'),
       );
       assert.deepEqual(JSON.parse(sys.files.get(HOOKS) ?? ''), {
         hooks: { SessionStart: [{ hooks: [{ type: 'command', command: 'echo hi' }, { type: 'command', command: HOOK_COMMAND }] }], PreToolUse: [GUARD_ENTRY] },
         env: BASE_ENV,
+        permissions: { allow: [REVIEW_THREAD_RULE] },
       });
     });
   }
@@ -185,7 +187,15 @@ describe('onboard', () => {
     assert.deepEqual(changes, ['set GH_TOKEN in env, so GitHub is locked out until session-start gives the agent identity']);
   });
 
+  it("adds the review-thread rule to the client's own allow list once", () => {
+    const { text, changes } = claudeSettings(JSON.stringify({ ...CLAUDE, permissions: { allow: ['Bash(pnpm test)'], deny: ['Read(.env)'] } }));
+    assert.deepEqual(JSON.parse(text).permissions, { allow: ['Bash(pnpm test)', REVIEW_THREAD_RULE], deny: ['Read(.env)'] });
+    assert.deepEqual(changes, ['allow process-rules review-thread without a prompt, so agent sessions answer review threads on their own pull requests']);
+    assert.deepEqual(claudeSettings(text).changes, []);
+  });
+
   it('refuses an env that is not an object, and a file that is not one', () => {
+    assert.throws(() => claudeSettings(JSON.stringify({ ...CLAUDE, permissions: { allow: 'all' } })), /^Error: \.claude\/settings\.json: permissions\.allow is not an array$/);
     assert.throws(() => claudeSettings('{ "env": [] }'), /^Error: \.claude\/settings\.json: env is not an object$/);
     assert.throws(() => claudeSettings('[]'), /^Error: \.claude\/settings\.json is not a JSON object$/);
   });
@@ -336,6 +346,7 @@ describe('onboard', () => {
     assert.deepEqual(JSON.parse(sys.files.get(HOOKS) ?? ''), {
       env: { A: '1', ...BASE_ENV },
       hooks: { SessionStart: [own, SESSION_ENTRY], Stop: [own], PreToolUse: [GUARD_ENTRY] },
+      permissions: { allow: [REVIEW_THREAD_RULE] },
     });
   });
 
@@ -505,7 +516,7 @@ describe('onboard', () => {
       const out = sys.files.get(HOOKS) ?? '';
       assert.ok(out.startsWith('{\n  "env": { "A": "1",'), out);
       assert.ok(out.includes('\n  "hooks": {\n    "Stop": [{ "hooks": [] }],\n    "SessionStart": ['), out);
-      assert.deepEqual(JSON.parse(out), { env: { A: '1', ...BASE_ENV }, hooks: { Stop: [{ hooks: [] }], SessionStart: [SESSION_ENTRY], PreToolUse: [GUARD_ENTRY] } });
+      assert.deepEqual(JSON.parse(out), { env: { A: '1', ...BASE_ENV }, hooks: { Stop: [{ hooks: [] }], SessionStart: [SESSION_ENTRY], PreToolUse: [GUARD_ENTRY] }, permissions: { allow: [REVIEW_THREAD_RULE] } });
     });
 
     it("swaps an older release's command in the text", async () => {

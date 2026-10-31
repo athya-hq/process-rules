@@ -6,6 +6,7 @@ import { guard } from './guard.ts';
 import { prIdentity } from './identity.ts';
 import { machine } from './machine.ts';
 import { reviewsDue } from './reviews.ts';
+import { reviewThread, threadArgs } from './review-thread.ts';
 import { onboard, onboardArgs } from './onboard.ts';
 import { sessionStart } from './session-start.ts';
 import { prePush, prWorkRules, propose } from './work.ts';
@@ -33,6 +34,8 @@ Commands:
   reviews-due      For the review routine: open decisions whose review date has come, as JSON lines
   pre-push         Run by the pre-push git hook: the same rules before an agent session pushes
   propose <issue>  As the agent: ask the owner to approve, with a 👍, a slice added late or a dropped state
+  review-thread <thread-id> [--reply <text>] [--resolve]
+                   As the agent: answer a review thread on one of its own pull requests here
   help             Show this text
   version          Print the installed version
 
@@ -49,17 +52,17 @@ export async function run(
   sys: () => Sys | Promise<Sys>,
 ): Promise<number> {
   const [command, ...rest] = args;
-  const allowed = command === 'onboard' ? Infinity : command === 'pre-push' ? 2 : command === 'machine' || command === 'doctor' || command === 'propose' ? 1 : 0;
+  const allowed = command === 'onboard' || command === 'review-thread' ? Infinity : command === 'pre-push' ? 2 : command === 'machine' || command === 'doctor' || command === 'propose' ? 1 : 0;
   const extra = rest[allowed];
   if (extra !== undefined) {
     io.err(`process-rules: unexpected argument "${extra}"`);
     io.err(USAGE);
     return 2;
   }
-  if (command === 'onboard') {
-    // onboard's options are checked here, so a bad one is bad usage (exit 2).
+  if (command === 'onboard' || command === 'review-thread') {
+    // Their options are checked here, so a bad one is bad usage (exit 2).
     try {
-      onboardArgs(rest);
+      (command === 'onboard' ? onboardArgs : threadArgs)(rest);
     } catch (error) {
       io.err(`process-rules: ${error instanceof Error ? error.message : String(error)}`);
       io.err(USAGE);
@@ -106,7 +109,9 @@ export async function run(
     case 'reviews-due':
     case 'pre-push':
     case 'propose':
+    case 'review-thread':
       try {
+        if (command === 'review-thread') return await reviewThread(await sys(), io, rest);
         if (command === 'propose') return await propose(await sys(), io, Number((rest[0] as string).replace('#', '')));
         if (command === 'reviews-due') return await reviewsDue(await sys(), io);
         if (command === 'decisions-weekly') return await decisionsWeekly(await sys(), io);

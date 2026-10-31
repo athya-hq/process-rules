@@ -96,7 +96,8 @@ repo's CODEOWNERS names the owner.
    `machine` set up on this Mac, for you to confirm (or name them:
    `process-rules onboard <owner> <agent>`). It writes `.github/process-rules.json`, adds to `.claude/settings.json`
    the lock in `env`, a SessionStart hook running `process-rules
-   session-start` and a PreToolUse hook running `process-rules guard`, and
+   session-start`, a PreToolUse hook running `process-rules guard` and a
+   `permissions.allow` rule for `process-rules review-thread`, and
    writes `.github/workflows/process-rules.yml`, which calls this repository's
    shared checks (`.github/workflows/checks.yml`) from two jobs: `process-rules`
    on pull requests and pushes, read-only, and `process-rules-weekly` on the
@@ -174,6 +175,19 @@ slice, after it was last added). Run again, `propose` posts nothing twice, and
 once the owner has approved everything it takes `needs-owner` off. A
 reaction does not re-run a pull request's checks: the agent proposes before
 it starts, and pre-push or a re-run of Work rules sees the 👍.
+
+**Answering review threads.** In an agent session, `process-rules
+review-thread <thread-id> --reply <text> --resolve` replies on a review
+thread (`PRRT_…`), resolves it, or both, as the agent. It refuses unless the
+session's token is the agent's and the thread is on a pull request the agent
+opened in the repository here. `onboard` allows exactly this command in
+`.claude/settings.json` (`Bash(process-rules review-thread *)`), so answering
+review findings on its own pull requests needs no prompt, even in Claude
+Code's auto mode, where an allow rule settles a command without the
+classifier. It allows the command, not `gh api`: a rule cannot hold `gh
+api`'s arguments to one endpoint, since its `*` matches anything after it. It
+uses GitHub's GraphQL API, the only one that resolves a thread, so it does not
+work in a Claude cloud session, whose proxy refuses GraphQL.
 
 **Design frames** is optional: with `"figma": { "library": "<file key>" }` in
 the settings and a `FIGMA_TOKEN` Actions secret, each State of the slice an
@@ -291,7 +305,7 @@ release, attaching the CLI package it built and tested. Install that package on
 each machine with pnpm; nothing is built on install:
 
 ```bash
-pnpm add -g https://github.com/athya-hq/process-rules/releases/download/v0.5.4/athya-hq-process-rules-0.5.4.tgz
+pnpm add -g https://github.com/athya-hq/process-rules/releases/download/v0.5.5/athya-hq-process-rules-0.5.5.tgz
 ```
 
 `onboard` pins the client's workflow to one version, the release of the CLI
