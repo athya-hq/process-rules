@@ -9,6 +9,9 @@ import type { Sys } from './types.ts';
 export const FEATURES = ['identity', 'pr-identity', 'board', 'work-rules', 'figma', 'decisions', 'review'] as const;
 export type Feature = (typeof FEATURES)[number];
 
+/** A Figma file key, as FIGMA_LIBRARY and the older `figma.library` hold it. */
+export const FIGMA_FILE_KEY = /^[A-Za-z0-9]+$/;
+
 /** Features renamed since older releases wrote them, still read as their new name. */
 const RENAMED = new Map<string, Feature>([['design', 'figma']]);
 

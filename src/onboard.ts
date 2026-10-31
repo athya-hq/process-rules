@@ -18,7 +18,7 @@ import {
 import { setUpBoard } from './board.ts';
 import { ownerRules, ownerRulesProblem } from './codeowners.ts';
 import { appendToArray, replaceValues, setMember } from './jsonedit.ts';
-import { type Feature, FEATURES, featuresIn, parseFeatures, renamedLines } from './features.ts';
+import { type Feature, FEATURES, FIGMA_FILE_KEY, featuresIn, parseFeatures, renamedLines } from './features.ts';
 import { packageVersion } from './version.ts';
 import type { Output, Sys } from './types.ts';
 
@@ -185,9 +185,6 @@ const OLDER_SECRETS = ['    secrets:', '      FIGMA_TOKEN: ${{ secrets.FIGMA_TOK
  * with secrets of the client's own is left as it is.
  */
 const SECRETS_AFTER_REF = /^( {6}process-rules-ref:[^\n]*\n)(?: {4}secrets:\n(?: {6}FIGMA_(?:TOKEN|LIBRARY): \$\{\{ secrets\.FIGMA_(?:TOKEN|LIBRARY) \}\}\n)+(?! {6})|(?! {4}secrets:))/gm;
-
-/** A Figma file key, as FIGMA_LIBRARY and the older `figma.library` hold it. */
-export const FIGMA_FILE_KEY = /^[A-Za-z0-9]+$/;
 
 /**
  * The jobs of a workflow that call the shared checks without passing them

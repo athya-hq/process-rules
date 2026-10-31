@@ -1,8 +1,7 @@
 import { API, SETTINGS_PATH, loadSettings, sameLogin } from './agent.ts';
-import { FIGMA_FILE_KEY } from './onboard.ts';
 import type { Output, Sys } from './types.ts';
 import { slicesNamed } from './work.ts';
-import { isOn, notAdoptedLine, offLine, renamedLines } from './features.ts';
+import { FIGMA_FILE_KEY, isOn, notAdoptedLine, offLine, renamedLines } from './features.ts';
 
 const FIGMA = 'https://api.figma.com/v1';
 /** A Figma link to one node: the file's key and the node's id. */
