@@ -1,10 +1,11 @@
 import { API, sameLogin } from './agent.ts';
 import { cloudLogin } from './cloud.ts';
 import type { Sys } from './types.ts';
+import { GITHUB_HOST, GITHUB_HOST_RE } from './host.ts';
 
 /** SSH as git reads a URL: an SSH scheme, or the scp-like `[user@]host:path`. */
 const SSH = /^(?:(?:ssh|git\+ssh|ssh\+git):\/\/|[^/:\s]+:(?!\/\/))/i;
-const HTTPS_GITHUB = /^https:\/\/(?:[^@/\s]+@)?github\.com(?::\d+)?\//i;
+const HTTPS_GITHUB = new RegExp(`^https://(?:[^@/\\s]+@)?${GITHUB_HOST_RE}(?::\\d+)?/`, 'i');
 
 /**
  * Whether this shell is an agent session's, on a Mac or in a Claude cloud
@@ -48,7 +49,7 @@ export async function pushIdentityProblem(sys: Sys, root: string, url: string, a
   });
   const password = /^password=(.*)$/m.exec(filled.stdout)?.[1];
   if (filled.code !== 0 || !password) {
-    return `git has no credentials for github.com here, so this push cannot reach GitHub as ${agent}: ${notSetUp}`;
+    return `git has no credentials for ${GITHUB_HOST} here, so this push cannot reach GitHub as ${agent}: ${notSetUp}`;
   }
   let login: unknown;
   try {

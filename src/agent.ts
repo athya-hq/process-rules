@@ -1,15 +1,17 @@
 import { KEYCHAIN, type TokenStore, tokenStore } from './token-store.ts';
 import type { Sys } from './types.ts';
+import { GITHUB_API, GITHUB_HOST_RE, GITHUB_NOREPLY, GITHUB_SSH, GITHUB_SSH_443, GITHUB_WEB } from './host.ts';
 
 /** The adopting repo's settings file, written by `onboard`. */
 export const SETTINGS_PATH = '.github/process-rules.json';
 /** What GH_TOKEN holds when the token store has none, so nothing falls back to the owner. */
 export const NO_TOKEN = 'process-rules-no-agent-token';
-export const API = 'https://api.github.com';
+export const API = GITHUB_API;
 const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/;
-/** The GitHub remotes `repoAt` accepts: HTTPS, scp-like SSH, or SSH URLs, on github.com only. */
-const GITHUB_REMOTE =
-  /^(?:https:\/\/(?:[^@/\s]+@)?github\.com\/|git@github\.com:|ssh:\/\/git@(?:ssh\.)?github\.com(?::\d+)?\/)([^/\s]+\/[^/\s]+?)(?:\.git)?\/?$/;
+/** The GitHub remotes `repoAt` accepts: HTTPS, scp-like SSH, or SSH URLs, on GitHub's host only. */
+const GITHUB_REMOTE = new RegExp(
+  `^(?:https://(?:[^@/\\s]+@)?${GITHUB_HOST_RE}/|git@${GITHUB_HOST_RE}:|ssh://git@(?:ssh\\.)?${GITHUB_HOST_RE}(?::\\d+)?/)([^/\\s]+/[^/\\s]+?)(?:\\.git)?/?$`,
+);
 /** The classic-token scopes an agent account needs (docs/decisions.md). */
 export const TOKEN_SCOPES = ['repo', 'workflow', 'read:org', 'project', 'write:ssh_signing_key'];
 /** Broader scopes that include a needed one. */
@@ -112,7 +114,7 @@ export function pathsFor(home: string, agent: string): Paths {
 
 /** GitHub's no-reply address for an account: always verified on it. */
 export function noreplyEmail(id: number, login: string): string {
-  return `${id}+${login}@users.noreply.github.com`;
+  return `${id}+${login}@${GITHUB_NOREPLY}`;
 }
 
 /** What an agent session must not inherit from the owner's shell. */
@@ -127,10 +129,10 @@ const LOCKED_CONFIG: [string, string][] = [
   ['credential.helper', ''],
   // Empty, git asks no program; GIT_TERMINAL_PROMPT=0 then fails the prompt.
   ['core.askpass', ''],
-  ['url.https://github.com/.insteadOf', 'git@github.com:'],
-  ['url.https://github.com/.insteadOf', 'ssh://git@github.com/'],
-  ['url.https://github.com/.insteadOf', 'ssh://git@github.com:22/'],
-  ['url.https://github.com/.insteadOf', 'ssh://git@ssh.github.com:443/'],
+  [`url.${GITHUB_WEB}/.insteadOf`, `${GITHUB_SSH}:`],
+  [`url.${GITHUB_WEB}/.insteadOf`, `ssh://${GITHUB_SSH}/`],
+  [`url.${GITHUB_WEB}/.insteadOf`, `ssh://${GITHUB_SSH}:22/`],
+  [`url.${GITHUB_WEB}/.insteadOf`, `ssh://${GITHUB_SSH_443}:443/`],
 ];
 
 function configVars(config: [string, string][]): [string, string][] {
@@ -163,9 +165,9 @@ function identityVars(agent: string, id: number, paths: Paths): [string, string]
       ['user.signingkey', `${paths.key}.pub`],
       ['commit.gpgsign', 'true'],
       ['tag.gpgsign', 'true'],
-      // After the reset, the agent's token goes to github.com only.
+      // After the reset, the agent's token goes to GitHub's host only.
       reset,
-      ['credential.https://github.com.helper', helper],
+      [`credential.${GITHUB_WEB}.helper`, helper],
       askpass,
       ...https,
     ]),

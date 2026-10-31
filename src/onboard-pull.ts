@@ -1,6 +1,7 @@
 import { API, SETTINGS_PATH, pathsFor, sessionEnv } from './agent.ts';
 import { CODEOWNERS_PATHS } from './codeowners.ts';
 import type { Output, Sys } from './types.ts';
+import { GITHUB_WEB } from './host.ts';
 
 /** The branch onboard's pull request comes from: a run again updates the same one. */
 export const ONBOARD_BRANCH = 'process-rules/onboard';
@@ -43,7 +44,7 @@ export async function openPull(sys: Sys, io: Output, target: PullTarget, changes
   const dir = sys.tempDir();
   const env = sessionEnv(sys.env, agent, id, token, pathsFor(sys.home, agent));
   const git = (args: string[], input?: string) => sys.exec('git', args, { cwd: dir, env, ...(input === undefined ? {} : { input }) });
-  const url = `https://github.com/${slug}.git`;
+  const url = `${GITHUB_WEB}/${slug}.git`;
   const failed = (what: string, stderr: string): 1 => {
     io.err(`onboard: ${what} failed: ${stderr.trim()}`);
     return 1;
