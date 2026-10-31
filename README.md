@@ -115,7 +115,8 @@ accepting clears that part of the record.
 
 The owner is never signed in to `gh`, and needs no sign-in kept anywhere on
 the Mac. When a run of `onboard` (or `onboard --add`) reaches a step that
-acts as the owner (giving the agent access, or setting up the board), it
+acts as the owner (giving the agent access, setting up the board, or
+setting the `FIGMA_LIBRARY` secret from an older setting), it
 asks for one browser approval, which serves the rest of that run; a run
 with no such step asks for none. It runs `gh auth login --web` into a
 fresh temporary `gh` folder, asking for gh's own scopes (`repo`,
@@ -173,7 +174,7 @@ repo's CODEOWNERS names the owner.
    one signed test commit as the agent to a throwaway branch, checks GitHub
    shows it Verified by the agent (asking again when the network or GitHub
    fails for a moment), and deletes the branch. The steps that act as you
-   (giving the agent access, the board) share one browser approval, for
+   (giving the agent access, the board, the `FIGMA_LIBRARY` secret) share one browser approval, for
    that run only. Each change waits
    for a yes. The files git tracks in your checkout are never changed: once every step has run,
    `onboard` commits the files it changes as the agent, signed, on the

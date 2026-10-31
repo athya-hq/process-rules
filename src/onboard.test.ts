@@ -14,7 +14,7 @@ import { FEATURES } from './features.ts';
 import { packageVersion } from './version.ts';
 import { GUARD_COMMAND, HOOK_COMMAND, HOOKS_PATH, OLDER_HOOK_COMMANDS, OLDER_PRE_PUSH_HOOKS, PRE_PUSH_HOOK, REVIEW_THREAD_RULE, WORKFLOW_PATH, claudeSettings, jobsWithoutLibrary, olderWorkflows, onboard, onboardArgs, workflow, workflowPins, workflowUpdate } from './onboard.ts';
 import { BASE_ENV } from './agent.ts';
-import { actionsKey, sealedValue } from './secrets.test.ts';
+import { actionsKey, sealedValue } from './fake-secrets.test.ts';
 
 const SETTINGS = `${ROOT}/.github/process-rules.json`;
 const HOOKS = `${ROOT}/${HOOKS_PATH}`;
