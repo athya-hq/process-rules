@@ -41,10 +41,10 @@ The trade-off, for adopters: the agent account holds one classic token, and
 its `repo` scope reaches every repository the agent account can access, not
 only the adopting one. Invite a dedicated agent account to the repositories
 it works in and nothing else; the expiry bounds the rest. It is classic for
-now because a fine-grained token waits on each organisation owner's
-approval, reaches no repository where the agent is only an outside
-collaborator, takes one token per organisation, and cannot register the
-agent's signing key when an organisation owns it. An organisation or
+now because a fine-grained token waits on an organisation owner's approval
+wherever the organisation requires it, reaches no repository where the agent
+is only an outside collaborator, takes one token per organisation, and
+cannot register the agent's signing key when an organisation owns it. An organisation or
 enterprise that blocks classic tokens cannot adopt process-rules yet:
 `onboard` names the block and that an organisation owner can allow classic
 tokens under Settings → Personal access tokens. A fine-grained token or a
