@@ -24,6 +24,8 @@ export interface Sys {
   cwd: string;
   /** The node running the CLI and the CLI's script, both by their real paths. */
   runtime: { node: string; cli: string };
+  /** Node's name for the operating system, such as darwin. */
+  platform: string;
   exec(
     command: string,
     args: readonly string[],

@@ -38,6 +38,7 @@ export class FakeSys implements Sys {
   home = HOME;
   cwd = ROOT;
   runtime = { node: NODE, cli: CLI };
+  platform = 'darwin';
   files = new Map<string, string>([[`${ROOT}/.github/process-rules.json`, SETTINGS]]);
   /** Keychain items by "service/account". */
   keychain = new Map<string, string>();

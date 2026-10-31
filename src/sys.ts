@@ -29,6 +29,7 @@ export function realSys(): Sys {
     home: homedir(),
     cwd: process.cwd(),
     runtime: { node: realPath(process.execPath), cli: realPath(process.argv[1] ?? '') },
+    platform: process.platform,
     exec(command, args, options = {}) {
       const result = spawnSync(command, args, {
         encoding: 'utf8',

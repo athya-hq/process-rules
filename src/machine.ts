@@ -10,13 +10,12 @@ import {
   launcherPath,
   launcherScript,
   pathsFor,
-  readToken,
   sessionScript,
   signingKeys,
-  storeToken,
   tokenInfo,
 } from './agent.ts';
 import { lockOwnerAway } from './lockout.ts';
+import { tokenStore, unsupported } from './token-store.ts';
 import type { Output, Sys } from './types.ts';
 
 /** GitHub's classic-token page, with the note and scopes filled in. */
@@ -36,11 +35,16 @@ export function tokenInstructions(agent: string): string[] {
 
 /**
  * Sets up this machine for one agent account: its signing key, its classic
- * token in the keychain, the key registered on GitHub, and the session file
+ * token in the token store, the key registered on GitHub, and the session file
  * agent sessions source. Needs no client repository; whether the agent can
  * push to one is `onboard`'s check. Every change waits for a yes.
  */
 export async function machine(sys: Sys, io: Output, named?: string): Promise<number> {
+  const store = tokenStore(sys);
+  if (!store) {
+    io.err(`machine: ${unsupported(sys)}`);
+    return 1;
+  }
   const { id, login: agent } = await account(sys, agentFrom(sys, named));
   const paths = pathsFor(sys.home, agent);
   io.out(`Setting up this machine so agent sessions work as ${agent}. Each change asks first.`);
@@ -76,7 +80,7 @@ export async function machine(sys: Sys, io: Output, named?: string): Promise<num
   }
   io.out(`✓ signing key ${paths.key}`);
 
-  let token = readToken(sys, agent);
+  let token = store.read(sys, agent);
   if (token) {
     const check = checkToken(token, await tokenInfo(sys, token), agent, sys.now());
     if (check.problem !== undefined) {
@@ -96,16 +100,16 @@ export async function machine(sys: Sys, io: Output, named?: string): Promise<num
       io.err(`machine: ${problem}`);
       return 1;
     }
-    if (!(await confirm(`Store it in this machine's keychain (service process-rules, account ${agent})?`))) {
+    if (!(await confirm(`Store it in ${store.where} (${store.item(agent)})?`))) {
       return stop('token');
     }
-    if (!storeToken(sys, agent, entered)) {
-      io.err('machine: the keychain did not take the token');
+    if (!store.store(sys, agent, entered)) {
+      io.err(`machine: ${store.where} did not take the token`);
       return 1;
     }
     token = entered;
   }
-  io.out(`✓ classic token for ${agent} in the keychain`);
+  io.out(`✓ classic token for ${agent} in ${store.where}`);
 
   const publicKey = sys.read(`${paths.key}.pub`).trim();
   if (!(await signingKeys(sys, agent, token)).includes(keyBody(publicKey))) {
@@ -131,7 +135,7 @@ export async function machine(sys: Sys, io: Output, named?: string): Promise<num
   }
   io.out(`✓ key registered as ${agent}'s signing key`);
 
-  const script = sessionScript(agent, id, paths);
+  const script = sessionScript(agent, id, paths, store);
   if (!sys.exists(paths.session) || sys.read(paths.session) !== script) {
     if (!(await confirm(`Write ${paths.session}, which agent sessions source to act as ${agent}?`))) {
       return stop('session file');

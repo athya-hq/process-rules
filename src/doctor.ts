@@ -7,13 +7,13 @@ import {
   keyPairProblem,
   launcherPath,
   pathsFor,
-  readToken,
   sessionScript,
   signingKeys,
   tokenInfo,
 } from './agent.ts';
 import { ownerRulesHere } from './codeowners.ts';
 import { exposure, exposureLines, readDeclined, setAside } from './lockout.ts';
+import { tokenStore, unsupported } from './token-store.ts';
 import type { Output, Sys } from './types.ts';
 
 interface Check {
@@ -40,6 +40,11 @@ async function remote(
  * names the `machine` step to re-run; a token near its end is a warning.
  */
 export async function doctor(sys: Sys, io: Output, named?: string): Promise<number> {
+  const store = tokenStore(sys);
+  if (!store) {
+    io.err(`doctor: ${unsupported(sys)}`);
+    return 1;
+  }
   const typed = agentFrom(sys, named);
   // GitHub's spelling of the login, as machine stored it; when GitHub cannot
   // be asked, the typed one, and the session file check says why.
@@ -53,10 +58,10 @@ export async function doctor(sys: Sys, io: Output, named?: string): Promise<numb
   const keyProblem = keyPairProblem(sys, paths.key);
   const checks: Check[] = [{ name: 'signing key', problem: keyProblem }];
 
-  const token = readToken(sys, agent);
+  const token = store.read(sys, agent);
   checks.push(
     await remote('token', async () => {
-      if (!token) return `no ${agent} token in this machine's keychain`;
+      if (!token) return `no ${agent} token in ${store.where}`;
       const check = checkToken(token, await tokenInfo(sys, token), agent, sys.now());
       if (check.problem === undefined && check.days <= EXPIRY_WARNING_DAYS) {
         warnings.push(`the token ends in ${check.days} days; run process-rules machine to replace it`);
@@ -72,7 +77,7 @@ export async function doctor(sys: Sys, io: Output, named?: string): Promise<numb
     await remote('session file', async () => {
       if (!sys.exists(paths.session)) return `${paths.session} is missing`;
       if (found instanceof Error) throw found;
-      const script = sessionScript(agent, found.id, paths);
+      const script = sessionScript(agent, found.id, paths, store);
       return sys.read(paths.session) === script ? undefined : `${paths.session} is out of date`;
     }),
   );

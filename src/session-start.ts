@@ -3,7 +3,6 @@ import {
   loadSettings,
   lockScript,
   pathsFor,
-  readToken,
   sameLogin,
   sessionNames,
   sessionRecord,
@@ -12,6 +11,7 @@ import {
 } from './agent.ts';
 import { cloudLogin, cloudToken } from './cloud.ts';
 import { PRE_PUSH_HOOK, prePushHook } from './onboard.ts';
+import { tokenStore, unsupported } from './token-store.ts';
 import type { Output, Sys } from './types.ts';
 
 /**
@@ -149,6 +149,8 @@ function start(sys: Sys): Said {
   const { agent } = settings;
   const paths = pathsFor(sys.home, agent);
   const fix = `ask ${owner} to run process-rules machine ${agent} (process-rules doctor ${agent} names what is missing)`;
+  const store = tokenStore(sys);
+  if (!store) return locked(unsupported(sys), `tell ${owner}`);
 
   if (!sys.exists(paths.session)) return locked(`${paths.session} is missing`, fix);
   let script: string;
@@ -158,7 +160,7 @@ function start(sys: Sys): Said {
     return locked(`${paths.session} cannot be read (${message(error)})`, fix);
   }
   const names = sessionNames(script);
-  if (!names || !sameLogin(names.agent, agent) || script !== sessionScript(names.agent, names.id, paths)) {
+  if (!names || !sameLogin(names.agent, agent) || script !== sessionScript(names.agent, names.id, paths, store)) {
     return locked(`${paths.session} is out of date, or not the file process-rules machine writes, for ${agent}`, fix);
   }
   try {
@@ -166,8 +168,8 @@ function start(sys: Sys): Said {
   } catch (error) {
     return locked(`appending ${paths.session} to CLAUDE_ENV_FILE failed (${message(error)})`, fix);
   }
-  if (!readToken(sys, names.agent)) {
-    return locked(`this Mac's keychain has no ${names.agent} token, so GitHub refuses gh and git`, fix);
+  if (!store.read(sys, names.agent)) {
+    return locked(`${store.where} has no ${names.agent} token, so GitHub refuses gh and git`, fix);
   }
   return { line: `process-rules: this session works as ${names.agent} on GitHub.`, agent: names.agent };
 }

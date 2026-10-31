@@ -257,3 +257,17 @@
   enterprise that blocks classic tokens cannot adopt yet. A fine-grained
   token or a GitHub App waits for adoption outside Athya. Docs only; no
   release.
+- **2026-11-01 — Record: P-29, the token store behind an interface.** The
+  owner's decision of 2026-10-31 on #49: Athya's agents run on macOS
+  laptops and in Claude cloud sessions, so keep the macOS keychain, but put
+  the token store behind an interface so a Linux or Windows store can be
+  added without rework. One `TokenStore` reads and stores the agent's token
+  and gives the session file the shell command that reads it on each use;
+  the keychain, through `/usr/bin/security`, is its only implementation,
+  and `machine`, `doctor`, `session-start` and `onboard` reach the token
+  through it. The session file is unchanged, so no machine needs `machine`
+  run again. On a platform with no store, `machine` and `doctor` refuse,
+  naming macOS, and `session-start` keeps GitHub locked out. The owner
+  lockout's checks of the owner's own keychain items stay as they are: they
+  are not the agent's token. Other platforms wait for adoption outside
+  Athya; the README states macOS as the supported platform.

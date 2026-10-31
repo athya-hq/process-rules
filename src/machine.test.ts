@@ -33,6 +33,16 @@ async function setUp(sys: FakeSys, named?: string): Promise<{ code: number; out:
 }
 
 describe('machine', () => {
+  it('refuses a platform with no token store, naming macOS, before changing anything', async () => {
+    const sys = Object.assign(fresh(), { platform: 'linux' });
+    assert.deepEqual(await setUp(sys), {
+      code: 1,
+      out: [],
+      err: ["machine: process-rules supports macOS only, where the keychain holds the agent's token; this machine runs linux"],
+    });
+    assert.deepEqual([sys.calls, sys.requests, sys.asked], [[], [], []]);
+  });
+
   it('sets up a fresh machine', async () => {
     const sys = fresh();
     const { code, out, err } = await setUp(sys);
@@ -233,7 +243,7 @@ describe('machine', () => {
     const sys = fresh();
     sys.execOverride = (call) => (call.args[0] === '-i' ? { code: 1, stdout: '', stderr: '' } : undefined);
     const { code, err } = await setUp(sys);
-    assert.deepEqual({ code, err }, { code: 1, err: ['machine: the keychain did not take the token'] });
+    assert.deepEqual({ code, err }, { code: 1, err: ["machine: this Mac's keychain did not take the token"] });
   });
 
   it('reports a failed ssh-keygen', async () => {

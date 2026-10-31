@@ -282,6 +282,15 @@ describe('sessionStart', () => {
     assert.deepEqual((await start(sys)).out, ['process-rules: this session works as ExampleBot on GitHub.']);
   });
 
+  it('keeps GitHub locked out on a platform with no token store', async () => {
+    const sys = Object.assign(ready(), { platform: 'linux' });
+    const { out, env } = await start(sys);
+    assert.equal(env, `\n${lockScript(HOME)}`);
+    assert.deepEqual(out, [
+      "process-rules: GitHub is locked out of this session: process-rules supports macOS only, where the keychain holds the agent's token; this machine runs linux. Do not work around the lock; tell example-owner.",
+    ]);
+  });
+
   it('says GitHub refuses the session when the keychain has no token', async () => {
     const sys = ready();
     sys.keychain.clear();
