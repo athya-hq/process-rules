@@ -1,0 +1,19 @@
+README.md
+  s_b84a14154829e7::t_1208951342669d 87-90
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b0eb3bd871818f5d636ab434dda7ca60fc06836f",
+  "prompts": {},
+  "sessions": {
+    "s_b84a14154829e7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b2b362e0-b521-4be4-8302-ec6666ad3fd9",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Alok Bansal <alokagrawal8@gmail.com>"
+    }
+  }
+}
