@@ -52,3 +52,11 @@ the **owner**, whose labels and comments count as approvals, and the
 | P-12 | [#34](https://github.com/athya-hq/process-rules/issues/34) | Staged adoption         | A client turns on one feature at a time: `onboard <owner> <agent> --features identity` sets up identity alone; `onboard --add <feature>` adds one; checks of features that are off pass, saying so; the Project's title is a setting | shipped  | P-11           |
 | P-13 | [#35](https://github.com/athya-hq/process-rules/issues/35) | Onboard finds the accounts | Plain `process-rules onboard` in a new client suggests the owner from the `gh` login and the agent from the accounts `machine` set up, for the owner to confirm; `.claude/settings.json` keeps its formatting, gaining only the hook entry | shipped  | P-12           |
 | P-14 | [#36](https://github.com/athya-hq/process-rules/issues/36) | process-rules adopts itself | process-rules onboarded with `board`, `pr-identity` and `work-rules`: its roadmap slices as Slice issues under a Work item the owner approved, on a Project; an agent PR here, Verified and pushed by the agent, passes its own checks | shipped  | P-13           |
+
+## Added after v1
+
+Slices added since v1 live in their issues; these rows only point to them.
+
+| id   | issue | title | you will see | status |
+| ---- | ----- | ----- | ------------ | ------ |
+| P-35 | [#83](https://github.com/athya-hq/process-rules/issues/83) | Owner commands sign in for one run only | `onboard` and `onboard --add` ask for one browser approval per run, into a temporary `gh` folder deleted afterwards; the owner stays signed out of `gh`, and nothing tells the owner to sign in or out of it | building |

@@ -10,7 +10,7 @@ async function setUp(sys: FakeSys, answers = ['y', 'y', 'y', 'y', 'y']): Promise
   sys.answers = [...answers];
   const { io, out, err } = capture();
   const confirm = async (question: string) => /^y/.test(await sys.ask(question));
-  return { url: await setUpBoard(sys, io, confirm, SLUG, 'example-owner'), out, err };
+  return { url: await setUpBoard(sys, io, confirm, SLUG, 'example-owner', OWNER_TOKEN), out, err };
 }
 
 describe('setUpBoard', () => {
@@ -59,7 +59,7 @@ describe('setUpBoard', () => {
     const board = new Board(sys);
     board.template = 'missing';
     sys.answers = ['y', 'y', 'y', 'y', 'y'];
-    await setUpBoard(sys, capture().io, async (q) => /^y/.test(await sys.ask(q)), SLUG, 'example-owner', '  ');
+    await setUpBoard(sys, capture().io, async (q) => /^y/.test(await sys.ask(q)), SLUG, 'example-owner', OWNER_TOKEN, '  ');
     assert.deepEqual(board.titles, ['example-app work']);
   });
 
@@ -215,22 +215,6 @@ describe('setUpBoard', () => {
     assert.ok(out.includes("- the process-rules template could not be copied (GitHub's GraphQL API refused: Resource not accessible by integration); keeping the Project as it is"));
     assert.deepEqual(out.slice(-4), viewsChecklist(URL));
   });
-
-  for (const [name, change, message] of [
-    ['gh not signed in', (sys: FakeSys) => (sys.ghToken = undefined), 'onboard: gh is not signed in; sign in as example-owner with: gh auth login -s project'],
-    ['gh signed in as someone else', (sys: FakeSys) => sys.acceptToken(OWNER_TOKEN, 'someone'), 'onboard: gh is signed in as someone, not the owner example-owner'],
-    ['gh with a token GitHub refuses', (sys: FakeSys) => (sys.ghToken = 'gho_bad'), 'onboard: gh is signed in as nobody GitHub accepts, not the owner example-owner'],
-    ['gh without the scopes', (sys: FakeSys) => sys.acceptToken(OWNER_TOKEN, 'example-owner', { 'x-oauth-scopes': 'repo, project' }), 'onboard: your gh login lacks admin:org; run: gh auth refresh -h github.com -s admin:org'],
-    ['gh reporting no scopes', (sys: FakeSys) => sys.acceptToken(OWNER_TOKEN, 'example-owner', {}), 'onboard: your gh login lacks project, admin:org; run: gh auth refresh -h github.com -s project,admin:org'],
-  ] as const) {
-    it(`stops with ${name}`, async () => {
-      const sys = new FakeSys();
-      new Board(sys);
-      change(sys);
-      const { url, err } = await setUp(sys);
-      assert.deepEqual({ url, err }, { url: undefined, err: [message] });
-    });
-  }
 
   for (const [index, step] of ['issue types', 'labels', 'project', 'fields', 'views'].entries()) {
     it(`stops when "${step}" is declined, changing nothing from it on`, async () => {

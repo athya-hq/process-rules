@@ -29,6 +29,7 @@ export interface Call {
   env?: Record<string, string | undefined>;
   input?: string;
   timeoutMs?: number;
+  interactive?: boolean;
 }
 
 /** A Sys whose world is plain data; each test changes what it needs. */
@@ -49,8 +50,11 @@ export class FakeSys implements Sys {
   ghAccounts: string[] = [];
   /** Whether the macOS keychain holds a git password for github.com. */
   gitPassword = false;
-  /** What `gh auth token` prints: the owner's gh login, when signed in. */
+  /** The token the owner's browser approval gives `gh auth login`; undefined when the owner turns it down. */
   ghToken: string | undefined;
+  /** The temporary folders made, and those removed. */
+  temps: string[] = [];
+  removed: string[] = [];
   /** Overrides for exec, by "command firstArg"; return undefined to fall through. */
   execOverride: (call: Call) => ExecResult | undefined = () => undefined;
   routes = new Map<string, HttpResult | (() => HttpResult)>();
@@ -109,9 +113,9 @@ export class FakeSys implements Sys {
   exec(
     command: string,
     args: readonly string[],
-    options: { cwd?: string; env?: Record<string, string | undefined>; input?: string; timeoutMs?: number } = {},
+    options: { cwd?: string; env?: Record<string, string | undefined>; input?: string; timeoutMs?: number; interactive?: boolean } = {},
   ): ExecResult {
-    const call: Call = { command, args, ...(options.cwd ? { cwd: options.cwd } : {}), ...(options.env ? { env: options.env } : {}), ...(options.input ? { input: options.input } : {}), ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}) };
+    const call: Call = { command, args, ...(options.cwd ? { cwd: options.cwd } : {}), ...(options.env ? { env: options.env } : {}), ...(options.input ? { input: options.input } : {}), ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}), ...(options.interactive ? { interactive: true } : {}) };
     this.calls.push(call);
     const override = this.execOverride(call);
     if (override) return override;
@@ -133,7 +137,17 @@ export class FakeSys implements Sys {
       );
       return { code: 0, stdout: lines.slice(0, 1).join('\n'), stderr: lines.slice(1).join('\n') };
     }
-    if (command === 'gh' && args[0] === 'auth') return this.ghToken ? ok(`${this.ghToken}\n`) : fail('not logged in');
+    // gh keeps its login in GH_CONFIG_DIR; the owner's own folder, ~/.config/gh, holds none.
+    const ghHosts = `${options.env?.GH_CONFIG_DIR ?? `${HOME}/.config/gh`}/hosts.yml`;
+    if (command === 'gh' && args.slice(0, 2).join(' ') === 'auth login') {
+      if (!this.ghToken) return fail('authentication cancelled');
+      this.files.set(ghHosts, `github.com:\n    oauth_token: ${this.ghToken}\n`);
+      return ok();
+    }
+    if (command === 'gh' && args.slice(0, 2).join(' ') === 'auth token') {
+      const token = /oauth_token: (\S+)/.exec(this.files.get(ghHosts) ?? '')?.[1];
+      return token ? ok(`${token}\n`) : fail('no oauth token found for github.com');
+    }
     if (command === '/usr/bin/security' && args[0] === 'find-internet-password') return this.gitPassword ? ok() : fail('not found');
     if (command === 'git' && args[0] === 'credential-osxkeychain') {
       if (options.input?.includes('host=github.com')) this.gitPassword = false;
@@ -208,6 +222,19 @@ export class FakeSys implements Sys {
 
   mkdir(path: string): void {
     this.dirs.push(path);
+  }
+
+  tempDir(): string {
+    const dir = `/tmp/process-rules-${this.temps.length + 1}`;
+    this.temps.push(dir);
+    this.dirs.push(dir);
+    return dir;
+  }
+
+  remove(path: string): void {
+    this.removed.push(path);
+    for (const name of this.files.keys()) if (name === path || name.startsWith(`${path}/`)) this.files.delete(name);
+    this.dirs = this.dirs.filter((dir) => dir !== path && !dir.startsWith(`${path}/`));
   }
 
   http(url: string, options: { method?: string; token?: string; body?: unknown; headers?: Record<string, string> } = {}): Promise<HttpResult> {

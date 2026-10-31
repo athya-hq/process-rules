@@ -47,6 +47,19 @@ describe('realSys', () => {
     assert.equal(sys.exists(join(dir, 'g')), true);
   });
 
+  it('makes a private temporary folder and removes it with what is in it', () => {
+    const temp = sys.tempDir();
+    assert.equal(statSync(temp).mode & 0o777, 0o700);
+    sys.write(join(temp, 'hosts.yml'), 'token');
+    sys.remove(temp);
+    assert.equal(sys.exists(temp), false);
+    sys.remove(temp);
+  });
+
+  it('leaves an interactive command the terminal, capturing nothing', () => {
+    assert.deepEqual(sys.exec('sh', ['-c', 'exit 0'], { interactive: true }), { code: 0, stdout: '', stderr: '' });
+  });
+
   it('knows home, cwd, env and the time', () => {
     assert.equal(sys.cwd, process.cwd());
     assert.ok(sys.home.length > 0);

@@ -4,13 +4,16 @@ import {
   chmodSync,
   existsSync,
   mkdirSync,
+  mkdtempSync,
   readdirSync,
   readFileSync,
   realpathSync,
+  rmSync,
   writeFileSync,
 } from 'node:fs';
 import * as http from 'node:http';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { isatty } from 'node:tty';
 
@@ -33,6 +36,7 @@ export function realSys(): Sys {
         env: options.env ?? process.env,
         input: options.input,
         timeout: options.timeoutMs,
+        ...(options.interactive ? { stdio: 'inherit' as const } : {}),
       });
       return {
         code: result.status ?? 1,
@@ -49,6 +53,8 @@ export function realSys(): Sys {
     append: (path, data) => appendFileSync(path, data),
     mkdir: (path) => mkdirSync(path, { recursive: true, mode: 0o700 }),
     list: (path) => (existsSync(path) ? readdirSync(path) : []),
+    tempDir: () => mkdtempSync(join(tmpdir(), 'process-rules-')),
+    remove: (path) => rmSync(path, { recursive: true, force: true }),
     async http(url, options = {}) {
       const response = await fetch(url, {
         method: options.method ?? 'GET',

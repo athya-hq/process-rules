@@ -83,6 +83,16 @@ the owner's own way to GitHub (docs/decisions.md); agent sessions send GitHub
 over HTTPS and refuse SSH, and the pre-push hook refuses their pushes over
 SSH.
 
+The owner is never signed in to `gh`, and needs no sign-in kept anywhere on
+the Mac. A command that needs the owner's GitHub rights (`onboard`, and
+`onboard --add`) asks for one browser approval each run: it runs
+`gh auth login --web` into a fresh temporary `gh` folder, asking only for
+the scopes the run's features need, reads the token from there, refuses it
+unless it is the owner's, and deletes the folder whatever happens. The
+token lives in the command's memory for that run; the owner's own `gh`
+config and keychain are never read or written, so there is nothing to sign
+out of afterwards.
+
 `process-rules doctor` re-checks the key, the token and its scopes, the key's
 registration, the session file and that the launcher runs, names the step to re-run, and warns 14
 days before the token ends. Run in an adopting repo, it also warns when the
@@ -92,7 +102,7 @@ repo's CODEOWNERS names the owner.
 
 1. On each Mac that runs agent sessions: `process-rules machine <agent>`.
 2. In the client repository, as its owner: `process-rules onboard`. It
-   suggests the owner from your `gh` login and the agent from the accounts
+   suggests the owner from the run's browser sign-in (below) and the agent from the accounts
    `machine` set up on this Mac, for you to confirm (or name them:
    `process-rules onboard <owner> <agent>`). It writes `.github/process-rules.json`, adds to `.claude/settings.json`
    the lock in `env`, a SessionStart hook running `process-rules
@@ -104,11 +114,11 @@ repo's CODEOWNERS names the owner.
    weekly run, the only one that writes to issues. It checks the agent can
    push. With no access, or read access only (a public repo, or an
    organisation's base permission), `onboard` offers to give it write access
-   through your `gh` and to accept the invitation as the agent; and it names
+   as you and to accept the invitation as the agent; and it names
    an organisation that
-   requires SAML authorisation or blocks classic tokens. Through your `gh`
-   login as the owner (which needs the `project` scope, and `admin:org` in an
-   organisation), it sets up the work board: the organisation's issue types
+   requires SAML authorisation or blocks classic tokens. As the owner (with
+   the `project` scope, and `admin:org` in an organisation), it sets up the
+   work board: the organisation's issue types
    (Work item, Slice, State, Decision, Brief), the repo's labels (`approved`,
    `needs-owner`, `mechanical`, `veto`, `expiring`, `cannot-run-here`), and a
    Project "<repo> work" linked to the repo. It makes that Project by copying
@@ -126,7 +136,9 @@ repo's CODEOWNERS names the owner.
    cannot set: the grouping and the auto-archive workflow. Last, it pushes
    one signed test commit as the agent to a throwaway branch, checks GitHub
    shows it Verified by the agent (asking again when the network or GitHub
-   fails for a moment), and deletes the branch. Each change waits
+   fails for a moment), and deletes the branch. The steps that act as you
+   (giving the agent access, the board) share one browser approval, for
+   that run only. Each change waits
    for a yes; commit the files afterwards. When a rule in the repo's
    CODEOWNERS (the file GitHub uses: `.github/CODEOWNERS`, else `CODEOWNERS`,
    else `docs/CODEOWNERS`) names the owner, GitHub will ask the owner to
