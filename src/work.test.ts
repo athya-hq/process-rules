@@ -357,12 +357,13 @@ describe('prePush', () => {
 
   describe('a push of only a merge, such as of the default branch', () => {
     const MAIN = 'c'.repeat(40);
-    function merged(parents: string): FakeSys {
+    const MERGE = "Merge branch 'main' into work\n";
+    function merged(parents: string, pushed = MERGE): FakeSys {
       const sys = session('');
       sys.execOverride = (call) => {
         if (call.args[0] !== 'log') return undefined;
         if (call.args.includes('--format=%P')) return { code: 0, stdout: parents, stderr: '' };
-        const stdout = call.args.includes('--no-merges') ? 'Add the thing\n\nSlice: #12\n' : "Merge branch 'main' into work\n";
+        const stdout = call.args.includes('--no-merges') ? 'Add the thing\n\nSlice: #12\n' : pushed;
         return { code: 0, stdout, stderr: '' };
       };
       return sys;
@@ -375,8 +376,14 @@ describe('prePush', () => {
     });
 
     it('is refused beside a commit of its own naming no slice', async () => {
-      const sys = merged(`${REMOTE} ${MAIN}\n${REMOTE}\n`);
+      const sys = merged(`${REMOTE} ${MAIN}\n${REMOTE}\n`, `${MERGE}\nTidy up\n`);
       assert.equal((await push(sys, `refs/heads/work ${LOCAL} refs/heads/work ${REMOTE}`)).err[0], '✗ the commits for work name no slice; add a trailer "Slice: #N" to a commit message');
+    });
+
+    it('passes beside a commit of its own naming the slice, without reading past the merges', async () => {
+      const sys = merged(`${REMOTE} ${MAIN}\n${REMOTE}\n`, `${MERGE}\nAdd more\n\nSlice: #12\n`);
+      assert.deepEqual(await push(sys, `refs/heads/work ${LOCAL} refs/heads/work ${REMOTE}`), { code: 0, err: [] });
+      assert.ok(!sys.calls.some((c) => c.args.includes('--no-merges')));
     });
   });
 

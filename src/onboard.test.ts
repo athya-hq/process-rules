@@ -418,12 +418,14 @@ describe('onboard', () => {
       });
       sys.execOverride = (call) => {
         if (call.command !== 'gh' || call.args[0] !== 'api') return undefined;
+        assert.deepEqual(call.args, ['api', '-X', 'PUT', 'repos/example-org/example-app/collaborators/ExampleBot', '-f', 'permission=push']);
         invited = true;
         return { code: 0, stdout: '', stderr: '' };
       };
       sys.answers = Array<string>(12).fill('y');
       const { code } = await run(sys);
       assert.equal(code, 0);
+      assert.ok(invited, 'grants write access');
       assert.ok(sys.asked.some((q) => q.startsWith('ExampleBot can read but not push to example-org/example-app. Give it write access')));
       assert.ok(sys.asked.some((q) => q.startsWith("Accept ExampleBot's invitation")));
     });
