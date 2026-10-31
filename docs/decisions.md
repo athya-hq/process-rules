@@ -408,10 +408,15 @@
   settings `env` that `onboard` writes, the session file session-start
   compares, the hook commands and the workflow template. A test fails when
   the host is written out in `src/` outside that module. The shared
-  workflow `.github/workflows/checks.yml` still checks out
-  `athya-hq/process-rules` from github.com, since workflow YAML cannot
-  import a constant; a host setting would change it there too. The setting
-  itself, for GitHub Enterprise Server or GHE.com, is not built.
+  workflow `.github/workflows/checks.yml` names no host: its checkout of
+  `athya-hq/process-rules` and the actions it uses (`actions/checkout`,
+  `actions/setup-node`) come from whichever host runs the workflow. On
+  another host all of them must exist there (for actions, GitHub Connect
+  can sync them), or the checkout must name github.com; that is for the
+  host setting, which, for GitHub
+  Enterprise Server or GHE.com, is not built. GitHub Enterprise Server's
+  API is `https://<host>/api/v3`, not `api.<host>`, so the setting also
+  changes how the API base is derived.
 - **2026-11-01 — Record: owners and agents as lists, P-26.** The owner, on
   #56 (31 Oct 2026, in chat): Athya keeps one owner and one agent for now,
   but the settings become generic: they accept lists of owners and agents,
