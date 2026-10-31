@@ -615,6 +615,15 @@ describe('onboard', () => {
       });
     }
 
+    it('refuses --add before renaming an older feature, changing nothing', async () => {
+      const sys = personal();
+      const settings = JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity', 'design'] });
+      sys.files.set(SETTINGS, settings);
+      assert.equal((await run(sys, ['--add', 'work-rules'])).code, 1);
+      assert.equal(sys.files.get(SETTINGS), settings);
+      assert.deepEqual(sys.asked, []);
+    });
+
     it('names the features its settings list that cannot run there', async () => {
       const sys = personal();
       sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity', 'decisions'] }));

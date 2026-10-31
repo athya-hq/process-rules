@@ -585,6 +585,11 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     let raw = JSON.parse(sys.read(settingsFile)) as Record<string, unknown>;
     features = featuresIn(raw);
     schedule = scheduleIn(raw);
+    // Before any change, so a refused --add leaves the settings as they were.
+    if (add && !features.includes(add) && NEEDS_ISSUE_TYPES.includes(add) && !(await byOrganisation())) {
+      io.err(`onboard: ${personal}, so ${add} cannot run here`);
+      return 1;
+    }
     // Settings an older release wrote: a feature by its older name, or the Figma library key, which belongs in a secret.
     const renamed = renamedLines(raw).length > 0;
     if (renamed || raw.figma !== undefined) {
@@ -609,10 +614,6 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
       io.out(`! ${personal}, so ${typed.join(', ')} cannot run here; their checks pass, saying so. Take them out of ${SETTINGS_PATH}'s features`);
     }
     if (add && !features.includes(add)) {
-      if (NEEDS_ISSUE_TYPES.includes(add) && !(await byOrganisation())) {
-        io.err(`onboard: ${personal}, so ${add} cannot run here`);
-        return 1;
-      }
       if (!(await confirm(`Turn ${add} on in ${SETTINGS_PATH}, once its setup below is done?`))) return stop('settings file');
       features = FEATURES.filter((feature) => features.includes(feature) || feature === add);
       // Written only once the feature's setup has finished, so settings never claim a half-set-up feature.

@@ -278,5 +278,7 @@ describe('isPersonal', () => {
   it('throws when GitHub will not say', async () => {
     const sys = new FakeSys().route('GET', '/repos/example-org/example-app', { status: 403, json: { message: 'Forbidden' } });
     await assert.rejects(isPersonal(sys, 'example-org/example-app', 'ghs_run'), /cannot tell whether a personal account owns example-org\/example-app \(HTTP 403\)/);
+    const odd = new FakeSys().route('GET', '/repos/example-org/example-app', { status: 200, json: { owner: { type: 'Enterprise' } } });
+    await assert.rejects(isPersonal(odd, 'example-org/example-app', 'ghs_run'), /cannot tell whether a personal account owns example-org\/example-app: GitHub names its owner a "Enterprise"/);
   });
 });

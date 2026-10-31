@@ -83,7 +83,9 @@ export function isPersonal(sys: Sys, slug: string, token: string): Promise<boole
       const { status, json } = await sys.http(`${API}/repos/${slug}`, { token });
       const type = (json as { owner?: { type?: unknown } } | null)?.owner?.type;
       if (status !== 200 || typeof type !== 'string') throw new Error(`cannot tell whether a personal account owns ${slug} (HTTP ${status})`);
-      return type === 'User';
+      if (type === 'Organization') return false;
+      if (type === 'User') return true;
+      throw new Error(`cannot tell whether a personal account owns ${slug}: GitHub names its owner a ${JSON.stringify(type)}`);
     })();
     asked.set(slug, answer);
   }
