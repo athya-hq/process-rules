@@ -114,6 +114,7 @@ describe('run', () => {
     assert.deepEqual(await capture(['propose']), { code: 2, out: [], err: ['process-rules: propose needs an issue number', USAGE] });
     assert.deepEqual(await capture(['propose', 'twelve']), { code: 2, out: [], err: ['process-rules: propose needs an issue number, not "twelve"', USAGE] });
     assert.equal((await capture(['propose', '12', '13'])).code, 2);
+    assert.deepEqual(await capture(['propose', '#0']), { code: 2, out: [], err: ['process-rules: propose needs an issue number, not "#0"', USAGE] });
   });
 
   it('runs guard, refusing when the check itself fails', async () => {

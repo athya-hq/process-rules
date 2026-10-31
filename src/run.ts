@@ -64,7 +64,7 @@ export async function run(
       return 2;
     }
   }
-  if (command === 'propose' && !/^#?\d+$/.test(rest[0] ?? '')) {
+  if (command === 'propose' && !/^#?0*[1-9]\d*$/.test(rest[0] ?? '')) {
     io.err(`process-rules: propose needs an issue number${rest[0] === undefined ? '' : `, not "${rest[0]}"`}`);
     io.err(USAGE);
     return 2;

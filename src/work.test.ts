@@ -43,6 +43,7 @@ function github(sys: FakeSys, issue: Node | null, pulls: Node[] = []): void {
       const nodes = (variables.ids ?? []).map((id) => (id === 'gone' ? null : { id, reactions: { nodes: thumbs.get(id) ?? [] } }));
       return { status: 200, json: { data: { nodes } } };
     }
+    if (query.includes('before: $before')) return { status: 200, json: { data: { node: { comments: issue?.earlier } } } };
     if (!query.includes('timelineItems')) return { status: 200, json: { data: { repository: { issue } } } };
     const nodes = ((issue?.parent as Node).timelineItems as { nodes: Node[] }).nodes;
     return { status: 200, json: { data: { node: { timelineItems: { nodes, pageInfo: { hasNextPage: false, endCursor: null } } } } } };
@@ -194,11 +195,27 @@ describe('sliceProblems', () => {
         ["on the owner's own proposal", [thumb()], comment('Proposal: add #12', LATER, OWNER), refused],
         ['on an agent comment that is not a proposal', [thumb()], comment('Added #12 for the owner', LATER, AGENT), refused],
         ['on a proposal for another issue', [thumb()], comment('Proposal: drop state #30 (of #12)', LATER, AGENT), refused],
+        ['on a proposal naming #12abc', [thumb()], comment('Proposal: add #12abc', LATER, AGENT), refused],
       ] as const) {
         it(`does not pass when ${name}`, async () => {
           assert.deepEqual(await problems(withProposal([...thumbs], made).issue), [expected]);
         });
       }
+
+      it('finds a proposal that later comments pushed back, reading every page of the slice\'s comments', async () => {
+        const sys = new FakeSys();
+        const g = added();
+        const made = comment('Proposal: add #12', LATER, AGENT);
+        g.thumbs.set(made.id as string, [thumb()]);
+        g.comments.push(comment('Later talk', LATEST, AGENT));
+        g.issue.id = 'I_12';
+        g.issue.comments = { nodes: g.comments, pageInfo: { hasPreviousPage: true, startCursor: 'c2' } };
+        g.issue.earlier = { nodes: [made], pageInfo: { hasPreviousPage: false, startCursor: 'c1' } };
+        github(sys, g.issue);
+        assert.deepEqual(await sliceProblems(sys, 'tok', SLUG, 12, ACCOUNTS, {}), []);
+        const page = sys.requests.find((r) => (r.body as { query?: string } | undefined)?.query?.includes('before: $before'));
+        assert.deepEqual((page?.body as { variables: unknown }).variables, { id: 'I_12', before: 'c2' });
+      });
 
       it('reads no reactions when a Decision: settles it, or nothing was proposed', async () => {
         const sys = new FakeSys();
@@ -321,7 +338,7 @@ describe('sliceProblems', () => {
     let page = 0;
     sys.route('POST', '/graphql', () => {
       const { query, variables } = sys.requests.at(-1)?.body as { query: string; variables: { after?: string | null } };
-      if (!query.includes('timelineItems')) return { status: 200, json: { data: { repository: { issue: g.issue } } } };
+    if (!query.includes('timelineItems')) return { status: 200, json: { data: { repository: { issue: g.issue } } } };
       page++;
       const first = variables.after === null;
       const nodes = first ? [g.timeline[0]] : [g.timeline[1]];

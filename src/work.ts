@@ -25,10 +25,11 @@ type TimelineItem =
   | ({ __typename: 'IssueComment' } & Comment);
 
 interface SliceGraph {
+  id: string;
   number: number;
   title: string;
   issueType: { name: string } | null;
-  comments: { nodes: Comment[] };
+  comments: { nodes: Comment[]; pageInfo?: { hasPreviousPage: boolean; startCursor: string | null } };
   parent: { id: string; number: number; issueType: { name: string } | null } | null;
   subIssues: {
     nodes: {
@@ -46,7 +47,7 @@ const COMMENT = 'id author { login } body createdAt lastEditedAt';
 const SLICE_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     issue(number: $number) {
-      number title issueType { name } comments(last: 100) { nodes { ${COMMENT} } }
+      id number title issueType { name } comments(last: 100) { nodes { ${COMMENT} } pageInfo { hasPreviousPage startCursor } }
       parent { id number issueType { name } }
       subIssues(first: 100) { nodes { number title issueType { name } stateReason closedAt comments(last: 50) { nodes { ${COMMENT} } } } }
     }
@@ -68,6 +69,10 @@ const TIMELINE_QUERY = `query($id: ID!, $after: String) {
       }
     }
   }
+}`;
+/** The slice's earlier comments, 100 a page, newest page first. */
+const COMMENTS_QUERY = `query($id: ID!, $before: String) {
+  node(id: $id) { ... on Issue { comments(last: 100, before: $before) { nodes { ${COMMENT} } pageInfo { hasPreviousPage startCursor } } } }
 }`;
 /** The 👍 reactions on some comments, by comment id; GitHub reads 100 ids at a time. */
 const THUMBS_UP_QUERY = `query($ids: [ID!]!) {
@@ -98,7 +103,7 @@ function decided(comments: Comment[], owner: string, since?: string, mention?: s
 }
 
 /** A proposal's first line, and the issue it names first: what the proposal is for. */
-const PROPOSAL = /^\s*Proposal:[^#\n]*#(\d+)/i;
+const PROPOSAL = /^\s*Proposal:[^#\n]*#(\d+)\b/i;
 
 /** The agent's proposals among `comments` for issue `number`. */
 function proposalsFor(comments: Comment[], agent: string, number: number): Comment[] {
@@ -181,7 +186,15 @@ async function readSlice(
   }
   const approvedAt = approval.createdAt;
   const parentComments = events.filter((event): event is { __typename: 'IssueComment' } & Comment => event.__typename === 'IssueComment');
-  const comments = issue.comments.nodes;
+  // Every comment on the slice, so a proposal or decision that later discussion pushed back still counts.
+  const comments = [...issue.comments.nodes];
+  for (let info = issue.comments.pageInfo; info?.hasPreviousPage; ) {
+    const page = (await graphql(sys, token, slice, COMMENTS_QUERY, { id: issue.id, before: info.startCursor })) as {
+      node: { comments: { nodes: Comment[]; pageInfo: { hasPreviousPage: boolean; startCursor: string | null } } };
+    };
+    comments.unshift(...page.node.comments.nodes);
+    info = page.node.comments.pageInfo;
+  }
 
   const owed: Owed[] = [];
   // The latest addition counts: a slice removed and added again after approval needs the owner's say.
