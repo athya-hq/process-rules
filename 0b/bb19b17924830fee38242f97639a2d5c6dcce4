@@ -1,0 +1,14 @@
+.github/workflows/process-rules.yml
+  h_cb9fade59fc5b3 1,28,30
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "0bbb19b17924830fee38242f97639a2d5c6dcce4",
+  "prompts": {},
+  "humans": {
+    "h_cb9fade59fc5b3": {
+      "author": "Alok Bansal <alokagrawal8@gmail.com>"
+    }
+  }
+}
