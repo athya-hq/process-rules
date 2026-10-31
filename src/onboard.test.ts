@@ -1199,6 +1199,8 @@ describe('workflowUpdate', () => {
     assert.ok(kept.kind === 'repin' && kept.text === uncommented.replace("'17 6 * * 1'", "'0 9 * * 1'"));
     const two = plain.replace("    - cron: '17 6 * * 1'\n", "    - cron: '17 6 * * 1'\n    - cron: '0 12 * * 5'\n");
     assert.deepEqual(workflowUpdate(two, 'main', '0.5.3', true, '0 9 * * 1'), { kind: 'same' });
+    const apart = plain.replace("    - cron: '17 6 * * 1'\n", "    - cron: '17 6 * * 1'\n\n    # Fridays too.\n    - cron: '0 12 * * 5'\n");
+    assert.deepEqual(workflowUpdate(apart, 'main', '0.5.3', true, '0 9 * * 1'), { kind: 'same' });
     const noted = plain.replace("- cron: '17 6 * * 1'", "- cron: '17 6 * * 1' # ours");
     assert.deepEqual(workflowUpdate(noted, 'main', '0.5.3', true, '0 9 * * 1'), { kind: 'same' });
   });

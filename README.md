@@ -17,6 +17,13 @@ on the Project [process-rules work](https://github.com/orgs/athya-hq/projects/2)
 
 ## Agent identity on a Mac
 
+macOS is the supported platform: the agent's token lives in the macOS
+keychain. On any other platform `machine` and `doctor` refuse, and
+`session-start` keeps GitHub locked out of the session; Claude cloud sessions
+need no keychain and work as before. The token is read and stored through
+one token-store interface (`src/token-store.ts`), so a Linux or Windows store
+can be added there when an adopter needs one.
+
 The adopting repo names its accounts in `.github/process-rules.json`:
 
 ```json
@@ -297,7 +304,8 @@ to issues, is replaced; a workflow already split into `process-rules` and
 `process-rules-weekly` keeps everything but its version pins, which move to the
 new release, the one branch pushes run on, which follows a changed default
 branch, and the one cron the weekly job runs on, which follows a changed
-`schedule`; any other workflow is offered a replacement. Make the checks of the
+`schedule` (a schedule with more crons, or a comment on its cron line, is the
+client's own and stays as it is); any other workflow is offered a replacement. Make the checks of the
 features a client has turned on required on its default branch, such as
 `process-rules / PR identity` with `pr-identity` and `process-rules / Work
 rules` with `work-rules`; a check of a feature that is off still runs and

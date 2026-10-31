@@ -294,9 +294,10 @@ const PUSH_BRANCH = /^( {2}push:\n {4}branches: \[\s*)(['"]?)([^,'"\]\s]+)\2(\s*
 
 /**
  * The one cron a workflow's `schedule:` trigger names, as `onboard` writes it,
- * quoted or not, with the comment `onboard` writes above it when it is there.
+ * quoted or not, with the comment `onboard` writes above it when it is there:
+ * no other item follows it, past blank and comment lines.
  */
-const SCHEDULE = /^( {2}# The (?:weekly )?decisions job:[^\n]*\n)?( {2}schedule:\n {4}- cron: )(['"]?)([^'"#\n]+?)\3([ \t]*)$(?!\n {4}- )/m;
+const SCHEDULE = /^( {2}# The (?:weekly )?decisions job:[^\n]*\n)?( {2}schedule:\n {4}- cron: )(['"]?)([^'"#\n]+?)\3([ \t]*)$(?!(?:\n[ \t]*(?:#[^\n]*)?)*\n {4}- )/m;
 
 /**
  * `value` as a YAML flow scalar in the `quote` style the line already uses:

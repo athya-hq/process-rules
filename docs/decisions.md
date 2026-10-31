@@ -257,6 +257,20 @@
   enterprise that blocks classic tokens cannot adopt yet. A fine-grained
   token or a GitHub App waits for adoption outside Athya. Docs only; no
   release.
+- **2026-11-01 — Record: P-29, the token store behind an interface.** The
+  owner's decision of 2026-10-31 on #49: Athya's agents run on macOS
+  laptops and in Claude cloud sessions, so keep the macOS keychain, but put
+  the token store behind an interface so a Linux or Windows store can be
+  added without rework. One `TokenStore` reads and stores the agent's token
+  and gives the session file the shell command that reads it on each use;
+  the keychain, through `/usr/bin/security`, is its only implementation,
+  and `machine`, `doctor`, `session-start` and `onboard` reach the token
+  through it. The session file is unchanged, so no machine needs `machine`
+  run again. On a platform with no store, `machine` and `doctor` refuse,
+  naming macOS, and `session-start` keeps GitHub locked out. The owner
+  lockout's checks of the owner's own keychain items stay as they are: they
+  are not the agent's token. Other platforms wait for adoption outside
+  Athya; the README states macOS as the supported platform.
 - **2026-11-01 — Record: P-28, org-wide issue types announced; schedule a
   setting.** The owner's decision of 2026-10-31 on #55. Issue types are an
   organisation-wide setting, so the ones `onboard` adds reach every
@@ -266,8 +280,9 @@
   schedule, fixed at Mondays 06:17 UTC, becomes `"schedule"` in
   `.github/process-rules.json`: a five-field cron in UTC, checked before
   `onboard` changes anything, defaulting to `17 6 * * 1`. `onboard` writes
-  it into the workflow's `schedule:`, and in a workflow it repins moves the
-  one cron there as it moves the push branch, asking first and leaving a
+  it into the workflow's `schedule:`. When `onboard` repins a split
+  workflow, it moves the one cron it wrote as it moves the push branch,
+  asking first and leaving a
   schedule the client has made its own (more crons, or a comment on the
   line) alone. Renaming the types,
   labels, field options and markers waits for adoption outside Athya.

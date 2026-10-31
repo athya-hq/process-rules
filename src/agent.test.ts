@@ -15,13 +15,11 @@ import {
   loadSettings,
   noreplyEmail,
   pathsFor,
-  readToken,
   repoAt,
   sameLogin,
   sessionEnv,
   sessionScript,
   signingKeys,
-  storeToken,
   tokenInfo,
 } from './agent.ts';
 import { AGENT, AGENT_ID, CLASSIC, FakeSys, HOME, KEY, NOW, PRIVATE_KEY, PUBLIC_KEY, ROOT, TOKEN } from './fake.test.ts';
@@ -237,35 +235,6 @@ describe('sessionScript, sourced by a real shell', () => {
     for (const name of names) {
       assert.equal(shell(`printf %s "$${name}"`), env[name], name);
     }
-  });
-});
-
-describe('keychain', () => {
-  it('reads a stored token', () => {
-    const sys = new FakeSys();
-    sys.setToken(AGENT, TOKEN);
-    sys.keychain.set('gh:github.com/Other', 'owners');
-    assert.equal(readToken(sys, AGENT), TOKEN);
-    assert.equal(readToken(sys, 'Other'), undefined);
-  });
-
-  it('stores a token through stdin, never argv', () => {
-    const sys = new FakeSys();
-    assert.equal(storeToken(sys, AGENT, TOKEN), true);
-    assert.deepEqual([...sys.keychain], [['process-rules/ExampleBot', TOKEN]]);
-    const call = sys.calls.find((c) => c.args[0] === '-i');
-    assert.ok(call?.input?.includes(TOKEN));
-    assert.ok(!call?.args.some((arg) => arg.includes(TOKEN)));
-  });
-
-  it('refuses a token with characters the keychain prompt could misread', () => {
-    assert.equal(storeToken(new FakeSys(), AGENT, 'a b'), false);
-  });
-
-  it('reports a keychain that did not keep the token', () => {
-    const sys = new FakeSys();
-    sys.execOverride = (call) => (call.args[0] === '-i' ? { code: 1, stdout: '', stderr: 'no' } : undefined);
-    assert.equal(storeToken(sys, AGENT, TOKEN), false);
   });
 });
 
