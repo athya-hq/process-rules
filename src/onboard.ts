@@ -124,6 +124,13 @@ export const GUARD_COMMAND =
   'printf \'%s\' "$input" | "$cli" guard && exit 0; [ $? -eq 2 ] && exit 2; ' +
   'echo "process-rules: refused, because the process-rules CLI did not run here to check this command. Do not work around it; tell the owner." >&2; exit 2';
 
+/**
+ * The permission rule that lets agent sessions answer review threads on
+ * their own pull requests without a prompt: only the CLI command that does
+ * that and checks it, not `gh api`, whose rules cannot hold its arguments.
+ */
+export const REVIEW_THREAD_RULE = 'Bash(process-rules review-thread *)';
+
 /** The hook commands older releases wrote, which onboard replaces with this release's. */
 export const OLDER_HOOK_COMMANDS = [
   `if [ "$CLAUDE_CODE_REMOTE" = true ]; then [ -z "$CLAUDE_ENV_FILE" ] || echo 'unset ${Object.keys(BASE_ENV).join(' ')}' >> "$CLAUDE_ENV_FILE"; else ` +
@@ -345,7 +352,7 @@ function hooksOf(settings: object, event: string): { command?: unknown }[] {
 /**
  * The client's Claude Code settings with this release's hooks and lock: each
  * entry an older release wrote swapped where it stands, a missing one added,
- * and the lock's variables set in `env`. Every edit is made in the text, so
+ * the lock's variables set in `env`, and REVIEW_THREAD_RULE allowed. Every edit is made in the text, so
  * the rest of the file keeps its layout. Says what changed, for the question.
  */
 export function claudeSettings(before: string | undefined): { text: string; changes: string[] } {
@@ -378,6 +385,11 @@ export function claudeSettings(before: string | undefined): { text: string; chan
     const names = missing.map(([name]) => name);
     const named = names.length <= 3 ? names.join(', ') : `${names.slice(0, 2).join(', ')} and ${names.length - 2} more`;
     if (missing.length > 0) changes.push(`set ${named} in env, so GitHub is locked out until session-start gives the agent identity`);
+    const allow = (parsed() as { permissions?: { allow?: unknown } }).permissions?.allow;
+    if (!Array.isArray(allow) || !allow.includes(REVIEW_THREAD_RULE)) {
+      text = appendToArray(text, ['permissions'], 'allow', REVIEW_THREAD_RULE);
+      changes.push('allow process-rules review-thread without a prompt, so agent sessions answer review threads on their own pull requests');
+    }
   } catch (error) {
     throw new Error(`${HOOKS_PATH}: ${(error as Error).message}`);
   }
