@@ -40,3 +40,14 @@ export function isOn(sys: Sys, root: string, feature: Feature): boolean {
 export function offLine(command: string, feature: Feature): string {
   return `${command}: ${feature} is off in ${SETTINGS_PATH}; nothing to check`;
 }
+
+/**
+ * The line a pull request check prints when the base branch it reads the
+ * settings from has none, as in the pull request that first commits them:
+ * the repo is not adopted on its base yet, so the check passes, as for a
+ * feature that is off. Undefined when the settings are there.
+ */
+export function notAdoptedLine(sys: Sys, root: string, command: string): string | undefined {
+  if (sys.exists(`${root}/${SETTINGS_PATH}`)) return undefined;
+  return `${command}: the base branch has no ${SETTINGS_PATH}, so the repo is not adopted on its base yet; nothing to check`;
+}

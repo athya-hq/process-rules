@@ -53,3 +53,9 @@
   "process-rules work". The issues are the source of truth from then on;
   `docs/roadmap.md` keeps v1 as approved and links each row to its issue.
   The shipped slices were closed as completed, each citing its pull request.
+- **2026-10-31 — Record: P-15, the adoption gaps closed.** The owner, on the
+  Work item #22: "Decision: add #40 (P-15) to roadmap v1." process-rules hit
+  three gaps adopting itself: `onboard` stopped when the agent could already
+  read the repo instead of offering the grant; pre-push refused a push that
+  brought only a merge of the default branch; and the pull request that first
+  commits the settings failed its own PR checks. The slice #40 closes them.

@@ -69,9 +69,10 @@ days before the token ends.
    running `process-rules session-start` to `.claude/settings.json`, and
    writes `.github/workflows/process-rules.yml`, which calls this repository's
    shared checks (`.github/workflows/checks.yml`). It checks the agent can
-   push. With no access, `onboard` offers to give it write access through your
-   `gh` and to accept the invitation as the agent; with read access only, it
-   asks you to give it the Write role; and it names an organisation that
+   push. With no access, or read access only (a public repo, or an
+   organisation's base permission), `onboard` offers to give it write access
+   through your `gh` and to accept the invitation as the agent; and it names
+   an organisation that
    requires SAML authorisation or blocks classic tokens. Through your `gh`
    login as the owner (which needs the `project` scope, and `admin:org` in an
    organisation), it sets up the work board: the organisation's issue types
@@ -85,9 +86,10 @@ days before the token ends.
    for a yes; commit the files afterwards. An existing `.claude/settings.json`
    keeps its layout: `onboard` adds only its hook entry. The repository needs at
    least one commit. The pull request checks read the settings from the base
-   branch, so the pull request that first commits them fails PR identity, Work
-   rules and Design frames; merge it before making those checks required, and
-   they apply from the next pull request.
+   branch, so a pull request cannot rename the agent it is checked against.
+   The pull request that first commits them passes PR identity, Work rules
+   and Design frames, saying the repo is not adopted on its base yet, as for
+   a feature that is off; they apply from the next pull request.
 
 The shared checks run five jobs. **Settings** validates
 `.github/process-rules.json`. **PR identity** runs on pull requests: every
@@ -139,7 +141,9 @@ weekly job removes `veto` once the week has passed.
 `onboard` also writes a pre-push git hook running `process-rules pre-push`,
 which applies the same rules before an agent session pushes: all the commits
 one push brings, on one branch, name one slice between them as a
-`Slice: #N` trailer. In an agent session, a push is refused when the CLI is
+`Slice: #N` trailer. Commits a remote already has, such as the default
+branch's, are not the push's own; a push of only a merge, such as of the
+default branch, is judged by the branch's own commits. In an agent session, a push is refused when the CLI is
 missing or the session has no token. When the repository already has its own
 pre-push hook, or git runs hooks from a folder outside the repository (a
 global `core.hooksPath`), `onboard` leaves it alone and names the line to add:

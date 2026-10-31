@@ -337,7 +337,7 @@ describe('prePush', () => {
   it('lets an agent push commits naming a slice that may be built', async () => {
     const sys = session('Add the thing\n\nSlice: #12\n');
     assert.deepEqual(await push(sys, `refs/heads/work ${LOCAL} refs/heads/work ${REMOTE}\n`), { code: 0, err: [] });
-    assert.deepEqual(sys.calls.find((c) => c.args[0] === 'log')?.args, ['log', '--format=%B', `${REMOTE}..${LOCAL}`]);
+    assert.deepEqual(sys.calls.find((c) => c.args[0] === 'log')?.args, ['log', '--format=%B', LOCAL, '--not', REMOTE, '--remotes']);
     assert.equal(sys.requests[0]?.token, 'ghp_good');
   });
 
@@ -353,6 +353,31 @@ describe('prePush', () => {
       err: ['✗ the commits for work name no slice; add a trailer "Slice: #N" to a commit message', 'pre-push: refused by the work rules'],
     });
     assert.equal((await push(session('Slice: #12\nSlice: #13'), `refs/heads/work ${LOCAL} refs/heads/work ${REMOTE}`)).err[0], '✗ the commits for work name 2 slices (#12, #13); one push builds one slice');
+  });
+
+  describe('a push of only a merge, such as of the default branch', () => {
+    const MAIN = 'c'.repeat(40);
+    function merged(parents: string): FakeSys {
+      const sys = session('');
+      sys.execOverride = (call) => {
+        if (call.args[0] !== 'log') return undefined;
+        if (call.args.includes('--format=%P')) return { code: 0, stdout: parents, stderr: '' };
+        const stdout = call.args.includes('--no-merges') ? 'Add the thing\n\nSlice: #12\n' : "Merge branch 'main' into work\n";
+        return { code: 0, stdout, stderr: '' };
+      };
+      return sys;
+    }
+
+    it("is judged by the branch's own commits", async () => {
+      const sys = merged(`${REMOTE} ${MAIN}\n`);
+      assert.deepEqual(await push(sys, `refs/heads/work ${LOCAL} refs/heads/work ${REMOTE}`), { code: 0, err: [] });
+      assert.deepEqual(sys.calls.filter((c) => c.args[0] === 'log').at(-1)?.args, ['log', '--no-merges', '--format=%B', LOCAL, '--not', MAIN]);
+    });
+
+    it('is refused beside a commit of its own naming no slice', async () => {
+      const sys = merged(`${REMOTE} ${MAIN}\n${REMOTE}\n`);
+      assert.equal((await push(sys, `refs/heads/work ${LOCAL} refs/heads/work ${REMOTE}`)).err[0], '✗ the commits for work name no slice; add a trailer "Slice: #N" to a commit message');
+    });
   });
 
   it('refuses a slice that may not be built', async () => {

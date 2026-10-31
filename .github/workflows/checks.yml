@@ -51,6 +51,7 @@ jobs:
     timeout-minutes: 5
     steps:
       # The settings come from the base branch: a pull request cannot rename the agent it is checked against.
+      # A base with none passes, saying the repo is not adopted there yet.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.base.sha }}
