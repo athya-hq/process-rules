@@ -97,7 +97,9 @@ days before the token ends.
    the lock in `env`, a SessionStart hook running `process-rules
    session-start` and a PreToolUse hook running `process-rules guard`, and
    writes `.github/workflows/process-rules.yml`, which calls this repository's
-   shared checks (`.github/workflows/checks.yml`). It checks the agent can
+   shared checks (`.github/workflows/checks.yml`) from two jobs: `process-rules`
+   on pull requests and pushes, read-only, and `process-rules-weekly` on the
+   weekly run, the only one that writes to issues. It checks the agent can
    push. With no access, or read access only (a public repo, or an
    organisation's base permission), `onboard` offers to give it write access
    through your `gh` and to accept the invitation as the agent; and it names
@@ -216,8 +218,11 @@ pre-push hook, or git runs hooks from a folder outside the repository (a
 global `core.hooksPath`), `onboard` leaves it alone and names the line to add:
 `process-rules pre-push "$@"`. The client workflow re-runs the checks when a
 pull request's description is edited. After upgrading process-rules, run
-`onboard` again: it replaces the workflow when a release needs more
-permissions, and upgrades the hook entries in `.claude/settings.json`. Make the checks of the
+`onboard` again: it upgrades the hook entries in `.claude/settings.json` and
+the workflow. An older release's workflow, one job that wrote to issues on
+every run, is replaced; a workflow already split into `process-rules` and
+`process-rules-weekly` keeps everything but its version pins, which move to the
+new release; any other workflow is offered a replacement. Make the checks of the
 features a client has turned on required on its default branch, such as
 `process-rules / PR identity` with `pr-identity` and `process-rules / Work
 rules` with `work-rules`; a check of a feature that is off still runs and
@@ -250,16 +255,18 @@ release, attaching the CLI package it built and tested. Install that package on
 each machine with pnpm; nothing is built on install:
 
 ```bash
-pnpm add -g https://github.com/athya-hq/process-rules/releases/download/v0.5.2/athya-hq-process-rules-0.5.2.tgz
+pnpm add -g https://github.com/athya-hq/process-rules/releases/download/v0.5.3/athya-hq-process-rules-0.5.3.tgz
 ```
 
 `onboard` pins the client's workflow to one version, the release of the CLI
-that ran it. The pin is written twice, `checks.yml@vX.Y.Z` and, two lines
+that ran it. Each job writes the pin twice, `checks.yml@vX.Y.Z` and, two lines
 below it under `with:`, `process-rules-ref: vX.Y.Z`, because a called
 workflow cannot read its own ref from GitHub's contexts. Upgrading is one
-step: install the new CLI and run `onboard` again, which rewrites both lines
-together (it offers to replace the workflow). Editing the version by hand
-means changing both lines. The hooks run the
+step: install the new CLI and run `onboard` again, which moves all four pins
+together. Editing the version by hand means changing all four lines, two per
+job. A split workflow needs v0.5.3 or later: GitHub refuses a whole run, before
+any job's `if:`, when the called workflow asks for more than the calling job
+grants, and before v0.5.3 `checks.yml` asked for `issues: write` itself. The hooks run the
 launcher `machine` writes, else `process-rules` from the `PATH`; without
 either the session-start hook tells the session to stop, and the guard refuses
 `gh` and `git`. Run `machine` again after removing the node it names.

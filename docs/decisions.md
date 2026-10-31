@@ -134,3 +134,21 @@
   `needs-owner` off once nothing waits. A reaction triggers no workflow, so
   the pull request's Work rules check sees a 👍 made after it ran only when
   it runs again.
+- **2026-11-01 — Record: pull request and push runs are read-only.** A
+  review of a client's adoption flagged that the workflow `onboard` wrote
+  gave every run `issues: write`, though only the weekly decisions run
+  writes to issues; so did upgrading, since `onboard` replaced a client's own
+  split with its one job. `onboard` now writes two jobs calling
+  `checks.yml`: `process-rules` on pull requests and pushes, with the
+  workflow's read-only permissions, and `process-rules-weekly` on the
+  schedule and by hand, with `issues: write`. The pull request checks keep
+  their names, `process-rules / …`, so required checks need no change.
+  Splitting alone was not enough: GitHub refuses a whole run, before any
+  job's `if:`, when a called job asks for more than its caller grants, and
+  `checks.yml`'s weekly job asked for `issues: write` itself, so a split
+  workflow at v0.5.2 or earlier fails to start on every pull request and
+  push. From v0.5.3 `checks.yml` sets no workflow-wide permissions, its
+  read-only jobs set their own, and its weekly job takes what the calling
+  job grants. `onboard` replaces the older single-job template, moves only
+  the version pins of a workflow already split, and offers to replace any
+  other workflow, as before. Released as v0.5.3, a patch release.
