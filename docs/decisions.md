@@ -282,7 +282,6 @@
   `onboard` changes anything, defaulting to `17 6 * * 1`. `onboard` writes
   it into the workflow's `schedule:`. When `onboard` repins a split
   workflow, it moves the one cron it wrote as it moves the push branch,
-  asking first and leaving a
-  schedule the client has made its own (more crons, or a comment on the
-  line) alone. Renaming the types,
-  labels, field options and markers waits for adoption outside Athya.
+  asking first and leaving a schedule the client has made its own (more
+  crons, or a comment on the line) alone. Renaming the types, labels, field
+  options and markers waits for adoption outside Athya.
