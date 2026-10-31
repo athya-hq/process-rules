@@ -1,0 +1,49 @@
+src/onboard.ts
+  s_d05166b61cca9a::t_3c5c17a5277a81 570
+  s_d05166b61cca9a::t_39ab2468ca2262 618
+  s_d05166b61cca9a::t_fd3a5b358ad58f 22,547-550,603-607,639-642,670-679
+README.md
+  s_b8f1fb0ef941fc::t_b35d8c845cc6c7 353-364
+docs/decisions.md
+  s_b8f1fb0ef941fc::t_085a3bb508bcf9 346-360
+src/decisions.ts
+  s_b8f1fb0ef941fc::t_b5b7ce2a956f9f 2,75-81,83-84
+src/design.ts
+  s_b8f1fb0ef941fc::t_f088411820c4ba 4,115-118
+src/fake.test.ts
+  s_b8f1fb0ef941fc::t_95edee7ddf0230 298,302-309
+src/features.test.ts
+  s_b8f1fb0ef941fc::t_d6da0d477381b0 7,10,183-284
+src/features.ts
+  s_b8f1fb0ef941fc::t_ff9296a2c99a75 1,55-92
+src/onboard.test.ts
+  s_d05166b61cca9a::t_e3d0b16e9c70f6 620-690
+src/reviews.ts
+  s_b8f1fb0ef941fc::t_27ef91f30ac253 3,40-44
+src/work.ts
+  s_b8f1fb0ef941fc::t_f498cdfb2abdc8 2,286-289,373-376,432-435
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f047ceeeee6b8211edd6783ab62241c7bd5b64f8",
+  "prompts": {},
+  "sessions": {
+    "s_b8f1fb0ef941fc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c58fbfef-3090-4909-9854-54c3d6435419",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Alok Bansal <alokagrawal8@gmail.com>"
+    },
+    "s_d05166b61cca9a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cff6e322-a74e-4519-b9d1-78e258722f55",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Alok Bansal <alokagrawal8@gmail.com>"
+    }
+  }
+}
