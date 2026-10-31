@@ -107,16 +107,19 @@ days before the token ends.
    organisation), it sets up the work board: the organisation's issue types
    (Work item, Slice, State, Decision, Brief), the repo's labels (`approved`,
    `needs-owner`, `mechanical`, `veto`, `expiring`, `cannot-run-here`), and a
-   Project "<repo> work" linked to the repo with the fields Step, Decision and
-   Review date. It makes the Project's views, or updates the one that already
-   has the name, so a rerun makes no duplicates: Needs you (`label:needs-owner
-   is:open`), Board (a board showing linked pull requests), Work items
-   (`type:"Work item"`, showing Sub-issues progress), Decisions
-   (`type:Decision`) and Reviews due (`"Review date":<=@today`). The default
-   "View 1" becomes the first of these the Project lacks (Needs you, in a new
-   Project) rather than being left. It prints what GitHub's API cannot set, to do
-   by hand: grouping Work items by Step and Decisions by Decision, the Board's
-   columns, and the auto-archive workflow. Last, it pushes
+   Project "<repo> work" linked to the repo. It makes that Project by copying
+   the product's public [process-rules template](https://github.com/orgs/athya-hq/projects/4),
+   which holds the fields Step, Decision and Review date and the views Needs
+   you (`label:needs-owner is:open`), Board (showing linked pull requests),
+   Work items (`type:"Work item"`, grouped by Step), Decisions
+   (`type:Decision`, grouped by Decision) and Reviews due (`"Review
+   date":<=@today`), with its workflows; so the board needs nothing done by
+   hand. If a copy's workflows arrive off, `onboard` names the ones to turn on. A Project of that title made before the template is offered a move
+   to a copy: its open items move with their Status, Step, Decision and Review
+   date, and the old one is closed as "<title> (old)". When GitHub refuses the
+   copy, or the owner keeps the old Project, `onboard` adds the fields and
+   makes or updates the views itself, and prints the two things GitHub's API
+   cannot set: the grouping and the auto-archive workflow. Last, it pushes
    one signed test commit as the agent to a throwaway branch, checks GitHub
    shows it Verified by the agent (asking again when the network or GitHub
    fails for a moment), and deletes the branch. Each change waits
@@ -230,7 +233,7 @@ release, attaching the CLI package it built and tested. Install that package on
 each machine with pnpm; nothing is built on install:
 
 ```bash
-pnpm add -g https://github.com/athya-hq/process-rules/releases/download/v0.6.0/athya-hq-process-rules-0.6.0.tgz
+pnpm add -g https://github.com/athya-hq/process-rules/releases/download/v0.7.0/athya-hq-process-rules-0.7.0.tgz
 ```
 
 `onboard` pins the client's workflow to one version, the release of the CLI

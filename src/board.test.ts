@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { FIELDS, ISSUE_TYPES, LABELS, VIEWS, setUpBoard, viewsChecklist } from './board.ts';
-import { BUILT_IN, Board, OWNER_TOKEN, SLUG, URL, defaultView, settledViews } from './fake-board.test.ts';
+import { BUILT_IN, Board, COPY_URL, OWNER_TOKEN, SLUG, URL, defaultView, settledViews } from './fake-board.test.ts';
+import type { FakeItem } from './fake-board.test.ts';
 import { FakeSys, capture } from './fake.test.ts';
 
 async function setUp(sys: FakeSys, answers = ['y', 'y', 'y', 'y', 'y']): Promise<{ url: string | undefined; out: string[]; err: string[] }> {
@@ -13,9 +14,10 @@ async function setUp(sys: FakeSys, answers = ['y', 'y', 'y', 'y', 'y']): Promise
 }
 
 describe('setUpBoard', () => {
-  it('creates the issue types, labels, Project and fields an organisation lacks', async () => {
+  it('builds the Project, its fields and views when the template cannot be copied', async () => {
     const sys = new FakeSys();
     const board = new Board(sys);
+    board.template = 'missing';
     const { url, out, err } = await setUp(sys);
     assert.deepEqual(err, []);
     assert.equal(url, URL);
@@ -23,14 +25,15 @@ describe('setUpBoard', () => {
     assert.deepEqual(board.issueTypes, ['Task', 'Bug', ...ISSUE_TYPES.map((t) => t.name)]);
     assert.deepEqual(board.labels, ['bug', ...LABELS.map((l) => l.name)]);
     assert.deepEqual(board.project?.fields, [...BUILT_IN, ...FIELDS.map((f) => f.name)]);
-    assert.deepEqual(out.slice(0, 5), [
+    assert.deepEqual(out.slice(0, 6), [
       '✓ issue types in example-org: Work item, Slice, State, Decision, Brief',
       '✓ labels: approved, needs-owner, mechanical, veto, expiring, cannot-run-here',
+      '- the process-rules template could not be copied (GitHub shows no Project 4 in athya-hq); building the Project instead',
       `✓ Project "example-app work": ${URL}`,
       '✓ fields: Step, Decision, Review date',
       '✓ views: Needs you, Board, Work items, Decisions, Reviews due',
     ]);
-    assert.deepEqual(out.slice(5), viewsChecklist(URL));
+    assert.deepEqual(out.slice(6), viewsChecklist(URL));
     assert.deepEqual(board.project?.views, [
       { id: 'V_1', name: 'Needs you', layout: 'TABLE_LAYOUT', filter: 'label:needs-owner is:open', visible: ['Title', 'Status'] },
       { id: 'V_2', name: 'Board', layout: 'BOARD_LAYOUT', filter: '', visible: ['Title', 'Status', 'Linked pull requests'] },
@@ -54,6 +57,7 @@ describe('setUpBoard', () => {
   it('uses the default title for a blank one', async () => {
     const sys = new FakeSys();
     const board = new Board(sys);
+    board.template = 'missing';
     sys.answers = ['y', 'y', 'y', 'y', 'y'];
     await setUpBoard(sys, capture().io, async (q) => /^y/.test(await sys.ask(q)), SLUG, 'example-owner', '  ');
     assert.deepEqual(board.titles, ['example-app work']);
@@ -64,8 +68,9 @@ describe('setUpBoard', () => {
     const board = new Board(sys);
     board.issueTypes = ISSUE_TYPES.map((t) => t.name.toUpperCase());
     board.labels = LABELS.map((l) => l.name);
-    board.project = { fields: [...BUILT_IN, ...FIELDS.map((f) => f.name)], linked: true, views: settledViews() };
-    const { url } = await setUp(sys, []);
+    board.project = { fields: [...BUILT_IN, ...FIELDS.map((f) => f.name)], linked: true, views: settledViews(), grouped: true };
+    const { url, out } = await setUp(sys, []);
+    assert.ok(!out.some((line) => line.startsWith('Finish the Project')));
     assert.equal(url, URL);
     assert.deepEqual(sys.asked, []);
     assert.ok(!board.operations.includes('createProjectV2('));
@@ -76,8 +81,139 @@ describe('setUpBoard', () => {
     new Board(sys, false);
     sys.acceptToken(OWNER_TOKEN, 'example-owner', { 'x-oauth-scopes': 'project' });
     const { url, out } = await setUp(sys, ['y', 'y', 'y', 'y']);
-    assert.equal(url, URL);
+    assert.equal(url, COPY_URL);
     assert.equal(out[0], '- issue types: GitHub has them for organisations only; skipped for a personal repository');
+  });
+
+  it('copies the template for a new Project, links it, and leaves nothing to do by hand', async () => {
+    const sys = new FakeSys();
+    const board = new Board(sys);
+    board.copyPending = 2;
+    const { url, out, err } = await setUp(sys, ['y', 'y', 'y']);
+    assert.deepEqual(err, []);
+    assert.equal(url, COPY_URL);
+    assert.deepEqual(board.titles, ['example-app work']);
+    assert.ok(board.project?.linked);
+    assert.deepEqual(sys.slept, [3000, 3000], 'waits for the fields GitHub adds after the copy');
+    assert.deepEqual(sys.asked.slice(2), ['Create the Project "example-app work" for example-org from the process-rules template, linked to example-org/example-app?']);
+    assert.deepEqual(out.slice(2), [
+      `✓ Project "example-app work": ${COPY_URL}`,
+      '✓ fields: Step, Decision, Review date',
+      '✓ views: Needs you, Board, Work items, Decisions, Reviews due',
+    ]);
+    assert.ok(!board.operations.some((o) => o === 'createProjectV2(' || o === 'createProjectV2Field' || o.includes('ProjectV2View')));
+  });
+
+  it("names a copy's workflows that are off", async () => {
+    const sys = new FakeSys();
+    const board = new Board(sys);
+    board.copyOff = ['Item added to project', 'Pull request merged'];
+    const { out } = await setUp(sys, ['y', 'y', 'y']);
+    assert.equal(out.at(-1), `Turn on the workflows Item added to project, Pull request merged in ${COPY_URL} → Workflows (GitHub's API cannot)`);
+    assert.ok(!out.some((line) => line.startsWith('Finish the Project')));
+  });
+
+  it("throws when a copy's fields never arrive", async () => {
+    const sys = new FakeSys();
+    const board = new Board(sys);
+    board.copyPending = 100;
+    await assert.rejects(setUp(sys), new Error(`the copy ${COPY_URL} has no fields Step, Decision, Review date yet; run onboard again`));
+    assert.equal(sys.slept.length, 19);
+  });
+
+  it('builds the Project when GitHub refuses the copy', async () => {
+    const sys = new FakeSys();
+    const board = new Board(sys);
+    board.template = 'refused';
+    const { url, out } = await setUp(sys);
+    assert.equal(url, URL);
+    assert.ok(out.includes("- the process-rules template could not be copied (GitHub's GraphQL API refused: Resource not accessible by integration); building the Project instead"));
+    assert.deepEqual(out.slice(-4), viewsChecklist(URL));
+    assert.ok(board.operations.includes('createProjectV2('));
+  });
+
+  /** A Project made before the template: not grouped, with items and a field the template lacks. */
+  function older(board: Board, items: FakeItem[]): void {
+    board.issueTypes = ISSUE_TYPES.map((t) => t.name);
+    board.labels = LABELS.map((l) => l.name);
+    board.project = { fields: [...BUILT_IN, ...FIELDS.map((f) => f.name), 'Estimate', 'Notes'], linked: true, views: settledViews(), items };
+  }
+
+  it('replaces a Project made before the template with a copy, moving its open items and their values', async () => {
+    const sys = new FakeSys();
+    const board = new Board(sys);
+    older(board, [
+      { content: 'ISSUE_a', values: { Status: 'In Progress', Step: 'Build', 'Review date': '2026-11-01', Estimate: 3, Notes: 'n' } },
+      { draft: { title: 'An idea', body: 'Some words' }, values: { Decision: 'Tripped' } },
+      { content: 'ISSUE_old', archived: true, values: { Status: 'Done' } },
+      { content: 'ISSUE_c', values: { Step: 'Gone' } },
+      { content: 'ISSUE_done', state: 'CLOSED', values: {} },
+      { content: 'PR_merged', state: 'MERGED', values: {} },
+      { content: 'PR_open', state: 'OPEN', values: {} },
+    ]);
+    const { url, out, err } = await setUp(sys, ['y']);
+    assert.deepEqual(err, []);
+    assert.equal(url, COPY_URL);
+    assert.deepEqual(sys.asked, [
+      '"example-app work" lacks what only the process-rules template sets (the views\' grouping, the workflows). Replace it with a copy of the template, moving its 4 open items with their Status, Step, Decision and Review date (not Estimate, Notes, which the template lacks), and close it as "example-app work (old)"?',
+    ]);
+    assert.deepEqual(board.project?.items, [
+      { content: 'ISSUE_a', values: { Status: 'In progress', Step: 'Build', 'Review date': '2026-11-01' } },
+      { draft: { title: 'An idea', body: 'Some words' }, values: { Decision: 'Tripped' } },
+      { content: 'ISSUE_c', values: {} },
+      { content: 'PR_open', values: {} },
+    ]);
+    assert.ok(board.project?.linked);
+    const order = board.operations.filter((o) => o === 'updateProjectV2(' || o === 'copyProjectV2');
+    assert.deepEqual(order, ['updateProjectV2(', 'copyProjectV2', 'updateProjectV2('], 'renamed before the copy, closed after the move');
+    assert.deepEqual({ title: board.old?.title, closed: board.old?.closed }, { title: 'example-app work (old)', closed: true });
+    assert.deepEqual(out.slice(2, 4), [
+      `✓ moved 4 items to the copy; closed the old Project as "example-app work (old)": ${URL}`,
+      `✓ Project "example-app work": ${COPY_URL}`,
+    ]);
+    assert.ok(!out.some((line) => line.startsWith('Finish the Project')));
+  });
+
+  it('moves every page of items, and says "item" for one', async () => {
+    const sys = new FakeSys();
+    const board = new Board(sys);
+    older(board, [{ content: 'ISSUE_a', values: {} }]);
+    board.project!.fields = [...BUILT_IN, ...FIELDS.map((f) => f.name)];
+    board.itemsPerPage = 1;
+    board.project!.items!.push({ content: 'ISSUE_b', values: {} }, { content: 'ISSUE_c', values: {} });
+    await setUp(sys, ['y']);
+    assert.deepEqual(board.project?.items?.map((item) => item.content), ['ISSUE_a', 'ISSUE_b', 'ISSUE_c']);
+
+    const one = new FakeSys();
+    const single = new Board(one);
+    older(single, [{ content: 'ISSUE_a', values: {} }]);
+    single.project!.fields = [...BUILT_IN, ...FIELDS.map((f) => f.name)];
+    const { out } = await setUp(one, ['y']);
+    assert.match(one.asked[0] ?? '', /moving its 1 open item with their Status, Step, Decision and Review date, and close it/);
+    assert.ok(out.includes(`✓ moved 1 item to the copy; closed the old Project as "example-app work (old)": ${URL}`));
+  });
+
+  it('keeps a Project made before the template when the owner says no, naming what is left to do', async () => {
+    const sys = new FakeSys();
+    const board = new Board(sys);
+    older(board, [{ content: 'ISSUE_a', values: {} }]);
+    const { url, out } = await setUp(sys, ['n']);
+    assert.equal(url, URL);
+    assert.ok(!board.operations.includes('copyProjectV2'));
+    assert.equal(board.project?.closed, undefined);
+    assert.deepEqual(out.slice(-4), viewsChecklist(URL));
+  });
+
+  it('keeps a Project made before the template when GitHub refuses the copy', async () => {
+    const sys = new FakeSys();
+    const board = new Board(sys);
+    older(board, [{ content: 'ISSUE_a', values: {} }]);
+    board.template = 'refused';
+    const { url, out } = await setUp(sys, ['y']);
+    assert.equal(url, URL);
+    assert.deepEqual({ title: board.project?.title, closed: board.project?.closed }, { title: 'example-app work', closed: undefined }, 'renamed back, its closed state untouched');
+    assert.ok(out.includes("- the process-rules template could not be copied (GitHub's GraphQL API refused: Resource not accessible by integration); keeping the Project as it is"));
+    assert.deepEqual(out.slice(-4), viewsChecklist(URL));
   });
 
   for (const [name, change, message] of [
@@ -100,6 +236,7 @@ describe('setUpBoard', () => {
     it(`stops when "${step}" is declined, changing nothing from it on`, async () => {
       const sys = new FakeSys();
       const board = new Board(sys);
+      board.template = 'missing';
       const { url, err } = await setUp(sys, [...Array<string>(index).fill('y'), 'n']);
       assert.deepEqual({ url, err }, { url: undefined, err: [`onboard: stopped at "${step}"; nothing after it was changed`] });
       assert.equal(board.issueTypes.length, index > 0 ? 7 : 2);
@@ -113,7 +250,7 @@ describe('setUpBoard', () => {
   it("links a same-titled Project that is not linked to the repo", async () => {
     const sys = new FakeSys();
     const board = new Board(sys);
-    board.project = { fields: FIELDS.map((f) => f.name), linked: false, views: settledViews() };
+    board.project = { fields: FIELDS.map((f) => f.name), linked: false, views: settledViews(), grouped: true };
     const { url } = await setUp(sys, ['y', 'y', 'y']);
     assert.equal(url, URL);
     assert.ok(board.project.linked);
@@ -123,7 +260,7 @@ describe('setUpBoard', () => {
   it('stops when linking is declined', async () => {
     const sys = new FakeSys();
     const board = new Board(sys);
-    board.project = { fields: FIELDS.map((f) => f.name), linked: false };
+    board.project = { fields: FIELDS.map((f) => f.name), linked: false, grouped: true };
     const { err } = await setUp(sys, ['y', 'y', 'n']);
     assert.deepEqual(err, ['onboard: stopped at "project"; nothing after it was changed']);
     assert.equal(board.project.linked, false);
@@ -132,7 +269,7 @@ describe('setUpBoard', () => {
   it('finds the Project on a later page instead of making another', async () => {
     const sys = new FakeSys();
     const board = new Board(sys);
-    board.project = { fields: FIELDS.map((f) => f.name), linked: true, views: settledViews() };
+    board.project = { fields: FIELDS.map((f) => f.name), linked: true, views: settledViews(), grouped: true };
     board.otherPages = 2;
     await setUp(sys, ['y', 'y']);
     assert.deepEqual(board.operations.filter((o) => o === 'projectsV2('), ['projectsV2(', 'projectsV2(', 'projectsV2(']);
@@ -155,7 +292,7 @@ describe('setUpBoard', () => {
     const board = new Board(sys);
     const views = settledViews();
     views[1] = { ...views[1]!, layout: 'TABLE_LAYOUT', filter: 'is:open', visible: ['Title', 'Assignees'] };
-    board.project = { fields: [...BUILT_IN, ...FIELDS.map((f) => f.name)], linked: true, views: [...views.slice(0, 4), { id: 'V_9', name: 'Mine', layout: 'TABLE_LAYOUT', filter: null, visible: ['Title'] }] };
+    board.project = { fields: [...BUILT_IN, ...FIELDS.map((f) => f.name)], linked: true, views: [...views.slice(0, 4), { id: 'V_9', name: 'Mine', layout: 'TABLE_LAYOUT', filter: null, visible: ['Title'] }], grouped: true };
     const { out } = await setUp(sys, ['y', 'y', 'y']);
     assert.ok(out.includes('✓ views: Needs you, Board, Work items, Decisions, Reviews due'));
     assert.ok(sys.asked.includes('Set up the views Board, Reviews due in "example-app work"?'));
@@ -169,17 +306,19 @@ describe('setUpBoard', () => {
     const board = new Board(sys);
     await setUp(sys);
     const asked = sys.asked.length;
-    await setUp(sys, []);
+    const { url } = await setUp(sys, []);
+    assert.equal(url, COPY_URL);
     assert.equal(sys.asked.length, asked);
+    assert.deepEqual(board.titles, ['example-app work']);
     assert.deepEqual(board.project?.views?.map((v) => v.name), VIEWS.map((v) => v.name));
-    assert.equal(board.operations.filter((o) => o === 'createProjectV2View').length, VIEWS.length - 1);
+    assert.ok(!board.operations.some((o) => o.includes('ProjectV2View') || o === 'createProjectV2Field'));
   });
 
   it('renames the default view to the first view the Project lacks, with no other change', async () => {
     const sys = new FakeSys();
     const board = new Board(sys);
     const views = settledViews();
-    board.project = { fields: [...BUILT_IN, ...FIELDS.map((f) => f.name)], linked: true, views: [views[0]!, { ...views[1]!, name: 'View 1' }, ...views.slice(2)] };
+    board.project = { fields: [...BUILT_IN, ...FIELDS.map((f) => f.name)], linked: true, views: [views[0]!, { ...views[1]!, name: 'View 1' }, ...views.slice(2)], grouped: true };
     await setUp(sys, ['y', 'y', 'y']);
     assert.ok(sys.asked.includes('Set up the views Board in "example-app work" (renaming "View 1" to "Board")?'));
     assert.deepEqual(board.project.views, settledViews());
@@ -190,7 +329,7 @@ describe('setUpBoard', () => {
     const sys = new FakeSys();
     const board = new Board(sys);
     const spare = { id: 'V_9', name: 'View 1', layout: 'TABLE_LAYOUT', filter: null, visible: ['Title'] };
-    board.project = { fields: [...BUILT_IN, ...FIELDS.map((f) => f.name)], linked: true, views: [spare, ...settledViews()] };
+    board.project = { fields: [...BUILT_IN, ...FIELDS.map((f) => f.name)], linked: true, views: [spare, ...settledViews()], grouped: true };
     await setUp(sys, ['y', 'y']);
     assert.ok(!sys.asked.some((q) => q.startsWith('Set up the views')));
     assert.deepEqual(board.project.views, [spare, ...settledViews()]);

@@ -102,3 +102,15 @@
   runs, so it holds where the hooks never ran. What remains is a session that
   works around the lock and the hook on purpose; only a separate macOS user
   for agent sessions would close that.
+- **2026-10-31 — Record: P-19, onboard copies a template Project.** The
+  owner, on the views P-16 could not finish through the API: "I need an
+  onboarding process where the repo owner has to do absolute minimum which in
+  my opinion is running a command and giving owner and agent account. Rest
+  all should be taken care by product itself." And on the Work item #22:
+  "Decision: add #66 (P-19) and #67 (P-20) to roadmap v1." GitHub's API
+  cannot group a view or make a workflow, but it copies a Project with its
+  views, grouping, fields and workflows. So the product keeps one public
+  Project, set up once by its owner, and `onboard` copies it into each
+  client; a Project made before it is offered a move to a copy. It is a
+  plain public Project, not one marked as a template: marking it turned its
+  workflows off, and copies kept them off.
