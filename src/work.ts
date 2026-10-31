@@ -1,5 +1,5 @@
 import { API, NO_TOKEN, loadSettings, repoAt, sameLogin } from './agent.ts';
-import { isOn, notAdoptedLine, offLine } from './features.ts';
+import { PERSONAL_REPO, isOn, isPersonal, notAdoptedLine, offLine } from './features.ts';
 import { agentSession, pushIdentityProblem } from './push-identity.ts';
 import { cloudToken } from './cloud.ts';
 import type { Output, Sys } from './types.ts';
@@ -280,6 +280,10 @@ export async function prWorkRules(sys: Sys, io: Output): Promise<number> {
     io.out(offLine('pr-work-rules', 'work-rules'));
     return 0;
   }
+  if (await isPersonal(sys, slug, token)) {
+    io.out(offLine('pr-work-rules', 'work-rules', PERSONAL_REPO));
+    return 0;
+  }
   if (!sameLogin(pull.user.login, agent)) {
     io.out(`pr-work-rules: #${pull.number} is by ${pull.user.login}, not the agent; the work rules bind agent pull requests`);
     return 0;
@@ -354,6 +358,10 @@ export async function prePush(sys: Sys, io: Output, refLines: string, url: strin
   if (!token) {
     return report(io, 'pre-push', ['this agent session has no token, so the work rules cannot be checked; run process-rules doctor']);
   }
+  if (await isPersonal(sys, slug, token)) {
+    io.err(offLine('pre-push', 'work-rules', PERSONAL_REPO));
+    return 0;
+  }
   let messages = '';
   const branches: string[] = [];
   for (const line of refLines.split('\n').filter(Boolean)) {
@@ -409,6 +417,10 @@ export async function propose(sys: Sys, io: Output, number: number): Promise<num
   }
   const token = sessionToken(sys);
   if (!token) return report(io, 'propose', ['this session has no token; run process-rules doctor']);
+  if (await isPersonal(sys, slug, token)) {
+    io.out(offLine('propose', 'work-rules', PERSONAL_REPO));
+    return 0;
+  }
   // Only the agent's proposals count, so one posted as anyone else would wait for nothing.
   const user = await sys.http(`${API}/user`, { token });
   const login = (user.json as { login?: string } | null)?.login;

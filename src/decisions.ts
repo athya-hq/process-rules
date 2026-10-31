@@ -1,5 +1,5 @@
 import { API, loadSettings, sameLogin } from './agent.ts';
-import { isOn, offLine } from './features.ts';
+import { PERSONAL_REPO, isOn, isPersonal, offLine } from './features.ts';
 import { expireVetoes } from './reviews.ts';
 import type { Output, Sys } from './types.ts';
 
@@ -72,9 +72,16 @@ export async function decisionsWeekly(sys: Sys, io: Output): Promise<number> {
   const { GITHUB_REPOSITORY: slug, GH_TOKEN: token } = sys.env;
   if (!slug || !token) throw new Error('decisions-weekly runs in GitHub Actions: GITHUB_REPOSITORY and GH_TOKEN must be set');
   const { owner, agent } = loadSettings(sys, sys.cwd);
+  const review = isOn(sys, sys.cwd, 'review');
+  const on = isOn(sys, sys.cwd, 'decisions');
+  // Decisions and their vetoes are issues of the type Decision, so neither runs where there are no issue types.
+  if ((review || on) && (await isPersonal(sys, slug, token))) {
+    io.out(offLine('decisions-weekly', on ? 'decisions' : 'review', PERSONAL_REPO));
+    return 0;
+  }
   // Vetoes belong to the review routine, so they expire whether decisions are on or not.
-  if (isOn(sys, sys.cwd, 'review')) await expireVetoes(sys, io, slug, token);
-  if (!isOn(sys, sys.cwd, 'decisions')) {
+  if (review) await expireVetoes(sys, io, slug, token);
+  if (!on) {
     io.out(offLine('decisions-weekly', 'decisions'));
     return 0;
   }

@@ -1,6 +1,6 @@
 import { API, loadSettings, repoAt, sameLogin } from './agent.ts';
 import { lastEditors, parseDecision } from './decisions.ts';
-import { isOn, offLine } from './features.ts';
+import { PERSONAL_REPO, isOn, isPersonal, offLine } from './features.ts';
 import type { Output, Sys } from './types.ts';
 
 /** How long the owner has to reverse a routine decision before its `veto` label goes. */
@@ -37,6 +37,11 @@ export async function reviewsDue(sys: Sys, io: Output): Promise<number> {
   }
   const token = sys.env.GH_TOKEN;
   if (!token) throw new Error('reviews-due needs GH_TOKEN: run it in an agent session');
+  // Decisions are issues of the type Decision.
+  if (await isPersonal(sys, slug, token)) {
+    io.err(offLine('reviews-due', 'review', PERSONAL_REPO));
+    return 0;
+  }
   const trusted = (login: string | undefined): boolean => sameLogin(login, owner) || sameLogin(login, agent);
   const today = sys.now().toISOString().slice(0, 10);
   const open: Issue[] = [];
