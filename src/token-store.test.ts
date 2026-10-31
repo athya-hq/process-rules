@@ -27,10 +27,17 @@ describe('the macOS keychain', () => {
     assert.equal(KEYCHAIN.store(new FakeSys(), AGENT, 'a b'), false);
   });
 
-  it('reports a keychain that did not keep the token', () => {
+  it('reports a keychain that refused the token', () => {
     const sys = new FakeSys();
     sys.execOverride = (call) => (call.args[0] === '-i' ? { code: 1, stdout: '', stderr: 'no' } : undefined);
     assert.equal(KEYCHAIN.store(sys, AGENT, TOKEN), false);
+  });
+
+  it('reports a keychain that said yes but did not keep the token', () => {
+    const sys = new FakeSys();
+    sys.execOverride = (call) => (call.args[0] === '-i' ? { code: 0, stdout: '', stderr: '' } : undefined);
+    assert.equal(KEYCHAIN.store(sys, AGENT, TOKEN), false);
+    assert.ok(sys.calls.some((c) => c.args[0] === 'find-generic-password'));
   });
 
   it('gives the session file the command it has always run', () => {
