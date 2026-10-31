@@ -21,7 +21,7 @@ export interface OwnerRules {
 /**
  * The rules of a CODEOWNERS file naming `owner` (`@owner`, in any case), and
  * the file without them: the handle goes with the space before it, and a rule
- * left with no owners goes. Team handles, emails, other owners and comments,
+ * left with no owners goes, so its paths fall to the rules before it. Team handles, emails, other owners and comments,
  * whole-line or after the owners, stay.
  */
 export function withoutOwner(text: string, owner: string): Omit<OwnerRules, 'path'> {
@@ -45,9 +45,10 @@ export function withoutOwner(text: string, owner: string): Omit<OwnerRules, 'pat
     }
     let edited = line;
     for (const token of named.reverse()) {
-      const start = token.index;
-      const before = start - (/\s*$/.exec(line.slice(0, start))?.[0].length ?? 0);
-      edited = edited.slice(0, before) + edited.slice(start + token[0].length);
+      // From the end of the token before, so a pattern ending in an escaped space keeps it.
+      const previous = tokens[tokens.indexOf(token) - 1];
+      const before = previous ? previous.index + previous[0].length : token.index;
+      edited = edited.slice(0, before) + edited.slice(token.index + token[0].length);
     }
     kept.push(edited);
   }
@@ -66,7 +67,7 @@ export function ownerRules(sys: Sys, root: string, owner: string): OwnerRules | 
 export function ownerRulesProblem(rules: OwnerRules, owner: string, agent: string): string {
   const where = rules.lines.length === 1 ? `a rule (line ${rules.lines[0]})` : `${rules.lines.length} rules (lines ${rules.lines.join(', ')})`;
   return (
-    `${rules.path} names ${owner} in ${where}: GitHub will ask ${owner} to review every pull request ${agent} opens, ` +
+    `${rules.path} names ${owner} in ${where}: GitHub will ask ${owner} to review every pull request ${agent} opens that changes a file ${rules.lines.length === 1 ? 'it matches' : 'they match'}, ` +
     `because ${agent} authors them and GitHub never asks a pull request's author`
   );
 }

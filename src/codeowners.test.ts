@@ -46,6 +46,10 @@ describe('withoutOwner', () => {
     });
   });
 
+  it('keeps a pattern ending in an escaped space whole', () => {
+    assert.equal(withoutOwner('my\\  @example-owner @a\n', 'example-owner').text, 'my\\  @a\n');
+  });
+
   it('keeps Windows line endings and rules with no owners', () => {
     assert.deepEqual(withoutOwner('/vendor/\r\n* @a @example-owner\r\n', 'example-owner'), {
       lines: [2],
@@ -71,10 +75,10 @@ describe('ownerRules', () => {
     const one = { path: 'CODEOWNERS', lines: [1], dropped: 1, text: '' };
     assert.equal(
       ownerRulesProblem(one, 'example-owner', AGENT),
-      'CODEOWNERS names example-owner in a rule (line 1): GitHub will ask example-owner to review every pull request ExampleBot opens, ' +
+      'CODEOWNERS names example-owner in a rule (line 1): GitHub will ask example-owner to review every pull request ExampleBot opens that changes a file it matches, ' +
         "because ExampleBot authors them and GitHub never asks a pull request's author",
     );
-    assert.match(ownerRulesProblem({ ...one, lines: [1, 4] }, 'example-owner', AGENT), /in 2 rules \(lines 1, 4\)/);
+    assert.match(ownerRulesProblem({ ...one, lines: [1, 4] }, 'example-owner', AGENT), /in 2 rules \(lines 1, 4\): .* a file they match,/);
   });
 });
 

@@ -34,7 +34,7 @@ describe('doctor', () => {
     const { code, err } = await check(sys);
     assert.equal(code, 0);
     assert.deepEqual(err, [
-      '! .github/CODEOWNERS names example-owner in a rule (line 1): GitHub will ask example-owner to review every pull request ExampleBot opens, ' +
+      '! .github/CODEOWNERS names example-owner in a rule (line 1): GitHub will ask example-owner to review every pull request ExampleBot opens that changes a file it matches, ' +
         "because ExampleBot authors them and GitHub never asks a pull request's author; run process-rules onboard to remove example-owner from them",
     ]);
   });

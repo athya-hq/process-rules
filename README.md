@@ -127,11 +127,12 @@ repo's CODEOWNERS names the owner.
    for a yes; commit the files afterwards. When a rule in the repo's
    CODEOWNERS (the file GitHub uses: `.github/CODEOWNERS`, else `CODEOWNERS`,
    else `docs/CODEOWNERS`) names the owner, GitHub will ask the owner to
-   review every agent pull request, since the agent authors them and GitHub
-   never asks a pull request's author; `onboard` says so and offers to remove
-   the owner's handle from those rules, dropping a rule left with no owners.
-   Teams, other owners and comments stay, and without a yes the file stays
-   as it is. An existing `.claude/settings.json`
+   review every agent pull request that changes a file those rules match,
+   since the agent authors them and GitHub never asks a pull request's
+   author. Once the test commit is Verified, `onboard` says so and offers to
+   remove the owner's handle from those rules, dropping a rule left with no
+   owners (its paths then fall to the rules before it). Teams, other owners
+   and comments stay, and without a yes the file stays as it is. An existing `.claude/settings.json`
    keeps its layout: `onboard` adds only its entries, and replaces the hook
    entries an older release wrote where they stand. The repository needs at
    least one commit. The pull request checks read the settings from the base

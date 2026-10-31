@@ -116,12 +116,12 @@ describe('onboard', () => {
     assert.equal(code, 0);
     assert.ok(
       out.includes(
-        '! .github/CODEOWNERS names example-owner in 2 rules (lines 2, 3): GitHub will ask example-owner to review every pull request ExampleBot opens, ' +
+        '! .github/CODEOWNERS names example-owner in 2 rules (lines 2, 3): GitHub will ask example-owner to review every pull request ExampleBot opens that changes a file they match, ' +
           "because ExampleBot authors them and GitHub never asks a pull request's author",
       ),
       out.join('\n'),
     );
-    assert.ok(sys.asked.includes('Remove example-owner from those rules in .github/CODEOWNERS, and drop the rule left with no owners? [y/N] '), sys.asked.join('\n'));
+    assert.ok(sys.asked.includes('Remove example-owner from those rules in .github/CODEOWNERS, and drop the rule left with no owners, so its paths fall to the rules before? [y/N] '), sys.asked.join('\n'));
     assert.equal(sys.files.get(codeowners), '# Owners\n/app/ @example-org/core # app team\n');
     assert.ok(out.includes('✓ .github/CODEOWNERS: example-owner removed'));
     assert.equal(
@@ -136,13 +136,16 @@ describe('onboard', () => {
       const codeowners = `${ROOT}/CODEOWNERS`;
       const text = '* @example-owner @a\n';
       sys.files.set(codeowners, text);
-      // Settings and hook first; then the CODEOWNERS question.
-      sys.answers.splice(2, 0, answer);
+      // The CODEOWNERS question comes last, after the test commit.
+      const before = fresh();
+      await run(before);
+      sys.answers = [...Array<string>(before.asked.length).fill('y'), answer];
       const { code, out } = await run(sys);
       assert.equal(code, 0);
       assert.ok(sys.asked.includes('Remove example-owner from that rule in CODEOWNERS? [y/N] '), sys.asked.join('\n'));
       assert.equal(sys.files.get(codeowners), text);
       assert.ok(out.includes('! CODEOWNERS left as it is'));
+      assert.equal(sys.asked.at(-1), 'Remove example-owner from that rule in CODEOWNERS? [y/N] ');
       assert.ok(!out.at(-1)?.includes('CODEOWNERS'));
     }
   });

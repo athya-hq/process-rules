@@ -143,9 +143,11 @@
   since GitHub never asks a pull request's author. `onboard` reads the file
   GitHub uses (the first of `.github/CODEOWNERS`, `CODEOWNERS` and
   `docs/CODEOWNERS`), says so, and offers to remove the owner's handle from
-  those rules and drop a rule left with no owners; the default is no, and
-  declining leaves the file and goes on, since a client may want the
-  requests. Only the owner's own handle counts: a team the owner belongs to
+  those rules and drop a rule left with no owners, whose paths then fall to
+  the rules before it; the default is no, and declining leaves the file,
+  since a client may want the requests. It asks last, after the test
+  commit, so a run stopped earlier and run again still names the file to
+  commit. Only the owner's own handle counts: a team the owner belongs to
   is the client's to change, and GitHub's API does not say who a team's
   review would reach without more scopes. `doctor`, in an adopting repo,
   warns about the same rules and changes nothing.
