@@ -239,7 +239,7 @@ describe('setUpBoard', () => {
       const board = new Board(sys);
       board.template = 'missing';
       const { url, err } = await setUp(sys, [...Array<string>(index).fill('y'), 'n']);
-      assert.deepEqual({ url, err }, { url: undefined, err: [`onboard: stopped at "${step}"; nothing after it was changed`] });
+      assert.deepEqual({ url, err }, { url: undefined, err: [`onboard: stopped at "${step}"; nothing after it was changed, and no pull request was opened`] });
       assert.equal(board.issueTypes.length, index > 0 ? 7 : 2);
       assert.equal(board.labels.length, index > 1 ? 7 : 1);
       assert.equal(board.project === undefined, index < 3);
@@ -263,7 +263,7 @@ describe('setUpBoard', () => {
     const board = new Board(sys);
     board.project = { fields: FIELDS.map((f) => f.name), linked: false, grouped: true };
     const { err } = await setUp(sys, ['y', 'y', 'n']);
-    assert.deepEqual(err, ['onboard: stopped at "project"; nothing after it was changed']);
+    assert.deepEqual(err, ['onboard: stopped at "project"; nothing after it was changed, and no pull request was opened']);
     assert.equal(board.project.linked, false);
   });
 

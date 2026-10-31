@@ -175,7 +175,17 @@ repo's CODEOWNERS names the owner.
    fails for a moment), and deletes the branch. The steps that act as you
    (giving the agent access, the board) share one browser approval, for
    that run only. Each change waits
-   for a yes; commit the files afterwards. When a rule in the repo's
+   for a yes. The files git tracks in your checkout are never changed: once every step has run,
+   `onboard` commits the files it changes as the agent, signed, on the
+   branch `process-rules/onboard` from the default branch's tip, in a
+   temporary repository it deletes afterwards, pushes it as the agent and
+   opens the agent's pull request (or updates the one an earlier run opened),
+   printing its link; merge it to finish. A run that changes no file, or
+   that stops, opens none. A file the default branch has otherwise than your
+   checkout is refused, so bring the checkout up to date first. The pre-push
+   git hook, which git does not track, is written in place. The work rules
+   pass that pull request without a `Slice:` line while it changes only the
+   files `onboard` writes. When a rule in the repo's
    CODEOWNERS (the file GitHub uses: `.github/CODEOWNERS`, else `CODEOWNERS`,
    else `docs/CODEOWNERS`) names the owner, GitHub will ask the owner to
    review every agent pull request that changes a file those rules match,
@@ -188,7 +198,7 @@ repo's CODEOWNERS names the owner.
    entries an older release wrote where they stand. The repository needs at
    least one commit. The pull request checks read the settings from the base
    branch, so a pull request cannot rename the agent it is checked against.
-   The pull request that first commits them passes PR identity, Work rules
+   The pull request that first commits them, `onboard`'s, passes PR identity, Work rules
    and Design frames, saying the repo is not adopted on its base yet, as for
    a feature that is off; they apply from the next pull request.
 

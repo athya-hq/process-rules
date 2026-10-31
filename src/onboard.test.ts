@@ -7,7 +7,7 @@ import { after, describe, it } from 'node:test';
 
 import { BUILT_IN, Board, COPY_URL, OWNER_TOKEN, repoJson, settledViews } from './fake-board.test.ts';
 import { FIELDS, ISSUE_TYPES, LABELS } from './board.ts';
-import { AGENT, FakeSys, ROOT, TOKEN, capture } from './fake.test.ts';
+import { AGENT, FakeSys, PULL_URL, ROOT, TOKEN, capture } from './fake.test.ts';
 import type { HttpResult } from './types.ts';
 import { pathsFor, sessionScript } from './agent.ts';
 import { FEATURES } from './features.ts';
@@ -45,28 +45,55 @@ function fresh(): FakeSys {
   return sys;
 }
 
+/** The checkout's files, git's own folder aside. */
+function checkout(sys: FakeSys): Map<string, string> {
+  return new Map([...sys.files].filter(([path]) => path.startsWith(`${ROOT}/`) && !path.startsWith(`${ROOT}/.git/`)));
+}
+
+/** The repository's files as onboard's pull request leaves them: what it committed, else what the checkout has. */
+function repo(sys: FakeSys): { get(path: string): string | undefined; has(path: string): boolean } {
+  const get = (path: string): string | undefined => sys.committed.get(path.slice(ROOT.length + 1)) ?? sys.files.get(path);
+  return { get, has: (path) => get(path) !== undefined };
+}
+
+/** As when the owner merges onboard's pull request: what it committed is now in the checkout. */
+function merge(sys: FakeSys): void {
+  for (const [path, text] of sys.committed) sys.files.set(`${ROOT}/${path}`, text);
+  sys.committed.clear();
+}
+
+/** How many times onboard had the owner sign in in the browser. */
+function signIns(sys: FakeSys): number {
+  return sys.calls.filter((call) => call.command === 'gh' && call.args[1] === 'login').length;
+}
+
+/** Runs onboard, checking it leaves the checkout as it found it. */
 async function run(sys: FakeSys, named: string[] = ['example-owner', AGENT]): Promise<{ code: number; out: string[]; err: string[] }> {
   const { io, out, err } = capture();
-  return { code: await onboard(sys, io, named), out, err };
+  const before = checkout(sys);
+  const code = await onboard(sys, io, named);
+  assert.deepEqual(checkout(sys), before, "onboard changed the owner's checkout");
+  return { code, out, err };
 }
 
 describe('onboard', () => {
-  it('writes the files, finds the agent can push, and proves a Verified commit', async () => {
+  it("opens the files as the agent's pull request, finds the agent can push, and proves a Verified commit", async () => {
     const sys = fresh();
     const { code, out, err } = await run(sys);
     assert.deepEqual(err, []);
     assert.equal(code, 0);
-    assert.deepEqual(JSON.parse(sys.files.get(SETTINGS) ?? ''), { owner: 'example-owner', agent: 'ExampleBot', features: [...FEATURES] });
-    assert.deepEqual(JSON.parse(sys.files.get(HOOKS) ?? ''), CLAUDE);
-    assert.equal(sys.files.get(WORKFLOW), workflow('main', packageVersion(), true));
+    assert.deepEqual(JSON.parse(repo(sys).get(SETTINGS) ?? ''), { owner: 'example-owner', agent: 'ExampleBot', features: [...FEATURES] });
+    assert.deepEqual(JSON.parse(repo(sys).get(HOOKS) ?? ''), CLAUDE);
+    assert.equal(repo(sys).get(WORKFLOW), workflow('main', packageVersion(), true));
     assert.equal(sys.files.get(PRE_PUSH), PRE_PUSH_HOOK);
     assert.equal(sys.modes.get(PRE_PUSH), 0o755);
-    assert.deepEqual(sys.dirs.filter((d) => d.startsWith(ROOT)), [`${ROOT}/.github`, `${ROOT}/.claude`, `${ROOT}/.github/workflows`]);
+    assert.deepEqual(sys.dirs.filter((d) => d.startsWith(ROOT)), [], 'no folder made in the checkout');
     assert.ok(out.includes('✓ ExampleBot can push to example-org/example-app'));
     assert.ok(out.includes('✓ GitHub shows the test commit Verified by ExampleBot'));
     assert.ok(out.includes('Deleted the throwaway branch process-rules/verify-examplebot-1793361600000.'));
-    assert.deepEqual(out.slice(-2), [
-      'onboard: done. Commit .github/process-rules.json, .claude/settings.json and .github/workflows/process-rules.yml; agent sessions then work as ExampleBot.',
+    assert.deepEqual(out.slice(-3), [
+      `✓ ExampleBot's pull request with .github/process-rules.json, .claude/settings.json, .github/workflows/process-rules.yml: ${PULL_URL}`,
+      `onboard: done; nothing in this checkout was changed. Merge ${PULL_URL}; agent sessions then work as ExampleBot.`,
       "For Claude cloud sessions: connect claude.ai's GitHub as ExampleBot, and put what process-rules cloud-setup prints in the cloud environment's Setup script.",
     ]);
     const git = sys.calls.filter((c) => c.command === 'git' && c.env);
@@ -77,10 +104,27 @@ describe('onboard', () => {
       'commit-tree -S',
       'push -q',
       'push -q',
+      // The pull request's commit, in a temporary repository: never the checkout.
+      'init -q',
+      'fetch -q',
+      'read-tree FETCH_HEAD',
+      ...['settings', 'hooks', 'workflow'].flatMap(() => ['rev-parse --verify', 'hash-object -w', 'update-index --add']),
+      'write-tree --missing-ok',
+      'commit-tree -S',
+      'push -q',
     ]);
-    assert.equal(git[0]?.env?.GH_TOKEN, TOKEN);
-    assert.equal(git[0]?.env?.GIT_COMMITTER_EMAIL, '42+ExampleBot@users.noreply.github.com');
-    assert.deepEqual(sys.calls.at(-1)?.args, ['-rf', '/tmp/verify']);
+    assert.ok(git.every((c) => c.env?.GH_TOKEN === TOKEN && c.env.GIT_COMMITTER_EMAIL === '42+ExampleBot@users.noreply.github.com'), 'every git step as the agent');
+    assert.ok(git.slice(6).every((c) => c.cwd === '/tmp/process-rules-2'), 'the pull request is made in a temporary repository');
+    assert.deepEqual(git.at(-1)?.args, ['push', '-q', 'https://github.com/example-org/example-app.git', '+abc123:refs/heads/process-rules/onboard']);
+    assert.ok(sys.removed.includes('/tmp/process-rules-2'), 'the temporary repository is deleted');
+    assert.deepEqual([...sys.committed.keys()], ['.github/process-rules.json', '.claude/settings.json', '.github/workflows/process-rules.yml']);
+    const pull = sys.requests.find((r) => r.method === 'POST' && r.url.endsWith(`${REPO}/pulls`));
+    assert.equal(pull?.token, TOKEN, 'the agent opens the pull request');
+    const { title, head, base, body } = pull?.body as { title: string; head: string; base: string; body: string };
+    assert.deepEqual([title, head, base], [`process-rules onboard at v${packageVersion()}`, 'process-rules/onboard', 'main']);
+    assert.match(body, /^- `\.github\/process-rules\.json`: owner example-owner approves, agent ExampleBot builds, with identity, .* on$/m);
+    assert.match(body, /^- `\.github\/workflows\/process-rules\.yml`: write \.github\/workflows\/process-rules\.yml, which runs the shared process-rules checks$/m);
+    assert.deepEqual(sys.calls.filter((c) => c.command === 'rm').at(-1)?.args, ['-rf', '/tmp/verify']);
     const reads = sys.requests.filter((r) => r.url === `https://api.github.com${REPO}`);
     assert.equal(reads[0]?.token, TOKEN, 'checks access as the agent');
     assert.ok(out.includes('✓ fields: Step, Decision, Review date'));
@@ -92,7 +136,7 @@ describe('onboard', () => {
     const sys = fresh();
     sys.route('GET', '/users/EXAMPLE-OWNER', { status: 200, json: { id: 1, login: 'example-owner' } });
     assert.equal((await run(sys, ['EXAMPLE-OWNER', 'examplebot'])).code, 0);
-    assert.match(sys.files.get(SETTINGS) ?? '', /"owner": "example-owner",\n {2}"agent": "ExampleBot"/);
+    assert.match(repo(sys).get(SETTINGS) ?? '', /"owner": "example-owner",\n {2}"agent": "ExampleBot"/);
   });
 
   it('reads the accounts from existing settings, and skips what is done', async () => {
@@ -105,9 +149,12 @@ describe('onboard', () => {
     board.issueTypes = ISSUE_TYPES.map((t) => t.name);
     board.labels = LABELS.map((l) => l.name);
     board.project = { fields: [...BUILT_IN, ...FIELDS.map((f) => f.name)], linked: true, views: settledViews(), grouped: true };
-    const { code } = await run(sys, []);
+    const { code, out } = await run(sys, []);
     assert.equal(code, 0);
     assert.deepEqual(sys.asked.map((q) => q.split(' ')[0]), ['Push']);
+    assert.ok(!sys.requests.some((r) => r.url.endsWith('/pulls')), 'nothing to change, no pull request');
+    assert.ok(!sys.calls.some((c) => c.args[0] === 'read-tree'));
+    assert.equal(out.at(-2), "onboard: done; the repository's files need no change, so there is no pull request. Agent sessions work as ExampleBot.");
   });
 
   it("offers to remove the owner from CODEOWNERS, which would ask them to review every agent pull request", async () => {
@@ -124,11 +171,11 @@ describe('onboard', () => {
       out.join('\n'),
     );
     assert.ok(sys.asked.includes('Remove example-owner from those rules in .github/CODEOWNERS, and drop the rule left with no owners, so its paths fall to the rules before? [y/N] '), sys.asked.join('\n'));
-    assert.equal(sys.files.get(codeowners), '# Owners\n/app/ @example-org/core # app team\n');
+    assert.equal(repo(sys).get(codeowners), '# Owners\n/app/ @example-org/core # app team\n');
     assert.ok(out.includes('✓ .github/CODEOWNERS: example-owner removed'));
     assert.ok(
       out.includes(
-        'onboard: done. Commit .github/process-rules.json, .claude/settings.json, .github/workflows/process-rules.yml and .github/CODEOWNERS; agent sessions then work as ExampleBot.',
+        `✓ ExampleBot's pull request with .github/process-rules.json, .claude/settings.json, .github/workflows/process-rules.yml, .github/CODEOWNERS: ${PULL_URL}`,
       ),
       out.join('\n'),
     );
@@ -147,10 +194,11 @@ describe('onboard', () => {
       const { code, out } = await run(sys);
       assert.equal(code, 0);
       assert.ok(sys.asked.includes('Remove example-owner from that rule in CODEOWNERS? [y/N] '), sys.asked.join('\n'));
-      assert.equal(sys.files.get(codeowners), text);
+      assert.equal(repo(sys).get(codeowners), text);
       assert.ok(out.includes('! CODEOWNERS left as it is'));
       assert.equal(sys.asked.at(-1), 'Remove example-owner from that rule in CODEOWNERS? [y/N] ');
-      assert.ok(out.some((line) => line.startsWith('onboard: done.') && !line.includes('CODEOWNERS')));
+      assert.ok(!sys.committed.has('CODEOWNERS'));
+      assert.ok(out.some((line) => line.startsWith("✓ ExampleBot's pull request") && !line.includes('CODEOWNERS')));
     }
   });
 
@@ -175,7 +223,7 @@ describe('onboard', () => {
         ),
         sys.asked.join('\n'),
       );
-      assert.deepEqual(JSON.parse(sys.files.get(HOOKS) ?? ''), {
+      assert.deepEqual(JSON.parse(repo(sys).get(HOOKS) ?? ''), {
         hooks: { SessionStart: [{ hooks: [{ type: 'command', command: 'echo hi' }, { type: 'command', command: HOOK_COMMAND }] }], PreToolUse: [GUARD_ENTRY] },
         env: BASE_ENV,
         permissions: { allow: [REVIEW_THREAD_RULE] },
@@ -210,7 +258,7 @@ describe('onboard', () => {
     await run(sys);
     const at = text.lastIndexOf(older);
     const swapped = `${text.slice(0, at)}${JSON.stringify(HOOK_COMMAND)}${text.slice(at + older.length)}`;
-    const written = sys.files.get(HOOKS) ?? '';
+    const written = repo(sys).get(HOOKS) ?? '';
     assert.ok(written.startsWith(swapped.slice(0, swapped.lastIndexOf('\r\n    }'))), written);
     assert.ok(written.includes('\r\n        "PreToolUse": [\r\n            {\r\n                "matcher": "Bash",'), 'added in the file\'s own layout');
     assert.deepEqual(JSON.parse(written).env, BASE_ENV);
@@ -220,7 +268,7 @@ describe('onboard', () => {
     const sys = fresh();
     sys.files.set(HOOKS, '{ "hooks": { "SessionStart": "x" } }');
     await assert.rejects(run(sys), /^Error: \.claude\/settings\.json: hooks\.SessionStart is not an array$/);
-    assert.equal(sys.files.get(HOOKS), '{ "hooks": { "SessionStart": "x" } }');
+    assert.equal(repo(sys).get(HOOKS), '{ "hooks": { "SessionStart": "x" } }');
     assert.ok(!sys.asked.some((q) => q.includes('.claude/settings.json')));
   });
 
@@ -229,7 +277,7 @@ describe('onboard', () => {
     const own = 'my-wrapper && process-rules session-start';
     sys.files.set(HOOKS, JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: own }] }] } }));
     await run(sys);
-    const commands = JSON.parse(sys.files.get(HOOKS) ?? '').hooks.SessionStart.flatMap((g: { hooks: { command: string }[] }) => g.hooks.map((h) => h.command));
+    const commands = JSON.parse(repo(sys).get(HOOKS) ?? '').hooks.SessionStart.flatMap((g: { hooks: { command: string }[] }) => g.hooks.map((h) => h.command));
     assert.deepEqual(commands, [own, HOOK_COMMAND]);
   });
 
@@ -238,7 +286,7 @@ describe('onboard', () => {
     sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT }));
     sys.files.set(HOOKS, JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ command: OLDER_HOOK_COMMANDS[0] }] }, null, { hooks: 'x' }] } }));
     sys.answers = ['n'];
-    assert.deepEqual((await run(sys, [])).err, ['onboard: stopped at "hook entry"; nothing after it was changed']);
+    assert.deepEqual((await run(sys, [])).err, ['onboard: stopped at "hook entry"; nothing after it was changed, and no pull request was opened']);
   });
 
   describe('the hook commands, in a real shell', () => {
@@ -319,7 +367,7 @@ describe('onboard', () => {
     sys.files.set(HOOKS, JSON.stringify(lookalike));
     await run(sys);
     assert.ok(sys.asked.some((q) => q.startsWith('Update .claude/settings.json: add the SessionStart hook')));
-    assert.equal(JSON.parse(sys.files.get(HOOKS) ?? '').hooks.SessionStart.length, 3);
+    assert.equal(JSON.parse(repo(sys).get(HOOKS) ?? '').hooks.SessionStart.length, 3);
   });
 
   it('uses GitHub\'s spelling of the accounts existing settings name', async () => {
@@ -345,7 +393,7 @@ describe('onboard', () => {
     const own = { hooks: [{ type: 'command', command: 'echo hi' }] };
     sys.files.set(HOOKS, JSON.stringify({ env: { A: '1' }, hooks: { SessionStart: [own], Stop: [own] } }));
     await run(sys);
-    assert.deepEqual(JSON.parse(sys.files.get(HOOKS) ?? ''), {
+    assert.deepEqual(JSON.parse(repo(sys).get(HOOKS) ?? ''), {
       env: { A: '1', ...BASE_ENV },
       hooks: { SessionStart: [own, SESSION_ENTRY], Stop: [own], PreToolUse: [GUARD_ENTRY] },
       permissions: { allow: [REVIEW_THREAD_RULE] },
@@ -398,7 +446,7 @@ describe('onboard', () => {
     sys.route('GET', REPO, { status: 200, json: repoJson(true, 'trunk') });
     await run(sys);
     assert.ok(sys.asked.some((q) => q.startsWith('Replace .github/workflows/process-rules.yml')));
-    assert.match(sys.files.get(WORKFLOW) ?? '', /branches: \["trunk"\]/);
+    assert.match(repo(sys).get(WORKFLOW) ?? '', /branches: \["trunk"\]/);
   });
 
   it("replaces an older release's single-job workflow, saying why", async () => {
@@ -406,7 +454,7 @@ describe('onboard', () => {
     sys.files.set(WORKFLOW, olderWorkflows('main', '0.5.2')[0] as string);
     await run(sys);
     assert.ok(sys.asked.some((q) => q.startsWith('Replace the older .github/workflows/process-rules.yml, which lets every run write to issues')));
-    assert.equal(sys.files.get(WORKFLOW), workflow('main', packageVersion(), true));
+    assert.equal(repo(sys).get(WORKFLOW), workflow('main', packageVersion(), true));
   });
 
   it('moves only the version pins of a workflow already split', async () => {
@@ -415,7 +463,7 @@ describe('onboard', () => {
     sys.files.set(WORKFLOW, own);
     await run(sys);
     assert.ok(sys.asked.some((q) => q === `In .github/workflows/process-rules.yml, move the version pins from v0.5.2 to v${packageVersion()}, leaving the rest as it is? [y/N] `));
-    assert.equal(sys.files.get(WORKFLOW), own.replaceAll('0.5.2', packageVersion()));
+    assert.equal(repo(sys).get(WORKFLOW), own.replaceAll('0.5.2', packageVersion()));
   });
 
   it('leaves a split workflow at this release alone', async () => {
@@ -424,7 +472,7 @@ describe('onboard', () => {
     sys.files.set(WORKFLOW, own);
     await run(sys);
     assert.ok(!sys.asked.some((q) => q.includes(WORKFLOW_PATH)));
-    assert.equal(sys.files.get(WORKFLOW), own);
+    assert.equal(repo(sys).get(WORKFLOW), own);
   });
 
   it('refuses inside an agent session', async () => {
@@ -483,8 +531,8 @@ describe('onboard', () => {
       const { code } = await run(sys, []);
       assert.equal(code, 0);
       assert.deepEqual(sys.asked.slice(0, 2), ['The owner, who approves [example-owner]: ', 'The agent, which builds [ExampleBot]: ']);
-      assert.deepEqual(JSON.parse(sys.files.get(SETTINGS) ?? '').owner, 'example-owner');
-      assert.equal(sys.temps.length, 1, 'the sign-in that suggested the owner serves the board too');
+      assert.deepEqual(JSON.parse(repo(sys).get(SETTINGS) ?? '').owner, 'example-owner');
+      assert.equal(signIns(sys), 1, 'the sign-in that suggested the owner serves the board too');
     });
 
     it('lists the agents set up here and takes what is typed', async () => {
@@ -493,7 +541,7 @@ describe('onboard', () => {
       const { code, out } = await run(sys, []);
       assert.equal(code, 0);
       assert.ok(out.includes('Accounts set up here for the agent: OtherBot, ExampleBot'));
-      assert.equal(JSON.parse(sys.files.get(SETTINGS) ?? '').agent, AGENT);
+      assert.equal(JSON.parse(repo(sys).get(SETTINGS) ?? '').agent, AGENT);
     });
 
     it('suggests no owner when the sign-in fails or GitHub will not answer', async () => {
@@ -541,7 +589,7 @@ describe('onboard', () => {
     it('does not sign in when no step needs the owner', async () => {
       const sys = fresh();
       assert.equal((await run(sys, ['example-owner', AGENT, '--features', 'identity,pr-identity'])).code, 0);
-      assert.deepEqual(sys.temps, []);
+      assert.equal(signIns(sys), 0);
     });
 
     it("signs in for the board's scopes when --add turns it on", async () => {
@@ -574,7 +622,7 @@ describe('onboard', () => {
       const text = '{\n  "env": { "A": "1" },\n  "hooks": {\n    "Stop": [{ "hooks": [] }]\n  }\n}\n';
       sys.files.set(HOOKS, text);
       await run(sys);
-      const out = sys.files.get(HOOKS) ?? '';
+      const out = repo(sys).get(HOOKS) ?? '';
       assert.ok(out.startsWith('{\n  "env": { "A": "1",'), out);
       assert.ok(out.includes('\n  "hooks": {\n    "Stop": [{ "hooks": [] }],\n    "SessionStart": ['), out);
       assert.deepEqual(JSON.parse(out), { env: { A: '1', ...BASE_ENV }, hooks: { Stop: [{ hooks: [] }], SessionStart: [SESSION_ENTRY], PreToolUse: [GUARD_ENTRY] }, permissions: { allow: [REVIEW_THREAD_RULE] } });
@@ -585,7 +633,7 @@ describe('onboard', () => {
       const older = OLDER_HOOK_COMMANDS[0] as string;
       sys.files.set(HOOKS, `{ "env": { "A": "1" }, "hooks": { "SessionStart": [{ "hooks": [{ "type": "command", "command": ${JSON.stringify(older)} }] }] } }\n`);
       await run(sys);
-      assert.ok((sys.files.get(HOOKS) ?? '').includes(`"SessionStart": [{ "hooks": [{ "type": "command", "command": ${JSON.stringify(HOOK_COMMAND)} }] }]`));
+      assert.ok((repo(sys).get(HOOKS) ?? '').includes(`"SessionStart": [{ "hooks": [{ "type": "command", "command": ${JSON.stringify(HOOK_COMMAND)} }] }]`));
     });
   });
 
@@ -619,7 +667,7 @@ describe('onboard', () => {
       assert.equal(code, 0);
       const put = sys.requests.find((r) => r.method === 'PUT');
       assert.deepEqual([put?.token, put?.body], [OWNER_TOKEN, { permission: 'push' }]);
-      assert.equal(sys.temps.length, 1, 'one sign-in for the access and the board');
+      assert.equal(signIns(sys), 1, 'one sign-in for the access and the board');
     });
 
     it('invites, then accepts the invitation as the agent', async () => {
@@ -859,8 +907,9 @@ describe('onboard', () => {
       const sys = fresh();
       sys.answers = [...Array<string>(index).fill('y'), 'n'];
       const { code, err } = await run(sys);
-      assert.deepEqual({ code, err }, { code: 1, err: [`onboard: stopped at "${step}"; nothing after it was changed`] });
-      assert.equal(sys.files.has(WORKFLOW), index > 2);
+      assert.deepEqual({ code, err }, { code: 1, err: [`onboard: stopped at "${step}"; nothing after it was changed, and no pull request was opened`] });
+      assert.equal(sys.committed.size, 0, 'the files confirmed before the stop are not committed either');
+      assert.ok(!sys.requests.some((r) => r.url.endsWith('/pulls')));
       assert.equal(sys.files.has(PRE_PUSH), index > 3);
     });
   }
@@ -880,7 +929,7 @@ describe('onboard', () => {
       setUp(sys);
       sys.answers = [...answers];
       const { code, err } = await run(sys);
-      assert.deepEqual({ code, err }, { code: 1, err: ['onboard: stopped at "agent access"; nothing after it was changed'] });
+      assert.deepEqual({ code, err }, { code: 1, err: ['onboard: stopped at "agent access"; nothing after it was changed, and no pull request was opened'] });
     });
   }
 });
@@ -891,12 +940,12 @@ describe('staged adoption', () => {
     sys.answers = ['y', 'y', 'y', 'y'];
     const { code, out } = await run(sys, ['example-owner', AGENT, '--features', 'identity']);
     assert.equal(code, 0);
-    assert.deepEqual(JSON.parse(sys.files.get(SETTINGS) ?? '').features, ['identity']);
-    assert.ok(sys.files.has(HOOKS));
-    assert.ok(!sys.files.has(WORKFLOW));
+    assert.deepEqual(JSON.parse(repo(sys).get(SETTINGS) ?? '').features, ['identity']);
+    assert.ok(repo(sys).has(HOOKS));
+    assert.ok(!repo(sys).has(WORKFLOW));
     assert.equal(sys.files.get(PRE_PUSH), PRE_PUSH_HOOK, 'the identity guard, for every adopter');
     assert.ok(!sys.requests.some((r) => r.url.endsWith('/graphql') || r.url.includes('/labels') || r.url.includes('/issue-types')), 'no board');
-    assert.equal(out.at(-2), 'onboard: done. Commit .github/process-rules.json and .claude/settings.json; agent sessions then work as ExampleBot.');
+    assert.equal(out.at(-3), `✓ ExampleBot's pull request with .github/process-rules.json, .claude/settings.json: ${PULL_URL}`);
     assert.ok(out.includes('✓ GitHub shows the test commit Verified by ExampleBot'));
     assert.deepEqual(sys.asked.map((q) => q.split(' ')[0]), ['Write', 'Write', 'Write', 'Push']);
   });
@@ -910,7 +959,7 @@ describe('staged adoption', () => {
     const { code } = await run(sys, ['--add', 'board']);
     assert.equal(code, 0);
     assert.deepEqual(board.titles, ['Example work']);
-    assert.deepEqual(JSON.parse(sys.files.get(SETTINGS) ?? ''), {
+    assert.deepEqual(JSON.parse(repo(sys).get(SETTINGS) ?? ''), {
       owner: 'example-owner',
       agent: AGENT,
       features: ['identity', 'board'],
@@ -918,7 +967,7 @@ describe('staged adoption', () => {
       note: 'kept',
     });
     assert.ok(sys.asked.some((q) => q.startsWith('Create the Project "Example work"')));
-    assert.ok(!sys.files.has(WORKFLOW), 'board alone needs no workflow');
+    assert.ok(!repo(sys).has(WORKFLOW), 'board alone needs no workflow');
   });
 
   it('renames design to figma and takes the library key out of older settings, naming the secret to set', async () => {
@@ -930,9 +979,9 @@ describe('staged adoption', () => {
     const { code, out } = await run(sys);
     assert.equal(code, 0);
     assert.equal(sys.asked[0], 'Update .github/process-rules.json: rename the design feature to figma and take out "figma", since the library key belongs in the FIGMA_LIBRARY Actions secret? [y/N] ');
-    assert.deepEqual(JSON.parse(sys.files.get(SETTINGS) ?? ''), { owner: 'example-owner', agent: AGENT, features: ['identity', 'figma'] });
+    assert.deepEqual(JSON.parse(repo(sys).get(SETTINGS) ?? ''), { owner: 'example-owner', agent: AGENT, features: ['identity', 'figma'] });
     assert.ok(out.includes('! set the FIGMA_LIBRARY Actions secret to the key taken out: gh secret set FIGMA_LIBRARY --repo example-org/example-app --body LIB1'));
-    assert.equal(sys.files.get(WORKFLOW), workflow('main', packageVersion(), true));
+    assert.equal(repo(sys).get(WORKFLOW), workflow('main', packageVersion(), true));
   });
 
   it('renames design alone, and stops at a no', async () => {
@@ -942,7 +991,7 @@ describe('staged adoption', () => {
     const { code } = await run(sys);
     assert.equal(code, 1);
     assert.equal(sys.asked[0], 'Update .github/process-rules.json: rename the design feature to figma? [y/N] ');
-    assert.deepEqual(JSON.parse(sys.files.get(SETTINGS) ?? '').features, ['identity', 'design']);
+    assert.deepEqual(JSON.parse(repo(sys).get(SETTINGS) ?? '').features, ['identity', 'design']);
   });
 
   it('takes out a library key from settings that list no features', async () => {
@@ -950,7 +999,7 @@ describe('staged adoption', () => {
     sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, figma: {} }));
     sys.answers = Array<string>(8).fill('y');
     const { out } = await run(sys);
-    assert.deepEqual(JSON.parse(sys.files.get(SETTINGS) ?? ''), { owner: 'example-owner', agent: AGENT });
+    assert.deepEqual(JSON.parse(repo(sys).get(SETTINGS) ?? ''), { owner: 'example-owner', agent: AGENT });
     assert.ok(!out.some((line) => line.includes('gh secret set')));
   });
 
@@ -963,7 +1012,7 @@ describe('staged adoption', () => {
     sys.files.set(WORKFLOW, own);
     sys.answers = ['y'];
     const { out } = await run(sys);
-    assert.equal(sys.files.get(WORKFLOW), own);
+    assert.equal(repo(sys).get(WORKFLOW), own);
     assert.ok(out.includes("! In .github/workflows/process-rules.yml, process-rules and process-rules-weekly pass the shared checks no FIGMA_LIBRARY secret, so the design check stays off there; add FIGMA_LIBRARY: ${{ secrets.FIGMA_LIBRARY }} under their secrets"));
   });
 
@@ -990,8 +1039,8 @@ describe('staged adoption', () => {
     const sys = fresh();
     sys.answers = Array<string>(5).fill('y');
     await run(sys, ['example-owner', AGENT, '--features', 'work-rules']);
-    assert.deepEqual(JSON.parse(sys.files.get(SETTINGS) ?? '').features, ['identity', 'work-rules']);
-    assert.ok(sys.files.has(WORKFLOW) && sys.files.has(PRE_PUSH));
+    assert.deepEqual(JSON.parse(repo(sys).get(SETTINGS) ?? '').features, ['identity', 'work-rules']);
+    assert.ok(repo(sys).has(WORKFLOW) && sys.files.has(PRE_PUSH));
   });
 
   it('adds nothing when the feature is already on', async () => {
@@ -1001,11 +1050,11 @@ describe('staged adoption', () => {
     sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity', 'pr-identity'] }));
     sys.files.set(WORKFLOW, workflow('main', packageVersion(), false));
     sys.files.set(PRE_PUSH, PRE_PUSH_HOOK);
-    const before = sys.files.get(SETTINGS);
+    const before = repo(sys).get(SETTINGS);
     sys.answers = ['y'];
     await run(sys, ['--add', 'pr-identity']);
     assert.deepEqual(sys.asked.map((q) => q.split(' ')[0]), ['Push']);
-    assert.equal(sys.files.get(SETTINGS), before);
+    assert.equal(repo(sys).get(SETTINGS), before);
   });
 
   for (const [name, args, change, message] of [
@@ -1028,15 +1077,99 @@ describe('staged adoption', () => {
     sys.files.set(PRE_PUSH, PRE_PUSH_HOOK);
     sys.answers = ['y', 'n'];
     const { err } = await run(sys, ['--add', 'board']);
-    assert.deepEqual(err, ['onboard: stopped at "issue types"; nothing after it was changed']);
-    assert.equal(sys.files.get(SETTINGS), before);
+    assert.deepEqual(err, ['onboard: stopped at "issue types"; nothing after it was changed, and no pull request was opened']);
+    assert.equal(repo(sys).get(SETTINGS), before);
   });
 
   it('stops when turning a feature on is declined', async () => {
     const sys = fresh();
     sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity'] }));
     sys.answers = ['n'];
-    assert.deepEqual((await run(sys, ['--add', 'board'])).err, ['onboard: stopped at "settings file"; nothing after it was changed']);
+    assert.deepEqual((await run(sys, ['--add', 'board'])).err, ['onboard: stopped at "settings file"; nothing after it was changed, and no pull request was opened']);
+  });
+});
+
+describe("onboard's pull request", () => {
+  /** onboard's git step whose arguments start with `prefix`, in the temporary repository, failing. */
+  const failing = (sys: FakeSys, prefix: string): void => {
+    sys.execOverride = (call) =>
+      call.cwd?.startsWith('/tmp/process-rules-') && call.args.join(' ').startsWith(prefix) ? { code: 1, stdout: '', stderr: 'boom\n' } : undefined;
+  };
+
+  for (const [step, said] of [
+    ['init', 'onboard: git init failed: boom'],
+    ['fetch', 'onboard: git fetch failed: boom'],
+    ['hash-object -w', 'onboard: storing .github/process-rules.json failed: boom'],
+    ['update-index', 'onboard: staging .github/process-rules.json failed: boom'],
+    ['write-tree', 'onboard: git write-tree failed: boom'],
+    ['commit-tree', 'onboard: signing the commit failed: boom'],
+    ['push -q https://github.com/example-org/example-app.git +', 'onboard: pushing as ExampleBot failed: boom'],
+  ] as const) {
+    it(`deletes the temporary repository and opens nothing when ${step} fails`, async () => {
+      const sys = fresh();
+      failing(sys, step);
+      const { code, err } = await run(sys);
+      assert.deepEqual({ code, err }, { code: 1, err: [said] });
+      const temp = sys.calls.find((c) => c.args[0] === 'init' && c.cwd?.startsWith('/tmp/process-rules-'))?.cwd;
+      assert.ok(temp && sys.removed.includes(temp), 'the temporary repository is deleted');
+      assert.ok(!sys.requests.some((r) => r.method === 'POST' && r.url.endsWith('/pulls')));
+    });
+  }
+
+  it('refuses a file the default branch has otherwise than this checkout, pushing nothing', async () => {
+    const sys = fresh();
+    sys.tip = new Map([['.github/process-rules.json', '{"owner":"someone-else"}\n']]);
+    const { code, err } = await run(sys);
+    assert.equal(code, 1);
+    assert.deepEqual(err, ['onboard: .github/process-rules.json on main is not what this checkout has; bring this checkout up to date with main and run onboard again']);
+    assert.ok(!sys.calls.some((c) => c.args.join(' ').includes('refs/heads/process-rules/onboard')));
+    assert.ok(sys.removed.includes('/tmp/process-rules-2'));
+  });
+
+  it('updates the pull request a run before opened', async () => {
+    const sys = fresh();
+    sys.route('POST', `${REPO}/pulls`, { status: 422, json: { message: 'Validation Failed' } });
+    sys.route('GET', `${REPO}/pulls?state=open&head=example-org:process-rules/onboard`, { status: 200, json: [{ number: 5, html_url: 'https://github.com/example-org/example-app/pull/5' }] });
+    sys.route('PATCH', `${REPO}/pulls/5`, { status: 200, json: {} });
+    const { code, out, err } = await run(sys);
+    assert.deepEqual([code, err], [0, []]);
+    const patched = sys.requests.find((r) => r.method === 'PATCH');
+    assert.equal(patched?.token, TOKEN);
+    assert.match((patched?.body as { body: string }).body, /Running onboard again updates this pull request\.$/);
+    assert.ok(out.includes('onboard: done; nothing in this checkout was changed. Merge https://github.com/example-org/example-app/pull/5; agent sessions then work as ExampleBot.'));
+  });
+
+  it('says so when the description of the open pull request cannot be updated, and goes on', async () => {
+    const sys = fresh();
+    sys.route('POST', `${REPO}/pulls`, { status: 422, json: { message: 'Validation Failed' } });
+    sys.route('GET', `${REPO}/pulls?state=open&head=example-org:process-rules/onboard`, { status: 200, json: [{ number: 5, html_url: 'https://github.com/example-org/example-app/pull/5' }] });
+    const { code, err } = await run(sys);
+    assert.deepEqual([code, err], [0, ['onboard: could not update the description of https://github.com/example-org/example-app/pull/5 (HTTP 404)']]);
+  });
+
+  for (const [name, route, said] of [
+    ['refuses it', { status: 403, json: { message: 'Resource not accessible' } }, 'onboard: GitHub did not open the pull request (HTTP 403: Resource not accessible); the changes are on process-rules/onboard'],
+    ['finds no open one after a 422', { status: 422, json: null }, 'onboard: GitHub did not open the pull request (HTTP 422); the changes are on process-rules/onboard'],
+  ] as const) {
+    it(`fails when GitHub ${name}`, async () => {
+      const sys = fresh();
+      sys.route('POST', `${REPO}/pulls`, route);
+      const { code, err } = await run(sys);
+      assert.deepEqual({ code, err }, { code: 1, err: [said] });
+    });
+  }
+
+  it('commits each file once, with every change to it described', async () => {
+    const sys = fresh();
+    sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity'], figma: { library: 'abc' } }));
+    sys.files.set(HOOKS, JSON.stringify(CLAUDE));
+    sys.files.set(PRE_PUSH, PRE_PUSH_HOOK);
+    new Board(sys);
+    const { code } = await run(sys, ['--add', 'board']);
+    assert.equal(code, 0);
+    assert.deepEqual([...sys.committed.keys()], ['.github/process-rules.json']);
+    const { body } = sys.requests.find((r) => r.method === 'POST' && r.url.endsWith('/pulls'))?.body as { body: string };
+    assert.match(body, /^- `\.github\/process-rules\.json`: take out "figma", .*; turn board on$/m);
   });
 });
 
@@ -1133,7 +1266,8 @@ describe('workflowUpdate', () => {
     sys.answers = ['y', 'y'];
     await run(sys);
     assert.equal(sys.asked[0], `In ${WORKFLOW_PATH}, stop passing Figma secrets, with figma off, leaving the rest as it is? [y/N] `);
-    assert.equal(sys.files.get(WORKFLOW), workflow('main', packageVersion(), false));
+    assert.equal(repo(sys).get(WORKFLOW), workflow('main', packageVersion(), false));
+    merge(sys);
     sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity', 'figma'] }));
     sys.asked.length = 0;
     sys.answers = ['y', 'y'];
@@ -1153,7 +1287,7 @@ describe('workflowUpdate', () => {
     sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, schedule: '0 9 * * 1-5' }));
     const { code } = await run(sys, []);
     assert.equal(code, 0);
-    const text = sys.files.get(WORKFLOW) ?? '';
+    const text = repo(sys).get(WORKFLOW) ?? '';
     assert.equal(text, workflow('main', packageVersion(), true, '0 9 * * 1-5'));
     assert.ok(text.includes(`  # The decisions job: cron 0 9 * * 1-5, UTC, as "schedule" in .github/process-rules.json sets it.\n  schedule:\n    - cron: '0 9 * * 1-5'\n`));
     assert.ok(workflow('main', packageVersion(), true).includes("  # The weekly decisions job: Mondays, 06:17 UTC.\n  schedule:\n    - cron: '17 6 * * 1'\n"));
@@ -1164,7 +1298,7 @@ describe('workflowUpdate', () => {
     sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, schedule: 'Mondays' }));
     await assert.rejects(run(sys, []), /"schedule" must be a five-field cron/);
     assert.deepEqual(sys.asked, []);
-    assert.ok(!sys.files.has(WORKFLOW));
+    assert.ok(!repo(sys).has(WORKFLOW));
   });
 
   it('asks to move a split workflow to a changed schedule, leaving the rest as it is', async () => {
@@ -1180,7 +1314,7 @@ describe('workflowUpdate', () => {
       sys.asked[0],
       `In ${WORKFLOW_PATH}, run the weekly decisions job on the schedule .github/process-rules.json sets, cron 30 5 * * 2 UTC, leaving the rest as it is? [y/N] `,
     );
-    assert.equal(sys.files.get(WORKFLOW), workflow('main', packageVersion(), true, '30 5 * * 2').replace('name: process-rules\n', 'name: process-rules\n# Our own note.\n'));
+    assert.equal(repo(sys).get(WORKFLOW), workflow('main', packageVersion(), true, '30 5 * * 2').replace('name: process-rules\n', 'name: process-rules\n# Our own note.\n'));
   });
 
   it('follows a changed schedule in a split workflow, keeping its quotes and leaving a cron of its own', () => {
@@ -1248,7 +1382,7 @@ describe('workflowUpdate', () => {
     sys.route('GET', REPO, { status: 200, json: repoJson(true, 'trunk') });
     await run(sys);
     assert.ok(sys.asked.includes('In .github/workflows/process-rules.yml, run pushes on the default branch, trunk, leaving the rest as it is? [y/N] '));
-    assert.equal(sys.files.get(WORKFLOW), workflow('trunk', packageVersion(), true));
+    assert.equal(repo(sys).get(WORKFLOW), workflow('trunk', packageVersion(), true));
   });
 
   it('replaces a workflow it does not recognise, a split one with a pin missing included', () => {
