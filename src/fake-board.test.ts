@@ -34,6 +34,7 @@ export interface FakeItem {
   content?: string;
   draft?: { title: string; body: string };
   archived?: boolean;
+  state?: 'OPEN' | 'CLOSED' | 'MERGED';
   values: Record<string, string | number>;
 }
 
@@ -50,6 +51,8 @@ export interface FakeProject {
   closed?: boolean;
   /** How many reads of a copy's fields come back before its custom fields arrive. */
   pending?: number;
+  /** Its workflows that are off. */
+  off?: string[];
 }
 
 /** The custom fields a copy of the template gains a little after the copy returns. */
@@ -79,6 +82,8 @@ export class Board {
   template: 'copies' | 'missing' | 'refused' = 'copies';
   /** How many reads of a copy's fields come back before its custom fields arrive. */
   copyPending = 0;
+  /** The workflows a copy of the template has off. */
+  copyOff: string[] = [];
   /** The titles of the Projects this board created or copied. */
   titles: string[] = [];
   /** Projects listed before this board's, as pages of other titles. */
@@ -163,7 +168,7 @@ export class Board {
         assert.deepEqual({ ...variables, title: undefined }, { template: 'P_T', owner: 'O_1', title: undefined });
         this.titles.push(String(variables.title));
         if (this.project) this.old = this.project;
-        this.project = { id: 'P_2', fields: [...BUILT_IN], linked: false, views: settledViews(), grouped: true, items: [], pending: this.copyPending };
+        this.project = { id: 'P_2', fields: [...BUILT_IN], linked: false, views: settledViews(), grouped: true, items: [], pending: this.copyPending, off: [...this.copyOff] };
         return data({ copyProjectV2: { projectV2: { id: 'P_2', title: variables.title, url: COPY_URL } } });
       }
       case 'linkProjectV2ToRepository':
@@ -182,7 +187,8 @@ export class Board {
       case 'groupByFields': {
         const project = this.at(variables.id);
         const by = (name: string) => (project.grouped ? { 'Work items': [{ name: 'Step' }, {}], Decisions: [{ name: 'Decision' }] }[name] ?? [] : []);
-        return data({ node: { views: { nodes: (project.views ?? []).map((view) => ({ name: view.name, groupByFields: { nodes: by(view.name) } })) } } });
+        const workflows = [{ name: 'Item closed', enabled: true }, ...(project.off ?? []).map((name) => ({ name, enabled: false }))];
+        return data({ node: { views: { nodes: (project.views ?? []).map((view) => ({ name: view.name, groupByFields: { nodes: by(view.name) } })) }, workflows: { nodes: workflows } } });
       }
       case 'items(first': {
         const project = this.at(variables.id);
@@ -199,7 +205,7 @@ export class Board {
               nodes: [
                 ...page.map((item) => ({
                   isArchived: item.archived ?? false,
-                  content: item.draft ? { __typename: 'DraftIssue', ...item.draft } : { __typename: 'Issue', id: item.content },
+                  content: item.draft ? { __typename: 'DraftIssue', ...item.draft } : { __typename: 'Issue', id: item.content, ...(item.state ? { state: item.state } : {}) },
                   fieldValues: { nodes: [{ text: 'a title', field: { name: 'Title' } }, ...Object.entries(item.values).map(([field, held]) => value(field, held)), {}] },
                 })),
                 ...(start === 0 ? [{ isArchived: false, content: null, fieldValues: { nodes: [] } }] : []),
@@ -230,7 +236,7 @@ export class Board {
         return data({ updateProjectV2ItemFieldValue: { projectV2Item: { id: variables.item } } });
       }
       case 'updateProjectV2(': {
-        Object.assign(this.at(variables.project), { title: variables.title, closed: true });
+        Object.assign(this.at(variables.project), { title: variables.title, closed: variables.closed });
         return data({ updateProjectV2: { projectV2: { id: variables.project } } });
       }
       case 'views(first': {

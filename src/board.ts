@@ -200,7 +200,7 @@ export async function setUpBoard(
     if (!(await confirm(`Create the Project "${title}" for ${repo.ownerLogin} from the process-rules template, linked to ${slug}?`))) {
       return stopped(io, 'project');
     }
-    const copy = await copyTemplate(sys, io, token, holderId as string, title);
+    const copy = await copyTemplate(sys, io, token, holderId as string, title, 'building the Project instead');
     if (copy) {
       await link(sys, token, copy.id, repo.nodeId);
       project = { ...copy, repositories: { nodes: [{ id: repo.nodeId }] } };
@@ -213,7 +213,7 @@ export async function setUpBoard(
       )) as { createProjectV2: { projectV2: Omit<Project, 'repositories'> } };
       project = { ...made.createProjectV2.projectV2, repositories: { nodes: [{ id: repo.nodeId }] } };
     }
-  } else if (!(await grouped(sys, token, project.id))) {
+  } else if (!(await finished(sys, token, project.id)).grouped) {
     const old = project;
     const moving = await itemsOf(sys, token, old.id);
     const lost = moving.fields.filter((name) => !FIELDS.some((field) => field.name === name) && name !== 'Status');
@@ -222,15 +222,13 @@ export async function setUpBoard(
       `Replace it with a copy of the template, moving its ${moving.items.length} open item${moving.items.length === 1 ? '' : 's'} with their Status, Step, Decision and Review date` +
       `${lost.length > 0 ? ` (not ${lost.join(', ')}, which the template lacks)` : ''}, and close it as "${title} (old)"?`;
     if (await confirm(question)) {
-      const copy = await copyTemplate(sys, io, token, holderId as string, title);
-      if (copy) {
+      // Renamed first, so a rerun after a failure finds the copy by the title, not the old Project.
+      await retitle(sys, token, old.id, `${title} (old)`, false);
+      const copy = await copyTemplate(sys, io, token, holderId as string, title, 'keeping the Project as it is');
+      if (!copy) await retitle(sys, token, old.id, title, false);
+      else {
         await moveItems(sys, token, moving.items, copy.id);
-        await graphql(
-          sys,
-          token,
-          'mutation($project: ID!, $title: String!) { updateProjectV2(input: { projectId: $project, title: $title, closed: true }) { projectV2 { id } } }',
-          { project: old.id, title: `${title} (old)` },
-        );
+        await retitle(sys, token, old.id, `${title} (old)`, true);
         await link(sys, token, copy.id, repo.nodeId);
         io.out(`✓ moved ${moving.items.length} item${moving.items.length === 1 ? '' : 's'} to the copy; closed the old Project as "${title} (old)": ${old.url}`);
         project = { ...copy, repositories: { nodes: [{ id: repo.nodeId }] } };
@@ -273,8 +271,19 @@ export async function setUpBoard(
 
   if (!(await setUpViews(sys, token, confirm, project.id, title))) return stopped(io, 'views');
   io.out(`✓ views: ${VIEWS.map((v) => v.name).join(', ')}`);
-  if (!(await grouped(sys, token, project.id))) for (const line of viewsChecklist(project.url)) io.out(line);
+  const done = await finished(sys, token, project.id);
+  if (!done.grouped) for (const line of viewsChecklist(project.url)) io.out(line);
+  if (done.off.length > 0) io.out(`Turn on the workflows ${done.off.join(', ')} in ${project.url} → Workflows (GitHub's API cannot)`);
   return project.url;
+}
+
+async function retitle(sys: Sys, token: string, projectId: string, title: string, closed: boolean): Promise<void> {
+  await graphql(
+    sys,
+    token,
+    'mutation($project: ID!, $title: String!, $closed: Boolean!) { updateProjectV2(input: { projectId: $project, title: $title, closed: $closed }) { projectV2 { id } } }',
+    { project: projectId, title, closed },
+  );
 }
 
 async function link(sys: Sys, token: string, projectId: string, repoId: string): Promise<void> {
@@ -293,10 +302,10 @@ const COPY_WAIT = { attempts: 20, ms: 3000 };
 
 /**
  * Copies the template to the owner as a Project with the title, and waits
- * for its fields. Returns undefined, saying why, when GitHub refuses the
- * copy, so onboard builds the Project itself.
+ * for its fields. Returns undefined, saying why and what onboard does
+ * instead, when GitHub refuses the copy.
  */
-async function copyTemplate(sys: Sys, io: Output, token: string, ownerId: string, title: string): Promise<Copy | undefined> {
+async function copyTemplate(sys: Sys, io: Output, token: string, ownerId: string, title: string, instead: string): Promise<Copy | undefined> {
   let copy: Copy;
   try {
     const found = (await graphql(sys, token, 'query($login: String!, $number: Int!) { organization(login: $login) { projectV2(number: $number) { id } } }', TEMPLATE)) as {
@@ -312,7 +321,7 @@ async function copyTemplate(sys: Sys, io: Output, token: string, ownerId: string
     )) as { copyProjectV2: { projectV2: Copy } };
     copy = made.copyProjectV2.projectV2;
   } catch (error) {
-    io.out(`- the process-rules template could not be copied (${(error as Error).message}); building the Project instead`);
+    io.out(`- the process-rules template could not be copied (${(error as Error).message}); ${instead}`);
     return undefined;
   }
   for (let attempt = 1; ; attempt++) {
@@ -326,16 +335,23 @@ async function copyTemplate(sys: Sys, io: Output, token: string, ownerId: string
   }
 }
 
-/** Whether the Project's views are grouped as the template's are, which marks a Project copied from it. */
-async function grouped(sys: Sys, token: string, projectId: string): Promise<boolean> {
+/**
+ * What a copy of the template has that GitHub's API cannot set: whether the
+ * views are grouped as the template's are, which marks a Project copied from
+ * it, and the names of its workflows that are off.
+ */
+async function finished(sys: Sys, token: string, projectId: string): Promise<{ grouped: boolean; off: string[] }> {
   const read = (await graphql(
     sys,
     token,
-    'query($id: ID!) { node(id: $id) { ... on ProjectV2 { views(first: 50) { nodes { name groupByFields(first: 5) { nodes { ... on ProjectV2FieldCommon { name } } } } } } } }',
+    'query($id: ID!) { node(id: $id) { ... on ProjectV2 { views(first: 50) { nodes { name groupByFields(first: 5) { nodes { ... on ProjectV2FieldCommon { name } } } } } workflows(first: 50) { nodes { name enabled } } } } }',
     { id: projectId },
-  )) as { node: { views: { nodes: { name: string; groupByFields: { nodes: { name?: string }[] } }[] } } };
+  )) as { node: { views: { nodes: { name: string; groupByFields: { nodes: { name?: string }[] } }[] }; workflows: { nodes: { name: string; enabled: boolean }[] } } };
   const views = read.node.views.nodes;
-  return GROUPING.every(({ view, field }) => views.some((had) => had.name === view && had.groupByFields.nodes.some((by) => by.name === field)));
+  return {
+    grouped: GROUPING.every(({ view, field }) => views.some((had) => had.name === view && had.groupByFields.nodes.some((by) => by.name === field))),
+    off: read.node.workflows.nodes.filter((workflow) => !workflow.enabled).map((workflow) => workflow.name),
+  };
 }
 
 type FieldValue = { field: string; option?: string | undefined; date?: string | undefined; text?: string | undefined; number?: number | undefined };
@@ -344,7 +360,7 @@ type Item = { content?: string | undefined; draft?: { title: string; body: strin
 /** The field kinds whose values move with an item; the others belong to the issue or are GitHub's own. */
 const MOVABLE = ['SINGLE_SELECT', 'DATE', 'TEXT', 'NUMBER'];
 
-/** A Project's open items with their field values, and the names of its fields whose values could move. */
+/** A Project's open items (drafts, and issues and pull requests not closed or merged) with their field values, and the names of its fields whose values could move. */
 async function itemsOf(sys: Sys, token: string, projectId: string): Promise<{ items: Item[]; fields: string[] }> {
   const items: Item[] = [];
   let fields: string[] = [];
@@ -353,7 +369,7 @@ async function itemsOf(sys: Sys, token: string, projectId: string): Promise<{ it
     const page = (await graphql(
       sys,
       token,
-      `query($id: ID!, $after: String) { node(id: $id) { ... on ProjectV2 { fields(first: 50) { nodes { ... on ProjectV2FieldCommon { name dataType } } } items(first: 100, after: $after) { nodes { isArchived content { __typename ... on Issue { id } ... on PullRequest { id } ... on DraftIssue { title body } } fieldValues(first: 30) { nodes { ... on ProjectV2ItemFieldSingleSelectValue { name field { ${field} } } ... on ProjectV2ItemFieldDateValue { date field { ${field} } } ... on ProjectV2ItemFieldTextValue { text field { ${field} } } ... on ProjectV2ItemFieldNumberValue { number field { ${field} } } } } } pageInfo { hasNextPage endCursor } } } } }`,
+      `query($id: ID!, $after: String) { node(id: $id) { ... on ProjectV2 { fields(first: 50) { nodes { ... on ProjectV2FieldCommon { name dataType } } } items(first: 100, after: $after) { nodes { isArchived content { __typename ... on Issue { id state } ... on PullRequest { id state } ... on DraftIssue { title body } } fieldValues(first: 30) { nodes { ... on ProjectV2ItemFieldSingleSelectValue { name field { ${field} } } ... on ProjectV2ItemFieldDateValue { date field { ${field} } } ... on ProjectV2ItemFieldTextValue { text field { ${field} } } ... on ProjectV2ItemFieldNumberValue { number field { ${field} } } } } } pageInfo { hasNextPage endCursor } } } } }`,
       { id: projectId, after },
     )) as {
       node: {
@@ -361,7 +377,7 @@ async function itemsOf(sys: Sys, token: string, projectId: string): Promise<{ it
         items: {
           nodes: {
             isArchived: boolean;
-            content: { __typename: string; id?: string; title?: string; body?: string } | null;
+            content: { __typename: string; id?: string; state?: string; title?: string; body?: string } | null;
             fieldValues: { nodes: { name?: string; date?: string; text?: string; number?: number; field?: { name?: string } }[] };
           }[];
           pageInfo: { hasNextPage: boolean; endCursor: string | null };
@@ -370,7 +386,7 @@ async function itemsOf(sys: Sys, token: string, projectId: string): Promise<{ it
     };
     fields = page.node.fields.nodes.filter((f) => MOVABLE.includes(f.dataType ?? '')).map((f) => f.name ?? '');
     for (const node of page.node.items.nodes) {
-      if (node.isArchived || !node.content) continue;
+      if (node.isArchived || !node.content || (node.content.state ?? 'OPEN') !== 'OPEN') continue;
       const values = node.fieldValues.nodes
         .filter((value) => fields.includes(value.field?.name ?? ''))
         .map((value) => ({ field: value.field?.name ?? '', option: value.name, date: value.date, text: value.text, number: value.number }));

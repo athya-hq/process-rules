@@ -104,6 +104,15 @@ describe('setUpBoard', () => {
     assert.ok(!board.operations.some((o) => o === 'createProjectV2(' || o === 'createProjectV2Field' || o.includes('ProjectV2View')));
   });
 
+  it("names a copy's workflows that are off", async () => {
+    const sys = new FakeSys();
+    const board = new Board(sys);
+    board.copyOff = ['Item added to project', 'Pull request merged'];
+    const { out } = await setUp(sys, ['y', 'y', 'y']);
+    assert.equal(out.at(-1), `Turn on the workflows Item added to project, Pull request merged in ${COPY_URL} → Workflows (GitHub's API cannot)`);
+    assert.ok(!out.some((line) => line.startsWith('Finish the Project')));
+  });
+
   it("throws when a copy's fields never arrive", async () => {
     const sys = new FakeSys();
     const board = new Board(sys);
@@ -138,22 +147,28 @@ describe('setUpBoard', () => {
       { draft: { title: 'An idea', body: 'Some words' }, values: { Decision: 'Tripped' } },
       { content: 'ISSUE_old', archived: true, values: { Status: 'Done' } },
       { content: 'ISSUE_c', values: { Step: 'Gone' } },
+      { content: 'ISSUE_done', state: 'CLOSED', values: {} },
+      { content: 'PR_merged', state: 'MERGED', values: {} },
+      { content: 'PR_open', state: 'OPEN', values: {} },
     ]);
     const { url, out, err } = await setUp(sys, ['y']);
     assert.deepEqual(err, []);
     assert.equal(url, COPY_URL);
     assert.deepEqual(sys.asked, [
-      '"example-app work" lacks what only the process-rules template sets (the views\' grouping, the workflows). Replace it with a copy of the template, moving its 3 open items with their Status, Step, Decision and Review date (not Estimate, Notes, which the template lacks), and close it as "example-app work (old)"?',
+      '"example-app work" lacks what only the process-rules template sets (the views\' grouping, the workflows). Replace it with a copy of the template, moving its 4 open items with their Status, Step, Decision and Review date (not Estimate, Notes, which the template lacks), and close it as "example-app work (old)"?',
     ]);
     assert.deepEqual(board.project?.items, [
       { content: 'ISSUE_a', values: { Status: 'In progress', Step: 'Build', 'Review date': '2026-11-01' } },
       { draft: { title: 'An idea', body: 'Some words' }, values: { Decision: 'Tripped' } },
       { content: 'ISSUE_c', values: {} },
+      { content: 'PR_open', values: {} },
     ]);
     assert.ok(board.project?.linked);
+    const order = board.operations.filter((o) => o === 'updateProjectV2(' || o === 'copyProjectV2');
+    assert.deepEqual(order, ['updateProjectV2(', 'copyProjectV2', 'updateProjectV2('], 'renamed before the copy, closed after the move');
     assert.deepEqual({ title: board.old?.title, closed: board.old?.closed }, { title: 'example-app work (old)', closed: true });
     assert.deepEqual(out.slice(2, 4), [
-      `✓ moved 3 items to the copy; closed the old Project as "example-app work (old)": ${URL}`,
+      `✓ moved 4 items to the copy; closed the old Project as "example-app work (old)": ${URL}`,
       `✓ Project "example-app work": ${COPY_URL}`,
     ]);
     assert.ok(!out.some((line) => line.startsWith('Finish the Project')));
@@ -196,8 +211,8 @@ describe('setUpBoard', () => {
     board.template = 'refused';
     const { url, out } = await setUp(sys, ['y']);
     assert.equal(url, URL);
-    assert.equal(board.project?.closed, undefined);
-    assert.ok(out.some((line) => line.startsWith('- the process-rules template could not be copied')));
+    assert.deepEqual({ title: board.project?.title, closed: board.project?.closed }, { title: 'example-app work', closed: false });
+    assert.ok(out.includes("- the process-rules template could not be copied (GitHub's GraphQL API refused: Resource not accessible by integration); keeping the Project as it is"));
     assert.deepEqual(out.slice(-4), viewsChecklist(URL));
   });
 

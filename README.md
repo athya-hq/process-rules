@@ -114,7 +114,7 @@ days before the token ends.
    Work items (`type:"Work item"`, grouped by Step), Decisions
    (`type:Decision`, grouped by Decision) and Reviews due (`"Review
    date":<=@today`), with its workflows; so the board needs nothing done by
-   hand. A Project of that title made before the template is offered a move
+   hand. If a copy's workflows arrive off, `onboard` names the ones to turn on. A Project of that title made before the template is offered a move
    to a copy: its open items move with their Status, Step, Decision and Review
    date, and the old one is closed as "<title> (old)". When GitHub refuses the
    copy, or the owner keeps the old Project, `onboard` adds the fields and
