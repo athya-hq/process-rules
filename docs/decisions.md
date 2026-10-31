@@ -59,3 +59,11 @@
   read the repo instead of offering the grant; pre-push refused a push that
   brought only a merge of the default branch; and the pull request that first
   commits the settings failed its own PR checks. The slice #40 closes them.
+- **2026-10-31 — Record: P-16, onboard makes the Project views.** The owner
+  approved the slice, and on the Work item #22: "Decision: add #44 (P-16) to
+  roadmap v1." `onboard` printed that GitHub's API cannot make Project views;
+  its GraphQL API now creates and updates them, with a layout, a filter and
+  the visible fields. So `onboard` makes the five views, renaming the default
+  one, and prints only what the API still cannot set: grouping, the Board's
+  column field and the auto-archive workflow, which it can only read or
+  delete.
