@@ -206,6 +206,17 @@ export function workflowPins(text: string): string[] {
 const PUSH_BRANCH = /^( {2}push:\n {4}branches: \[\s*)(['"]?)([^,'"\]\s]+)\2(\s*\])$/m;
 
 /**
+ * `value` as a YAML flow scalar in the `quote` style the line already uses:
+ * single quotes double themselves, double quotes and a bare value that needs
+ * quoting are written as JSON, which YAML reads alike.
+ */
+function flowScalar(value: string, quote: string): string {
+  if (quote === "'") return `'${value.replaceAll("'", "''")}'`;
+  if (quote === '' && /^[A-Za-z0-9][\w./-]*$/.test(value)) return value;
+  return JSON.stringify(value);
+}
+
+/**
  * What onboard does with the client's workflow: write it, replace an older
  * release's template, or, in a workflow already split into a read-only
  * `process-rules` job and a `process-rules-weekly` job, move the version pins
@@ -237,7 +248,7 @@ export function workflowUpdate(
       .replace(REF_PIN, (_, head: string) => `${head}${version}`)
       .replace(HEADER_PIN, (_, head: string, _old: string, dot: string) => `${head}${version}${dot}`)
       .replace(PUSH_BRANCH, (line: string, head: string, quote: string, _old: string, tail: string) =>
-        moved ? `${head}${quote}${branch}${quote}${tail}` : line,
+        moved ? `${head}${flowScalar(branch, quote)}${tail}` : line,
       );
     if (text === before) return { kind: 'same' };
     const stale = pins.find((pin) => pin !== version);
