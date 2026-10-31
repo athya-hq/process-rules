@@ -73,15 +73,25 @@ github.com only, commits as the agent's no-reply address and signs with its
 key.
 
 The lock lives in the session's environment, which a session that ignores it
-could change, so `machine` ends by offering to lock the owner away: to sign
-`gh` out of every account other than the agent's, active or not, and to remove a git password for
-github.com saved in the macOS keychain. It warns about SSH keys in `~/.ssh`
-with no passphrase, and names the account SSH reaches GitHub as without
-asking (a key in the SSH agent or the keychain). Declining leaves them, and
-`doctor` keeps naming them. The owner's SSH access is left alone, since it is
-the owner's own way to GitHub (docs/decisions.md); agent sessions send GitHub
+could change. So `machine` ends by offering to lock the owner away, as
+optional hardening for a machine that runs agents: to sign `gh` out of every
+account other than the agent's, active or not, and to remove a git password
+for github.com saved in the macOS keychain. On a laptop you also use for your
+own work, accepting signs you out of your own GitHub tooling. The stronger
+alternative is a separate macOS user that runs only the agent sessions: none
+of your logins, keychain or SSH keys are in it, and nothing of yours is signed
+out. `machine` also warns about SSH keys in `~/.ssh` with no passphrase, and
+names the account SSH reaches GitHub as without asking (a key in the SSH
+agent or the keychain). The owner's SSH access is left alone, since it is the
+owner's own way to GitHub (docs/decisions.md); agent sessions send GitHub
 over HTTPS and refuse SSH, and the pre-push hook refuses their pushes over
 SSH.
+
+Declining leaves the `gh` logins and the git password in place and records
+which ones in `~/.config/process-rules/<agent>/lockout-declined.json`;
+`doctor` then reports them as your choice instead of warning. An account
+signed in later is still a warning. Each `machine` run offers again, and
+accepting clears that part of the record.
 
 `process-rules doctor` re-checks the key, the token and its scopes, the key's
 registration, the session file and that the launcher runs, names the step to re-run, and warns 14
