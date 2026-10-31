@@ -23,6 +23,7 @@ docs/roadmap.md
   s_0d8441d81ecc7c::t_320576461e8254 55-62
 docs/decisions.md
   s_0d8441d81ecc7c::t_320576461e8254 220-235
+  s_0d8441d81ecc7c::t_ad4b52523ebfde 236-237
 src/lockout.ts
   s_0d8441d81ecc7c::t_f8f43d33af4a2b 95
 src/owner-login.ts
@@ -34,6 +35,8 @@ src/onboard.test.ts
   s_0d8441d81ecc7c::t_58d0ea7583203f 568-569
 src/board.test.ts
   s_0d8441d81ecc7c::t_7d0e0db4243144 13,62
+package.json
+  s_0d8441d81ecc7c::t_ad4b52523ebfde 3
 ---
 {
   "schema_version": "authorship/3.0.0",
