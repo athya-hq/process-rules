@@ -212,6 +212,8 @@ describe('onboard', () => {
       assert.equal(code, 0, [...out, ...err].join('\n'));
       assert.ok(out.includes('✓ .github/process-rules.json: owner Second-Owner, agent ExampleBot; on: ' + FEATURES.join(', ')), out.join('\n'));
       assert.equal(signIns(sys), 1);
+      const login = sys.calls.find((call) => call.command === 'gh' && call.args[1] === 'login')?.args ?? [];
+      assert.equal(login[login.indexOf('-s') + 1], 'project,admin:org', 'the sign-in that names the owner asks for the scopes the features need');
     });
 
     it('refuses a sign-in as an account the owners do not hold, or one that fails', async () => {
