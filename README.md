@@ -88,7 +88,7 @@ over HTTPS and refuse SSH, and the pre-push hook refuses their pushes over
 SSH.
 
 Declining leaves the `gh` logins and the git password in place and records
-which ones in `~/.config/process-rules/<agent>/lockout-declined.json`;
+which ones in `~/.config/process-rules/<agent, lowercased>/lockout-declined.json`;
 `doctor` then reports them as your choice instead of warning. An account
 signed in later is still a warning. Each `machine` run offers again, and
 accepting clears that part of the record.
