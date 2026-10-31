@@ -249,3 +249,11 @@
   present the lockout as optional hardening for a machine that runs agents,
   and a separate macOS user for the agent sessions as the stronger
   alternative.
+- **2026-11-01 — Record: P-31, the classic token trade-off documented.**
+  The owner's decision of 2026-10-31 on #52: "keep the one classic token
+  for now (Athya's organisation allows it)". The README records the
+  trade-off for outside adopters: the token's `repo` scope reaches every
+  repository the agent account can access, and an organisation or
+  enterprise that blocks classic tokens cannot adopt yet. A fine-grained
+  token or a GitHub App waits for adoption outside Athya. Docs only; no
+  release.

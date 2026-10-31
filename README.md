@@ -37,6 +37,19 @@ launcher names the node that ran `machine` by its real path (not a version
 manager's per-shell one, which the Claude app's hooks may not have), so the
 hooks need no node on their `PATH`. Each change waits for a yes. Why a classic token: [docs/decisions.md](docs/decisions.md).
 
+The trade-off, for adopters: the agent account holds one classic token, and
+its `repo` scope reaches every repository the agent account can access, not
+only the adopting one. Invite a dedicated agent account to the repositories
+it works in and nothing else; the expiry bounds the rest. It is classic for
+now because a fine-grained token waits on an organisation owner's approval
+wherever the organisation requires it, reaches no repository where the agent
+is only an outside collaborator, takes one token per organisation, and
+cannot register the agent's signing key when an organisation owns it. An organisation or
+enterprise that blocks classic tokens cannot adopt process-rules yet:
+`onboard` names the block and that an organisation owner can allow classic
+tokens under Settings → Personal access tokens. A fine-grained token or a
+GitHub App waits for adoption outside Athya.
+
 A client's `.claude/settings.json` locks GitHub out of every session before
 any hook runs: its `env` holds the lock's variables (a `GH_TOKEN` GitHub
 refuses, no credential helper, GitHub's SSH remotes on HTTPS and every other
