@@ -1,0 +1,23 @@
+src/onboard.ts
+  s_a8b2c1e821846d::t_632fd817d4ddfd 209-218,251
+  s_a8b2c1e821846d::t_72b819f10f3cf3 208
+src/onboard.test.ts
+  s_a8b2c1e821846d::t_632fd817d4ddfd 941-949,951-960
+  s_a8b2c1e821846d::t_7a3ad4a6e18260 950
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ddfb1d46b58e092c4f0ba5457723c61c9e0d285f",
+  "prompts": {},
+  "sessions": {
+    "s_a8b2c1e821846d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d017dddd-01b9-412e-88fb-2638950988f9",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Alok Bansal <alokagrawal8@gmail.com>"
+    }
+  }
+}
