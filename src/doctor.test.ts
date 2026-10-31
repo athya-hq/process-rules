@@ -21,6 +21,14 @@ async function check(sys: FakeSys, named?: string): Promise<{ code: number; out:
 }
 
 describe('doctor', () => {
+  it('refuses a platform with no token store, naming macOS', async () => {
+    assert.deepEqual(await check(Object.assign(healthy(), { platform: 'win32' })), {
+      code: 1,
+      out: [],
+      err: ["doctor: process-rules supports macOS only, where the keychain holds the agent's token; this machine runs win32"],
+    });
+  });
+
   it('passes when the machine is set up', async () => {
     assert.deepEqual(await check(healthy()), {
       code: 0,
@@ -45,7 +53,7 @@ describe('doctor', () => {
     assert.equal(code, 1);
     assert.deepEqual(err, [
       `✗ signing key: ${KEY} is missing`,
-      "✗ token: no ExampleBot token in this machine's keychain",
+      "✗ token: no ExampleBot token in this Mac's keychain",
       '✗ key registered: GitHub does not list this key as a signing key of ExampleBot',
       `✗ session file: ${SESSION} is missing`,
       `✗ launcher: ${LAUNCHER} is missing, so the hooks need process-rules and node on their PATH`,

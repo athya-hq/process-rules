@@ -17,6 +17,13 @@ on the Project [process-rules work](https://github.com/orgs/athya-hq/projects/2)
 
 ## Agent identity on a Mac
 
+macOS is the supported platform: the agent's token lives in the macOS
+keychain. On any other platform `machine` and `doctor` refuse, and
+`session-start` keeps GitHub locked out of the session; Claude cloud sessions
+need no keychain and work as before. The token is read and stored through
+one token-store interface (`src/token-store.ts`), so a Linux or Windows store
+can be added there when an adopter needs one.
+
 The adopting repo names its accounts in `.github/process-rules.json`:
 
 ```json

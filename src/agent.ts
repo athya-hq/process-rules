@@ -1,12 +1,10 @@
+import { KEYCHAIN, type TokenStore, tokenStore } from './token-store.ts';
 import type { Sys } from './types.ts';
 
 /** The adopting repo's settings file, written by `onboard`. */
 export const SETTINGS_PATH = '.github/process-rules.json';
-/** The keychain item holding the agent account's token: service, account = login. */
-export const KEYCHAIN_SERVICE = 'process-rules';
-/** What GH_TOKEN holds when the keychain has no token, so nothing falls back to the owner. */
+/** What GH_TOKEN holds when the token store has none, so nothing falls back to the owner. */
 export const NO_TOKEN = 'process-rules-no-agent-token';
-const SECURITY = '/usr/bin/security';
 export const API = 'https://api.github.com';
 const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/;
 /** The GitHub remotes `repoAt` accepts: HTTPS, scp-like SSH, or SSH URLs, on github.com only. */
@@ -224,14 +222,15 @@ export function launcherScript(node: string, cli: string, command?: string): str
 
 /**
  * The shell lines an agent session sources at start. They hold no secret:
- * the token is read from the keychain each time, and when it is missing
- * GH_TOKEN is a value GitHub refuses, so gh and git fail instead of using
- * the owner's login. GH_CONFIG_DIR is empty for the same reason.
+ * the token is read from the token store (the macOS keychain unless named)
+ * each time, and when it is missing GH_TOKEN is a value GitHub refuses, so
+ * gh and git fail instead of using the owner's login. GH_CONFIG_DIR is empty
+ * for the same reason.
  */
-export function sessionScript(agent: string, id: number, paths: Paths): string {
+export function sessionScript(agent: string, id: number, paths: Paths, store: TokenStore = KEYCHAIN): string {
   return [
     `# Written by process-rules machine. Makes this shell act as ${agent} on GitHub.`,
-    `export GH_TOKEN="$(${SECURITY} find-generic-password -s ${KEYCHAIN_SERVICE} -a ${agent} -w 2>/dev/null)"`,
+    `export GH_TOKEN="$(${store.readCommand(agent)})"`,
     `[ -n "$GH_TOKEN" ] || export GH_TOKEN=${NO_TOKEN}`,
     // Inherited `git -c` and config-file injection could bring back a helper; askpass could prompt.
     `unset ${UNSET.join(' ')}`,
@@ -288,27 +287,14 @@ function quote(value: string): string {
   return `'${value.replaceAll(`'`, `'\\''`)}'`;
 }
 
-/** The agent's token from this machine's keychain, or undefined. */
+/** The agent's token from this machine's token store, or undefined, as on a platform with none. */
 export function readToken(sys: Sys, agent: string): string | undefined {
-  const result = sys.exec(SECURITY, [
-    'find-generic-password', '-s', KEYCHAIN_SERVICE, '-a', agent, '-w',
-  ]);
-  const token = result.stdout.trim();
-  return result.code === 0 && token ? token : undefined;
-}
-
-/** Stores the token without putting it on any command line. */
-export function storeToken(sys: Sys, agent: string, token: string): boolean {
-  if (!/^[A-Za-z0-9_]+$/.test(token)) return false;
-  const result = sys.exec(SECURITY, ['-i'], {
-    input: `add-generic-password -U -s ${KEYCHAIN_SERVICE} -a ${agent} -w ${token}\n`,
-  });
-  return result.code === 0 && readToken(sys, agent) === token;
+  return tokenStore(sys)?.read(sys, agent);
 }
 
 /**
  * An account's numeric id and its login as GitHub spells it, from the public
- * API. Logins are case-insensitive; the keychain item, the session file and
+ * API. Logins are case-insensitive; the stored token's item, the session file and
  * commits all use GitHub's spelling, whatever case the login was typed in.
  */
 export async function account(sys: Sys, login: string): Promise<{ id: number; login: string }> {
