@@ -1,4 +1,4 @@
-import { sameLogin } from './agent.ts';
+import { pathsFor, sameLogin } from './agent.ts';
 import type { Output, Sys } from './types.ts';
 
 /**
@@ -80,9 +80,57 @@ export function exposureLines(found: Exposure): string[] {
 }
 
 /**
+ * What the owner declined to lock away when `machine` last offered: the `gh`
+ * logins it named and the saved git password. `doctor` reports these as
+ * chosen instead of warning; an account signed in later is a new finding.
+ */
+export interface Declined {
+  ghLogins: string[];
+  gitPassword: boolean;
+}
+
+/** Where `machine` keeps what was declined, in the agent's folder beside its session file. */
+export function declinedPath(home: string, agent: string): string {
+  return `${pathsFor(home, agent).dir}/lockout-declined.json`;
+}
+
+/** What was declined on this Mac; nothing when there is no record or it cannot be read. */
+export function readDeclined(sys: Sys, agent: string): Declined {
+  const path = declinedPath(sys.home, agent);
+  const none: Declined = { ghLogins: [], gitPassword: false };
+  if (!sys.exists(path)) return none;
+  try {
+    const record = JSON.parse(sys.read(path)) as Partial<Declined>;
+    return {
+      ghLogins: Array.isArray(record.ghLogins) ? record.ghLogins.filter((login): login is string => typeof login === 'string') : [],
+      gitPassword: record.gitPassword === true,
+    };
+  } catch {
+    return none;
+  }
+}
+
+/**
+ * Splits what `exposure` found into what is left to warn about and one line
+ * for each finding the owner declined to lock away.
+ */
+export function setAside(found: Exposure, declined: Declined): { left: Exposure; kept: string[] } {
+  const isDeclined = (login: string) => declined.ghLogins.some((other) => sameLogin(other, login));
+  const keptPassword = found.gitPassword && declined.gitPassword;
+  return {
+    left: { ...found, ghLogins: found.ghLogins.filter((login) => !isDeclined(login)), gitPassword: found.gitPassword && !keptPassword },
+    kept: [
+      ...found.ghLogins.filter(isDeclined).map((login) => `lockout declined: gh stays signed in as ${login}; process-rules machine offers again`),
+      ...(keptPassword ? ['lockout declined: the saved git password for github.com stays; process-rules machine offers again'] : []),
+    ],
+  };
+}
+
+/**
  * `machine`'s last step: offers to sign `gh` out and to remove the saved git
- * password, and warns about keys with no passphrase. Declining leaves them
- * in place, and `doctor` keeps naming them.
+ * password, and warns about keys with no passphrase. What is declined stays
+ * in place and is recorded, so `doctor` reports it as chosen; each run offers
+ * again, and the record holds only what this run's owner declined.
  */
 export async function lockOwnerAway(
   sys: Sys,
@@ -91,11 +139,13 @@ export async function lockOwnerAway(
   agent: string,
 ): Promise<void> {
   const found = exposure(sys, agent);
+  const declined: Declined = { ghLogins: [], gitPassword: false };
   for (const login of found.ghLogins) {
     if (await confirm(`gh is signed in as ${login}. Sign it out, so agent sessions cannot use it?`)) {
       const out = sys.exec('gh', ['auth', 'logout', '-h', 'github.com', '-u', login], { env: ownerEnv(sys) });
       io.out(out.code === 0 ? `✓ gh signed out of ${login}` : `! gh could not sign out of ${login}: ${out.stderr.trim()}`);
     } else {
+      declined.ghLogins.push(login);
       io.out(`! gh stays signed in as ${login}`);
     }
   }
@@ -105,8 +155,17 @@ export async function lockOwnerAway(
       const left = sys.exec('/usr/bin/security', KEYCHAIN_QUERY).code === 0;
       io.out(left ? '! the saved git password for github.com is still in the keychain' : '✓ removed the saved git password for github.com');
     } else {
+      declined.gitPassword = true;
       io.out('! the saved git password for github.com stays in the keychain');
     }
+  }
+  const path = declinedPath(sys.home, agent);
+  if (declined.ghLogins.length > 0 || declined.gitPassword || sys.exists(path)) {
+    sys.mkdir(pathsFor(sys.home, agent).dir);
+    sys.write(path, `${JSON.stringify(declined, null, 2)}\n`, 0o600);
+  }
+  if (declined.ghLogins.length > 0 || declined.gitPassword) {
+    io.out(`  doctor reports what you declined as your choice (${path}); process-rules machine offers again`);
   }
   for (const key of found.openKeys) io.out(`! ${key} has no passphrase; add one with: ssh-keygen -p -f ${key}`);
   if (found.sshLogin) io.out(`! ${sshLine(found.sshLogin)}`);

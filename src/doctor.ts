@@ -13,7 +13,7 @@ import {
   tokenInfo,
 } from './agent.ts';
 import { ownerRulesHere } from './codeowners.ts';
-import { exposure, exposureLines } from './lockout.ts';
+import { exposure, exposureLines, readDeclined, setAside } from './lockout.ts';
 import type { Output, Sys } from './types.ts';
 
 interface Check {
@@ -92,7 +92,9 @@ export async function doctor(sys: Sys, io: Output, named?: string): Promise<numb
     if (problem) io.err(`✗ ${name}: ${problem}`);
     else io.out(`✓ ${name}`);
   }
-  warnings.push(...exposureLines(exposure(sys, agent)));
+  const { left, kept } = setAside(exposure(sys, agent), readDeclined(sys, agent));
+  for (const line of kept) io.out(`✓ ${line}`);
+  warnings.push(...exposureLines(left));
   const codeowners = ownerRulesHere(sys, agent);
   if (codeowners) warnings.push(codeowners);
   for (const warning of warnings) io.err(`! ${warning}`);

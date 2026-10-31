@@ -235,3 +235,17 @@
   account, which the owner can revoke under Settings → Applications; no
   token is left on the Mac. Approval: the owner's 👍 on #83. Released as
   v0.5.7, a patch release.
+- **2026-11-01 — Record: P-27, a declined lockout stays declined.** The
+  owner's decision of 2026-10-31 on #57: keep offering the lockout. On a
+  team member's laptop or a shared machine, accepting it signs that person
+  out of their own GitHub tooling, and declining left `doctor` warning on
+  every run. So `machine` records what the owner declined, the `gh` logins
+  it named and the saved git password, in the agent's folder beside the
+  session file, and `doctor` reports those as a passing line. The record
+  names each finding, so an account signed in after the owner declined is
+  still a warning; each `machine` run offers again and rewrites the record
+  from that run's answers, so accepting clears it. Keys with no passphrase
+  and the SSH route are not offered, so they are not recorded. The docs
+  present the lockout as optional hardening for a machine that runs agents,
+  and a separate macOS user for the agent sessions as the stronger
+  alternative.
