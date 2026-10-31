@@ -16,6 +16,7 @@ import {
   tokenInfo,
 } from './agent.ts';
 import { setUpBoard } from './board.ts';
+import { type OwnerToken, asOwner, isOrganisation, ownerScopes, signInOnce } from './owner-login.ts';
 import { ownerRules, ownerRulesProblem } from './codeowners.ts';
 import { appendToArray, replaceValues, setMember } from './jsonedit.ts';
 import { type Feature, FEATURES, FIGMA_FILE_KEY, featuresIn, parseFeatures, renamedLines } from './features.ts';
@@ -437,13 +438,10 @@ export function claudeSettings(before: string | undefined): { text: string; chan
   return { text, changes };
 }
 
-/** The account the owner's `gh` is signed in as, the owner's likely login. */
-async function ghLogin(sys: Sys): Promise<string | undefined> {
-  const token = sys.exec('gh', ['auth', 'token', '-h', 'github.com'], { env: { ...sys.env, GH_TOKEN: undefined, GITHUB_TOKEN: undefined } });
-  if (token.code !== 0 || !token.stdout.trim()) return undefined;
-  const { status, json } = await sys.http(`${API}/user`, { token: token.stdout.trim() }).catch(() => ({ status: 0, json: null }));
-  const login = (json as { login?: unknown } | null)?.login;
-  return status === 200 && typeof login === 'string' ? login : undefined;
+/** Who the run's sign-in is, the owner's likely login; undefined when it failed. */
+async function signedInLogin(signIn: () => Promise<OwnerToken | { problem: string }>): Promise<string | undefined> {
+  const signed = await signIn().catch(() => undefined);
+  return signed && 'login' in signed ? signed.login : undefined;
 }
 
 /** The agent accounts `machine` has set up on this Mac, as their session files spell them. */
@@ -517,6 +515,21 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     io.err(`onboard: stopped at "${step}"; nothing after it was changed`);
     return 1;
   };
+  // The owner's sign-in for this run: one browser approval at the first step that needs it, never stored.
+  let scopes: string[] = [];
+  let signedIn: Promise<OwnerToken | { problem: string }> | undefined;
+  const signIn = (): Promise<OwnerToken | { problem: string }> =>
+    (signedIn ??= (async () => {
+      scopes = ownerScopes(features, await isOrganisation(sys, slug.split('/')[0] as string));
+      io.out(`Sign in to GitHub as the owner in the browser, for this run only (${['repo', ...scopes].join(', ')}); nothing is kept.`);
+      return signInOnce(sys, scopes);
+    })());
+  const ownerToken = async (): Promise<string | undefined> => {
+    const token = asOwner(await signIn(), owner, scopes);
+    if (typeof token === 'string') return token;
+    io.err(`onboard: ${token.problem}`);
+    return undefined;
+  };
 
   const settingsFile = `${root}/${SETTINGS_PATH}`;
   let owner: string;
@@ -570,7 +583,7 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
       return 1;
     }
     features = chosen ?? [...FEATURES];
-    const namedOwner = named[0] ?? (await choose(sys, io, 'owner, who approves', [await ghLogin(sys)]));
+    const namedOwner = named[0] ?? (await choose(sys, io, 'owner, who approves', [await signedInLogin(signIn)]));
     const namedAgent = named[1] ?? (await choose(sys, io, 'agent, which builds', agentsSetUp(sys)));
     if (!namedOwner || !namedAgent) {
       io.err('onboard: name the owner and the agent account: process-rules onboard <owner> <agent>');
@@ -623,12 +636,15 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     let invite = await invitation(sys, slug, token);
     if (invite === undefined) {
       const sees = reach.kind === 'none' ? 'cannot see' : 'can read but not push to';
-      if (!(await confirm(`${agent} ${sees} ${slug}. Give it write access, as you, through gh?`))) {
+      if (!(await confirm(`${agent} ${sees} ${slug}. Give it write access, as you?`))) {
         return stop('agent access');
       }
-      const added = sys.exec('gh', ['api', '-X', 'PUT', `repos/${slug}/collaborators/${agent}`, '-f', 'permission=push']);
-      if (added.code !== 0) {
-        io.err(`onboard: gh could not add ${agent}: ${added.stderr.trim()}`);
+      const mine = await ownerToken();
+      if (!mine) return 1;
+      const added = await sys.http(`${API}/repos/${slug}/collaborators/${agent}`, { method: 'PUT', token: mine, body: { permission: 'push' } });
+      if (added.status !== 201 && added.status !== 204) {
+        const why = (added.json as { message?: unknown } | null)?.message;
+        io.err(`onboard: GitHub did not add ${agent} (HTTP ${added.status}${typeof why === 'string' ? `: ${why}` : ''})`);
         io.err(`  Add it yourself: ${slug} → Settings → Collaborators → Add people → ${agent}, role Write.`);
         return 1;
       }
@@ -708,7 +724,10 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
   }
 
   const projectTitle = (JSON.parse(sys.read(settingsFile)) as { project?: unknown }).project;
-  if (on('board') && !(await setUpBoard(sys, io, confirm, slug, owner, typeof projectTitle === 'string' ? projectTitle : undefined))) return 1;
+  if (on('board')) {
+    const mine = await ownerToken();
+    if (!mine || !(await setUpBoard(sys, io, confirm, slug, owner, mine, typeof projectTitle === 'string' ? projectTitle : undefined))) return 1;
+  }
   if (pendingSettings) {
     sys.write(settingsFile, pendingSettings);
     io.out(`✓ ${add} on in ${SETTINGS_PATH}`);

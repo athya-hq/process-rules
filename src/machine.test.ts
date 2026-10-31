@@ -75,7 +75,7 @@ describe('machine', () => {
     const { code, out } = await setUp(sys);
     assert.equal(code, 0);
     assert.deepEqual(sys.asked, [
-      'gh is signed in as example-owner. Sign it out, so agent sessions cannot use it? (gh auth login brings it back) [y/N] ',
+      'gh is signed in as example-owner. Sign it out, so agent sessions cannot use it? [y/N] ',
       'The macOS keychain holds a saved git password for github.com. Remove it? [y/N] ',
     ]);
     assert.deepEqual(out.slice(-4), [

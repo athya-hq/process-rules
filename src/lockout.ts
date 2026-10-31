@@ -141,7 +141,7 @@ export async function lockOwnerAway(
   const found = exposure(sys, agent);
   const declined: Declined = { ghLogins: [], gitPassword: false };
   for (const login of found.ghLogins) {
-    if (await confirm(`gh is signed in as ${login}. Sign it out, so agent sessions cannot use it? (gh auth login brings it back)`)) {
+    if (await confirm(`gh is signed in as ${login}. Sign it out, so agent sessions cannot use it?`)) {
       const out = sys.exec('gh', ['auth', 'logout', '-h', 'github.com', '-u', login], { env: ownerEnv(sys) });
       io.out(out.code === 0 ? `✓ gh signed out of ${login}` : `! gh could not sign out of ${login}: ${out.stderr.trim()}`);
     } else {

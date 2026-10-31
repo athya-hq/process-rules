@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, describe, it } from 'node:test';
 
-import { BUILT_IN, Board, COPY_URL, repoJson, settledViews } from './fake-board.test.ts';
+import { BUILT_IN, Board, COPY_URL, OWNER_TOKEN, repoJson, settledViews } from './fake-board.test.ts';
 import { FIELDS, ISSUE_TYPES, LABELS } from './board.ts';
 import { AGENT, FakeSys, ROOT, TOKEN, capture } from './fake.test.ts';
 import type { HttpResult } from './types.ts';
@@ -20,6 +20,7 @@ const HOOKS = `${ROOT}/${HOOKS_PATH}`;
 const WORKFLOW = `${ROOT}/${WORKFLOW_PATH}`;
 const PRE_PUSH = `${ROOT}/.git/hooks/pre-push`;
 const REPO = '/repos/example-org/example-app';
+const COLLABORATOR = `${REPO}/collaborators/ExampleBot`;
 const PUSH = { status: 200, json: repoJson() };
 const SESSION_ENTRY = { hooks: [{ type: 'command', command: HOOK_COMMAND }] };
 const GUARD_ENTRY = { matcher: 'Bash', hooks: [{ type: 'command', command: GUARD_COMMAND }] };
@@ -35,6 +36,7 @@ function fresh(): FakeSys {
   const sys = new FakeSys().ready();
   sys.files.delete(SETTINGS);
   sys.route('GET', '/users/example-owner', { status: 200, json: { id: 1, login: 'example-owner' } });
+  sys.route('GET', '/users/example-org', { status: 200, json: { login: 'example-org', type: 'Organization' } });
   sys.route('GET', REPO, PUSH);
   sys.route('GET', `${REPO}/commits/abc123`, VERIFIED);
   new Board(sys);
@@ -465,7 +467,7 @@ describe('onboard', () => {
   }
 
   describe('finding the accounts', () => {
-    /** A Mac where machine set up the agent, with the owner signed in to gh. */
+    /** A Mac where machine set up the agent, and the owner's browser approves the sign-in. */
     function setUp(agents: string[]): FakeSys {
       const sys = fresh();
       for (const agent of agents) {
@@ -475,13 +477,14 @@ describe('onboard', () => {
       return sys;
     }
 
-    it('takes the gh login as owner and the one agent set up here, with Enter', async () => {
+    it("takes the one-run sign-in's login as owner and the one agent set up here, with Enter", async () => {
       const sys = setUp([AGENT]);
       sys.answers = ['', '', ...Array<string>(12).fill('y')];
       const { code } = await run(sys, []);
       assert.equal(code, 0);
       assert.deepEqual(sys.asked.slice(0, 2), ['The owner, who approves [example-owner]: ', 'The agent, which builds [ExampleBot]: ']);
       assert.deepEqual(JSON.parse(sys.files.get(SETTINGS) ?? '').owner, 'example-owner');
+      assert.equal(sys.temps.length, 1, 'the sign-in that suggested the owner serves the board too');
     });
 
     it('lists the agents set up here and takes what is typed', async () => {
@@ -493,7 +496,7 @@ describe('onboard', () => {
       assert.equal(JSON.parse(sys.files.get(SETTINGS) ?? '').agent, AGENT);
     });
 
-    it('suggests no owner when gh is signed out or GitHub will not answer', async () => {
+    it('suggests no owner when the sign-in fails or GitHub will not answer', async () => {
       const sys = setUp([AGENT]);
       sys.ghToken = 'gho_unknown';
       sys.answers = ['', ''];
@@ -505,6 +508,64 @@ describe('onboard', () => {
       assert.deepEqual((await run(down, [])).err, ['onboard: name the owner and the agent account: process-rules onboard <owner> <agent>']);
       assert.equal(down.asked[0], 'The owner, who approves: ');
     });
+  });
+
+  describe("the owner's one-run sign-in", () => {
+    /** The scopes onboard's sign-in asked gh for, one list per sign-in. */
+    const asked = (sys: FakeSys): string[][] =>
+      sys.calls.filter((c) => c.args[1] === 'login').map((c) => (c.args.includes('-s') ? (c.args[c.args.indexOf('-s') + 1] ?? '').split(',') : []));
+
+    it("signs in once, for the board's scopes, with the owner's gh folder untouched and the temporary one gone", async () => {
+      const sys = fresh();
+      sys.files.set(`${sys.home}/.config/gh/hosts.yml`, 'github.com:\n    oauth_token: gho_owners_own\n');
+      const { code, out } = await run(sys);
+      assert.equal(code, 0);
+      assert.deepEqual(asked(sys), [['project', 'admin:org']]);
+      assert.ok(out.includes('Sign in to GitHub as the owner in the browser, for this run only (repo, project, admin:org); nothing is kept.'));
+      assert.deepEqual(sys.removed, sys.temps);
+      const gh = sys.calls.filter((c) => c.command === 'gh');
+      assert.ok(gh.length > 0 && gh.every((c) => c.env?.GH_CONFIG_DIR === sys.temps[0]), "gh never runs on the owner's own folder");
+      assert.equal(sys.files.get(`${sys.home}/.config/gh/hosts.yml`), 'github.com:\n    oauth_token: gho_owners_own\n');
+      assert.ok(!sys.requests.some((r) => r.token === 'gho_owners_own'));
+    });
+
+    it('asks a personal repository for projects alone', async () => {
+      const sys = fresh();
+      sys.route('GET', '/users/example-org', { status: 200, json: { login: 'example-org', type: 'User' } });
+      sys.route('GET', REPO, { status: 200, json: repoJson(false) });
+      sys.acceptToken(OWNER_TOKEN, 'example-owner', { 'x-oauth-scopes': 'repo, project' });
+      assert.equal((await run(sys)).code, 0);
+      assert.deepEqual(asked(sys), [['project']]);
+    });
+
+    it('does not sign in when no step needs the owner', async () => {
+      const sys = fresh();
+      assert.equal((await run(sys, ['example-owner', AGENT, '--features', 'identity,pr-identity'])).code, 0);
+      assert.deepEqual(sys.temps, []);
+    });
+
+    it("signs in for the board's scopes when --add turns it on", async () => {
+      const sys = fresh();
+      sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity'] }));
+      assert.equal((await run(sys, ['--add', 'board'])).code, 0);
+      assert.deepEqual(asked(sys), [['project', 'admin:org']]);
+      assert.deepEqual(sys.removed, sys.temps);
+    });
+
+    for (const [name, change, message] of [
+      ['a sign-in as someone else', (sys: FakeSys) => sys.acceptToken(OWNER_TOKEN, 'someone'), 'onboard: the browser signed in to GitHub as someone, not the owner example-owner; sign in to github.com there as example-owner and run it again'],
+      ['a sign-in turned down', (sys: FakeSys) => (sys.ghToken = undefined), 'onboard: the GitHub sign-in in the browser did not finish'],
+    ] as const) {
+      it(`stops at ${name}, with the temporary folder gone`, async () => {
+        const sys = fresh();
+        change(sys);
+        const { code, err } = await run(sys);
+        assert.deepEqual({ code, err }, { code: 1, err: [message] });
+        assert.equal(sys.temps.length, 1);
+        assert.deepEqual(sys.removed, sys.temps);
+        assert.ok(!sys.requests.some((r) => /\/labels|\/issue-types|\/graphql$/.test(r.url)), 'the board is not touched');
+      });
+    }
   });
 
   describe("keeping the client's settings layout", () => {
@@ -545,21 +606,20 @@ describe('onboard', () => {
   });
 
   describe('agent access', () => {
-    it('gives an organisation member access through gh', async () => {
+    it("gives an organisation member access with the owner's one-run token", async () => {
       const sys = fresh();
       let added = false;
       sys.route('GET', REPO, () => (added ? PUSH : { status: 404, json: null }));
       sys.route('GET', '/user/repository_invitations?per_page=100&page=1', { status: 200, json: [] });
-      sys.execOverride = (call) => {
-        if (call.command !== 'gh' || call.args[0] !== 'api') return undefined;
+      sys.route('PUT', COLLABORATOR, () => {
         added = true;
-        return { code: 0, stdout: '', stderr: '' };
-      };
+        return { status: 204, json: null };
+      });
       const { code } = await run(sys);
       assert.equal(code, 0);
-      assert.deepEqual(sys.calls.find((c) => c.command === 'gh')?.args, [
-        'api', '-X', 'PUT', 'repos/example-org/example-app/collaborators/ExampleBot', '-f', 'permission=push',
-      ]);
+      const put = sys.requests.find((r) => r.method === 'PUT');
+      assert.deepEqual([put?.token, put?.body], [OWNER_TOKEN, { permission: 'push' }]);
+      assert.equal(sys.temps.length, 1, 'one sign-in for the access and the board');
     });
 
     it('invites, then accepts the invitation as the agent', async () => {
@@ -575,11 +635,10 @@ describe('onboard', () => {
         accepted = true;
         return { status: 204, json: null };
       });
-      sys.execOverride = (call) => {
-        if (call.command !== 'gh' || call.args[0] !== 'api') return undefined;
+      sys.route('PUT', COLLABORATOR, () => {
         invited = true;
-        return { code: 0, stdout: '', stderr: '' };
-      };
+        return { status: 201, json: {} };
+      });
       sys.answers = Array<string>(13).fill('y');
       const { code } = await run(sys);
       assert.equal(code, 0);
@@ -599,12 +658,10 @@ describe('onboard', () => {
         accepted = true;
         return { status: 204, json: null };
       });
-      sys.execOverride = (call) => {
-        if (call.command !== 'gh' || call.args[0] !== 'api') return undefined;
-        assert.deepEqual(call.args, ['api', '-X', 'PUT', 'repos/example-org/example-app/collaborators/ExampleBot', '-f', 'permission=push']);
+      sys.route('PUT', COLLABORATOR, () => {
         invited = true;
-        return { code: 0, stdout: '', stderr: '' };
-      };
+        return { status: 201, json: {} };
+      });
       sys.answers = Array<string>(13).fill('y');
       const { code } = await run(sys);
       assert.equal(code, 0);
@@ -637,18 +694,18 @@ describe('onboard', () => {
         return { status: 204, json: null };
       });
       assert.equal((await run(sys)).code, 0);
-      assert.ok(!sys.calls.some((c) => c.command === 'gh' && c.args[0] === 'api'), 'invites no one');
+      assert.ok(!sys.requests.some((r) => r.method === 'PUT'), 'invites no one');
     });
 
     for (const [name, setUp, message] of [
       [
-        'gh failing to add the agent',
+        'GitHub refusing to add the agent',
         (sys: FakeSys) => {
           sys.route('GET', REPO, { status: 404, json: null });
           sys.route('GET', '/user/repository_invitations?per_page=100&page=1', { status: 500, json: null });
-          sys.execOverride = (call) => (call.command === 'gh' ? { code: 1, stdout: '', stderr: 'HTTP 403\n' } : undefined);
+          sys.route('PUT', COLLABORATOR, { status: 403, json: { message: 'Must have admin rights to Repository.' } });
         },
-        ['onboard: gh could not add ExampleBot: HTTP 403', '  Add it yourself: example-org/example-app → Settings → Collaborators → Add people → ExampleBot, role Write.'],
+        ['onboard: GitHub did not add ExampleBot (HTTP 403: Must have admin rights to Repository.)', '  Add it yourself: example-org/example-app → Settings → Collaborators → Add people → ExampleBot, role Write.'],
       ],
       [
         'an invitation GitHub will not accept',
@@ -664,7 +721,7 @@ describe('onboard', () => {
         (sys: FakeSys) => {
           sys.route('GET', REPO, { status: 404, json: null });
           sys.route('GET', '/user/repository_invitations?per_page=100&page=1', { status: 200, json: [] });
-          sys.execOverride = (call) => (call.command === 'gh' ? { code: 0, stdout: '', stderr: '' } : undefined);
+          sys.route('PUT', COLLABORATOR, { status: 204, json: null });
         },
         ['onboard: ExampleBot still cannot see example-org/example-app; check the invitation reached ExampleBot'],
       ],
@@ -673,7 +730,7 @@ describe('onboard', () => {
         (sys: FakeSys) => {
           sys.route('GET', REPO, { status: 200, json: { ...repoJson(), permissions: { push: false } } });
           sys.route('GET', '/user/repository_invitations?per_page=100&page=1', { status: 200, json: [] });
-          sys.execOverride = (call) => (call.command === 'gh' ? { code: 0, stdout: '', stderr: '' } : undefined);
+          sys.route('PUT', COLLABORATOR, { status: 204, json: null });
         },
         ['onboard: ExampleBot can read example-org/example-app but still not push; check the invitation reached ExampleBot, or give it the Write role'],
       ],
