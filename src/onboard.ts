@@ -202,30 +202,46 @@ export function workflowPins(text: string): string[] {
   return [...text.matchAll(CHECKS_PIN), ...text.matchAll(REF_PIN)].map((match) => match[2] as string);
 }
 
+/** The one branch a workflow's `push:` trigger names, as `onboard` writes it, quoted or not. */
+const PUSH_BRANCH = /^( {2}push:\n {4}branches: \[\s*)(['"]?)([^,'"\]\s]+)\2(\s*\])$/m;
+
 /**
  * What onboard does with the client's workflow: write it, replace an older
  * release's template, or, in a workflow already split into a read-only
  * `process-rules` job and a `process-rules-weekly` job, move the version pins
- * alone, leaving the rest as the client has it.
+ * and, when the default branch has changed, the one branch pushes run on,
+ * leaving the rest as the client has it.
  */
 export function workflowUpdate(
   before: string | undefined,
   branch: string,
   version: string,
-): { kind: 'same' } | { kind: 'write' | 'replace-older' | 'replace' | 'repin'; text: string; from?: string } {
+):
+  | { kind: 'same' }
+  | { kind: 'write' | 'replace-older' | 'replace'; text: string; from?: string }
+  | { kind: 'repin'; text: string; from?: string; branch?: string } {
   const wanted = workflow(branch, version);
   if (before === undefined) return { kind: 'write', text: wanted };
   if (before === wanted) return { kind: 'same' };
   const pins = workflowPins(before);
   const from = pins[0];
-  if (from !== undefined && olderWorkflows(branch, from).includes(before)) return { kind: 'replace-older', text: wanted, from };
+  const pushed = PUSH_BRANCH.exec(before)?.[3];
+  if (from !== undefined && pushed !== undefined && olderWorkflows(pushed, from).includes(before)) {
+    return { kind: 'replace-older', text: wanted, from };
+  }
   const split = /^ {2}process-rules:\s*$/m.test(before) && /^ {2}process-rules-weekly:\s*$/m.test(before);
   if (split && pins.length === 4) {
+    const moved = pushed !== undefined && pushed !== branch;
     const text = before
       .replace(CHECKS_PIN, (_, head: string) => `${head}${version}`)
       .replace(REF_PIN, (_, head: string) => `${head}${version}`)
-      .replace(HEADER_PIN, (_, head: string, _old: string, dot: string) => `${head}${version}${dot}`);
-    return text === before ? { kind: 'same' } : { kind: 'repin', text, ...(from ? { from } : {}) };
+      .replace(HEADER_PIN, (_, head: string, _old: string, dot: string) => `${head}${version}${dot}`)
+      .replace(PUSH_BRANCH, (line: string, head: string, quote: string, _old: string, tail: string) =>
+        moved ? `${head}${quote}${branch}${quote}${tail}` : line,
+      );
+    if (text === before) return { kind: 'same' };
+    const stale = pins.find((pin) => pin !== version);
+    return { kind: 'repin', text, ...(stale ? { from: stale } : {}), ...(moved ? { branch } : {}) };
   }
   return { kind: 'replace', text: wanted };
 }
@@ -534,9 +550,12 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     if (update.kind !== 'same') {
       const what = {
         write: `Write ${WORKFLOW_PATH}, which runs the shared process-rules checks`,
-        'replace-older': `Replace the older ${WORKFLOW_PATH}, which writes to issues on every run, with this release's, which writes on the weekly run alone`,
+        'replace-older': `Replace the older ${WORKFLOW_PATH}, which lets every run write to issues, with this release's, which lets the weekly run alone`,
         replace: `Replace ${WORKFLOW_PATH}, which runs the shared process-rules checks`,
-        repin: `Move the version pins in ${WORKFLOW_PATH} from v${update.from ?? '?'} to v${version}, leaving the rest as it is`,
+        repin: `In ${WORKFLOW_PATH}, ${[
+          ...(update.kind === 'repin' && update.from ? [`move the version pins from v${update.from} to v${version}`] : []),
+          ...(update.kind === 'repin' && update.branch ? [`run pushes on the default branch, ${update.branch}`] : []),
+        ].join(' and ') || `set the version in its header comment to v${version}`}, leaving the rest as it is`,
       }[update.kind];
       if (!(await confirm(`${what}?`))) {
         return stop('workflow');

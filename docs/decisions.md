@@ -150,5 +150,6 @@
   push. From v0.5.3 `checks.yml` sets no workflow-wide permissions, its
   read-only jobs set their own, and its weekly job takes what the calling
   job grants. `onboard` replaces the older single-job template, moves only
-  the version pins of a workflow already split, and offers to replace any
-  other workflow, as before. Released as v0.5.3, a patch release.
+  the version pins of a workflow already split (and its push branch, when the
+  default branch has changed), and offers to replace any other workflow, as
+  before. Released as v0.5.3, a patch release.

@@ -219,10 +219,11 @@ global `core.hooksPath`), `onboard` leaves it alone and names the line to add:
 `process-rules pre-push "$@"`. The client workflow re-runs the checks when a
 pull request's description is edited. After upgrading process-rules, run
 `onboard` again: it upgrades the hook entries in `.claude/settings.json` and
-the workflow. An older release's workflow, one job that wrote to issues on
-every run, is replaced; a workflow already split into `process-rules` and
+the workflow. An older release's workflow, one job that let every run write
+to issues, is replaced; a workflow already split into `process-rules` and
 `process-rules-weekly` keeps everything but its version pins, which move to the
-new release; any other workflow is offered a replacement. Make the checks of the
+new release, and the one branch pushes run on, which follows a changed default
+branch; any other workflow is offered a replacement. Make the checks of the
 features a client has turned on required on its default branch, such as
 `process-rules / PR identity` with `pr-identity` and `process-rules / Work
 rules` with `work-rules`; a check of a feature that is off still runs and

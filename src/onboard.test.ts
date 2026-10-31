@@ -346,7 +346,7 @@ describe('onboard', () => {
     const sys = fresh();
     sys.files.set(WORKFLOW, olderWorkflows('main', '0.5.2')[0] as string);
     await run(sys);
-    assert.ok(sys.asked.some((q) => q.startsWith('Replace the older .github/workflows/process-rules.yml, which writes to issues on every run')));
+    assert.ok(sys.asked.some((q) => q.startsWith('Replace the older .github/workflows/process-rules.yml, which lets every run write to issues')));
     assert.equal(sys.files.get(WORKFLOW), workflow('main', packageVersion()));
   });
 
@@ -355,7 +355,7 @@ describe('onboard', () => {
     const own = workflow('main', '0.5.2').replace('name: process-rules\n', 'name: process-rules\n# Our own note.\n');
     sys.files.set(WORKFLOW, own);
     await run(sys);
-    assert.ok(sys.asked.some((q) => q === `Move the version pins in .github/workflows/process-rules.yml from v0.5.2 to v${packageVersion()}, leaving the rest as it is? [y/N] `));
+    assert.ok(sys.asked.some((q) => q === `In .github/workflows/process-rules.yml, move the version pins from v0.5.2 to v${packageVersion()}, leaving the rest as it is? [y/N] `));
     assert.equal(sys.files.get(WORKFLOW), own.replaceAll('0.5.2', packageVersion()));
   });
 
@@ -919,14 +919,40 @@ describe('workflowUpdate', () => {
   it('moves the pins of a split workflow, quoted or not, and nothing else', () => {
     const before = workflow('main', '0.5.2')
       .replace("branches: [\"main\"]", "branches: ['main']")
+      .replace('name: process-rules\n', 'name: process-rules\n# Our own note: split by hand at v0.5.2.\n')
       .replace('process-rules-ref: v0.5.2\n    secrets', "process-rules-ref: 'v0.5.2'\n    secrets")
       .replace('    secrets:\n      FIGMA_TOKEN: ${{ secrets.FIGMA_TOKEN }}\n\n', '\n');
     const update = workflowUpdate(before, 'main', '0.5.3');
     assert.equal(update.kind, 'repin');
     assert.ok(update.kind === 'repin');
     assert.equal(update.from, '0.5.2');
-    assert.equal(update.text, before.replaceAll('0.5.2', '0.5.3'));
+    assert.equal(update.text, before.replaceAll('0.5.2', '0.5.3').replace('split by hand at v0.5.3', 'split by hand at v0.5.2'));
+    assert.match(update.text, /^# Our own note: split by hand at v0\.5\.2\.$/m);
     assert.deepEqual(workflowPins(update.text), ['0.5.3', '0.5.3', '0.5.3', '0.5.3']);
+  });
+
+  it('follows a changed default branch in a split workflow, keeping its quotes', () => {
+    const before = workflow('main', '0.5.3').replace('branches: ["main"]', "branches: ['main']");
+    assert.deepEqual(workflowUpdate(before, 'trunk', '0.5.3'), { kind: 'repin', text: before.replace("['main']", "['trunk']"), branch: 'trunk' });
+    const update = workflowUpdate(workflow('main', '0.5.2'), 'trunk', '0.5.3');
+    assert.deepEqual(update, { kind: 'repin', text: workflow('trunk', '0.5.3'), from: '0.5.2', branch: 'trunk' });
+  });
+
+  it('leaves a push trigger listing several branches as it is', () => {
+    const before = workflow('main', '0.5.2').replace('branches: ["main"]', 'branches: ["main", "release"]');
+    const update = workflowUpdate(before, 'trunk', '0.5.3');
+    assert.ok(update.kind === 'repin');
+    assert.match(update.text, /branches: \["main", "release"\]/);
+    assert.equal(update.branch, undefined);
+  });
+
+  it('asks to follow the default branch alone when the pins are current', async () => {
+    const sys = fresh();
+    sys.files.set(WORKFLOW, workflow('main', packageVersion()));
+    sys.route('GET', REPO, { status: 200, json: repoJson(true, 'trunk') });
+    await run(sys);
+    assert.ok(sys.asked.includes('In .github/workflows/process-rules.yml, run pushes on the default branch, trunk, leaving the rest as it is? [y/N] '));
+    assert.equal(sys.files.get(WORKFLOW), workflow('trunk', packageVersion()));
   });
 
   it('replaces a workflow it does not recognise, a split one with a pin missing included', () => {
@@ -934,7 +960,13 @@ describe('workflowUpdate', () => {
     const halfPinned = workflow('main', '0.5.2').replace(/\n {4}with:\n {6}process-rules-ref: v0\.5\.2\n {4}secrets:/, '\n    secrets:');
     assert.equal(workflowPins(halfPinned).length, 3);
     assert.equal(workflowUpdate(halfPinned, 'main', '0.5.3').kind, 'replace');
-    // An older template on another branch than the default is not one onboard wrote for this repository.
-    assert.equal(workflowUpdate(olderWorkflows('trunk', '0.5.2')[0], 'main', '0.5.3').kind, 'replace');
+  });
+
+  it('replaces the older template written for a default branch since changed', () => {
+    assert.deepEqual(workflowUpdate(olderWorkflows('main', '0.5.2')[0], 'trunk', '0.5.3'), {
+      kind: 'replace-older',
+      text: workflow('trunk', '0.5.3'),
+      from: '0.5.2',
+    });
   });
 });
