@@ -1,4 +1,4 @@
-# Written by process-rules onboard: the shared process-rules checks at v0.4.0.
+# Written by process-rules onboard: the shared process-rules checks at v0.5.0.
 # To upgrade, change the version on both lines that name it.
 name: process-rules
 
@@ -25,8 +25,8 @@ jobs:
       contents: read
       issues: write
       pull-requests: read
-    uses: athya-hq/process-rules/.github/workflows/checks.yml@v0.4.0
+    uses: athya-hq/process-rules/.github/workflows/checks.yml@v0.5.0
     with:
-      process-rules-ref: v0.4.0
+      process-rules-ref: v0.5.0
     secrets:
       FIGMA_TOKEN: ${{ secrets.FIGMA_TOKEN }}
