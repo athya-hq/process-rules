@@ -9,6 +9,7 @@ import {
   realpathSync,
   writeFileSync,
 } from 'node:fs';
+import * as http from 'node:http';
 import { homedir } from 'node:os';
 import { createInterface } from 'node:readline/promises';
 import { isatty } from 'node:tty';
@@ -17,6 +18,9 @@ import type { Sys } from './types.ts';
 
 /** The real machine: processes, files, the terminal and GitHub's REST API. */
 export function realSys(): Sys {
+  // Behind a proxy, such as a Claude cloud session's GitHub proxy, GitHub is reached through it, as gh and git reach it.
+  // Node's own types do not name it yet.
+  if (process.env.HTTPS_PROXY || process.env.https_proxy) (http as { setGlobalProxyFromEnv?: () => void }).setGlobalProxyFromEnv?.();
   return {
     env: process.env,
     home: homedir(),

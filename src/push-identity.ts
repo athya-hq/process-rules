@@ -1,4 +1,5 @@
 import { API, sameLogin } from './agent.ts';
+import { cloudLogin } from './cloud.ts';
 import type { Sys } from './types.ts';
 
 /** SSH as git reads a URL: an SSH scheme, or the scp-like `[user@]host:path`. */
@@ -6,13 +7,11 @@ const SSH = /^(?:(?:ssh|git\+ssh|ssh\+git):\/\/|[^/:\s]+:(?!\/\/))/i;
 const HTTPS_GITHUB = /^https:\/\/(?:[^@/\s]+@)?github\.com(?::\d+)?\//i;
 
 /**
- * Whether this shell is an agent session's on this Mac: one session-start
- * gave the agent identity, or any shell Claude Code runs (it sets
- * CLAUDECODE), so a session whose hooks never ran is one too. Cloud sessions
- * are left alone; they reach GitHub as the account connected to them.
+ * Whether this shell is an agent session's, on a Mac or in a Claude cloud
+ * session: one session-start gave the agent identity, or any shell Claude
+ * Code runs (it sets CLAUDECODE), so a session whose hooks never ran is one too.
  */
 export function agentSession(sys: Sys): boolean {
-  if (sys.env.CLAUDE_CODE_REMOTE === 'true') return false;
   return !!sys.env.PROCESS_RULES_AGENT || sys.env.CLAUDECODE === '1';
 }
 
@@ -22,7 +21,9 @@ export function agentSession(sys: Sys): boolean {
  * over SSH is refused, whatever the host, since a host alias can be GitHub:
  * it uses this Mac's keys, which are the owner's, and the agent's identity
  * sends GitHub over HTTPS. Over HTTPS the credentials git would push with,
- * one in the URL included, are asked of git itself, then of GitHub.
+ * one in the URL included, are asked of git itself, then of GitHub. A Claude
+ * cloud session pushes through its GitHub proxy as the account connected to
+ * claude.ai, which GitHub names through the same proxy.
  */
 export async function pushIdentityProblem(sys: Sys, root: string, url: string, agent: string): Promise<string | undefined> {
   const notSetUp = 'this session was not given the agent identity, which sends GitHub over HTTPS; tell the owner';
@@ -31,6 +32,12 @@ export async function pushIdentityProblem(sys: Sys, root: string, url: string, a
     return `this push goes over SSH, with this Mac's SSH keys, which are its owner's, not ${agent}'s: ${notSetUp}`;
   }
   if (!HTTPS_GITHUB.test(url)) return undefined;
+  if (sys.env.CLAUDE_CODE_REMOTE === 'true') {
+    const asked = await cloudLogin(sys);
+    if ('problem' in asked) return `${asked.problem}, so this push cannot be checked as ${agent}`;
+    if (sameLogin(asked.login, agent)) return undefined;
+    return `this cloud session pushes as ${asked.login}, not ${agent}; claude.ai's GitHub connection must be ${agent} for agent sessions`;
+  }
   const filled = sys.exec('git', ['credential', 'fill'], {
     cwd: root,
     // The whole URL, so a user or password in it is the one checked, as git would push with it.

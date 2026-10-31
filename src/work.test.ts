@@ -17,61 +17,76 @@ type Node = Record<string, unknown>;
 /** Slice #12 under work item #10, approved by the owner, with nothing else. */
 function graph(): { issue: Node; timeline: Node[]; states: Node[]; comments: Node[]; thumbs: Map<string, Node[]> } {
   const timeline: Node[] = [
-    { __typename: 'SubIssueAddedEvent', createdAt: T0, subIssue: { number: 12 } },
-    { __typename: 'LabeledEvent', createdAt: APPROVED, actor: { login: OWNER }, label: { name: 'approved' } },
+    { event: 'sub_issue_added', created_at: T0, sub_issue: { number: 12 } },
+    { event: 'labeled', created_at: APPROVED, actor: { login: OWNER }, label: { name: 'approved' } },
   ];
   const states: Node[] = [];
   const comments: Node[] = [];
   const issue: Node = {
     number: 12,
     title: 'Add the thing',
-    issueType: { name: 'Slice' },
-    comments: { nodes: comments },
-    parent: { id: 'I_10', number: 10, issueType: { name: 'Work item' }, timelineItems: { nodes: timeline } },
-    subIssues: { nodes: states },
+    type: { name: 'Slice' },
+    comments,
+    parent: { number: 10, type: { name: 'Work item' } },
+    timeline,
+    states,
     thumbs: new Map<string, Node[]>(),
   };
   return { issue, timeline, states, comments, thumbs: issue.thumbs as Map<string, Node[]> };
 }
 
+const ISSUES = `https://api.github.com/repos/${SLUG}/issues`;
+const LIST = /^(.*?)[?&]per_page=100&page=(\d+)$/;
+
+/** What GitHub's REST API answers `url` with for slice `issue`'s model, or undefined for a path it does not hold. */
+function answer(issue: Node | null, url: string): { status: number; json: unknown } | undefined {
+  const list = LIST.exec(url);
+  const path = (list ? list[1] as string : url).replace(ISSUES, '');
+  const page = (items: Node[] | undefined): { status: number; json: unknown } | undefined => {
+    if (!items) return undefined;
+    const from = (Number(list?.[2]) - 1) * 100;
+    return { status: 200, json: items.slice(from, from + 100) };
+  };
+  if (!issue) return undefined;
+  const parent = issue.parent as Node | null;
+  const states = (issue.states as Node[]).map((state): Node => ({ ...state, url: `${ISSUES}/${state.number}`, parent_issue_url: `${ISSUES}/12` }));
+  if (path === '/12') return { status: 200, json: { ...issue, url: `${ISSUES}/12`, parent_issue_url: parent ? `${ISSUES}/10` : null } };
+  if (path === '/10' && parent) return { status: 200, json: { ...parent, url: `${ISSUES}/10` } };
+  if (path === '/10/timeline') return page(issue.timeline as Node[]);
+  if (path === '/12/comments') return page(issue.comments as Node[]);
+  if (path === '/12/sub_issues') return page(states);
+  const own = /^\/(\d+)(\/comments)?$/.exec(path);
+  const state = states.find((one) => one.number === Number(own?.[1]));
+  if (state) return own?.[2] ? page(state.comments as Node[]) : { status: 200, json: state };
+  const reactions = /^\/comments\/([^/]+)\/reactions\?content=%2B1$/.exec(path);
+  // A deleted comment reads as 404.
+  if (reactions && reactions[1] !== 'gone') return page((issue.thumbs as Map<string, Node[]>).get(reactions[1] as string) ?? []);
+  return undefined;
+}
+
+/** GitHub as slice `issue`'s model says, read when asked so a test can change it after; routes a test sets win. */
 function github(sys: FakeSys, issue: Node | null, pulls: Node[] = []): void {
-  sys.route('POST', '/graphql', () => {
-    const { query, variables } = sys.requests.at(-1)?.body as { query: string; variables: { ids?: string[]; id?: string; after?: string } };
-    if (query.includes('nodes(ids')) {
-      const thumbs = issue?.thumbs as Map<string, Node[]>;
-      // A deleted comment reads as null.
-      // A comment with more 👍s than one read returns says so.
-      const nodes = (variables.ids ?? []).map((id) =>
-        id === 'gone' ? null : { id, reactions: { nodes: thumbs.get(id) ?? [], pageInfo: { hasNextPage: issue?.crowded === id } } },
-      );
-      return { status: 200, json: { data: { nodes } } };
+  const http = sys.http.bind(sys);
+  sys.http = (url, options = {}) => {
+    const key = `${options.method ?? 'GET'} ${url}`;
+    if (!sys.routes.has(key) && (options.method ?? 'GET') === 'GET' && url.startsWith(ISSUES)) {
+      sys.route('GET', url, () => answer(issue, url) ?? { status: 404, json: { message: 'Not Found' } });
     }
-    // A state's earlier comments sit on the state; the slice's on the slice.
-    if (query.includes('before: $before')) {
-      const state = (issue?.morePages as Node[] | undefined)?.flatMap((page) => (page.nodes as Node[])).find((one) => one.id === variables.id);
-      return { status: 200, json: { data: { node: { comments: state ? state.earlier : issue?.earlier } } } };
-    }
-    if (query.includes('subIssues(first: 100, after')) {
-      const page = (issue?.morePages as Node[])[Number(variables.after)];
-      return { status: 200, json: { data: { node: { subIssues: page } } } };
-    }
-    if (!query.includes('timelineItems')) return { status: 200, json: { data: { repository: { issue } } } };
-    const nodes = ((issue?.parent as Node).timelineItems as { nodes: Node[] }).nodes;
-    return { status: 200, json: { data: { node: { timelineItems: { nodes, pageInfo: { hasNextPage: false, endCursor: null } } } } } };
-  });
+    return http(url, options);
+  };
   sys.route('GET', `/repos/${SLUG}/pulls?state=open&per_page=100&page=1`, { status: 200, json: pulls });
 }
 
 let ids = 0;
-const comment = (body: string, createdAt = LATEST, login = OWNER, lastEditedAt: string | null = null): Node => ({
-  __typename: 'IssueComment',
+const comment = (body: string, created_at = LATEST, login = OWNER, edited: string | null = null): Node => ({
+  event: 'commented',
   id: `IC_${++ids}`,
-  author: { login },
+  user: { login },
   body,
-  createdAt,
-  lastEditedAt,
+  created_at,
+  updated_at: edited ?? created_at,
 });
-const thumb = (createdAt = LATEST, login = OWNER): Node => ({ user: { login }, createdAt });
+const thumb = (created_at = LATEST, login = OWNER): Node => ({ user: { login }, created_at });
 
 async function problems(issue: Node | null, pulls: Node[] = [], mine: { pull?: number; branch?: string } = {}): Promise<string[]> {
   const sys = new FakeSys();
@@ -93,7 +108,7 @@ describe('sliceProblems', () => {
 
   for (const [name, change, problem] of [
     ['a missing issue', () => null, '#12 is not an issue in example-org/example-app'],
-    ['an issue that is not a Slice', (g: ReturnType<typeof graph>) => ({ ...g.issue, issueType: null }), '#12 is not a Slice (its type is none)'],
+    ['an issue that is not a Slice', (g: ReturnType<typeof graph>) => ({ ...g.issue, type: null }), '#12 is not a Slice (its type is none)'],
     ['a slice with no work item', (g: ReturnType<typeof graph>) => ({ ...g.issue, parent: null }), '#12 is not a sub-issue of a Work item'],
   ] as const) {
     it(`refuses ${name}`, async () => {
@@ -109,28 +124,28 @@ describe('sliceProblems', () => {
 
   it('refuses an approval taken back', async () => {
     const g = graph();
-    g.timeline.push({ __typename: 'UnlabeledEvent', createdAt: LATER, actor: { login: OWNER }, label: { name: 'approved' } });
+    g.timeline.push({ event: 'unlabeled', created_at: LATER, actor: { login: OWNER }, label: { name: 'approved' } });
     assert.match((await problems(g.issue))[0] ?? '', /is not approved/);
   });
 
   it('refuses an approval by anyone but the owner', async () => {
     const g = graph();
-    g.timeline[1] = { __typename: 'LabeledEvent', createdAt: APPROVED, actor: { login: AGENT }, label: { name: 'approved' } };
+    g.timeline[1] = { event: 'labeled', created_at: APPROVED, actor: { login: AGENT }, label: { name: 'approved' } };
     assert.deepEqual(await problems(g.issue), ['work item #10 was labeled approved by ExampleBot, not example-owner']);
-    g.timeline[1] = { __typename: 'LabeledEvent', createdAt: APPROVED, actor: null, label: { name: 'approved' } };
+    g.timeline[1] = { event: 'labeled', created_at: APPROVED, actor: null, label: { name: 'approved' } };
     assert.deepEqual(await problems(g.issue), ['work item #10 was labeled approved by someone unknown, not example-owner']);
   });
 
   it('ignores other labels', async () => {
     const g = graph();
-    g.timeline.push({ __typename: 'LabeledEvent', createdAt: LATER, actor: { login: AGENT }, label: { name: 'mechanical' } });
+    g.timeline.push({ event: 'labeled', created_at: LATER, actor: { login: AGENT }, label: { name: 'mechanical' } });
     assert.deepEqual(await problems(g.issue), []);
   });
 
   describe('a slice added after approval', () => {
     const added = (): ReturnType<typeof graph> => {
       const g = graph();
-      g.timeline[0] = { __typename: 'SubIssueAddedEvent', createdAt: LATER, subIssue: { number: 12 } };
+      g.timeline[0] = { event: 'sub_issue_added', created_at: LATER, sub_issue: { number: 12 } };
       return g;
     };
     const refused =
@@ -158,7 +173,7 @@ describe('sliceProblems', () => {
       ['before the slice was added', comment('Decision: add #12', APPROVED)],
       ['naming another slice', comment('Decision: add #120')],
       ['without the Decision: prefix', comment('ok, add #12')],
-      ['with no author', { ...comment('Decision: add #12'), author: null }],
+      ['with no author', { ...comment('Decision: add #12'), user: null }],
     ] as const) {
       it(`ignores a comment ${name}`, async () => {
         const g = added();
@@ -169,13 +184,13 @@ describe('sliceProblems', () => {
 
     it('checks the latest addition when a slice is removed and added again', async () => {
       const g = graph();
-      g.timeline.push({ __typename: 'SubIssueAddedEvent', createdAt: LATER, subIssue: { number: 12 } });
+      g.timeline.push({ event: 'sub_issue_added', created_at: LATER, sub_issue: { number: 12 } });
       assert.deepEqual(await problems(g.issue), [refused]);
     });
 
     it('ignores the add of another slice', async () => {
       const g = graph();
-      g.timeline.push({ __typename: 'SubIssueAddedEvent', createdAt: LATER, subIssue: null });
+      g.timeline.push({ event: 'sub_issue_added', created_at: LATER, sub_issue: null });
       assert.deepEqual(await problems(g.issue), []);
     });
 
@@ -188,12 +203,8 @@ describe('sliceProblems', () => {
         return g;
       };
 
-      it('refuses to judge a proposal with more 👍s than one read returns', async () => {
-        const g = withProposal([thumb(LATEST, AGENT)]);
-        g.issue.crowded = (g.comments.at(-1) as Node).id;
-        const sys = new FakeSys();
-        github(sys, g.issue);
-        await assert.rejects(sliceProblems(sys, 'tok', SLUG, 12, ACCOUNTS, {}), /more than 100 👍 reactions/);
+      it('reads every page of a proposal\'s 👍s', async () => {
+        assert.deepEqual(await problems(withProposal([...Array.from({ length: 100 }, () => thumb(LATEST, AGENT)), thumb()]).issue), []);
       });
 
       it('passes, made after the slice was added', async () => {
@@ -208,7 +219,7 @@ describe('sliceProblems', () => {
       // The refusal names the propose command while the agent's proposal is missing.
       for (const [name, thumbs, made, expected] of [
         ['by the agent', [thumb(LATEST, AGENT)], undefined, proposed],
-        ['by anyone else', [thumb(LATEST, 'someone'), { user: null, createdAt: LATEST }], undefined, proposed],
+        ['by anyone else', [thumb(LATEST, 'someone'), { user: null, created_at: LATEST }], undefined, proposed],
         ['made before the slice was added', [thumb(APPROVED)], undefined, proposed],
         ['on a proposal edited after it', [thumb(LATER)], comment('Proposal: add #12', LATER, AGENT, LATEST), proposed],
         ["on the owner's own proposal", [thumb()], comment('Proposal: add #12', LATER, OWNER), refused],
@@ -226,14 +237,11 @@ describe('sliceProblems', () => {
         const g = added();
         const made = comment('Proposal: add #12', LATER, AGENT);
         g.thumbs.set(made.id as string, [thumb()]);
-        g.comments.push(comment('Later talk', LATEST, AGENT));
-        g.issue.id = 'I_12';
-        g.issue.comments = { nodes: g.comments, pageInfo: { hasPreviousPage: true, startCursor: 'c2' } };
-        g.issue.earlier = { nodes: [made], pageInfo: { hasPreviousPage: false, startCursor: 'c1' } };
+        for (let i = 0; i < 100; i++) g.comments.push(comment('Later talk', LATEST, AGENT));
+        g.comments.push(made);
         github(sys, g.issue);
         assert.deepEqual(await sliceProblems(sys, 'tok', SLUG, 12, ACCOUNTS, {}), []);
-        const page = sys.requests.find((r) => (r.body as { query?: string } | undefined)?.query?.includes('before: $before'));
-        assert.deepEqual((page?.body as { variables: unknown }).variables, { id: 'I_12', before: 'c2' });
+        assert.ok(sys.requests.some((r) => r.url === `${ISSUES}/12/comments?per_page=100&page=2`));
       });
 
       it('reads no reactions when a Decision: settles it, or nothing was proposed', async () => {
@@ -245,21 +253,20 @@ describe('sliceProblems', () => {
         const none = new FakeSys();
         github(none, added().issue);
         await sliceProblems(none, 'tok', SLUG, 12, ACCOUNTS, {});
-        for (const run of [sys, none]) assert.ok(!run.requests.some((r) => (r.body as { query?: string } | undefined)?.query?.includes('nodes(ids')));
+        for (const run of [sys, none]) assert.ok(!run.requests.some((r) => r.url.includes('/reactions')));
       });
 
-      it('reads reactions 100 proposals at a time, skipping a deleted comment', async () => {
+      it("reads each proposal's 👍s, a deleted proposal having none", async () => {
         const sys = new FakeSys();
         const g = added();
-        for (let i = 0; i < 100; i++) g.comments.push(comment('Proposal: add #12', LATER, AGENT));
+        g.comments.push(comment('Proposal: add #12', LATER, AGENT));
         g.comments.push({ ...comment('Proposal: add #12', LATER, AGENT), id: 'gone' });
         const last = comment('Proposal: add #12', LATER, AGENT);
         g.comments.push(last);
         g.thumbs.set(last.id as string, [thumb()]);
         github(sys, g.issue);
         assert.deepEqual(await sliceProblems(sys, 'tok', SLUG, 12, ACCOUNTS, {}), []);
-        const reads = sys.requests.filter((r) => (r.body as { query?: string } | undefined)?.query?.includes('nodes(ids'));
-        assert.deepEqual(reads.map((r) => (r.body as { variables: { ids: string[] } }).variables.ids.length), [100, 2]);
+        assert.equal(sys.requests.filter((r) => r.url.includes('/reactions')).length, 3);
       });
     });
   });
@@ -267,10 +274,10 @@ describe('sliceProblems', () => {
   describe('a dropped state', () => {
     const state = (extra: Node = {}): Node => ({
       number: 30,
-      issueType: { name: 'State' },
-      stateReason: 'NOT_PLANNED',
-      closedAt: LATER,
-      comments: { nodes: [] },
+      type: { name: 'State' },
+      state_reason: 'not_planned',
+      closed_at: LATER,
+      comments: [],
       ...extra,
     });
     const refused =
@@ -284,7 +291,7 @@ describe('sliceProblems', () => {
 
     it("passes with the owner's Decision: on the state, or naming it on the slice", async () => {
       const g = graph();
-      g.states.push(state({ comments: { nodes: [comment('Decision: drop it')] } }));
+      g.states.push(state({ comments: [comment('Decision: drop it')] }));
       assert.deepEqual(await problems(g.issue), []);
       const h = graph();
       h.states.push(state());
@@ -307,11 +314,8 @@ describe('sliceProblems', () => {
       /** Slice #12 with 150 states: 100 on the first page, 50 on a second, the dropped one #149 among them. */
       const many = (dropped: Node): ReturnType<typeof graph> => {
         const g = graph();
-        const open = (n: number): Node => state({ id: `I_${n}`, number: n, closedAt: null });
-        for (let n = 0; n < 100; n++) g.states.push(open(n));
-        g.issue.subIssues = { nodes: g.states, pageInfo: { hasNextPage: true, endCursor: '0' } };
-        const second = [...Array.from({ length: 49 }, (_, i) => open(100 + i)), state({ id: 'I_149', number: 149, ...dropped })];
-        g.issue.morePages = [{ nodes: second, pageInfo: { hasNextPage: false, endCursor: null } }];
+        for (let n = 0; n < 149; n++) g.states.push(state({ number: n, closed_at: null }));
+        g.states.push(state({ number: 149, ...dropped }));
         return g;
       };
 
@@ -320,17 +324,16 @@ describe('sliceProblems', () => {
       });
 
       it("passes with the owner's Decision: among the state's earlier comments", async () => {
-        const earlier = { nodes: [comment('Decision: drop it')], pageInfo: { hasPreviousPage: false, startCursor: null } };
-        const latest = { nodes: Array.from({ length: 100 }, () => comment('a later note', LATEST, AGENT)), pageInfo: { hasPreviousPage: true, startCursor: 'c' } };
-        assert.deepEqual(await problems(many({ comments: latest, earlier }).issue), []);
+        const comments = [...Array.from({ length: 100 }, () => comment('a note', LATER, AGENT)), comment('Decision: drop it')];
+        assert.deepEqual(await problems(many({ comments }).issue), []);
       });
     });
 
     for (const [name, extra] of [
-      ['completed', { stateReason: 'COMPLETED' }],
-      ['dropped before approval', { closedAt: T0 }],
-      ['open', { closedAt: null }],
-      ['not a State', { issueType: { name: 'Brief' } }],
+      ['completed', { state_reason: 'completed' }],
+      ['dropped before approval', { closed_at: T0 }],
+      ['open', { closed_at: null }],
+      ['not a State', { type: { name: 'Brief' } }],
     ] as const) {
       it(`ignores a state ${name}`, async () => {
         const g = graph();
@@ -376,32 +379,30 @@ describe('sliceProblems', () => {
   it('reads every page of the work item\'s timeline', async () => {
     const sys = new FakeSys();
     const g = graph();
+    // The approval comes after 100 other events, on the second page.
+    g.timeline.splice(1, 0, ...Array.from({ length: 100 }, () => ({ event: 'cross-referenced', created_at: T0 })));
     github(sys, g.issue);
-    let page = 0;
-    sys.route('POST', '/graphql', () => {
-      const { query, variables } = sys.requests.at(-1)?.body as { query: string; variables: { after?: string | null } };
-    if (!query.includes('timelineItems')) return { status: 200, json: { data: { repository: { issue: g.issue } } } };
-      page++;
-      const first = variables.after === null;
-      const nodes = first ? [g.timeline[0]] : [g.timeline[1]];
-      return { status: 200, json: { data: { node: { timelineItems: { nodes, pageInfo: { hasNextPage: first, endCursor: first ? 'c1' : null } } } } } };
-    });
     assert.deepEqual(await sliceProblems(sys, 'tok', SLUG, 12, ACCOUNTS, {}), []);
-    assert.equal(page, 2);
+    assert.ok(sys.requests.some((r) => r.url === `${ISSUES}/10/timeline?per_page=100&page=2`));
   });
 
   it('says how to fix a client workflow without issues: read', async () => {
     const sys = new FakeSys();
-    sys.route('POST', '/graphql', { status: 200, json: { errors: [{ message: 'Resource not accessible by integration' }] } });
+    sys.route('GET', `${ISSUES}/12`, { status: 403, json: { message: 'Resource not accessible by integration' } });
     await assert.rejects(sliceProblems(sys, 'tok', SLUG, 12, ACCOUNTS, {}), /needs issues: read, so run process-rules onboard to update it/);
   });
 
   it('throws when GitHub will not answer', async () => {
     const sys = new FakeSys();
-    sys.route('POST', '/graphql', { status: 200, json: { errors: [{ message: 'no access' }] } });
-    await assert.rejects(sliceProblems(sys, 'tok', SLUG, 12, ACCOUNTS, {}), /cannot read #12: no access/);
-    sys.route('POST', '/graphql', { status: 502, json: null });
+    sys.route('GET', `${ISSUES}/12`, { status: 403, json: { message: 'no access' } });
+    await assert.rejects(sliceProblems(sys, 'tok', SLUG, 12, ACCOUNTS, {}), /cannot read #12: no access \(\/repos\/example-org\/example-app\/issues\/12\)/);
+    sys.route('GET', `${ISSUES}/12`, { status: 502, json: null });
     await assert.rejects(sliceProblems(sys, 'tok', SLUG, 12, ACCOUNTS, {}), /cannot read #12: HTTP 502/);
+    const listless = new FakeSys();
+    github(listless, graph().issue);
+    listless.route('GET', `${ISSUES}/12/comments?per_page=100&page=1`, { status: 200, json: {} });
+    await assert.rejects(sliceProblems(listless, 'tok', SLUG, 12, ACCOUNTS, {}), /GitHub did not answer a list \(\/repos\/example-org\/example-app\/issues\/12\/comments\)/);
+    sys.routes.delete(`GET ${ISSUES}/12`);
     github(sys, graph().issue);
     sys.route('GET', `/repos/${SLUG}/pulls?state=open&per_page=100&page=1`, { status: 403, json: null });
     await assert.rejects(sliceProblems(sys, 'tok', SLUG, 12, ACCOUNTS, {}), /cannot list open pull requests \(HTTP 403\)/);
@@ -608,13 +609,6 @@ describe('propose', () => {
     sys.env = { PROCESS_RULES_AGENT: AGENT, GH_TOKEN: 'ghp_good' };
     sys.acceptToken('ghp_good', AGENT);
     github(sys, g.issue);
-    const slice = sys.routes.get('POST https://api.github.com/graphql') as () => { status: number; json: unknown };
-    sys.route('POST', '/graphql', () => {
-      const { variables } = sys.requests.at(-1)?.body as { variables: { number?: number } };
-      if (variables.number !== 30) return slice();
-      const state = { number: 30, title: 'Empty list', issueType: { name: 'State' }, parent: { id: 'I_12', number: 12, issueType: { name: 'Slice' } } };
-      return { status: 200, json: { data: { repository: { issue: state } } } };
-    });
     sys.route('POST', `${ISSUE}/comments`, { status: 201, json: { html_url: 'https://github.com/example-org/example-app/issues/12#issuecomment-1' } });
     sys.route('POST', `${ISSUE}/labels`, { status: 200, json: [] });
     sys.route('DELETE', `${ISSUE}/labels/needs-owner`, { status: 200, json: [] });
@@ -622,8 +616,8 @@ describe('propose', () => {
   }
   const owing = (): ReturnType<typeof graph> => {
     const g = graph();
-    g.timeline[0] = { __typename: 'SubIssueAddedEvent', createdAt: LATER, subIssue: { number: 12 } };
-    g.states.push({ number: 30, title: 'Empty list', issueType: { name: 'State' }, stateReason: 'NOT_PLANNED', closedAt: LATER, comments: { nodes: [] } });
+    g.timeline[0] = { event: 'sub_issue_added', created_at: LATER, sub_issue: { number: 12 } };
+    g.states.push({ number: 30, title: 'Empty list', type: { name: 'State' }, state_reason: 'not_planned', closed_at: LATER, comments: [] });
     return g;
   };
   async function run(sys: FakeSys, number = 12): Promise<{ code: number; out: string[]; err: string[] }> {
@@ -662,7 +656,7 @@ describe('propose', () => {
     const g = owing();
     g.comments.push(comment('Proposal: add #12', LATER, AGENT));
     // On the slice, any Decision: also settles its addition.
-    ((g.states[0] as Node).comments as { nodes: Node[] }).nodes.push(comment('Decision: drop it'));
+    ((g.states[0] as Node).comments as Node[]).push(comment('Decision: drop it'));
     const { sys } = session(g);
     assert.deepEqual((await run(sys)).out, [
       "#12: proposed on #12, waiting on example-owner's 👍",

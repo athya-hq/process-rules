@@ -41,8 +41,9 @@ A client's `.claude/settings.json` locks GitHub out of every session before
 any hook runs: its `env` holds the lock's variables (a `GH_TOKEN` GitHub
 refuses, no credential helper, GitHub's SSH remotes on HTTPS and every other
 SSH remote refused), so a session whose hook never ran or failed reaches
-GitHub as nobody, never as the owner. In a cloud session the SessionStart
-hook unsets it, so the session reaches GitHub as the account connected to it.
+GitHub as nobody, never as the owner. In a Claude cloud session the
+SessionStart hook lifts it only once GitHub says the session is the agent
+(see Claude cloud sessions below).
 
 In Claude Code, the client's SessionStart hook runs `process-rules
 session-start`. It appends a lock to `CLAUDE_ENV_FILE`: a token GitHub refuses,
@@ -53,8 +54,7 @@ wrote for the agent the repo's settings name, exactly as `machine` writes it,
 it appends that file, which replaces the lock with the agent's identity. Any
 other outcome leaves GitHub locked out and says why, so a session never falls
 back to the owner's login. When the CLI is missing or fails, the hook still
-tells the session to stop, with what the CLI printed. Cloud sessions are left
-alone.
+tells the session to stop, with what the CLI printed.
 
 Before each Bash command, the client's PreToolUse hook runs `process-rules
 guard`: a command running `gh` or a git command that reaches a remote (push,
@@ -205,9 +205,9 @@ where the Claude Code hooks never ran) it is the pre-push identity guard: a
 push over SSH is refused, whatever the host, since it would use this Mac's
 SSH keys, the owner's; over HTTPS to GitHub, git is asked for the
 credentials it would push with (one in the URL included) and GitHub for
-whose they are, and only the agent's push goes ahead. The owner's pushes
-from their own terminal are not checked, and neither are cloud sessions',
-which reach GitHub as the account connected to them. With `work-rules` on, it then applies the same rules before an
+whose they are, and only the agent's push goes ahead; in a Claude cloud
+session, GitHub is asked through its proxy whose account the session is. The
+owner's pushes from their own terminal are not checked. With `work-rules` on, it then applies the same rules before an
 agent session pushes: all the commits
 one push brings, on one branch, name one slice between them as a
 `Slice: #N` trailer. Commits a remote already has, such as the default
@@ -247,6 +247,32 @@ it up. Settings with no `features` key keep every feature on, as before;
 the weekly job, `reviews-due` and the pre-push hook each pass, saying so, when
 their feature is off; `onboard` writes the workflow only once a check needs it. `project` names the board's
 Project (by default `<repo> work`).
+
+### Claude cloud sessions
+
+A Claude cloud session has no keychain and no session file: it reaches
+GitHub through Claude's GitHub proxy, as the account connected to claude.ai.
+So for agent sessions there, that connection is the agent account. Its
+`session-start` asks GitHub, through the proxy, which account the session
+is. When it is the agent, it writes the pre-push git hook (a fresh clone
+has none), lifts the lock and records the session for the guard; `gh` gets
+the proxy's placeholder token (`proxy-injected`), which the proxy swaps for
+the connected account's. As anyone else, GitHub stays locked out and the
+session is told to stop. The pre-push hook asks GitHub the same through
+the proxy before each push.
+
+The proxy refuses GitHub's GraphQL API, so the work rules read only its
+REST API, here and everywhere else. The cloud environment's Setup script,
+which runs as root before each session, installs the CLI:
+`process-rules cloud-setup` prints one for the installed release. It
+unpacks Node, once it matches the sha256 the release pins, and the CLI
+under `/opt/process-rules` and puts
+`process-rules` on `PATH`, leaving the image's own Node alone. The
+environment needs the network to reach nodejs.org and GitHub's release
+downloads.
+
+claude.ai has one GitHub connection per account, so it is the agent's for
+every cloud session that account starts.
 
 ### Releases and upgrading
 
