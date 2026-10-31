@@ -68,9 +68,9 @@ describe('guard', () => {
     assert.match(err[0] ?? '', /the hook was given no command to check/);
   });
 
-  it('leaves cloud sessions alone', () => {
+  it('holds in cloud sessions too', () => {
     const sys = new FakeSys();
     sys.env.CLAUDE_CODE_REMOTE = 'true';
-    assert.deepEqual(check(sys, 'git push'), { code: 0, err: [] });
+    assert.equal(check(sys, 'git push').code, 2);
   });
 });

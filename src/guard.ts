@@ -22,10 +22,9 @@ export function reachesGitHub(command: string): boolean {
  * hook cannot see the variables session-start gives the session's shells, so
  * it reads what session-start recorded for this session id: a session whose
  * hook never ran, failed, or locked GitHub out has no record saying it works
- * as the agent. Cloud sessions are left alone.
+ * as the agent, a Claude cloud session's included.
  */
 export function guard(sys: Sys, io: Output, stdin: string): number {
-  if (sys.env.CLAUDE_CODE_REMOTE === 'true') return 0;
   let input: { session_id?: unknown; tool_input?: { command?: unknown } };
   try {
     input = JSON.parse(stdin) as typeof input;

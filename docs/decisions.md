@@ -134,3 +134,19 @@
   `needs-owner` off once nothing waits. A reaction triggers no workflow, so
   the pull request's Work rules check sees a 👍 made after it ran only when
   it runs again.
+- **2026-10-31 — Record: P-22, cloud sessions work as the agent.** The
+  owner, in chat: cloud sessions are "needed": claude.ai's GitHub
+  connection for agent sessions is the agent account, the environment's
+  setup script installs the CLI, and session-start checks the account
+  GitHub sees is the agent, printing STOP otherwise. This replaces the
+  2026-10-30 rule above that a cloud session's hook unsets the lock: now it
+  lifts it only for the agent. Claude's GitHub proxy refuses GraphQL
+  (whatever the credentials), so the owner chose the more robust of the
+  ways through: the work rules read GitHub's REST API alone, on a Mac, in
+  a cloud session and in Actions, rather than skipping them before a cloud
+  push or refusing cloud pushes. REST names when a comment was last edited
+  only as `updated_at`, which a reaction does not move, so a 👍 counts only
+  after it. REST pages reactions too, so a proposal with more than 100 👍s
+  is read in full. A cloud clone has no pre-push hook, so session-start
+  writes it there before lifting the lock. The CLI reaches GitHub through
+  `HTTPS_PROXY` when one is set, as gh and git do.

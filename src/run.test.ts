@@ -57,6 +57,12 @@ describe('run', () => {
     });
   }
 
+  it('prints the cloud setup script for cloud-setup', async () => {
+    const { code, out } = await capture(['cloud-setup']);
+    assert.equal(code, 0);
+    assert.match(out[0] ?? '', new RegExp(`^#!/bin/bash\n# process-rules ${expectedVersion} for Claude cloud sessions`));
+  });
+
   it('refuses an unknown command with usage on stderr', async () => {
     assert.deepEqual(await capture(['deploy']), {
       code: 2,

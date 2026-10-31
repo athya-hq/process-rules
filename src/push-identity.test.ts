@@ -32,7 +32,7 @@ describe('agentSession', () => {
     sys.env = { PROCESS_RULES_AGENT: AGENT };
     assert.equal(agentSession(sys), true);
     sys.env = { CLAUDECODE: '1', CLAUDE_CODE_REMOTE: 'true' };
-    assert.equal(agentSession(sys), false, 'cloud sessions are left alone');
+    assert.equal(agentSession(sys), true, 'a cloud session is one too');
   });
 });
 
@@ -54,6 +54,31 @@ describe('pushIdentityProblem', () => {
       );
     });
   }
+
+  describe('in a Claude cloud session', () => {
+    const cloud = (login: string | null): FakeSys => {
+      const sys = new FakeSys();
+      sys.env = { CLAUDECODE: '1', CLAUDE_CODE_REMOTE: 'true', GH_TOKEN: 'proxy-injected' };
+      if (login) sys.acceptToken('proxy-injected', login);
+      return sys;
+    };
+
+    it('asks GitHub, through the proxy, who the session pushes as', async () => {
+      assert.equal(await pushIdentityProblem(cloud('examplebot'), ROOT, HTTPS, AGENT), undefined);
+      assert.equal(
+        await pushIdentityProblem(cloud('example-owner'), ROOT, HTTPS, AGENT),
+        `this cloud session pushes as example-owner, not ${AGENT}; claude.ai's GitHub connection must be ${AGENT} for agent sessions`,
+      );
+      assert.equal(
+        await pushIdentityProblem(cloud(null), ROOT, HTTPS, AGENT),
+        `GitHub answered HTTP 401 when asked who this session is, so this push cannot be checked as ${AGENT}`,
+      );
+    });
+
+    it('still refuses SSH', async () => {
+      assert.match((await pushIdentityProblem(cloud(AGENT), ROOT, 'git@github.com:example-org/example-app.git', AGENT)) ?? '', /goes over SSH/);
+    });
+  });
 
   it('refuses a push git gave no URL for', async () => {
     assert.equal(await pushIdentityProblem(new FakeSys(), ROOT, '', AGENT), 'git gave the pre-push hook no remote URL, so this push cannot be checked');

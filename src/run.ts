@@ -1,3 +1,4 @@
+import { cloudSetup } from './cloud.ts';
 import { decisionsWeekly } from './decisions.ts';
 import { prDesign } from './design.ts';
 import { doctor } from './doctor.ts';
@@ -22,6 +23,7 @@ Commands:
   doctor [agent]   Check agent sessions here can work as the agent account
   onboard [owner agent] [--features a,b] [--add feature]
                    Set up the client repo here, for the features it turns on
+  cloud-setup      Print the setup script for a Claude cloud environment's agent sessions
   session-start    Run by a client's SessionStart hook: the agent identity, or GitHub locked out
   guard            Run by a client's PreToolUse hook: gh and git's remote commands only as the agent
   pr-identity      Run by the shared workflow: agent commits Verified and pushed by the agent
@@ -81,6 +83,8 @@ export async function run(
     case '-v':
       io.out(packageVersion());
       return 0;
+    case 'cloud-setup':
+      return cloudSetup(io);
     case 'session-start':
       return sessionStart(await sys(), io);
     case 'guard':

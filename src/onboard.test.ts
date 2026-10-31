@@ -63,10 +63,10 @@ describe('onboard', () => {
     assert.ok(out.includes('✓ ExampleBot can push to example-org/example-app'));
     assert.ok(out.includes('✓ GitHub shows the test commit Verified by ExampleBot'));
     assert.ok(out.includes('Deleted the throwaway branch process-rules/verify-examplebot-1793361600000.'));
-    assert.equal(
-      out.at(-1),
+    assert.deepEqual(out.slice(-2), [
       'onboard: done. Commit .github/process-rules.json, .claude/settings.json and .github/workflows/process-rules.yml; agent sessions then work as ExampleBot.',
-    );
+      "For Claude cloud sessions: connect claude.ai's GitHub as ExampleBot, and put what process-rules cloud-setup prints in the cloud environment's Setup script.",
+    ]);
     const git = sys.calls.filter((c) => c.command === 'git' && c.env);
     assert.deepEqual(git.map((c) => c.args.slice(0, 2).join(' ')), [
       'ls-remote https://github.com/example-org/example-app.git',
@@ -194,14 +194,10 @@ describe('onboard', () => {
     const shell = (command: string, env: Record<string, string>, input = '') =>
       spawnSync('bash', ['-c', command], { encoding: 'utf8', input, env: { HOME: home, PATH: '/usr/bin:/bin', ...env } });
 
-    it('session-start: nothing in a cloud session, its output, else STOP with why', () => {
+    it('session-start: its output, in a cloud session too, else STOP with why', () => {
       rmSync(launcher, { force: true });
       cli(join(bin, 'process-rules'), 'echo "ran $* with $(cat)"');
-      assert.equal(shell(HOOK_COMMAND, { PATH: `${bin}:/usr/bin:/bin`, CLAUDE_CODE_REMOTE: 'true' }).stdout, '');
-      const envFile = join(home, 'env.sh');
-      shell(HOOK_COMMAND, { CLAUDE_CODE_REMOTE: 'true', CLAUDE_ENV_FILE: envFile, ...BASE_ENV });
-      const cloud = spawnSync('bash', ['-c', `. ${envFile}; env`], { encoding: 'utf8', env: { PATH: '/usr/bin:/bin', ...BASE_ENV } }).stdout;
-      assert.ok(Object.keys(BASE_ENV).every((name) => !cloud.includes(`${name}=`)), `a cloud session loses the lock: ${cloud}`);
+      assert.equal(shell(HOOK_COMMAND, { PATH: `${bin}:/usr/bin:/bin`, CLAUDE_CODE_REMOTE: 'true' }, '{}').stdout, 'ran session-start with {}\n');
       assert.equal(shell(HOOK_COMMAND, { PATH: `${bin}:/usr/bin:/bin` }, '{"session_id":"s"}').stdout, 'ran session-start with {"session_id":"s"}\n');
       assert.match(
         shell(HOOK_COMMAND, {}).stdout,
@@ -217,8 +213,7 @@ describe('onboard', () => {
       rmSync(launcher, { force: true });
       const hook = (env: Record<string, string>) => spawnSync('sh', ['-c', `${PRE_PUSH_HOOK}`, 'pre-push', 'origin', 'url'], { encoding: 'utf8', env: { HOME: home, PATH: '/usr/bin:/bin', ...env } });
       assert.equal(hook({}).status, 0);
-      assert.equal(hook({ CLAUDECODE: '1', CLAUDE_CODE_REMOTE: 'true' }).status, 0, 'cloud sessions are left alone');
-      for (const env of [{ CLAUDECODE: '1' }, { PROCESS_RULES_AGENT: AGENT }]) {
+      for (const env of [{ CLAUDECODE: '1' }, { PROCESS_RULES_AGENT: AGENT }, { CLAUDECODE: '1', CLAUDE_CODE_REMOTE: 'true' }]) {
         const refused = hook(env);
         assert.deepEqual({ status: refused.status, stderr: refused.stderr }, { status: 1, stderr: 'process-rules: the CLI is not installed, so this agent push cannot be checked\n' });
       }
@@ -241,7 +236,7 @@ describe('onboard', () => {
       const missing = shell(GUARD_COMMAND, {}, input('git push'));
       assert.equal(missing.status, 2);
       assert.match(missing.stderr, /process-rules: refused, because the process-rules CLI did not run here to check this command\./);
-      assert.equal(shell(GUARD_COMMAND, { CLAUDE_CODE_REMOTE: 'true' }, input('git push')).status, 0);
+      assert.equal(shell(GUARD_COMMAND, { CLAUDE_CODE_REMOTE: 'true' }, input('git push')).status, 2, 'in a cloud session too');
       cli(launcher, 'cat > "$HOME/seen"; exit 0');
       assert.equal(shell(GUARD_COMMAND, {}, input('gh pr list')).status, 0);
       assert.equal(readFileSync(join(home, 'seen'), 'utf8'), input('gh pr list'));
@@ -756,7 +751,7 @@ describe('staged adoption', () => {
     assert.ok(!sys.files.has(WORKFLOW));
     assert.equal(sys.files.get(PRE_PUSH), PRE_PUSH_HOOK, 'the identity guard, for every adopter');
     assert.ok(!sys.requests.some((r) => r.url.endsWith('/graphql') || r.url.includes('/labels') || r.url.includes('/issue-types')), 'no board');
-    assert.equal(out.at(-1), 'onboard: done. Commit .github/process-rules.json and .claude/settings.json; agent sessions then work as ExampleBot.');
+    assert.equal(out.at(-2), 'onboard: done. Commit .github/process-rules.json and .claude/settings.json; agent sessions then work as ExampleBot.');
     assert.ok(out.includes('✓ GitHub shows the test commit Verified by ExampleBot'));
     assert.deepEqual(sys.asked.map((q) => q.split(' ')[0]), ['Write', 'Write', 'Write', 'Push']);
   });
