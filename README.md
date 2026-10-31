@@ -307,9 +307,9 @@ below it under `with:`, `process-rules-ref: vX.Y.Z`, because a called
 workflow cannot read its own ref from GitHub's contexts. Upgrading is one
 step: install the new CLI and run `onboard` again, which moves all four pins
 together. Editing the version by hand means changing all four lines, two per
-job. A split workflow needs v0.5.3 or later: GitHub refuses a whole run, before
+job. A split workflow needs v0.5.4 or later: GitHub refuses a whole run, before
 any job's `if:`, when the called workflow asks for more than the calling job
-grants, and before v0.5.3 `checks.yml` asked for `issues: write` itself. The hooks run the
+grants, and before v0.5.4 `checks.yml` asked for `issues: write` itself. The hooks run the
 launcher `machine` writes, else `process-rules` from the `PATH`; without
 either the session-start hook tells the session to stop, and the guard refuses
 `gh` and `git`. Run `machine` again after removing the node it names.

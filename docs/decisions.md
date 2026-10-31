@@ -163,12 +163,12 @@
   job's `if:`, when a called job asks for more than its caller grants, and
   `checks.yml`'s weekly job asked for `issues: write` itself, so a split
   workflow at v0.5.2 or earlier fails to start on every pull request and
-  push. From v0.5.3 `checks.yml` sets no workflow-wide permissions, its
+  push. From v0.5.4 `checks.yml` sets no workflow-wide permissions, its
   read-only jobs set their own, and its weekly job takes what the calling
   job grants. `onboard` replaces the older single-job template, moves only
   the version pins of a workflow already split (and its push branch, when the
   default branch has changed), and offers to replace any other workflow, as
-  before. Released as v0.5.3, a patch release.
+  before. Released in v0.5.4, a patch release: v0.5.3 was never tagged.
 - **2026-11-01 — Record: P-33, onboard warns about a CODEOWNERS naming the
   owner.** The owner, in chat, answered "OK." to: "process-rules release:
   onboard warns about such a CODEOWNERS file and offers the fix. This is the
