@@ -1,0 +1,50 @@
+README.md
+  s_59a4772ccb9dca::t_aa93b10fac5e2f 20-26,307-308
+src/onboard.ts
+  s_59a4772ccb9dca::t_aa93b10fac5e2f 297-298,300
+src/doctor.test.ts
+  s_59a4772ccb9dca::t_aa93b10fac5e2f 24-31,56
+src/token-store.test.ts
+  s_59a4772ccb9dca::t_aa93b10fac5e2f 1-71
+src/token-store.ts
+  s_59a4772ccb9dca::t_aa93b10fac5e2f 1-59
+src/machine.ts
+  s_59a4772ccb9dca::t_aa93b10fac5e2f 18,38,43-47,83,103,106-107,112,138
+src/session-start.ts
+  s_59a4772ccb9dca::t_aa93b10fac5e2f 14,152-153,163,171-172
+src/types.ts
+  s_59a4772ccb9dca::t_aa93b10fac5e2f 27-28
+src/fake.test.ts
+  s_59a4772ccb9dca::t_aa93b10fac5e2f 41
+src/sys.ts
+  s_59a4772ccb9dca::t_aa93b10fac5e2f 32
+src/onboard.test.ts
+  s_59a4772ccb9dca::t_aa93b10fac5e2f 1202-1203
+src/session-start.test.ts
+  s_59a4772ccb9dca::t_aa93b10fac5e2f 285-293
+src/agent.ts
+  s_59a4772ccb9dca::t_aa93b10fac5e2f 1,6,225-228,230,233,290,292,297
+src/machine.test.ts
+  s_59a4772ccb9dca::t_aa93b10fac5e2f 36-45,246
+docs/decisions.md
+  s_59a4772ccb9dca::t_aa93b10fac5e2f 260-272
+  s_59a4772ccb9dca::t_6aac9035726a68 273,283-285
+src/doctor.ts
+  s_59a4772ccb9dca::t_aa93b10fac5e2f 16,43-47,61,64,80
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "85eaeaebf4464e994db8dfe632f907215cc048f8",
+  "prompts": {},
+  "sessions": {
+    "s_59a4772ccb9dca": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2ed019ec-2192-4781-ac59-69bcdbbb1120",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Alok Bansal <alokagrawal8@gmail.com>"
+    }
+  }
+}
