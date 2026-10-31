@@ -1,0 +1,25 @@
+src/secrets.test.ts
+  s_d05166b61cca9a::t_bf0ff2a220282c 4
+README.md
+  s_d05166b61cca9a::t_bf0ff2a220282c 118-119,177
+src/fake-secrets.test.ts
+  s_d05166b61cca9a::t_bf0ff2a220282c 1-27
+src/onboard.test.ts
+  s_d05166b61cca9a::t_bf0ff2a220282c 17
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e36bc62aa8e33df3d3ce53bd2057b9397cf95ef8",
+  "prompts": {},
+  "sessions": {
+    "s_d05166b61cca9a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cff6e322-a74e-4519-b9d1-78e258722f55",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Alok Bansal <alokagrawal8@gmail.com>"
+    }
+  }
+}
