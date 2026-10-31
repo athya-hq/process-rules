@@ -155,9 +155,14 @@ export async function decisionsWeekly(sys: Sys, io: Output): Promise<number> {
     const open = undos.find((undo) => new RegExp(`^Undoes #${issue.number}\\b`, 'm').test(undo.body ?? ''));
     if (open) {
       // A run that opened the undo issue but failed to comment leaves the comment to this one.
-      const comments = await sys.http(`${API}/repos/${slug}/issues/${issue.number}/comments?per_page=100`, { token });
-      if (comments.status !== 200 || !Array.isArray(comments.json)) throw new Error(`cannot read #${issue.number}'s comments (HTTP ${comments.status})`);
-      const told = (comments.json as { body?: string; user?: { login?: string } | null }[]).some(
+      const comments: { body?: string; user?: { login?: string } | null }[] = [];
+      for (let page = 1; ; page++) {
+        const reply = await sys.http(`${API}/repos/${slug}/issues/${issue.number}/comments?per_page=100&page=${page}`, { token });
+        if (reply.status !== 200 || !Array.isArray(reply.json)) throw new Error(`cannot read #${issue.number}'s comments (HTTP ${reply.status})`);
+        comments.push(...(reply.json as typeof comments));
+        if (reply.json.length < 100) break;
+      }
+      const told = comments.some(
         (comment) => comment.user?.login === WORKFLOW_BOT && comment.body?.includes(`Opened #${open.number} to undo it.`),
       );
       if (told) {

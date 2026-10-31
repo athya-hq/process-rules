@@ -118,17 +118,24 @@ export async function prDesign(sys: Sys, io: Output): Promise<number> {
     return 0;
   }
 
+  // Every state of the slice, 100 a page: GitHub's most.
   const [owner, name] = slug.split('/');
-  const { status, json } = await sys.http(`${API}/graphql`, {
-    method: 'POST',
-    token,
-    body: {
-      query: 'query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { issue(number: $number) { subIssues(first: 100) { nodes { number issueType { name } stateReason body } } } } }',
-      variables: { owner, name, number: slice },
-    },
-  });
-  const states = (json as { data?: { repository?: { issue?: { subIssues: { nodes: State[] } } | null } } } | null)?.data?.repository?.issue?.subIssues.nodes;
-  if (status !== 200 || !states) throw new Error(`cannot read the states of #${slice} (HTTP ${status})`);
+  const states: State[] = [];
+  for (let after: string | null = null; ; ) {
+    const { status, json } = await sys.http(`${API}/graphql`, {
+      method: 'POST',
+      token,
+      body: {
+        query: 'query($owner: String!, $name: String!, $number: Int!, $after: String) { repository(owner: $owner, name: $name) { issue(number: $number) { subIssues(first: 100, after: $after) { nodes { number issueType { name } stateReason body } pageInfo { hasNextPage endCursor } } } } }',
+        variables: { owner, name, number: slice, after },
+      },
+    });
+    const page = (json as { data?: { repository?: { issue?: { subIssues: { nodes: State[]; pageInfo?: { hasNextPage: boolean; endCursor: string | null } } } | null } } } | null)?.data?.repository?.issue?.subIssues;
+    if (status !== 200 || !page) throw new Error(`cannot read the states of #${slice} (HTTP ${status})`);
+    states.push(...page.nodes);
+    if (!page.pageInfo?.hasNextPage) break;
+    after = page.pageInfo.endCursor;
+  }
 
   const published = (await figma(sys, figmaToken, `/files/${library}/components`)) as { meta?: { components?: { key?: string }[] } };
   const keys = new Set((published.meta?.components ?? []).flatMap((component) => (component.key ? [component.key] : [])));

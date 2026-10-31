@@ -173,6 +173,21 @@ describe('prDesign', () => {
     await assert.rejects(check(new FakeSys()), /pr-design runs in GitHub Actions/);
   });
 
+  it("checks the slice's states past the first page", async () => {
+    const sys = actions(null);
+    const first = Array.from({ length: 100 }, (_, n) => state(100 + n, LINK));
+    sys.route('POST', '/graphql', () => {
+      const { after } = (sys.requests.at(-1)?.body as { variables: { after: string | null } }).variables;
+      const subIssues = after === null
+        ? { nodes: first, pageInfo: { hasNextPage: true, endCursor: 'p2' } }
+        : { nodes: [state(250, 'no link yet')], pageInfo: { hasNextPage: false, endCursor: null } };
+      return { status: 200, json: { data: { repository: { issue: { subIssues } } } } };
+    });
+    assert.deepEqual((await check(sys)).err, ['✗ state #250 links no Figma frame (a figma.com/design link with node-id)', 'pr-design: refused by the design check']);
+    const cursors = sys.requests.filter((request) => request.url.endsWith('/graphql')).map((request) => (request.body as { variables: { after: string | null } }).variables.after);
+    assert.deepEqual(cursors, [null, 'p2']);
+  });
+
   it('throws when GitHub will not list the states', async () => {
     await assert.rejects(check(actions(null)), /cannot read the states of #12 \(HTTP 200\)/);
   });

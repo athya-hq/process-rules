@@ -37,7 +37,7 @@ function weekly(decisions: Node[], checks: Record<string, number> = {}, undos: N
       ? { code: 124, stdout: 'line\n', stderr: '' }
       : { code: 0, stdout: `line\nprocess-rules-check-exit=${code === 125 ? 124 : code}\n`, stderr: 'why it failed\n' };
   };
-  for (const d of decisions) sys.route('GET', `/repos/${SLUG}/issues/${d.number}/comments?per_page=100`, { status: 200, json: [] });
+  for (const d of decisions) sys.route('GET', `/repos/${SLUG}/issues/${d.number}/comments?per_page=100&page=1`, { status: 200, json: [] });
   return sys;
 }
 
@@ -105,7 +105,7 @@ describe('decisionsWeekly', () => {
 
   it('opens no second undo issue', async () => {
     const sys = weekly([decision(6, 'Check: `false`')], { false: 1 }, [{ number: 98, body: 'Undoes #6.\n\nmore' }, { number: 97, body: null }, { number: 96, body: 'Undoes #60.' }]);
-    sys.route('GET', `/repos/${SLUG}/issues/6/comments?per_page=100`, {
+    sys.route('GET', `/repos/${SLUG}/issues/6/comments?per_page=100&page=1`, {
       status: 200,
       json: [{ body: 'Tripped on ...\n\nOpened #98 to undo it.', user: { login: 'github-actions[bot]' } }, {}],
     });
@@ -113,9 +113,17 @@ describe('decisionsWeekly', () => {
     assert.deepEqual(posts(sys), []);
   });
 
+  it("finds the workflow's undo note past the first page of comments", async () => {
+    const sys = weekly([decision(6, 'Check: `false`')], { false: 1 }, [{ number: 98, body: 'Undoes #6.' }]);
+    sys.route('GET', `/repos/${SLUG}/issues/6/comments?per_page=100&page=1`, { status: 200, json: Array.from({ length: 100 }, () => ({ body: 'discussion', user: { login: 'example-owner' } })) });
+    sys.route('GET', `/repos/${SLUG}/issues/6/comments?per_page=100&page=2`, { status: 200, json: [{ body: 'Opened #98 to undo it.', user: { login: 'github-actions[bot]' } }] });
+    assert.deepEqual((await run(sys)).out[0], '#6: tripped; its undo issue is already open');
+    assert.deepEqual(posts(sys), []);
+  });
+
   it('does not take a forged undo note from anyone but the workflow', async () => {
     const sys = weekly([decision(6, 'Check: `false`')], { false: 1 }, [{ number: 98, body: 'Undoes #6.' }]);
-    sys.route('GET', `/repos/${SLUG}/issues/6/comments?per_page=100`, { status: 200, json: [{ body: 'Opened #98 to undo it.', user: { login: 'mallory' } }] });
+    sys.route('GET', `/repos/${SLUG}/issues/6/comments?per_page=100&page=1`, { status: 200, json: [{ body: 'Opened #98 to undo it.', user: { login: 'mallory' } }] });
     assert.deepEqual((await run(sys)).out[0], '#6: tripped; its undo issue #98 is open, and the decision now says so');
   });
 
@@ -133,7 +141,7 @@ describe('decisionsWeekly', () => {
 
   it("throws when it cannot read a tripped decision's comments", async () => {
     const sys = weekly([decision(6, 'Check: `false`')], { false: 1 }, [{ number: 98, body: 'Undoes #6.' }]);
-    sys.route('GET', `/repos/${SLUG}/issues/6/comments?per_page=100`, { status: 500, json: null });
+    sys.route('GET', `/repos/${SLUG}/issues/6/comments?per_page=100&page=1`, { status: 500, json: null });
     await assert.rejects(decisionsWeekly(sys, capture().io), /cannot read #6's comments \(HTTP 500\)/);
   });
 

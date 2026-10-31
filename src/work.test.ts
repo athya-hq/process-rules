@@ -36,14 +36,25 @@ function graph(): { issue: Node; timeline: Node[]; states: Node[]; comments: Nod
 
 function github(sys: FakeSys, issue: Node | null, pulls: Node[] = []): void {
   sys.route('POST', '/graphql', () => {
-    const { query, variables } = sys.requests.at(-1)?.body as { query: string; variables: { ids?: string[] } };
+    const { query, variables } = sys.requests.at(-1)?.body as { query: string; variables: { ids?: string[]; id?: string; after?: string } };
     if (query.includes('nodes(ids')) {
       const thumbs = issue?.thumbs as Map<string, Node[]>;
       // A deleted comment reads as null.
-      const nodes = (variables.ids ?? []).map((id) => (id === 'gone' ? null : { id, reactions: { nodes: thumbs.get(id) ?? [] } }));
+      // A comment with more 👍s than one read returns says so.
+      const nodes = (variables.ids ?? []).map((id) =>
+        id === 'gone' ? null : { id, reactions: { nodes: thumbs.get(id) ?? [], pageInfo: { hasNextPage: issue?.crowded === id } } },
+      );
       return { status: 200, json: { data: { nodes } } };
     }
-    if (query.includes('before: $before')) return { status: 200, json: { data: { node: { comments: issue?.earlier } } } };
+    // A state's earlier comments sit on the state; the slice's on the slice.
+    if (query.includes('before: $before')) {
+      const state = (issue?.morePages as Node[] | undefined)?.flatMap((page) => (page.nodes as Node[])).find((one) => one.id === variables.id);
+      return { status: 200, json: { data: { node: { comments: state ? state.earlier : issue?.earlier } } } };
+    }
+    if (query.includes('subIssues(first: 100, after')) {
+      const page = (issue?.morePages as Node[])[Number(variables.after)];
+      return { status: 200, json: { data: { node: { subIssues: page } } } };
+    }
     if (!query.includes('timelineItems')) return { status: 200, json: { data: { repository: { issue } } } };
     const nodes = ((issue?.parent as Node).timelineItems as { nodes: Node[] }).nodes;
     return { status: 200, json: { data: { node: { timelineItems: { nodes, pageInfo: { hasNextPage: false, endCursor: null } } } } } };
@@ -177,6 +188,14 @@ describe('sliceProblems', () => {
         return g;
       };
 
+      it('refuses to judge a proposal with more 👍s than one read returns', async () => {
+        const g = withProposal([thumb(LATEST, AGENT)]);
+        g.issue.crowded = (g.comments.at(-1) as Node).id;
+        const sys = new FakeSys();
+        github(sys, g.issue);
+        await assert.rejects(sliceProblems(sys, 'tok', SLUG, 12, ACCOUNTS, {}), /more than 100 👍 reactions/);
+      });
+
       it('passes, made after the slice was added', async () => {
         assert.deepEqual(await problems(withProposal([thumb(LATEST, AGENT), thumb()]).issue), []);
       });
@@ -282,6 +301,29 @@ describe('sliceProblems', () => {
       assert.deepEqual(await problems(g.issue), []);
       g.thumbs.set(made.id as string, [thumb(LATEST, AGENT)]);
       assert.deepEqual(await problems(g.issue), [refused.replace(/; ExampleBot proposes it with: .*$/, '')]);
+    });
+
+    describe('past the first page of states', () => {
+      /** Slice #12 with 150 states: 100 on the first page, 50 on a second, the dropped one #149 among them. */
+      const many = (dropped: Node): ReturnType<typeof graph> => {
+        const g = graph();
+        const open = (n: number): Node => state({ id: `I_${n}`, number: n, closedAt: null });
+        for (let n = 0; n < 100; n++) g.states.push(open(n));
+        g.issue.subIssues = { nodes: g.states, pageInfo: { hasNextPage: true, endCursor: '0' } };
+        const second = [...Array.from({ length: 49 }, (_, i) => open(100 + i)), state({ id: 'I_149', number: 149, ...dropped })];
+        g.issue.morePages = [{ nodes: second, pageInfo: { hasNextPage: false, endCursor: null } }];
+        return g;
+      };
+
+      it('refuses a state dropped on the second page', async () => {
+        assert.deepEqual(await problems(many({}).issue), [refused.replaceAll('#30', '#149').replace('propose 30', 'propose 149')]);
+      });
+
+      it("passes with the owner's Decision: among the state's earlier comments", async () => {
+        const earlier = { nodes: [comment('Decision: drop it')], pageInfo: { hasPreviousPage: false, startCursor: null } };
+        const latest = { nodes: Array.from({ length: 100 }, () => comment('a later note', LATEST, AGENT)), pageInfo: { hasPreviousPage: true, startCursor: 'c' } };
+        assert.deepEqual(await problems(many({ comments: latest, earlier }).issue), []);
+      });
     });
 
     for (const [name, extra] of [
