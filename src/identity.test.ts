@@ -82,9 +82,60 @@ describe('prIdentity', () => {
     });
   });
 
-  it('keeps failing on a later run started by someone else, such as an edit', async () => {
-    const sys = actions('edited', 'cubic-dev-ai[bot]', [commit('a1', 'agent')], [created('example-owner', ['a1'])]);
-    assert.deepEqual((await check(sys)).err[0], '✗ example-owner pushed a1, which claims ExampleBot; agent work must be pushed by ExampleBot');
+  describe('judges who pushed, never who started the run', () => {
+    const ownerPushed = '✗ example-owner pushed a1, which claims ExampleBot; agent work must be pushed by ExampleBot';
+
+    it('keeps failing when a bot edits after the owner pushed', async () => {
+      for (const [action, actor] of [['opened', 'example-owner'], ['edited', 'cubic-dev-ai[bot]'], ['labeled', AGENT], ['reopened', AGENT]] as const) {
+        const sys = actions(action, actor, [commit('a1', 'agent')], [created('example-owner', ['a1'])]);
+        assert.deepEqual(await check(sys), { code: 1, out: [], err: [ownerPushed, 'pr-identity: #7 fails the identity check'] }, `${action} by ${actor}`);
+      }
+    });
+
+    it('keeps passing when the owner edits after the agent pushed', async () => {
+      for (const [action, actor] of [['opened', AGENT], ['edited', 'example-owner'], ['labeled', 'example-owner']] as const) {
+        const sys = actions(action, actor, [commit('a1', 'agent')], [created(AGENT, ['a1'])]);
+        assert.equal((await check(sys)).code, 0, `${action} by ${actor}`);
+      }
+    });
+
+    it('fails an owner force push over agent commits, whoever runs it again', async () => {
+      for (const actor of ['example-owner', AGENT]) {
+        const sys = actions('synchronize', actor, [commit('a1', 'agent')], [
+          created(AGENT, ['a0'], 'h1'),
+          { type: 'force_push', actor: 'example-owner', before: 'h1', after: 'h2', brings: ['a1'] },
+        ]);
+        assert.deepEqual((await check(sys)).err[0], ownerPushed, `run by ${actor}`);
+      }
+    });
+
+    it('does not credit the agent that opens the pull request with a push GitHub has not recorded yet', async () => {
+      const sys = actions('opened', AGENT, [commit('a1', 'agent')]);
+      assert.deepEqual(await check(sys), {
+        code: 1,
+        out: [],
+        err: [
+          '✗ no push GitHub has recorded to work brought a1, which claims ExampleBot; re-run once GitHub records the push',
+          'pr-identity: #7 fails the identity check',
+        ],
+      });
+      assert.deepEqual(sys.slept, [10_000, 10_000, 10_000, 10_000, 10_000]);
+      assert.equal(sys.requests.filter((r) => r.url.includes('/activity')).length, 6);
+    });
+
+    it('waits for GitHub to record the push', async () => {
+      for (const [pusher, code] of [[AGENT, 0], ['example-owner', 1]] as const) {
+        const sys = actions('synchronize', AGENT, [commit('a1', 'agent')]);
+        let reads = 0;
+        sys.route('GET', ACTIVITY, () => ({
+          status: 200,
+          json: ++reads < 3 ? [] : [{ activity_type: 'branch_creation', actor: { login: pusher }, before: ZERO, after: 'h1' }],
+        }));
+        sys.route('GET', compare(BASE, 'h1'), { status: 200, json: { commits: [{ sha: 'a1' }] } });
+        assert.equal((await check(sys)).code, code, `pushed by ${pusher}`);
+        assert.deepEqual(sys.slept, [10_000, 10_000]);
+      }
+    });
   });
 
   it('credits each commit to the push that first brought it', async () => {
@@ -113,25 +164,20 @@ describe('prIdentity', () => {
     assert.match((await check(sys)).err[0] ?? '', /^✗ example-owner pushed a9/);
   });
 
-  it('skips deletions and pushes with no actor', async () => {
+  it('skips deletions', async () => {
     const sys = actions('opened', AGENT, [commit('a1', 'agent')], [
       { type: 'branch_deletion', actor: 'example-owner', before: 'h0', after: ZERO, brings: [] },
-      { type: 'push', actor: null, before: ZERO, after: 'hx', brings: ['a1'] },
       created(AGENT, ['a1']),
     ]);
     assert.equal((await check(sys)).code, 0);
   });
 
-  it('credits commits GitHub has not recorded yet to whoever opened or pushed', async () => {
-    assert.equal((await check(actions('opened', AGENT, [commit('a1', 'agent')]))).code, 0);
-    assert.match((await check(actions('synchronize', 'example-owner', [commit('a1', 'agent')]))).err[0] ?? '', /^✗ example-owner pushed a1/);
-  });
-
-  it('fails closed when no record says who pushed', async () => {
-    assert.deepEqual(
-      (await check(actions('reopened', 'example-owner', [commit('a1', 'agent')]))).err[0],
-      '✗ an account GitHub has not recorded yet pushed a1, which claims ExampleBot; agent work must be pushed by ExampleBot',
-    );
+  it('fails a push GitHub records with no actor, even when the agent pushes the commit again', async () => {
+    const sys = actions('opened', AGENT, [commit('a1', 'agent')], [
+      { type: 'push', actor: null, before: ZERO, after: 'hx', brings: ['a1'] },
+      created(AGENT, ['a1']),
+    ]);
+    assert.deepEqual((await check(sys)).err[0], '✗ an account GitHub no longer names pushed a1, which claims ExampleBot; agent work must be pushed by ExampleBot');
   });
 
   it('fails a commit that claims the agent without its signature', async () => {
@@ -157,18 +203,32 @@ describe('prIdentity', () => {
   });
 
   it("reads a fork's pushes from the fork", async () => {
-    const sys = actions('opened', AGENT, [commit('a1', 'agent')]);
+    const sys = actions('opened', AGENT, [commit('a1', 'agent')], [created('example-owner', ['a1'])]);
     const event = JSON.parse(sys.files.get(EVENT) ?? '{}');
     event.pull_request.head.repo = { full_name: 'someone/example-app' };
     sys.files.set(EVENT, JSON.stringify(event));
-    sys.route('GET', ACTIVITY, { status: 404, json: null });
-    sys.route('GET', '/repos/someone/example-app/activity?ref=refs%2Fheads%2Fwork&per_page=100', { status: 200, json: [] });
+    sys.route('GET', '/repos/someone/example-app/activity?ref=refs%2Fheads%2Fwork&per_page=100', {
+      status: 200,
+      json: [{ activity_type: 'branch_creation', actor: { login: AGENT }, before: ZERO, after: 'h1' }],
+    });
+    sys.route('GET', '/repos/someone/example-app/compare/base0...h1?per_page=100&page=1', { status: 200, json: { commits: [{ sha: 'a1' }] } });
     assert.equal((await check(sys)).code, 0);
     assert.ok(sys.requests.some((r) => r.url.startsWith('https://api.github.com/repos/someone/example-app/activity')));
-    event.pull_request.head.repo = null;
-    sys.files.set(EVENT, JSON.stringify(event));
-    sys.route('GET', ACTIVITY, { status: 200, json: [] });
-    assert.equal((await check(sys)).code, 0);
+    assert.ok(!sys.requests.some((r) => r.url.startsWith(`https://api.github.com${REPO}/activity`)));
+  });
+
+  it('fails agent commits when the head repository is gone, and passes owner commits', async () => {
+    const gone = (commits: Record<string, unknown>[]): FakeSys => {
+      const sys = actions('opened', AGENT, commits, [created(AGENT, ['a1'])]);
+      const event = JSON.parse(sys.files.get(EVENT) ?? '{}');
+      event.pull_request.head.repo = null;
+      sys.files.set(EVENT, JSON.stringify(event));
+      return sys;
+    };
+    const sys = gone([commit('a1', 'agent')]);
+    assert.deepEqual((await check(sys)).err[0], "✗ #7's head repository is gone, so no record says who pushed a1, which claims ExampleBot");
+    assert.ok(!sys.requests.some((r) => r.url.includes('/activity')));
+    assert.equal((await check(gone([commit('o1', 'owner')]))).code, 0);
   });
 
   it('asks nothing about pushes when no commit claims the agent', async () => {
@@ -231,6 +291,6 @@ describe('prIdentity', () => {
   it('reads a compare with no commits as bringing none', async () => {
     const sys = actions('reopened', AGENT, [commit('a1', 'agent')], [created(AGENT, [])]);
     sys.route('GET', compare(BASE, 'h1'), { status: 200, json: null });
-    assert.match((await check(sys)).err[0] ?? '', /has not recorded yet pushed a1/);
+    assert.match((await check(sys)).err[0] ?? '', /^✗ no push GitHub has recorded to work brought a1/);
   });
 });

@@ -60,3 +60,4 @@ Slices added since v1 live in their issues; these rows only point to them.
 | id   | issue | title | you will see | status |
 | ---- | ----- | ----- | ------------ | ------ |
 | P-35 | [#83](https://github.com/athya-hq/process-rules/issues/83) | Owner commands sign in for one run only | `onboard` and `onboard --add` ask for one browser approval per run, into a temporary `gh` folder deleted afterwards; the owner stays signed out of `gh`, and nothing tells the owner to sign in or out of it | shipped |
+| P-38 | [#91](https://github.com/athya-hq/process-rules/issues/91) | PR identity judges the pusher, not the run's actor | The PR identity check names who pushed each agent commit from GitHub's push record alone; an edit, reopen or re-run by anyone gives the push's result, an unrecorded push fails closed, and sandbox #8 re-run from Cubic's edit fails naming the owner | shipped |
