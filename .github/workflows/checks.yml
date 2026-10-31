@@ -14,14 +14,17 @@ on:
         description: A Figma token that reads the design library and the frames states link
         required: false
 
-permissions:
-  contents: read
-  issues: read
-  pull-requests: read
-
+# No workflow-wide permissions: GitHub refuses a whole run, before any job's
+# `if`, when a job here asks for more than the calling job grants. So the
+# read-only jobs say so each, and the weekly job takes what its caller grants:
+# `issues: write` from the client's weekly job, nothing more from the others.
 jobs:
   settings:
     name: Settings
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -46,6 +49,10 @@ jobs:
 
   identity:
     name: PR identity
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -72,6 +79,10 @@ jobs:
 
   work-rules:
     name: Work rules
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -97,6 +108,10 @@ jobs:
 
   design:
     name: Design frames
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -131,9 +146,7 @@ jobs:
     runs-on: ubuntu-latest
     # Checks stop starting after 45 minutes; the rest wait for next week.
     timeout-minutes: 60
-    permissions:
-      contents: read
-      issues: write
+    # The caller's permissions: the client's weekly job grants issues: write.
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

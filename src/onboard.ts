@@ -106,15 +106,11 @@ export const OLDER_HOOK_COMMANDS = [
 /** The guard commands older releases wrote; none yet. */
 export const OLDER_GUARD_COMMANDS: string[] = [];
 
-/**
- * The client's workflow: the shared checks on every pull request, on pushes
- * to the default branch and weekly, at the process-rules release `version`.
- * Upgrading is changing that version, which appears twice, two lines apart.
- */
-export function workflow(branch: string, version: string): string {
+/** The workflow's head, down to its jobs, which every template shares. */
+function workflowHead(branch: string, version: string, comments: string[]): string[] {
   return [
     `# Written by process-rules onboard: the shared process-rules checks at v${version}.`,
-    '# To upgrade, change the version on both lines that name it.',
+    ...comments,
     'name: process-rules',
     '',
     'on:',
@@ -134,19 +130,120 @@ export function workflow(branch: string, version: string): string {
     '  pull-requests: read',
     '',
     'jobs:',
-    '  process-rules:',
-    '    # Write to issues for this job only: the weekly run comments and opens undo issues.',
-    '    permissions:',
-    '      contents: read',
-    '      issues: write',
-    '      pull-requests: read',
+  ];
+}
+
+/** One job's call of the shared checks at `version`. */
+function callChecks(version: string): string[] {
+  return [
     `    uses: ${PRODUCT}/.github/workflows/checks.yml@v${version}`,
     '    with:',
     `      process-rules-ref: v${version}`,
     '    secrets:',
     '      FIGMA_TOKEN: ${{ secrets.FIGMA_TOKEN }}',
+  ];
+}
+
+/**
+ * The client's workflow: the shared checks on every pull request, on pushes
+ * to the default branch and weekly, at the process-rules release `version`.
+ * Pull request and push runs are read-only; the weekly job alone writes to
+ * issues. Upgrading is changing that version, which each job names twice.
+ */
+export function workflow(branch: string, version: string): string {
+  return [
+    ...workflowHead(branch, version, [
+      '# To upgrade, change the version on every line that names it (two per job).',
+      '# The weekly job is split out so pull request and push runs stay read-only.',
+    ]),
+    '  # Pull request and push runs: read-only.',
+    '  process-rules:',
+    "    if: github.event_name == 'pull_request' || github.event_name == 'push'",
+    ...callChecks(version),
+    '',
+    '  # The weekly run alone writes to issues: it comments and opens undo issues.',
+    '  process-rules-weekly:',
+    "    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'",
+    '    permissions:',
+    '      contents: read',
+    '      issues: write',
+    '      pull-requests: read',
+    ...callChecks(version),
     '',
   ].join('\n');
+}
+
+/**
+ * The workflows older releases wrote, at `version`, which onboard replaces
+ * with this release's: one job that wrote to issues on every run.
+ */
+export function olderWorkflows(branch: string, version: string): string[] {
+  return [
+    [
+      ...workflowHead(branch, version, ['# To upgrade, change the version on both lines that name it.']),
+      '  process-rules:',
+      '    # Write to issues for this job only: the weekly run comments and opens undo issues.',
+      '    permissions:',
+      '      contents: read',
+      '      issues: write',
+      '      pull-requests: read',
+      ...callChecks(version),
+      '',
+    ].join('\n'),
+  ];
+}
+
+const CHECKS_PIN = new RegExp(`(${PRODUCT.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/\\.github/workflows/checks\\.yml@v)([^\\s'"#]+)`, 'g');
+const REF_PIN = /^(\s+process-rules-ref:\s*['"]?v)([^\s'"#]+)/gm;
+const HEADER_PIN = /^(# Written by process-rules onboard: the shared process-rules checks at v)(\S+?)(\.?)$/m;
+
+/** The versions a workflow pins: each `checks.yml@v…`, then each `process-rules-ref: v…`. */
+export function workflowPins(text: string): string[] {
+  return [...text.matchAll(CHECKS_PIN), ...text.matchAll(REF_PIN)].map((match) => match[2] as string);
+}
+
+/** The one branch a workflow's `push:` trigger names, as `onboard` writes it, quoted or not. */
+const PUSH_BRANCH = /^( {2}push:\n {4}branches: \[\s*)(['"]?)([^,'"\]\s]+)\2(\s*\])$/m;
+
+/**
+ * What onboard does with the client's workflow: write it, replace an older
+ * release's template, or, in a workflow already split into a read-only
+ * `process-rules` job and a `process-rules-weekly` job, move the version pins
+ * and, when the default branch has changed, the one branch pushes run on,
+ * leaving the rest as the client has it.
+ */
+export function workflowUpdate(
+  before: string | undefined,
+  branch: string,
+  version: string,
+):
+  | { kind: 'same' }
+  | { kind: 'write' | 'replace-older' | 'replace'; text: string; from?: string }
+  | { kind: 'repin'; text: string; from?: string; branch?: string } {
+  const wanted = workflow(branch, version);
+  if (before === undefined) return { kind: 'write', text: wanted };
+  if (before === wanted) return { kind: 'same' };
+  const pins = workflowPins(before);
+  const from = pins[0];
+  const pushed = PUSH_BRANCH.exec(before)?.[3];
+  if (from !== undefined && pushed !== undefined && olderWorkflows(pushed, from).includes(before)) {
+    return { kind: 'replace-older', text: wanted, from };
+  }
+  const split = /^ {2}process-rules:\s*$/m.test(before) && /^ {2}process-rules-weekly:\s*$/m.test(before);
+  if (split && pins.length === 4) {
+    const moved = pushed !== undefined && pushed !== branch;
+    const text = before
+      .replace(CHECKS_PIN, (_, head: string) => `${head}${version}`)
+      .replace(REF_PIN, (_, head: string) => `${head}${version}`)
+      .replace(HEADER_PIN, (_, head: string, _old: string, dot: string) => `${head}${version}${dot}`)
+      .replace(PUSH_BRANCH, (line: string, head: string, quote: string, _old: string, tail: string) =>
+        moved ? `${head}${quote}${branch}${quote}${tail}` : line,
+      );
+    if (text === before) return { kind: 'same' };
+    const stale = pins.find((pin) => pin !== version);
+    return { kind: 'repin', text, ...(stale ? { from: stale } : {}), ...(moved ? { branch } : {}) };
+  }
+  return { kind: 'replace', text: wanted };
 }
 
 /** What GitHub says about the agent's access to a repository. */
@@ -448,14 +545,23 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
   // The shared checks run only for features that need them.
   if (workflowNeeded) {
     const workflowFile = `${root}/${WORKFLOW_PATH}`;
-    const wanted = workflow(reach.branch, packageVersion());
-    if (!sys.exists(workflowFile) || sys.read(workflowFile) !== wanted) {
-      const verb = sys.exists(workflowFile) ? 'Replace' : 'Write';
-      if (!(await confirm(`${verb} ${WORKFLOW_PATH}, which runs the shared process-rules checks?`))) {
+    const version = packageVersion();
+    const update = workflowUpdate(sys.exists(workflowFile) ? sys.read(workflowFile) : undefined, reach.branch, version);
+    if (update.kind !== 'same') {
+      const what = {
+        write: `Write ${WORKFLOW_PATH}, which runs the shared process-rules checks`,
+        'replace-older': `Replace the older ${WORKFLOW_PATH}, which lets every run write to issues, with this release's, which lets the weekly run alone`,
+        replace: `Replace ${WORKFLOW_PATH}, which runs the shared process-rules checks`,
+        repin: `In ${WORKFLOW_PATH}, ${[
+          ...(update.kind === 'repin' && update.from ? [`move the version pins from v${update.from} to v${version}`] : []),
+          ...(update.kind === 'repin' && update.branch ? [`run pushes on the default branch, ${update.branch}`] : []),
+        ].join(' and ') || `set the version in its header comment to v${version}`}, leaving the rest as it is`,
+      }[update.kind];
+      if (!(await confirm(`${what}?`))) {
         return stop('workflow');
       }
       sys.mkdir(`${root}/.github/workflows`);
-      sys.write(workflowFile, wanted);
+      sys.write(workflowFile, update.text);
     }
     io.out(`✓ ${WORKFLOW_PATH}`);
   }
