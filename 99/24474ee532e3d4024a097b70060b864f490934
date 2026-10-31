@@ -1,0 +1,66 @@
+src/onboard.ts
+  s_d05166b61cca9a::t_38a127b2c38ce1 23,30
+  s_d05166b61cca9a::t_1f5e553a0da048 499-500,552,605,611,614,794
+  s_d05166b61cca9a::t_a9ed2b95fb0f95 544,547-551,553-559,582,596,660,666,673,747,750,778,784,800,806-814
+  s_d05166b61cca9a::t_94457536c8b1db 815
+  s_d05166b61cca9a::t_221ca2314cf938 24,565-566,603-604,607-609,615-623,625-627
+src/onboard.test.ts
+  s_d05166b61cca9a::t_3996f4e79d1c82 1127,1130-1205,1207-1210
+  s_d05166b61cca9a::t_810ed4dd2d1275 912-913
+  s_d05166b61cca9a::t_90b1fb4b048dee 10,60-70,179,201-202,290,536,593,671,911,933,1118,1126,1310
+  s_d05166b61cca9a::t_01bbe75f333075 49-59,71,74-77,86-88,140,175,198,227,262,272,281,371,397,450,458,467,476,535,545,626,637,944-946,963,971,987,995,1027,1035,1048,1080-1081,1091,1095,1119,1309,1425
+  s_d05166b61cca9a::t_2fcd990edb399f 81,91,95-97,108-115,117-128,153,156-158,949
+  s_d05166b61cca9a::t_2d67061d4c077c 1128-1129
+  s_d05166b61cca9a::t_8a7b8418b66497 17,974,976,979,981-986,988-994,998-1019,1067-1071,1073,1206,1211-1212
+src/board.test.ts
+  s_d05166b61cca9a::t_ddcd246166dc35 266
+  s_d05166b61cca9a::t_bcbeef1a268e36 242
+docs/roadmap.md
+  s_d05166b61cca9a::t_8fcd8e149aac32 32,63
+  s_d05166b61cca9a::t_038aa7080ee660 64
+src/work.test.ts
+  s_d05166b61cca9a::t_af7cb0be44ba40 452-482
+src/onboard-pull.ts
+  s_d05166b61cca9a::t_38a127b2c38ce1 1,7,10
+  s_d05166b61cca9a::t_6e6fc679075e0e 2-6,8-9,11-108
+docs/decisions.md
+  s_d05166b61cca9a::t_8fcd8e149aac32 238-259
+  s_d05166b61cca9a::t_94733ef8b56b8d 220-237
+src/board.ts
+  s_d05166b61cca9a::t_810ed4dd2d1275 512
+src/fake.test.ts
+  s_d05166b61cca9a::t_bc7b3aa966e3e4 1-2,26-32,65-72,91,144-161
+src/work.ts
+  s_d05166b61cca9a::t_af7cb0be44ba40 5,259-261,269,290-296
+  s_d05166b61cca9a::t_dd942113631907 297
+README.md
+  s_d05166b61cca9a::t_8fcd8e149aac32 178-188,201
+  s_d05166b61cca9a::t_28bd40e6e690a8 264-267,383
+src/secrets.test.ts
+  s_d05166b61cca9a::t_8a7b8418b66497 1-11,17,19-26,28-75
+  s_d05166b61cca9a::t_b119a718dccd6a 12-16,18,27
+src/secrets.ts
+  s_d05166b61cca9a::t_3101bc124de7b4 1-15,18-34
+  s_d05166b61cca9a::t_2313008274b464 16-17
+package.json
+  s_d05166b61cca9a::t_ced57306d88578 29-31
+  s_d05166b61cca9a::t_63f6d7df1cdb5f 3
+pnpm-lock.yaml
+  s_d05166b61cca9a::t_2d112c2b2602fe 168-171,185-190,205-210
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "9924474ee532e3d4024a097b70060b864f490934",
+  "prompts": {},
+  "sessions": {
+    "s_d05166b61cca9a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cff6e322-a74e-4519-b9d1-78e258722f55",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Alok Bansal <alokagrawal8@gmail.com>"
+    }
+  }
+}
