@@ -1,5 +1,6 @@
 import {
   API,
+  BASE_ENV,
   SETTINGS_PATH,
   account,
   checkToken,
@@ -15,7 +16,7 @@ import {
   tokenInfo,
 } from './agent.ts';
 import { setUpBoard } from './board.ts';
-import { appendToArray, replaceValues } from './jsonedit.ts';
+import { appendToArray, replaceValues, setMember } from './jsonedit.ts';
 import { type Feature, FEATURES, featuresIn, parseFeatures } from './features.ts';
 import { packageVersion } from './version.ts';
 import type { Output, Sys } from './types.ts';
@@ -37,22 +38,48 @@ export const PRE_PUSH_HOOK = [
   'exec process-rules pre-push "$@"',
   '',
 ].join('\n');
+/** How a hook finds the CLI: the launcher `machine` writes, else whatever PATH has. */
+const FIND_CLI = 'cli="$HOME/.config/process-rules/bin/process-rules"; [ -x "$cli" ] || cli=process-rules; ';
+
 /**
- * What the client's SessionStart hook runs. Cloud sessions are left alone,
- * before anything else: they reach GitHub as the account connected to them
- * and have no CLI. Without the CLI on a machine, or when it fails to run,
- * nothing can lock GitHub, so the session is told to stop instead.
+ * What the client's SessionStart hook runs. Cloud sessions reach GitHub as
+ * the account connected to them and have no CLI, so before anything else
+ * their hook unsets the lock the settings' `env` gave them. Elsewhere, when
+ * the CLI is missing or fails, what it printed reaches the session inside a
+ * line telling it to stop; the settings' `env` has already locked GitHub out.
  */
 export const HOOK_COMMAND =
-  'if [ "$CLAUDE_CODE_REMOTE" = true ]; then :; ' +
-  'elif command -v process-rules >/dev/null 2>&1 && process-rules session-start; then :; ' +
-  'else echo "process-rules: STOP. The process-rules CLI is missing or did not run here, so this session cannot be given the agent identity and gh and git would act as the owner. Do not push, fetch, or run gh in this session; tell the owner."; fi';
+  `if [ "$CLAUDE_CODE_REMOTE" = true ]; then [ -z "$CLAUDE_ENV_FILE" ] || echo 'unset ${Object.keys(BASE_ENV).join(' ')}' >> "$CLAUDE_ENV_FILE"; else ` +
+  FIND_CLI +
+  'if said=$("$cli" session-start 2>&1); then printf \'%s\\n\' "$said"; ' +
+  'else printf \'%s\\n\' "process-rules: STOP. process-rules session-start did not run here ($said), so this session cannot be given the agent identity and GitHub is locked out of it. Do not push, fetch, or run gh in this session; tell the owner."; fi; fi';
+
+/**
+ * What the client's PreToolUse hook runs before each Bash command: `guard`
+ * refuses gh and git's remote commands outside the agent identity. A command
+ * not naming either as a word goes ahead without starting the CLI. When the CLI cannot
+ * run, every command naming either is refused, so a broken CLI fails closed.
+ */
+export const GUARD_COMMAND =
+  '[ "$CLAUDE_CODE_REMOTE" = true ] && exit 0; input=$(cat); ' +
+  // The command alone, not the rest of the input, such as its description and paths.
+  'cmd=$(printf \'%s\' "$input" | sed -nE \'s/.*"command"[[:space:]]*:[[:space:]]*"(([^"\\\\]|\\\\.)*)".*/\\1/p\'); ' +
+  'printf \'%s\' "$cmd" | grep -Eq \'(^|[^[:alnum:]_-])(gh|git)([^[:alnum:]_-]|$)\' || exit 0; ' +
+  FIND_CLI +
+  'printf \'%s\' "$input" | "$cli" guard && exit 0; [ $? -eq 2 ] && exit 2; ' +
+  'echo "process-rules: refused, because the process-rules CLI did not run here to check this command. Do not work around it; tell the owner." >&2; exit 2';
 
 /** The hook commands older releases wrote, which onboard replaces with this release's. */
 export const OLDER_HOOK_COMMANDS = [
   'command -v process-rules >/dev/null 2>&1 && process-rules session-start || ' +
     'echo "process-rules: STOP. The process-rules CLI is not installed here, so this session cannot be given the agent identity and gh and git would act as the owner. Do not push, fetch, or run gh in this session; tell the owner."',
+  'if [ "$CLAUDE_CODE_REMOTE" = true ]; then :; ' +
+    'elif command -v process-rules >/dev/null 2>&1 && process-rules session-start; then :; ' +
+    'else echo "process-rules: STOP. The process-rules CLI is missing or did not run here, so this session cannot be given the agent identity and gh and git would act as the owner. Do not push, fetch, or run gh in this session; tell the owner."; fi',
 ];
+
+/** The guard commands older releases wrote; none yet. */
+export const OLDER_GUARD_COMMANDS: string[] = [];
 
 /**
  * The client's workflow: the shared checks on every pull request, on pushes
@@ -141,19 +168,56 @@ async function invitation(sys: Sys, slug: string, token: string): Promise<number
   }
 }
 
-/** Whether the SessionStart hooks in a Claude Code settings object run exactly `HOOK_COMMAND`. */
-function hasHook(settings: object): boolean {
-  return sessionStartHooks(settings).some((hook) => hook.command === HOOK_COMMAND);
-}
-
-/** The command entries under SessionStart, as written in the settings object. */
-function sessionStartHooks(settings: object): { command?: unknown }[] {
-  const groups = (settings as { hooks?: { SessionStart?: unknown } }).hooks?.SessionStart;
+/** The command entries under one hook event, as written in the settings object. */
+function hooksOf(settings: object, event: string): { command?: unknown }[] {
+  const groups = (settings as { hooks?: Record<string, unknown> }).hooks?.[event];
   if (!Array.isArray(groups)) return [];
   return groups.flatMap((group: unknown) => {
     const hooks = (group as { hooks?: unknown } | null)?.hooks;
     return Array.isArray(hooks) ? hooks.filter((hook): hook is { command?: unknown } => typeof hook === 'object' && hook !== null) : [];
   });
+}
+
+/**
+ * The client's Claude Code settings with this release's hooks and lock: each
+ * entry an older release wrote swapped where it stands, a missing one added,
+ * and the lock's variables set in `env`. Every edit is made in the text, so
+ * the rest of the file keeps its layout. Says what changed, for the question.
+ */
+export function claudeSettings(before: string | undefined): { text: string; changes: string[] } {
+  let text = before ?? '{}\n';
+  const changes: string[] = [];
+  const parsed = (): object => JSON.parse(text) as object;
+  const first: unknown = parsed();
+  if (typeof first !== 'object' || first === null || Array.isArray(first)) throw new Error(`${HOOKS_PATH} is not a JSON object`);
+  const hooks: [string, string, readonly string[], string, Record<string, unknown>][] = [
+    ['SessionStart', HOOK_COMMAND, OLDER_HOOK_COMMANDS, 'the SessionStart hook that runs process-rules session-start', {}],
+    ['PreToolUse', GUARD_COMMAND, OLDER_GUARD_COMMANDS, "the PreToolUse hook that refuses gh and git's remote commands outside the agent identity", { matcher: 'Bash' }],
+  ];
+  try {
+    for (const [event, command, older, name, extra] of hooks) {
+      const swapped = replaceValues(text, ['hooks', event, '*', 'hooks', '*', 'command'], (value) =>
+        typeof value === 'string' && older.includes(value) ? command : undefined,
+      );
+      if (swapped.replaced > 0) {
+        text = swapped.text;
+        changes.push(`replace the older ${name.replace(/^the /, '')} with this release's`);
+      } else if (!hooksOf(parsed(), event).some((hook) => hook.command === command)) {
+        text = appendToArray(text, ['hooks'], event, { ...extra, hooks: [{ type: 'command', command }] });
+        changes.push(`add ${name}`);
+      }
+    }
+    const env = (parsed() as { env?: unknown }).env;
+    const current = typeof env === 'object' && env !== null ? (env as Record<string, unknown>) : {};
+    const missing = Object.entries(BASE_ENV).filter(([name, value]) => current[name] !== value);
+    for (const [name, value] of missing) text = setMember(text, ['env'], name, value);
+    const names = missing.map(([name]) => name);
+    const named = names.length <= 3 ? names.join(', ') : `${names.slice(0, 2).join(', ')} and ${names.length - 2} more`;
+    if (missing.length > 0) changes.push(`set ${named} in env, so GitHub is locked out until session-start gives the agent identity`);
+  } catch (error) {
+    throw new Error(`${HOOKS_PATH}: ${(error as Error).message}`);
+  }
+  return { text, changes };
 }
 
 /** The account the owner's `gh` is signed in as, the owner's likely login. */
@@ -296,40 +360,17 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
   const workflowNeeded = on('pr-identity') || on('work-rules') || on('design') || on('decisions') || on('review');
 
   const hooksFile = `${root}/${HOOKS_PATH}`;
-  const hooks: unknown = sys.exists(hooksFile) ? JSON.parse(sys.read(hooksFile)) : {};
-  if (typeof hooks !== 'object' || hooks === null || Array.isArray(hooks)) {
-    throw new Error(`${HOOKS_PATH} is not a JSON object`);
-  }
-  // An entry an older release wrote is replaced where it stands, not added to;
-  // both edits are made in the text itself, so the rest of the client's file keeps its layout.
-  const older = sys.exists(hooksFile)
-    ? replaceValues(sys.read(hooksFile), ['hooks', 'SessionStart', '*', 'hooks', '*', 'command'], (command) =>
-        typeof command === 'string' && OLDER_HOOK_COMMANDS.includes(command) ? HOOK_COMMAND : undefined,
-      )
-    : { text: '', replaced: 0 };
-  if (older.replaced > 0) {
-    if (!(await confirm(`Replace the older process-rules SessionStart hook in ${HOOKS_PATH} with this release's?`))) {
-      return stop('hook entry');
-    }
-    sys.write(hooksFile, older.text);
-  } else if (!hasHook(hooks)) {
-    const entry = { hooks: [{ type: 'command', command: HOOK_COMMAND }] };
-    // Worked out before asking, so a file onboard cannot add to is refused before any question.
-    let text = `${JSON.stringify({ hooks: { SessionStart: [entry] } }, null, 2)}\n`;
-    if (sys.exists(hooksFile)) {
-      try {
-        text = appendToArray(sys.read(hooksFile), ['hooks'], 'SessionStart', entry);
-      } catch (error) {
-        throw new Error(`${HOOKS_PATH}: ${(error as Error).message}`);
-      }
-    }
-    if (!(await confirm(`Add the SessionStart hook that runs process-rules session-start to ${HOOKS_PATH}?`))) {
+  const existing = sys.exists(hooksFile) ? sys.read(hooksFile) : undefined;
+  // Worked out before asking, so a file onboard cannot edit is refused before any question.
+  const claude = claudeSettings(existing);
+  if (claude.changes.length > 0) {
+    if (!(await confirm(`${existing === undefined ? 'Write' : 'Update'} ${HOOKS_PATH}: ${claude.changes.join('; ')}?`))) {
       return stop('hook entry');
     }
     sys.mkdir(`${root}/.claude`);
-    sys.write(hooksFile, text);
+    sys.write(hooksFile, claude.text);
   }
-  io.out(`✓ ${HOOKS_PATH}: SessionStart runs process-rules session-start`);
+  io.out(`✓ ${HOOKS_PATH}: GitHub locked out until session-start gives the agent identity, and the guard on gh and git`);
 
   const paths = pathsFor(sys.home, agent);
   const token = readToken(sys, agent);
@@ -433,6 +474,29 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
   return 0;
 }
 
+/** How many times onboard asks GitHub about the test commit, waiting a little longer each time. */
+export const COMMIT_ATTEMPTS = 5;
+
+/**
+ * GitHub's answer about a commit just pushed. A dropped connection or an
+ * error from GitHub is asked again, since a commit can take a moment to
+ * show and the network can fail for a moment; the last failure otherwise.
+ */
+async function commitInfo(sys: Sys, slug: string, sha: string, token: string): Promise<unknown> {
+  let failure = new Error('not asked');
+  for (let attempt = 1; attempt <= COMMIT_ATTEMPTS; attempt++) {
+    try {
+      const { status, json } = await sys.http(`${API}/repos/${slug}/commits/${sha}`, { token });
+      if (status === 200) return json;
+      failure = new Error(`HTTP ${status}`);
+    } catch (error) {
+      failure = error instanceof Error ? error : new Error(String(error));
+    }
+    if (attempt < COMMIT_ATTEMPTS) await sys.sleep(attempt * 2000);
+  }
+  return failure;
+}
+
 interface Target {
   agent: string;
   id: number;
@@ -479,14 +543,18 @@ async function testCommit(sys: Sys, io: Output, target: Target): Promise<number>
       return 1;
     }
     pushed = true;
-    const { json } = await sys.http(`${API}/repos/${slug}/commits/${sha}`, { token });
-    const commit = json as {
+    io.out(`Test commit https://github.com/${slug}/commit/${sha}`);
+    const asked = await commitInfo(sys, slug, sha, token);
+    if (asked instanceof Error) {
+      io.err(`onboard: cannot ask GitHub whether the test commit is Verified (${asked.message}); open the link above to see`);
+      return 1;
+    }
+    const commit = asked as {
       committer?: { login?: string } | null;
       commit?: { verification?: { verified?: boolean; reason?: string } };
     } | null;
     const verification = commit?.commit?.verification;
     const committer = commit?.committer?.login;
-    io.out(`Test commit https://github.com/${slug}/commit/${sha}`);
     io.out(`  committer: ${committer ?? 'none'}; verified: ${String(verification?.verified)} (${verification?.reason ?? 'no reason'})`);
     if (verification?.verified !== true || !sameLogin(committer, agent)) {
       io.err(`onboard: GitHub does not show the commit Verified by ${agent}`);

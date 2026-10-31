@@ -6,6 +6,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
@@ -20,6 +21,7 @@ export function realSys(): Sys {
     env: process.env,
     home: homedir(),
     cwd: process.cwd(),
+    runtime: { node: realPath(process.execPath), cli: realPath(process.argv[1] ?? '') },
     exec(command, args, options = {}) {
       const result = spawnSync(command, args, {
         encoding: 'utf8',
@@ -77,7 +79,17 @@ export function realSys(): Sys {
       spawnSync('open', [url]);
     },
     now: () => new Date(),
+    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   };
+}
+
+/** A path with its links resolved, or as given when it cannot be. */
+function realPath(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
 }
 
 /** Reads one line from the terminal without echoing it. */

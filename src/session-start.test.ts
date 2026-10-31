@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, describe, it } from 'node:test';
 
-import { NO_TOKEN, lockScript, pathsFor, sessionNames, sessionScript } from './agent.ts';
+import { NO_TOKEN, lockScript, pathsFor, sessionNames, sessionRecord, sessionScript } from './agent.ts';
 import { AGENT, AGENT_ID, FakeSys, HOME, ROOT, capture } from './fake.test.ts';
 import { sessionStart } from './session-start.ts';
 
@@ -30,7 +30,40 @@ function start(sys: FakeSys): { code: number; out: string[]; env: string | undef
   return { code, out, env: sys.files.get(ENV) };
 }
 
+const RECORD = sessionRecord(HOME, 'abc-123') as string;
+
 describe('sessionStart', () => {
+  it('records the agent for the guard, keyed by the session id Claude Code passes', () => {
+    const sys = ready();
+    sys.stdin = JSON.stringify({ session_id: 'abc-123', source: 'compact' });
+    start(sys);
+    assert.equal(sys.files.get(RECORD), '{"agent":"ExampleBot"}\n');
+    assert.equal(sys.modes.get(RECORD), 0o600);
+  });
+
+  it('records why when GitHub stays locked out', () => {
+    const sys = ready();
+    sys.stdin = JSON.stringify({ session_id: 'abc-123' });
+    sys.files.delete(SESSION);
+    const { out } = start(sys);
+    assert.deepEqual(JSON.parse(sys.files.get(RECORD) ?? ''), { problem: out[0] });
+  });
+
+  it('records nothing without a session id, or when writing fails', () => {
+    for (const stdin of ['', 'not json', '{"session_id":"../../x"}']) {
+      const sys = ready();
+      sys.stdin = stdin;
+      start(sys);
+      assert.ok(![...sys.files.keys()].some((path) => path.includes('/sessions/')), stdin);
+    }
+    const sys = ready();
+    sys.stdin = JSON.stringify({ session_id: 'abc-123' });
+    sys.write = () => {
+      throw new Error('read-only');
+    };
+    assert.deepEqual(start(sys).out, ['process-rules: this session works as ExampleBot on GitHub.']);
+  });
+
   it('locks, then gives the session the agent identity', () => {
     const { code, out, env } = start(ready());
     assert.equal(code, 0);

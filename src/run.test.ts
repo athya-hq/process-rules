@@ -107,6 +107,18 @@ describe('run', () => {
     assert.equal((await capture(['pre-push', 'origin', 'url', 'extra'])).code, 2);
   });
 
+  it('runs guard, refusing when the check itself fails', async () => {
+    const sys = new FakeSys();
+    sys.stdin = JSON.stringify({ session_id: 's', tool_input: { command: 'ls' } });
+    assert.equal((await capture(['guard'], () => sys)).code, 0);
+    const failed = await capture(['guard']);
+    assert.deepEqual(failed, { code: 2, out: [], err: ['process-rules guard: refused, because the check failed: this command must not touch the machine'] });
+    const thrown = await capture(['guard'], () => {
+      throw 'odd';
+    });
+    assert.equal(thrown.err[0], 'process-rules guard: refused, because the check failed: odd');
+  });
+
   it('treats a bad onboard option as bad usage', async () => {
     for (const args of [['onboard', 'a', 'b', 'c'], ['onboard', '--add', 'boards'], ['onboard', '--force']]) {
       const { code, err } = await capture(args);

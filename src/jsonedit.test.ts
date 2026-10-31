@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { appendToArray, replaceValues } from './jsonedit.ts';
+import { appendToArray, replaceValues, setMember } from './jsonedit.ts';
 
 const entry = { hooks: [{ type: 'command', command: 'run "it"' }] };
 
@@ -71,5 +71,30 @@ describe('replaceValues', () => {
     assert.equal(out, text.replaceAll('"old"', '"new"'));
     assert.deepEqual(replaceValues('{ "hooks": [] }', path, swap), { text: '{ "hooks": [] }', replaced: 0 });
     assert.deepEqual(replaceValues('[1]', ['*'], () => 2), { text: '[2]', replaced: 1 });
+  });
+});
+
+describe('setMember', () => {
+  it('swaps a value where it stands, keeping the layout', () => {
+    const text = '{\r\n    "env": { "A": "1", "B": "2" }\r\n}\r\n';
+    assert.equal(setMember(text, ['env'], 'A', 'x'), '{\r\n    "env": { "A": "x", "B": "2" }\r\n}\r\n');
+  });
+
+  it('adds a missing key last, in the file\'s layout', () => {
+    assert.equal(setMember('{\n    "env": {\n        "A": "1"\n    }\n}\n', ['env'], 'B', '2'), '{\n    "env": {\n        "A": "1",\n        "B": "2"\n    }\n}\n');
+  });
+
+  it('creates the objects on the way', () => {
+    assert.deepEqual(JSON.parse(setMember('{}', ['env'], 'A', '1')), { env: { A: '1' } });
+    assert.deepEqual(JSON.parse(setMember('{ "x": 1 }', ['a', 'b'], 'c', 2)), { x: 1, a: { b: { c: 2 } } });
+  });
+
+  it('refuses a value on the way that is not an object, and undefined', () => {
+    assert.throws(() => setMember('{ "env": [] }', ['env'], 'A', '1'), /^Error: env is not an object$/);
+    assert.throws(() => setMember('{}', ['env'], 'A', undefined), /^Error: env\.A cannot be set to undefined$/);
+  });
+
+  it('swaps in an object in the file\'s layout', () => {
+    assert.equal(setMember('{\n    "a": {\n        "b": 1\n    }\n}\n', ['a'], 'b', { c: 2 }), '{\n    "a": {\n        "b": {\n            "c": 2\n        }\n    }\n}\n');
   });
 });

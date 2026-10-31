@@ -1,3 +1,4 @@
+import { launcherPath, launcherScript } from './agent.ts';
 import type { ExecResult, HttpResult, Sys } from './types.ts';
 
 export const HOME = '/home/u';
@@ -16,6 +17,9 @@ export const CLASSIC = {
 };
 /** The fake's clock: 2026-10-30, 90 days before CLASSIC's token ends. */
 export const NOW = new Date('2026-10-30T12:00:00Z');
+/** The node and CLI script the fake runs with. */
+export const NODE = '/opt/node/bin/node';
+export const CLI = '/opt/process-rules/dist/cli.js';
 export const SETTINGS = JSON.stringify({ owner: 'example-owner', agent: AGENT });
 
 export interface Call {
@@ -32,6 +36,7 @@ export class FakeSys implements Sys {
   env: Record<string, string | undefined> = {};
   home = HOME;
   cwd = ROOT;
+  runtime = { node: NODE, cli: CLI };
   files = new Map<string, string>([[`${ROOT}/.github/process-rules.json`, SETTINGS]]);
   /** Keychain items by "service/account". */
   keychain = new Map<string, string>();
@@ -74,6 +79,7 @@ export class FakeSys implements Sys {
     this.files.set(`${KEY}.pub`, `${PUBLIC_KEY}\n`);
     this.setToken(AGENT, TOKEN);
     this.acceptToken(TOKEN, AGENT);
+    this.files.set(launcherPath(HOME), launcherScript(NODE, CLI));
     for (const path of ['/users/ExampleBot/ssh_signing_keys', '/user/ssh_signing_keys']) {
       this.route('GET', path, { status: 200, json: [{ key: 'ssh-ed25519 AAAAkey' }] });
     }
@@ -111,6 +117,7 @@ export class FakeSys implements Sys {
     if (override) return override;
     const ok = (stdout = ''): ExecResult => ({ code: 0, stdout, stderr: '' });
     const fail = (stderr = 'failed'): ExecResult => ({ code: 1, stdout: '', stderr });
+    if (command === launcherPath(HOME)) return this.files.has(command) ? ok('0.0.0\n') : fail('not found');
     if (command === 'git' && args[1] === '--git-path') return this.inRepo ? ok(`.git/${args[2]}\n`) : fail('not a git repository');
     if (command === 'git' && args.includes('--git-common-dir')) return this.inRepo ? ok(`${ROOT}/.git\n`) : fail('not a git repository');
     if (command === 'git' && args[0] === 'rev-parse') return this.inRepo ? ok(`${ROOT}\n`) : fail();
@@ -239,6 +246,12 @@ export class FakeSys implements Sys {
 
   now(): Date {
     return NOW;
+  }
+
+  slept: number[] = [];
+  sleep(ms: number): Promise<void> {
+    this.slept.push(ms);
+    return Promise.resolve();
   }
 }
 

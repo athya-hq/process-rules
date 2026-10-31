@@ -5,6 +5,7 @@ import {
   checkToken,
   keyBody,
   keyPairProblem,
+  launcherPath,
   pathsFor,
   readToken,
   sessionScript,
@@ -74,6 +75,17 @@ export async function doctor(sys: Sys, io: Output, named?: string): Promise<numb
       return sys.read(paths.session) === script ? undefined : `${paths.session} is out of date`;
     }),
   );
+
+  const launcher = launcherPath(sys.home);
+  const runs = sys.exists(launcher) ? sys.exec(launcher, ['--version'], { env: { ...sys.env, PATH: '/usr/bin:/bin' } }) : undefined;
+  checks.push({
+    name: 'launcher',
+    problem: !runs
+      ? `${launcher} is missing, so the hooks need process-rules and node on their PATH`
+      : runs.code !== 0
+        ? `${launcher} does not run (${runs.stderr.trim() || `exit ${runs.code}`}); was its node removed?`
+        : undefined,
+  });
 
   for (const { name, problem } of checks) {
     if (problem) io.err(`✗ ${name}: ${problem}`);
