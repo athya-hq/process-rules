@@ -1,0 +1,19 @@
+.github/workflows/process-rules.yml
+  s_7d7895df19a11a::t_4efdfd9d31e9ae 1,28,30
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "cc205c145908ec5e0c3fa875f26c7153552acd75",
+  "prompts": {},
+  "sessions": {
+    "s_7d7895df19a11a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "88c921f4-35fe-4ce8-b9fe-f31a7e83c025",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Alok Bansal <alokagrawal8@gmail.com>"
+    }
+  }
+}
