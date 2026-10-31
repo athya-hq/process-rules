@@ -1053,7 +1053,7 @@ describe('staged adoption', () => {
     assert.deepEqual([code, err], [0, []]);
     assert.equal(
       sys.asked[0],
-      'Update .github/process-rules.json: rename the design feature to figma and take out "figma" and set its library key as the FIGMA_LIBRARY Actions secret, as you? [y/N] ',
+      'Update .github/process-rules.json: rename the design feature to figma and take out "figma" and set its library key as the FIGMA_LIBRARY Actions secret? [y/N] ',
     );
     assert.deepEqual(JSON.parse(repo(sys).get(SETTINGS) ?? ''), { owner: 'example-owner', agent: AGENT, features: ['identity', 'figma'] });
     const sent = sealedValue(sys, pair);
@@ -1280,7 +1280,9 @@ describe("onboard's pull request", () => {
     assert.deepEqual([...sys.committed.keys()], ['.github/process-rules.json']);
     const { body } = sys.requests.find((r) => r.method === 'POST' && r.url.endsWith('/pulls'))?.body as { body: string };
     assert.match(body, /^- `\.github\/process-rules\.json`: take out "figma" .*; turn board on$/m);
-    assert.equal(signIns(sys), 1, "the sign-in for the secret has the board's scopes too");
+    assert.equal(signIns(sys), 1, 'one sign-in, for the secret and the board');
+    const login = sys.calls.find((call) => call.command === 'gh' && call.args[1] === 'login')?.args ?? [];
+    assert.equal(login[login.indexOf('-s') + 1], 'project,admin:org', "the sign-in for the secret asks for the board's scopes too");
   });
 });
 

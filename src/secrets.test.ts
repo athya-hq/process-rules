@@ -44,8 +44,9 @@ describe('setSecret', () => {
 
   it('takes a replaced secret too', async () => {
     const sys = new FakeSys();
-    await actionsKey(sys, { status: 204, json: null });
+    const pair = await actionsKey(sys, { status: 204, json: null });
     assert.equal(await setSecret(sys, 'example-org/example-app', 'gho_owner', 'FIGMA_LIBRARY', VALUE), undefined);
+    assert.equal(sealedValue(sys, pair).value, VALUE, 'the existing secret is replaced with the sealed value');
   });
 
   it('says why when GitHub gives no public key, or one that is not a key', async () => {
