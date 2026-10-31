@@ -59,8 +59,10 @@ days before the token ends.
 ## Adopting
 
 1. On each Mac that runs agent sessions: `process-rules machine <agent>`.
-2. In the client repository, as its owner: `process-rules onboard <owner>
-   <agent>`. It writes `.github/process-rules.json`, adds a SessionStart hook
+2. In the client repository, as its owner: `process-rules onboard`. It
+   suggests the owner from your `gh` login and the agent from the accounts
+   `machine` set up on this Mac, for you to confirm (or name them:
+   `process-rules onboard <owner> <agent>`). It writes `.github/process-rules.json`, adds a SessionStart hook
    running `process-rules session-start` to `.claude/settings.json`, and
    writes `.github/workflows/process-rules.yml`, which calls this repository's
    shared checks (`.github/workflows/checks.yml`). It checks the agent can
@@ -77,7 +79,8 @@ days before the token ends.
    make them. Last, it pushes
    one signed test commit as the agent to a throwaway branch, checks GitHub
    shows it Verified by the agent, and deletes the branch. Each change waits
-   for a yes; commit the three files afterwards. The repository needs at
+   for a yes; commit the files afterwards. An existing `.claude/settings.json`
+   keeps its layout: `onboard` adds only its hook entry. The repository needs at
    least one commit.
 
 The shared checks run five jobs. **Settings** validates
@@ -171,7 +174,7 @@ release, attaching the CLI package it built and tested. Install that package on
 each machine with pnpm; nothing is built on install:
 
 ```bash
-pnpm add -g https://github.com/athya-hq/process-rules/releases/download/v0.2.2/athya-hq-process-rules-0.2.2.tgz
+pnpm add -g https://github.com/athya-hq/process-rules/releases/download/v0.3.0/athya-hq-process-rules-0.3.0.tgz
 ```
 
 `onboard` pins the client's workflow to one version, the release of the CLI

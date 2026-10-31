@@ -8,6 +8,7 @@ import { describe, it } from 'node:test';
 import { Board, repoJson } from './fake-board.test.ts';
 import { FIELDS, ISSUE_TYPES, LABELS, viewsChecklist } from './board.ts';
 import { AGENT, FakeSys, ROOT, TOKEN, capture } from './fake.test.ts';
+import { pathsFor, sessionScript } from './agent.ts';
 import { FEATURES } from './features.ts';
 import { packageVersion } from './version.ts';
 import { HOOK_COMMAND, HOOKS_PATH, OLDER_HOOK_COMMANDS, PRE_PUSH_HOOK, WORKFLOW_PATH, onboard, onboardArgs, workflow } from './onboard.ts';
@@ -231,7 +232,15 @@ describe('onboard', () => {
   });
 
   for (const [name, named, change, message] of [
-    ['without accounts the first time', [], () => undefined, 'onboard: name the owner and the agent account: process-rules onboard <owner> <agent>'],
+    [
+      'without accounts the first time, when this Mac suggests none',
+      [],
+      (sys: FakeSys) => {
+        sys.ghToken = undefined;
+        sys.answers = ['', ''];
+      },
+      'onboard: name the owner and the agent account: process-rules onboard <owner> <agent>',
+    ],
     ['the same account twice', ['example-owner', 'Example-Owner'], () => undefined, 'onboard: the owner and the agent must be different accounts'],
     [
       'accounts other than the settings name',
@@ -254,6 +263,69 @@ describe('onboard', () => {
       assert.deepEqual({ code, err }, { code: 1, err: [message] });
     });
   }
+
+  describe('finding the accounts', () => {
+    /** A Mac where machine set up the agent, with the owner signed in to gh. */
+    function setUp(agents: string[]): FakeSys {
+      const sys = fresh();
+      for (const agent of agents) {
+        sys.files.set(`${sys.home}/.config/process-rules/${agent.toLowerCase()}/session.sh`, sessionScript(agent, 42, pathsFor(sys.home, agent)));
+      }
+      sys.files.set(`${sys.home}/.config/process-rules/locked/gh/hosts.yml`, '');
+      return sys;
+    }
+
+    it('takes the gh login as owner and the one agent set up here, with Enter', async () => {
+      const sys = setUp([AGENT]);
+      sys.answers = ['', '', ...Array<string>(11).fill('y')];
+      const { code } = await run(sys, []);
+      assert.equal(code, 0);
+      assert.deepEqual(sys.asked.slice(0, 2), ['The owner, who approves [example-owner]: ', 'The agent, which builds [ExampleBot]: ']);
+      assert.deepEqual(JSON.parse(sys.files.get(SETTINGS) ?? '').owner, 'example-owner');
+    });
+
+    it('lists the agents set up here and takes what is typed', async () => {
+      const sys = setUp(['OtherBot', AGENT]);
+      sys.answers = ['', 'examplebot', ...Array<string>(11).fill('y')];
+      const { code, out } = await run(sys, []);
+      assert.equal(code, 0);
+      assert.ok(out.includes('Accounts set up here for the agent: OtherBot, ExampleBot'));
+      assert.equal(JSON.parse(sys.files.get(SETTINGS) ?? '').agent, AGENT);
+    });
+
+    it('suggests no owner when gh is signed out or GitHub will not answer', async () => {
+      const sys = setUp([AGENT]);
+      sys.ghToken = 'gho_unknown';
+      sys.answers = ['', ''];
+      assert.deepEqual((await run(sys, [])).err, ['onboard: name the owner and the agent account: process-rules onboard <owner> <agent>']);
+      assert.equal(sys.asked[0], 'The owner, who approves: ');
+      const down = setUp([AGENT]);
+      down.http = () => Promise.reject(new Error('offline'));
+      down.answers = ['', ''];
+      assert.deepEqual((await run(down, [])).err, ['onboard: name the owner and the agent account: process-rules onboard <owner> <agent>']);
+      assert.equal(down.asked[0], 'The owner, who approves: ');
+    });
+  });
+
+  describe("keeping the client's settings layout", () => {
+    it('adds only the hook entry to an existing file', async () => {
+      const sys = fresh();
+      const text = '{\n  "env": { "A": "1" },\n  "hooks": {\n    "Stop": [{ "hooks": [] }]\n  }\n}\n';
+      sys.files.set(HOOKS, text);
+      await run(sys);
+      const out = sys.files.get(HOOKS) ?? '';
+      assert.ok(out.startsWith('{\n  "env": { "A": "1" },\n  "hooks": {\n    "Stop": [{ "hooks": [] }],\n    "SessionStart": ['), out);
+      assert.deepEqual(JSON.parse(out).hooks.SessionStart, [{ hooks: [{ type: 'command', command: HOOK_COMMAND }] }]);
+    });
+
+    it("swaps an older release's command in the text", async () => {
+      const sys = fresh();
+      const older = OLDER_HOOK_COMMANDS[0] as string;
+      sys.files.set(HOOKS, `{ "env": { "A": "1" }, "hooks": { "SessionStart": [{ "hooks": [{ "type": "command", "command": ${JSON.stringify(older)} }] }] } }\n`);
+      await run(sys);
+      assert.equal(sys.files.get(HOOKS), `{ "env": { "A": "1" }, "hooks": { "SessionStart": [{ "hooks": [{ "type": "command", "command": ${JSON.stringify(HOOK_COMMAND)} }] }] } }\n`);
+    });
+  });
 
   it('refuses a name that is not a login', async () => {
     await assert.rejects(run(fresh(), ['-x', AGENT]), /"-x" is not a GitHub login/);
