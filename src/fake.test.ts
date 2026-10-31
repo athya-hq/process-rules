@@ -142,6 +142,11 @@ export class FakeSys implements Sys {
     // An SSH key with no passphrase: its file starts "open:".
     if (command === 'ssh-keygen' && args[1] === '-P') return this.files.get(args[4] ?? '')?.startsWith('open:') ? ok() : fail('incorrect passphrase');
     if (command === 'git' && args[0] === 'remote') return ok(`${this.origin}\n`);
+    // As the agent session's credential helper does: the token in GH_TOKEN, else nothing.
+    if (command === 'git' && args.join(' ') === 'credential fill') {
+      const token = options.env?.GH_TOKEN;
+      return token ? ok(`protocol=https\nhost=github.com\nusername=x\npassword=${token}\n`) : fail('terminal prompts disabled');
+    }
     if (command === 'git' && args[0] === 'commit-tree') return ok('abc123\n');
     if (command === 'git' && args[0] === 'ls-remote') return ok(this.remoteHead);
     // The test commit's other git steps; anything else fails, so an unexpected call shows.

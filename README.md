@@ -32,8 +32,7 @@ into the keychain (service `process-rules`), refusing a fine-grained token,
 missing scopes or no expiry. It then registers the key as the agent's signing key, writes
 `~/.config/process-rules/<agent, lowercased>/session.sh`, and writes the
 launcher `~/.config/process-rules/bin/process-rules`, which the Claude Code
-hooks run (the pre-push git hook still runs `process-rules` from the agent
-session's `PATH`). The
+hooks and the pre-push git hook run. The
 launcher names the node that ran `machine` by its real path (not a version
 manager's per-shell one, which the Claude app's hooks may not have), so the
 hooks need no node on their `PATH`. Each change waits for a yes. Why a classic token: [docs/decisions.md](docs/decisions.md).
@@ -77,7 +76,12 @@ The lock lives in the session's environment, which a session that ignores it
 could change, so `machine` ends by offering to lock the owner away: to sign
 `gh` out of every account other than the agent's, active or not, and to remove a git password for
 github.com saved in the macOS keychain. It warns about SSH keys in `~/.ssh`
-with no passphrase. Declining leaves them, and `doctor` keeps naming them.
+with no passphrase, and names the account SSH reaches GitHub as without
+asking (a key in the SSH agent or the keychain). Declining leaves them, and
+`doctor` keeps naming them. The owner's SSH access is left alone, since it is
+the owner's own way to GitHub (docs/decisions.md); agent sessions send GitHub
+over HTTPS and refuse SSH, and the pre-push hook refuses their pushes over
+SSH.
 
 `process-rules doctor` re-checks the key, the token and its scopes, the key's
 registration, the session file and that the launcher runs, names the step to re-run, and warns 14
@@ -173,12 +177,21 @@ production is held for the owner with a suggestion and `needs-owner`. The
 weekly job removes `veto` once the week has passed.
 
 `onboard` also writes a pre-push git hook running `process-rules pre-push`,
-which applies the same rules before an agent session pushes: all the commits
+for every adopter. In a local agent session (one session-start set up, or
+any shell Claude Code runs on the Mac, which sets `CLAUDECODE`, so it holds
+where the Claude Code hooks never ran) it is the pre-push identity guard: a
+push over SSH is refused, whatever the host, since it would use this Mac's
+SSH keys, the owner's; over HTTPS to GitHub, git is asked for the
+credentials it would push with (one in the URL included) and GitHub for
+whose they are, and only the agent's push goes ahead. The owner's pushes
+from their own terminal are not checked, and neither are cloud sessions',
+which reach GitHub as the account connected to them. With `work-rules` on, it then applies the same rules before an
+agent session pushes: all the commits
 one push brings, on one branch, name one slice between them as a
 `Slice: #N` trailer. Commits a remote already has, such as the default
 branch's, are not the push's own; a push of only a merge, such as of the
 default branch, is judged by the branch's own commits. In an agent session, a push is refused when the CLI is
-missing or the session has no token. When the repository already has its own
+missing, or, with `work-rules` on, the session has no token. When the repository already has its own
 pre-push hook, or git runs hooks from a folder outside the repository (a
 global `core.hooksPath`), `onboard` leaves it alone and names the line to add:
 `process-rules pre-push "$@"`. The client workflow re-runs the checks when a
@@ -206,8 +219,7 @@ alone; later, `process-rules onboard --add board` turns one more on and sets
 it up. Settings with no `features` key keep every feature on, as before;
 `"features": []` means identity alone. The shared checks,
 the weekly job, `reviews-due` and the pre-push hook each pass, saying so, when
-their feature is off; `onboard` writes the workflow only once a check needs it
-and the pre-push hook only with `work-rules`. `project` names the board's
+their feature is off; `onboard` writes the workflow only once a check needs it. `project` names the board's
 Project (by default `<repo> work`).
 
 ### Releases and upgrading
@@ -227,7 +239,7 @@ below it under `with:`, `process-rules-ref: vX.Y.Z`, because a called
 workflow cannot read its own ref from GitHub's contexts. Upgrading is one
 step: install the new CLI and run `onboard` again, which rewrites both lines
 together (it offers to replace the workflow). Editing the version by hand
-means changing both lines. The Claude Code hooks run the
+means changing both lines. The hooks run the
 launcher `machine` writes, else `process-rules` from the `PATH`; without
 either the session-start hook tells the session to stop, and the guard refuses
 `gh` and `git`. Run `machine` again after removing the node it names.

@@ -327,11 +327,12 @@ describe('prePush', () => {
     sys.env = { PROCESS_RULES_AGENT: AGENT, GH_TOKEN: 'ghp_good' };
     sys.execOverride = (call) => (call.args[0] === 'log' ? { code: 0, stdout: log, stderr: '' } : undefined);
     github(sys, graph().issue);
+    sys.acceptToken('ghp_good', AGENT);
     return sys;
   }
   async function push(sys: FakeSys, lines: string): Promise<{ code: number; err: string[] }> {
     const { io, err } = capture();
-    return { code: await prePush(sys, io, lines), err };
+    return { code: await prePush(sys, io, lines, 'https://github.com/example-org/example-app.git'), err };
   }
 
   it('lets an agent push commits naming a slice that may be built', async () => {
@@ -403,15 +404,25 @@ describe('prePush', () => {
     assert.equal((await push(owner, `refs/heads/work ${LOCAL} refs/heads/work ${REMOTE}`)).code, 0);
   });
 
-  it('refuses an agent session with no token', async () => {
+  it('refuses an agent session with no token, at the identity guard', async () => {
     for (const token of [undefined, 'process-rules-no-agent-token']) {
       const sys = session('Slice: #12');
       sys.env = { PROCESS_RULES_AGENT: AGENT, ...(token ? { GH_TOKEN: token } : {}) };
-      assert.deepEqual(await push(sys, `refs/heads/work ${LOCAL} refs/heads/work ${REMOTE}`), {
-        code: 1,
-        err: ['✗ this agent session has no token, so the work rules cannot be checked; run process-rules doctor', 'pre-push: refused by the work rules'],
-      });
+      const { code, err } = await push(sys, `refs/heads/work ${LOCAL} refs/heads/work ${REMOTE}`);
+      assert.deepEqual({ code, last: err.at(-1) }, { code: 1, last: `pre-push: refused; an agent session pushes to GitHub only as ${AGENT}` });
     }
+  });
+
+  it('refuses work rules it cannot read when git pushes as the agent without GH_TOKEN', async () => {
+    const sys = session('Slice: #12');
+    sys.env = { PROCESS_RULES_AGENT: AGENT };
+    const log = sys.execOverride;
+    sys.execOverride = (call) =>
+      call.args.join(' ') === 'credential fill' ? { code: 0, stdout: 'password=ghp_good\n', stderr: '' } : log(call);
+    assert.deepEqual(await push(sys, `refs/heads/work ${LOCAL} refs/heads/work ${REMOTE}`), {
+      code: 1,
+      err: ['✗ this agent session has no token, so the work rules cannot be checked; run process-rules doctor', 'pre-push: refused by the work rules'],
+    });
   });
 
   it('counts the slices across every ref of one push', async () => {

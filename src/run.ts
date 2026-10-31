@@ -103,7 +103,7 @@ export async function run(
         if (command === 'pr-work-rules') return await prWorkRules(await sys(), io);
         if (command === 'pre-push') {
           const real = await sys();
-          return await prePush(real, io, real.readStdin());
+          return await prePush(real, io, real.readStdin(), rest[1] ?? '');
         }
         if (command === 'onboard') return await onboard(await sys(), io, rest);
         return await (command === 'machine' ? machine : doctor)(await sys(), io, rest[0]);

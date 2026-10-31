@@ -102,11 +102,11 @@ describe('checks of features that are off', () => {
     assert.deepEqual({ out, err }, { out: [], err: ['reviews-due: review is off in .github/process-rules.json; nothing to check'] });
   });
 
-  it('pre-push lets an agent push, even with no token, saying so', async () => {
+  it('pre-push checks only that an agent pushes as the agent, saying the work rules are off', async () => {
     const sys = identityOnly();
-    delete sys.env.GH_TOKEN;
+    sys.acceptToken('ghs_run', AGENT);
     const { io, err } = capture();
-    assert.equal(await prePush(sys, io, `refs/heads/w ${'a'.repeat(40)} refs/heads/w ${'b'.repeat(40)}`), 0);
+    assert.equal(await prePush(sys, io, `refs/heads/w ${'a'.repeat(40)} refs/heads/w ${'b'.repeat(40)}`, 'https://github.com/example-org/example-app.git'), 0);
     assert.deepEqual(err, ['pre-push: work-rules is off in .github/process-rules.json; nothing to check']);
   });
 

@@ -25,19 +25,44 @@ import type { Output, Sys } from './types.ts';
 export const PRODUCT = 'athya-hq/process-rules';
 export const HOOKS_PATH = '.claude/settings.json';
 export const WORKFLOW_PATH = '.github/workflows/process-rules.yml';
-/** The pre-push git hook: the work rules before an agent session pushes. */
+/**
+ * The pre-push git hook: before a local agent session pushes, that it
+ * reaches GitHub as the agent, then the work rules. It needs no Claude Code
+ * hook to have run: any shell Claude Code runs sets CLAUDECODE. Cloud
+ * sessions are left alone; they reach GitHub as the account connected to them.
+ */
 export const PRE_PUSH_HOOK = [
   '#!/bin/sh',
-  '# Written by process-rules onboard: the work rules before an agent session pushes.',
-  '# Without the CLI nothing can check an agent session\'s push, so it is refused; anyone else\'s goes ahead.',
-  'if ! command -v process-rules >/dev/null 2>&1; then',
-  '  [ -z "$PROCESS_RULES_AGENT" ] && exit 0',
-  '  echo "process-rules: the CLI is not installed, so this agent push cannot be checked against the work rules" >&2',
+  '# Written by process-rules onboard: before an agent session pushes, that it pushes as the agent, then the work rules.',
+  '# Anyone else\'s push goes ahead. Without the CLI nothing can check an agent session\'s push, so it is refused.',
+  '[ "$CLAUDE_CODE_REMOTE" = true ] && exit 0',
+  '[ -z "$PROCESS_RULES_AGENT" ] && [ "$CLAUDECODE" != 1 ] && exit 0',
+  'cli="$HOME/.config/process-rules/bin/process-rules"',
+  '[ -x "$cli" ] || cli=process-rules',
+  'if ! command -v "$cli" >/dev/null 2>&1; then',
+  '  echo "process-rules: the CLI is not installed, so this agent push cannot be checked" >&2',
   '  exit 1',
   'fi',
-  'exec process-rules pre-push "$@"',
+  'exec "$cli" pre-push "$@"',
   '',
 ].join('\n');
+
+/** The pre-push hooks older releases wrote, which onboard replaces with this release's. */
+export const OLDER_PRE_PUSH_HOOKS = [
+  [
+    '#!/bin/sh',
+    '# Written by process-rules onboard: the work rules before an agent session pushes.',
+    '# Without the CLI nothing can check an agent session\'s push, so it is refused; anyone else\'s goes ahead.',
+    'if ! command -v process-rules >/dev/null 2>&1; then',
+    '  [ -z "$PROCESS_RULES_AGENT" ] && exit 0',
+    '  echo "process-rules: the CLI is not installed, so this agent push cannot be checked against the work rules" >&2',
+    '  exit 1',
+    'fi',
+    'exec process-rules pre-push "$@"',
+    '',
+  ].join('\n'),
+];
+
 /** How a hook finds the CLI: the launcher `machine` writes, else whatever PATH has. */
 const FIND_CLI = 'cli="$HOME/.config/process-rules/bin/process-rules"; [ -x "$cli" ] || cli=process-rules; ';
 
@@ -435,21 +460,24 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     io.out(`✓ ${WORKFLOW_PATH}`);
   }
 
-  if (on('work-rules')) {
+  // Every adopter: the identity guard holds where the Claude Code hooks did not run.
+  {
     const hookPath = sys.exec('git', ['rev-parse', '--git-path', 'hooks/pre-push'], { cwd: root }).stdout.trim();
     const hookFile = hookPath.startsWith('/') ? hookPath : `${root}/${hookPath}`;
     const gitDir = sys.exec('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd: root }).stdout.trim();
     const line = 'process-rules pre-push "$@"';
+    const what = 'which checks an agent session pushes to GitHub as the agent, and the work rules';
     if (!hookFile.startsWith(`${root}/`) && !hookFile.startsWith(`${gitDir}/`)) {
       // A hooks folder shared by other repositories (a global core.hooksPath) is the owner's to change.
       io.out(`! git runs hooks from ${hookPath}, outside this repository; add this line to its pre-push hook: ${line}`);
-    } else if (!sys.exists(hookFile)) {
-      if (!(await confirm(`Write the pre-push git hook ${hookPath}, which runs the work rules before an agent session pushes?`))) {
+    } else if (!sys.exists(hookFile) || OLDER_PRE_PUSH_HOOKS.includes(sys.read(hookFile))) {
+      const verb = sys.exists(hookFile) ? 'Replace the older process-rules pre-push git hook' : 'Write the pre-push git hook';
+      if (!(await confirm(`${verb} ${hookPath}, ${what}?`))) {
         return stop('pre-push hook');
       }
       sys.write(hookFile, PRE_PUSH_HOOK, 0o755);
       io.out(`✓ pre-push hook ${hookPath}`);
-    } else if (/^\s*(?:exec\s+)?process-rules\s+pre-push\b/m.test(sys.read(hookFile))) {
+    } else if (/^\s*(?:exec\s+)?(?:"\$cli"|process-rules)\s+pre-push\b/m.test(sys.read(hookFile))) {
       io.out(`✓ pre-push hook ${hookPath}`);
     } else {
       io.out(`! ${hookPath} is your own; add this line to it: ${line}`);

@@ -86,3 +86,19 @@
   its real path, since a version manager's per-shell node may be missing
   from the app's hook environment. The guard matches commands by their text,
   so it misses what a script runs; the lock and the pre-push hook cover that.
+- **2026-10-31 — Record: P-18, the owner's SSH route.** The owner, on the
+  Work item #22: "Decision: add #44 (P-16), #45 (P-17) and #46 (P-18) to
+  roadmap v1." After `machine` signed `gh` out of the owner, git still
+  reached GitHub as the owner over SSH, with the owner's key from the SSH
+  agent. `machine` and `doctor` name the account SSH reaches GitHub as, but
+  removing that route is out of scope: the key is the owner's own way to
+  GitHub, used outside agent sessions, and an agent session runs as the same
+  macOS user, so nothing on the Mac tells its `ssh` from the owner's. The
+  route is covered where agents act instead. The lock, in every session's
+  `env` since P-17, sends GitHub's SSH remotes over HTTPS and refuses SSH,
+  and the pre-push hook, now written for every adopter, refuses an agent
+  session's push over SSH, or over HTTPS as anyone but the agent. It knows an
+  agent session by `CLAUDECODE`, which Claude Code sets in every shell it
+  runs, so it holds where the hooks never ran. What remains is a session that
+  works around the lock and the hook on purpose; only a separate macOS user
+  for agent sessions would close that.

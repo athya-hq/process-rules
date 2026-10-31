@@ -12,7 +12,7 @@ import type { HttpResult } from './types.ts';
 import { pathsFor, sessionScript } from './agent.ts';
 import { FEATURES } from './features.ts';
 import { packageVersion } from './version.ts';
-import { GUARD_COMMAND, HOOK_COMMAND, HOOKS_PATH, OLDER_HOOK_COMMANDS, PRE_PUSH_HOOK, WORKFLOW_PATH, claudeSettings, onboard, onboardArgs, workflow } from './onboard.ts';
+import { GUARD_COMMAND, HOOK_COMMAND, HOOKS_PATH, OLDER_HOOK_COMMANDS, OLDER_PRE_PUSH_HOOKS, PRE_PUSH_HOOK, WORKFLOW_PATH, claudeSettings, onboard, onboardArgs, workflow } from './onboard.ts';
 import { BASE_ENV } from './agent.ts';
 
 const SETTINGS = `${ROOT}/.github/process-rules.json`;
@@ -212,6 +212,21 @@ describe('onboard', () => {
       assert.equal(shell(HOOK_COMMAND, {}).stdout, 'launched session-start\n', 'the launcher, with nothing on PATH');
     });
 
+    it('pre-push: the owner\'s pushes go ahead; an agent session\'s runs the CLI, refused without one', () => {
+      rmSync(launcher, { force: true });
+      const hook = (env: Record<string, string>) => spawnSync('sh', ['-c', `${PRE_PUSH_HOOK}`, 'pre-push', 'origin', 'url'], { encoding: 'utf8', env: { HOME: home, PATH: '/usr/bin:/bin', ...env } });
+      assert.equal(hook({}).status, 0);
+      assert.equal(hook({ CLAUDECODE: '1', CLAUDE_CODE_REMOTE: 'true' }).status, 0, 'cloud sessions are left alone');
+      for (const env of [{ CLAUDECODE: '1' }, { PROCESS_RULES_AGENT: AGENT }]) {
+        const refused = hook(env);
+        assert.deepEqual({ status: refused.status, stderr: refused.stderr }, { status: 1, stderr: 'process-rules: the CLI is not installed, so this agent push cannot be checked\n' });
+      }
+      cli(launcher, 'echo "ran $*"; exit 1');
+      assert.deepEqual((({ status, stdout }) => ({ status, stdout }))(hook({ CLAUDECODE: '1' })), { status: 1, stdout: 'ran pre-push origin url\n' });
+      cli(launcher, 'exit 0');
+      assert.equal(hook({ CLAUDECODE: '1' }).status, 0);
+    });
+
     it('guard: commands naming neither gh nor git go ahead without the CLI; others as the CLI says, refused when it cannot run', () => {
       rmSync(launcher, { force: true });
       const input = (command: string): string => JSON.stringify({ session_id: 's', tool_input: { command } });
@@ -275,6 +290,14 @@ describe('onboard', () => {
       env: { A: '1', ...BASE_ENV },
       hooks: { SessionStart: [own, SESSION_ENTRY], Stop: [own], PreToolUse: [GUARD_ENTRY] },
     });
+  });
+
+  it("replaces an older release's pre-push hook", async () => {
+    const sys = fresh();
+    sys.files.set(PRE_PUSH, OLDER_PRE_PUSH_HOOKS[0] as string);
+    await run(sys);
+    assert.ok(sys.asked.includes('Replace the older process-rules pre-push git hook .git/hooks/pre-push, which checks an agent session pushes to GitHub as the agent, and the work rules? [y/N] '));
+    assert.equal(sys.files.get(PRE_PUSH), PRE_PUSH_HOOK);
   });
 
   it("leaves the client's own pre-push hook, naming the line to add", async () => {
@@ -722,18 +745,19 @@ describe('onboard', () => {
 });
 
 describe('staged adoption', () => {
-  it('sets up identity alone, with no workflow, hook or board', async () => {
+  it('sets up identity alone, with the pre-push hook but no workflow or board', async () => {
     const sys = fresh();
-    sys.answers = ['y', 'y', 'y'];
+    sys.answers = ['y', 'y', 'y', 'y'];
     const { code, out } = await run(sys, ['example-owner', AGENT, '--features', 'identity']);
     assert.equal(code, 0);
     assert.deepEqual(JSON.parse(sys.files.get(SETTINGS) ?? '').features, ['identity']);
     assert.ok(sys.files.has(HOOKS));
-    assert.ok(!sys.files.has(WORKFLOW) && !sys.files.has(PRE_PUSH));
+    assert.ok(!sys.files.has(WORKFLOW));
+    assert.equal(sys.files.get(PRE_PUSH), PRE_PUSH_HOOK, 'the identity guard, for every adopter');
     assert.ok(!sys.requests.some((r) => r.url.endsWith('/graphql') || r.url.includes('/labels') || r.url.includes('/issue-types')), 'no board');
     assert.equal(out.at(-1), 'onboard: done. Commit .github/process-rules.json and .claude/settings.json; agent sessions then work as ExampleBot.');
     assert.ok(out.includes('✓ GitHub shows the test commit Verified by ExampleBot'));
-    assert.deepEqual(sys.asked.map((q) => q.split(' ')[0]), ['Write', 'Write', 'Push']);
+    assert.deepEqual(sys.asked.map((q) => q.split(' ')[0]), ['Write', 'Write', 'Write', 'Push']);
   });
 
   it('turns one more feature on, keeping the other settings', async () => {
@@ -770,6 +794,7 @@ describe('staged adoption', () => {
     sys.files.set(HOOKS, JSON.stringify(CLAUDE));
     sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity', 'pr-identity'] }));
     sys.files.set(WORKFLOW, workflow('main', packageVersion()));
+    sys.files.set(PRE_PUSH, PRE_PUSH_HOOK);
     const before = sys.files.get(SETTINGS);
     sys.answers = ['y'];
     await run(sys, ['--add', 'pr-identity']);
@@ -794,6 +819,7 @@ describe('staged adoption', () => {
     const before = JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity'] });
     sys.files.set(SETTINGS, before);
     sys.files.set(HOOKS, JSON.stringify(CLAUDE));
+    sys.files.set(PRE_PUSH, PRE_PUSH_HOOK);
     sys.answers = ['y', 'n'];
     const { err } = await run(sys, ['--add', 'board']);
     assert.deepEqual(err, ['onboard: stopped at "issue types"; nothing after it was changed']);
