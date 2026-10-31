@@ -1,0 +1,55 @@
+src/types.ts
+  s_0d8441d81ecc7c::t_dd1a9beb2c4cf1 30-37,46-49
+src/onboard.ts
+  s_0d8441d81ecc7c::t_63a3da5bd118bb 401-404,478,480,487,489-492,527,580,583-588,663-666
+  s_0d8441d81ecc7c::t_f8f43d33af4a2b 19,479,481-486,488
+src/machine.test.ts
+  s_0d8441d81ecc7c::t_9bd7dd7777495f 78
+src/sys.test.ts
+  s_0d8441d81ecc7c::t_75dc0bdb4e9420 50-62
+src/board.ts
+  s_0d8441d81ecc7c::t_58b9f6576da8ef 1,94,106-107
+  s_0d8441d81ecc7c::t_63a3da5bd118bb 95-96
+src/sys.ts
+  s_0d8441d81ecc7c::t_dd1a9beb2c4cf1 7,11,15-16,39,56-57
+src/fake.test.ts
+  s_0d8441d81ecc7c::t_2e020efe6405a2 32,53,55-57,116,118,140-150,227-238
+  s_0d8441d81ecc7c::t_e3f685136c1b08 239
+src/owner-login.test.ts
+  s_0d8441d81ecc7c::t_5ccad44a0776c9 1-120
+README.md
+  s_0d8441d81ecc7c::t_1e41624605db27 86-95,105,116,118-120,138-140
+docs/roadmap.md
+  s_0d8441d81ecc7c::t_320576461e8254 55-62
+package.json
+  s_0d8441d81ecc7c::t_bcd7c3949afdcc 3
+docs/decisions.md
+  s_0d8441d81ecc7c::t_320576461e8254 189-205
+src/lockout.ts
+  s_0d8441d81ecc7c::t_f8f43d33af4a2b 95
+src/owner-login.ts
+  s_0d8441d81ecc7c::t_c4a442544f4c8d 1-77
+src/onboard.test.ts
+  s_0d8441d81ecc7c::t_a8916a80a1cb6b 8,23,597,602,604-605,608-610,626,628-629,649,651-652,685,690,694,696,712,721
+  s_0d8441d81ecc7c::t_ff3291afb063e2 458,468,487,501-556
+  s_0d8441d81ecc7c::t_82e328334cd659 475
+  s_0d8441d81ecc7c::t_58d0ea7583203f 557-558
+src/board.test.ts
+  s_0d8441d81ecc7c::t_7d0e0db4243144 13,62
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "0b3f17c8b376aa93ec9a26e0c4901bb5eeb5c9ff",
+  "prompts": {},
+  "sessions": {
+    "s_0d8441d81ecc7c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "257318a3-06b8-452f-91df-c07145b2e66f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Alok Bansal <alokagrawal8@gmail.com>"
+    }
+  }
+}
