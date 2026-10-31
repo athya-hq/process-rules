@@ -84,7 +84,10 @@ days before the token ends.
    shows it Verified by the agent, and deletes the branch. Each change waits
    for a yes; commit the files afterwards. An existing `.claude/settings.json`
    keeps its layout: `onboard` adds only its hook entry. The repository needs at
-   least one commit.
+   least one commit. The pull request checks read the settings from the base
+   branch, so the pull request that first commits them fails PR identity, Work
+   rules and Design frames; merge it before making those checks required, and
+   they apply from the next pull request.
 
 The shared checks run five jobs. **Settings** validates
 `.github/process-rules.json`. **PR identity** runs on pull requests: every
