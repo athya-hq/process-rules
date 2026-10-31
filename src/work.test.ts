@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { AGENT, FakeSys, ROOT, SETTINGS, capture } from './fake.test.ts';
-import { prePush, prWorkRules, propose, sliceProblems, slicesNamed } from './work.ts';
+import { prePush, prWorkRules, propose, section, sliceProblems, slicesNamed } from './work.ts';
 
 const SLUG = 'example-org/example-app';
 const OWNER = 'example-owner';
@@ -25,6 +25,7 @@ function graph(): { issue: Node; timeline: Node[]; states: Node[]; comments: Nod
   const issue: Node = {
     number: 12,
     title: 'Add the thing',
+    body: 'Slice P-01 of #10.\n\n**You will see:** the thing.\n- on every page\n\n**Why:** it is asked for.\n\n**Needs:** —',
     type: { name: 'Slice' },
     comments,
     parent: { number: 10, type: { name: 'Work item' } },
@@ -105,6 +106,17 @@ describe('slicesNamed', () => {
   });
 });
 
+describe('section', () => {
+  it("reads a body's section up to the next one, or nothing when it is missing or empty", () => {
+    const body = 'Intro\r\n**Why:** because\r\n- **Bold.** a point\r\n**Needs:** —\n**Empty:**  \n**Cost:**';
+    assert.equal(section(body, 'why'), 'because\n- **Bold.** a point');
+    assert.equal(section(body, 'Needs'), '—');
+    assert.equal(section(body, 'Empty'), undefined);
+    assert.equal(section(body, 'Cost'), undefined);
+    assert.equal(section(body, 'You will see'), undefined);
+  });
+});
+
 describe('sliceProblems', () => {
   it('lets an approved slice be built', async () => {
     assert.deepEqual(await problems(graph().issue), []);
@@ -164,9 +176,9 @@ describe('sliceProblems', () => {
       g.timeline[0] = { event: 'sub_issue_added', created_at: LATER, sub_issue: { number: 12 } };
       return g;
     };
-    const refused =
-      '#12 was added to work item #10 after its approval; example-owner reacts 👍 on ExampleBot\'s proposal on #12, or adds a "Decision:" comment naming #12; ExampleBot proposes it with: process-rules propose 12';
-    const proposed = '#12 was added to work item #10 after its approval; example-owner reacts 👍 on ExampleBot\'s proposal on #12, or adds a "Decision:" comment naming #12';
+    const proposed =
+      '#12 was added to work item #10 after its approval; example-owner reacts 👍 on ExampleBot\'s proposal on #12, or adds a "Decision:" comment naming #12, or #12 links example-owner\'s request for it on #10';
+    const refused = `${proposed}; ExampleBot proposes it with: process-rules propose 12`;
 
     it('is refused without the owner\'s decision', async () => {
       assert.deepEqual(await problems(added().issue), [refused]);
@@ -197,6 +209,47 @@ describe('sliceProblems', () => {
         assert.deepEqual(await problems(g.issue), [refused]);
       });
     }
+
+    describe("a request on the work item the slice links", () => {
+      const LINK = `https://github.com/${SLUG}/issues/10#issuecomment-`;
+      /** Slice #12 added after approval, its body linking `link`, with `made` on the work item. */
+      const linking = (made: Node, link = `${LINK}${made.id as number}`): ReturnType<typeof graph> => {
+        const g = added();
+        g.issue.body = `${g.issue.body as string}\n\nRequested: ${link}`;
+        g.timeline.push(made);
+        return g;
+      };
+      const request = (created_at = APPROVED, login = OWNER, edited: string | null = null): Node => ({ ...comment('Please add the thing', created_at, login, edited), id: 4321 });
+
+      it("passes with the owner's comment, made before the slice was added", async () => {
+        assert.deepEqual(await problems(linking(request()).issue), []);
+        // GitHub writes a repository's name as it likes; the link may differ in case.
+        assert.deepEqual(await problems(linking(request(), `${LINK.replace(SLUG, SLUG.toUpperCase())}4321`).issue), []);
+      });
+
+      for (const [name, made, link] of [
+        ['by anyone else', request(APPROVED, AGENT), undefined],
+        ['with no author', { ...request(), user: null }, undefined],
+        ['made after the slice was added', request(LATEST), undefined],
+        ['edited since it was made', request(APPROVED, OWNER, APPROVED.replace('02T', '02T01')), undefined],
+        ['on another issue', request(), `https://github.com/${SLUG}/issues/11#issuecomment-4321`],
+        ['in another repository', request(), `https://github.com/example-org/other-app/issues/10#issuecomment-4321`],
+        ['that is not the one linked', request(), `${LINK}43210`],
+      ] as const) {
+        it(`does not pass with a comment ${name}`, async () => {
+          assert.deepEqual(await problems(linking(made, link).issue), [refused]);
+        });
+      }
+
+      it('does not pass when the slice links nothing, or GitHub holds no such comment', async () => {
+        const g = added();
+        g.timeline.push(request());
+        assert.deepEqual(await problems(g.issue), [refused]);
+        const h = added();
+        h.issue.body = `${LINK}4321`;
+        assert.deepEqual(await problems(h.issue), [refused]);
+      });
+    });
 
     it('checks the latest addition when a slice is removed and added again', async () => {
       const g = graph();
@@ -446,6 +499,16 @@ describe('prWorkRules', () => {
     assert.equal(sys.requests[0]?.token, 'ghs_run');
   });
 
+  it('passes a fix: a pull request naming the closed slice it fixes, with a State filed under it after approval', async () => {
+    const g = graph();
+    g.issue.state = 'closed';
+    g.issue.closed_at = LATER;
+    g.states.push({ number: 31, title: 'Fix: the thing on narrow pages', type: { name: 'State' }, state_reason: null, closed_at: null, comments: [] });
+    const sys = actions(agentPull('Fixes state #31.\n\nSlice: #12'));
+    github(sys, g.issue);
+    assert.deepEqual(await check(sys), { code: 0, out: ['✓ pr-work-rules: #40 builds slice #12, which may be built'], err: [] });
+  });
+
   it('refuses an agent pull request whose slice may not be built', async () => {
     const g = graph();
     g.timeline.splice(1, 1);
@@ -665,7 +728,15 @@ describe('propose', () => {
   const owing = (): ReturnType<typeof graph> => {
     const g = graph();
     g.timeline[0] = { event: 'sub_issue_added', created_at: LATER, sub_issue: { number: 12 } };
-    g.states.push({ number: 30, title: 'Empty list', type: { name: 'State' }, state_reason: 'not_planned', closed_at: LATER, comments: [] });
+    g.states.push({
+      number: 30,
+      title: 'Empty list',
+      body: 'The list shows a note when empty.\n\n**Why:** the list is never empty now.\n\n**Cost:** nothing anyone would see.',
+      type: { name: 'State' },
+      state_reason: 'not_planned',
+      closed_at: LATER,
+      comments: [],
+    });
     return g;
   };
   async function run(sys: FakeSys, number = 12): Promise<{ code: number; out: string[]; err: string[] }> {
@@ -686,11 +757,48 @@ describe('propose', () => {
       ],
       err: [],
     });
+    const ask = '@example-owner: react 👍 to this comment to approve it, or comment "Decision:".';
     assert.deepEqual(posted(sys), [
-      'Proposal: add #12 (Add the thing) to work item #10, after its approval.\n\n@example-owner: react 👍 to this comment to approve it, or comment "Decision:".',
-      "Proposal: drop state #30 (Empty list), closed as not planned after work item #10's approval.\n\n@example-owner: react 👍 to this comment to approve it, or comment \"Decision:\".",
+      [
+        'Proposal: add #12 (Add the thing) to work item #10, after its approval.',
+        '**What changes:** the thing.\n- on every page',
+        '**Why:** it is asked for.',
+        '**What it costs:** one more slice of work item #10: the agent builds it in a pull request, which you review.',
+        '**If you decline:** #12 is closed as not planned and nothing of it is built; work item #10 keeps what you approved.',
+        ask,
+      ].join('\n\n'),
+      [
+        "Proposal: drop state #30 (Empty list), closed as not planned after work item #10's approval.",
+        '**What changes:** slice #12 is built without state #30, which you approved.',
+        '**Why:** the list is never empty now.',
+        '**What it costs:** nothing anyone would see.',
+        '**If you decline:** state #30 is reopened and built as you approved it.',
+        ask,
+      ].join('\n\n'),
     ]);
     assert.deepEqual(sys.requests.find((r) => r.url.endsWith('/labels'))?.body, { labels: ['needs-owner'] });
+  });
+
+  it('refuses, posting nothing, while a body lacks what its proposal says', async () => {
+    const g = owing();
+    g.issue.body = 'Slice P-01 of #10.\n\n**You will see:**\n\n**Needs:** —';
+    (g.states[0] as Node).body = null;
+    const { sys } = session(g);
+    assert.deepEqual(await run(sys), {
+      code: 1,
+      out: [],
+      err: [
+        '✗ #12\'s body has no "**You will see:**" or "**Why:**" section; write it there first, so the proposal says what changes and why',
+        '✗ state #30\'s body has no "**Why:**" section; write it there first, so the proposal says what changes and why',
+        'propose: refused by the work rules',
+      ],
+    });
+    assert.deepEqual(posted(sys), []);
+    // What is already proposed, or settled, needs nothing more.
+    g.comments.push(comment('Proposal: add #12', LATER, AGENT));
+    ((g.states[0] as Node).comments as Node[]).push(comment('Decision: drop it'));
+    assert.equal((await run(sys)).code, 0);
+    assert.deepEqual(posted(sys), []);
   });
 
   it('proposes a state alone, given the state', async () => {

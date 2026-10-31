@@ -24,6 +24,7 @@ interface Comment {
 interface Issue {
   number: number;
   title: string;
+  body?: string | null;
   /** The issue's address in GitHub's REST API, from which its comments, sub-issues and timeline are read. */
   url: string;
   type: { name: string } | null;
@@ -101,11 +102,13 @@ interface Owed {
   /** The slice, when it was added; the state, when it was dropped. */
   number: number;
   title: string;
+  /** The body of the slice, or of the state: what a proposal says for it. */
+  body: string;
   /** The owner's say counts only after this, when given: the slice's latest addition. */
   since?: string;
   /** The agent's proposals for it, on the slice. */
   proposals: Comment[];
-  /** Whether the owner gave it: a `Decision:` comment, or 👍 on one of the proposals. */
+  /** Whether the owner gave it: a `Decision:` comment, a request on the work item the slice links, or 👍 on one of the proposals. */
   settled: boolean;
 }
 
@@ -119,6 +122,21 @@ function thumbsUp(proposals: Comment[], reactions: Map<Comment['id'], Reaction[]
       const edited = editedAt(proposal);
       return sameLogin(reaction.user?.login, owner) && (!since || reaction.created_at > since) && (!edited || reaction.created_at > edited);
     }),
+  );
+}
+
+/**
+ * Whether the slice's `body` links a comment the owner wrote on work item
+ * `parent` before `since`, the slice's latest addition: a request on GitHub
+ * is its own approval. GitHub, not the link, says who wrote the comment, on
+ * which issue and when; one edited since it was written does not count,
+ * since REST does not say who edited it.
+ */
+function requested(body: string, slug: string, parent: number, comments: Comment[], owner: string, since: string): boolean {
+  const link = new RegExp(`https://github\\.com/${slug.replaceAll('.', '\\.')}/issues/${parent}#issuecomment-(\\d+)\\b`, 'gi');
+  const linked = new Set([...body.matchAll(link)].map((match) => match[1]));
+  return comments.some(
+    (comment) => linked.has(String(comment.id)) && sameLogin(comment.user?.login, owner) && comment.created_at < since && !editedAt(comment),
   );
 }
 
@@ -188,9 +206,13 @@ async function readSlice(
       kind: 'added',
       number: slice,
       title: issue.title,
+      body: issue.body ?? '',
       since: added.created_at,
       proposals: proposalsFor(comments, agent, slice),
-      settled: decided(parentComments, owner, added.created_at, `#${slice}`) || decided(comments, owner, added.created_at),
+      settled:
+        decided(parentComments, owner, added.created_at, `#${slice}`) ||
+        decided(comments, owner, added.created_at) ||
+        requested(issue.body ?? '', slug, parent.number, parentComments, owner, added.created_at),
     });
   }
   for (const state of states) {
@@ -199,6 +221,7 @@ async function readSlice(
       kind: 'dropped',
       number: state.number,
       title: state.title,
+      body: state.body ?? '',
       proposals: proposalsFor(comments, agent, state.number),
       settled: decided(comments, owner, undefined, `#${state.number}`) || decided(await every<Comment>(sys, token, slice, `${state.url}/comments`), owner),
     });
@@ -217,7 +240,7 @@ async function readSlice(
 function owedProblem(one: Owed, slice: number, parent: number | undefined, { owner, agent }: { owner: string; agent: string }): string {
   const ask = one.proposals.length > 0 ? '' : `; ${agent} proposes it with: process-rules propose ${one.number}`;
   return one.kind === 'added'
-    ? `#${slice} was added to work item #${parent} after its approval; ${owner} reacts 👍 on ${agent}'s proposal on #${slice}, or adds a "Decision:" comment naming #${slice}${ask}`
+    ? `#${slice} was added to work item #${parent} after its approval; ${owner} reacts 👍 on ${agent}'s proposal on #${slice}, or adds a "Decision:" comment naming #${slice}, or #${slice} links ${owner}'s request for it on #${parent}${ask}`
     : `state #${one.number} was closed as not planned after approval; ${owner} reacts 👍 on ${agent}'s proposal for it on #${slice}, or adds a "Decision:" comment to it${ask}`;
 }
 
@@ -413,12 +436,51 @@ export async function prePush(sys: Sys, io: Output, refLines: string, url: strin
 /** The label that puts an issue in the owner's Needs you view. */
 const NEEDS_OWNER = 'needs-owner';
 
-function proposalBody(one: Owed, parent: number | undefined, owner: string): string {
+/** The text of `body`'s section `**name:**`, up to the next line that starts a section, or undefined when it has none or it is empty. */
+export function section(body: string, name: string): string | undefined {
+  const lines = body.split(/\r?\n/);
+  const head = new RegExp(`^\\s*\\*\\*${name}:\\*\\*`, 'i');
+  const from = lines.findIndex((line) => head.test(line));
+  if (from < 0) return undefined;
+  const rest = lines.slice(from + 1);
+  const to = rest.findIndex((line) => /^\s*\*\*[^*\n]+:\*\*/.test(line));
+  const text = [(lines[from] as string).replace(head, ''), ...(to < 0 ? rest : rest.slice(0, to))].join('\n').trim();
+  return text || undefined;
+}
+
+/** The sections a proposal for `one` takes from its body, by the name the body gives each. */
+const NEEDED = { added: ['You will see', 'Why'], dropped: ['Why'] } as const;
+
+/** What `one`'s body lacks for a proposal that stands alone, as a problem, or undefined. */
+function proposalGap(one: Owed): string | undefined {
+  const missing = NEEDED[one.kind].filter((name) => !section(one.body, name));
+  if (missing.length === 0) return undefined;
+  const what = one.kind === 'added' ? `#${one.number}` : `state #${one.number}`;
+  return `${what}'s body has no ${missing.map((name) => `"**${name}:**"`).join(' or ')} section; write it there first, so the proposal says what changes and why`;
+}
+
+/**
+ * The `Proposal:` comment for `one`: what changes, why, what it costs and
+ * what happens if the owner declines, so it stands alone.
+ */
+function proposalBody(one: Owed, slice: number, parent: number | undefined, owner: string): string {
   // The issue it is for comes first: that is how the work rules match a 👍 to it.
-  const what = one.kind === 'added'
-    ? `add #${one.number} (${one.title}) to work item #${parent}, after its approval.`
-    : `drop state #${one.number} (${one.title}), closed as not planned after work item #${parent}'s approval.`;
-  return `Proposal: ${what}\n\n@${owner}: react 👍 to this comment to approve it, or comment "Decision:".`;
+  const lines = one.kind === 'added'
+    ? [
+        `Proposal: add #${one.number} (${one.title}) to work item #${parent}, after its approval.`,
+        `**What changes:** ${section(one.body, 'You will see')}`,
+        `**Why:** ${section(one.body, 'Why')}`,
+        `**What it costs:** ${section(one.body, 'Cost') ?? `one more slice of work item #${parent}: the agent builds it in a pull request, which you review.`}`,
+        `**If you decline:** #${one.number} is closed as not planned and nothing of it is built; work item #${parent} keeps what you approved.`,
+      ]
+    : [
+        `Proposal: drop state #${one.number} (${one.title}), closed as not planned after work item #${parent}'s approval.`,
+        `**What changes:** slice #${slice} is built without state #${one.number}, which you approved.`,
+        `**Why:** ${section(one.body, 'Why')}`,
+        `**What it costs:** ${section(one.body, 'Cost') ?? `what state #${one.number} would show is not built.`}`,
+        `**If you decline:** state #${one.number} is reopened and built as you approved it.`,
+      ];
+  return `${lines.join('\n\n')}\n\n@${owner}: react 👍 to this comment to approve it, or comment "Decision:".`;
 }
 
 /**
@@ -462,6 +524,10 @@ export async function propose(sys: Sys, io: Output, number: number): Promise<num
     return 0;
   }
 
+  // A proposal says what it asks for, so one whose body cannot say it is not posted.
+  const gaps = asked.filter((one) => !one.settled && one.proposals.length === 0).map(proposalGap).filter((gap) => gap !== undefined);
+  if (gaps.length > 0) return report(io, 'propose', gaps);
+
   const issues = `${API}/repos/${slug}/issues/${slice}`;
   for (const one of asked) {
     const what = one.kind === 'added' ? `#${slice}` : `state #${one.number}`;
@@ -470,7 +536,7 @@ export async function propose(sys: Sys, io: Output, number: number): Promise<num
     } else if (one.proposals.length > 0) {
       io.out(`${what}: proposed on #${slice}, waiting on ${accounts.owner}'s 👍`);
     } else {
-      const posted = await sys.http(`${issues}/comments`, { method: 'POST', token, body: { body: proposalBody(one, read.parent, accounts.owner) } });
+      const posted = await sys.http(`${issues}/comments`, { method: 'POST', token, body: { body: proposalBody(one, slice, read.parent, accounts.owner) } });
       if (posted.status !== 201) throw new Error(`cannot comment on #${slice} (HTTP ${posted.status})`);
       io.out(`✓ ${what}: proposed on #${slice}: ${(posted.json as { html_url?: string } | null)?.html_url ?? ''}`.trimEnd());
     }

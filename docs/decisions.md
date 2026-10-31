@@ -358,3 +358,42 @@
   reason, rather than failing every pull request; the weekly job leaves
   vetoes alone there too, since they sit on Decision issues. Labels as a
   substitute for issue types wait for adoption outside Athya.
+- **2026-11-01 — Record: P-40, approvals ask only for what needs the
+  owner.** The owner approved eight late-added slices on #22 in minutes
+  each, none questioned, and asked: "How can we be sure of it so that we
+  can use the mechanism properly?" In chat they agreed that a comment on the
+  work item counts as approval ("This is OK"), kept chat requests filed with
+  a quote and approved once ("But let's keep the following too"), and
+  declined a daily batch of proposals ("not appropriate") and a weekly
+  approval health check ("no need"). So:
+  - **A request on GitHub is its own approval.** A slice added after its
+    work item's approval is approved when its body links
+    (`…/issues/<work item>#issuecomment-<id>`) a comment the owner wrote on
+    that work item before the slice was last added. The work rules match the
+    link to the work item's comments as GitHub returns them, so the author,
+    the issue and the time are GitHub's, not the link's. A comment edited
+    since it was written does not count: REST does not say who edited it,
+    and the agent, with write access, can edit another's comment. The
+    comment cannot name the slice, which it came before, so which comment
+    asked for it is the agent's claim, in the slice's body for the owner
+    to see; the owner accepted that check (author, work item, time).
+  - **Fixes need no approval, and need no new rule.** A fix restores what
+    the owner approved and changes nothing they would see beyond it. It is
+    filed as a State under the slice it fixes, and its pull request names
+    that slice (`Slice: #N`), closed or not; the slice's own approval
+    rules still apply. A State added after approval
+    already owes the owner nothing; only a slice added late, or a State
+    dropped, does. Anything filed as its own slice, called a fix or not,
+    keeps the 👍: whether a change goes beyond what was approved is a
+    judgement about what the owner would see, which no code rule can make
+    from an issue's text, so the gate is not loosened on a label or a word.
+  - **Chat requests keep the 👍.** The agent files the slice quoting the
+    owner's words and proposes it; the owner's 👍 approves it once.
+  - **Every proposal stands alone.** `propose` writes what changes (the
+    slice's "You will see"), why (its "Why"), what it costs (its "Cost",
+    else one more slice of the work item for the owner to review) and what
+    happens if the owner declines; for a dropped State, why from the
+    state's own "Why". It refuses, posting nothing, while a body lacks
+    those sections, naming them, so the agent writes them first. The first
+    line still names the issue first (`#N`), which the 👍 matching relies
+    on, so proposals posted before P-40 still count.
