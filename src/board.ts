@@ -28,15 +28,26 @@ export const FIELDS = [
 /** What the owner's `gh` login needs for the board: projects, and issue types in an organisation. */
 const OWNER_SCOPES = ['project', 'admin:org'];
 
-/** GitHub's API cannot make Project views, so the owner makes these by hand. */
+/** The Project's views; onboard makes them, or updates the view that has the name. */
+export const VIEWS = [
+  { name: 'Needs you', layout: 'TABLE_LAYOUT', filter: 'label:needs-owner is:open', show: [] },
+  { name: 'Board', layout: 'BOARD_LAYOUT', filter: '', show: ['Linked pull requests'] },
+  { name: 'Work items', layout: 'TABLE_LAYOUT', filter: 'type:"Work item"', show: ['Sub-issues progress'] },
+  { name: 'Decisions', layout: 'TABLE_LAYOUT', filter: 'type:Decision', show: [] },
+  { name: 'Reviews due', layout: 'TABLE_LAYOUT', filter: '"Review date":<=@today', show: [] },
+];
+
+/** The name GitHub gives a new Project's first view, which onboard renames rather than leaves. */
+const DEFAULT_VIEW = 'View 1';
+
+/** What GitHub's API still cannot set on the views, so the owner does it by hand. */
 export function viewsChecklist(url: string): string[] {
   return [
-    `Make these views in ${url} (GitHub's API cannot):`,
-    '  [ ] Needs you: table, filter label:needs-owner is:open',
-    '  [ ] Board: board by Status (Todo, In progress, Done); no "In review" column; show linked pull requests;',
-    '      Workflows → Auto-archive items: is:closed updated:<@today-7d',
-    '  [ ] Work items: table, filter type:"Work item", group by Step, show the Sub-issues progress field',
-    '  [ ] Decisions: table, filter type:Decision, group by Decision; a "Reviews due" view filtered on Review date:<=@today',
+    `Finish the views in ${url} by hand (GitHub's API cannot):`,
+    '  [ ] Work items: group by Step',
+    '  [ ] Decisions: group by Decision',
+    '  [ ] Board: columns by Status (Todo, In progress, Done); no "In review" column',
+    '  [ ] Workflows → Auto-archive items: is:closed updated:<@today-7d',
   ];
 }
 
@@ -223,8 +234,90 @@ export async function setUpBoard(
     }
   }
   io.out(`✓ fields: ${FIELDS.map((f) => f.name).join(', ')}`);
+
+  if (!(await setUpViews(sys, token, confirm, project.id, title))) return stopped(io, 'views');
+  io.out(`✓ views: ${VIEWS.map((v) => v.name).join(', ')}`);
   for (const line of viewsChecklist(project.url)) io.out(line);
   return project.url;
+}
+
+type View = { id: string; name: string; layout: string; filter: string | null; configuration: { visibleFields: { nodes: { id?: string }[] } } };
+
+const VIEW = 'id name layout filter configuration { visibleFields(first: 50) { nodes { ... on ProjectV2FieldCommon { id } } } }';
+
+/**
+ * Makes the Project's views, or updates the view that already has the name,
+ * so a rerun makes no duplicates; the default view becomes the first view it
+ * would otherwise make. Every change waits for one yes. Returns false when
+ * that yes was not given.
+ */
+export async function setUpViews(
+  sys: Sys,
+  token: string,
+  confirm: (question: string) => Promise<boolean>,
+  projectId: string,
+  title: string,
+): Promise<boolean> {
+  const read = (await graphql(
+    sys,
+    token,
+    `query($id: ID!) { node(id: $id) { ... on ProjectV2 { views(first: 50) { nodes { ${VIEW} } } fields(first: 50) { nodes { ... on ProjectV2FieldCommon { id name } } } } } }`,
+    { id: projectId },
+  )) as { node: { views: { nodes: View[] }; fields: { nodes: { id?: string; name?: string }[] } } };
+  const views = read.node.views.nodes;
+  const fieldIds = new Map(read.node.fields.nodes.map((field) => [field.name, field.id]));
+  let spare = views.find((view) => view.name === DEFAULT_VIEW);
+
+  const changes = VIEWS.map((spec) => {
+    let view = views.find((had) => had.name === spec.name);
+    if (!view && spare) [view, spare] = [spare, undefined];
+    return { spec, view };
+  }).filter(({ spec, view }) => !view || !settled(view, spec, fieldIds));
+  if (changes.length === 0) return true;
+  const renamed = changes.find((step) => step.view?.name === DEFAULT_VIEW);
+  const question = `Set up the views ${changes.map((step) => step.spec.name).join(', ')} in "${title}"${renamed ? ` (renaming "${DEFAULT_VIEW}" to "${renamed.spec.name}")` : ''}?`;
+  if (!(await confirm(question))) return false;
+
+  for (const { spec, view: had } of changes) {
+    const view =
+      had ??
+      ((await graphql(
+        sys,
+        token,
+        `mutation($project: ID!, $name: String!, $layout: ProjectV2ViewLayout!) { createProjectV2View(input: { projectId: $project, name: $name, layout: $layout }) { projectV2View { ${VIEW} } } }`,
+        { project: projectId, name: spec.name, layout: spec.layout },
+      )) as { createProjectV2View: { projectV2View: View } }).createProjectV2View.projectV2View;
+    if (settled(view, spec, fieldIds)) continue;
+    const show = hidden(view, spec, fieldIds);
+    await graphql(
+      sys,
+      token,
+      'mutation($view: ID!, $name: String!, $layout: ProjectV2ViewLayout!, $filter: String!, $configuration: ProjectV2ViewConfigurationInput) { updateProjectV2View(input: { viewId: $view, name: $name, layout: $layout, filter: $filter, configuration: $configuration }) { projectV2View { id } } }',
+      {
+        view: view.id,
+        name: spec.name,
+        layout: spec.layout,
+        filter: spec.filter,
+        configuration: show.length > 0 ? { visibleFieldIds: [...visibleIds(view), ...show] } : null,
+      },
+    );
+  }
+  return true;
+}
+
+function visibleIds(view: View): string[] {
+  return view.configuration.visibleFields.nodes.map((field) => field.id).filter((id) => id !== undefined);
+}
+
+/** The fields the spec shows that the view hides. */
+function hidden(view: View, spec: (typeof VIEWS)[number], fieldIds: Map<string | undefined, string | undefined>): string[] {
+  const visible = visibleIds(view);
+  return spec.show.map((name) => fieldIds.get(name)).filter((id): id is string => id !== undefined && !visible.includes(id));
+}
+
+/** Whether the view already is what the spec asks for. */
+function settled(view: View, spec: (typeof VIEWS)[number], fieldIds: Map<string | undefined, string | undefined>): boolean {
+  return view.name === spec.name && view.layout === spec.layout && (view.filter ?? '') === spec.filter && hidden(view, spec, fieldIds).length === 0;
 }
 
 function stopped(io: Output, step: string): undefined {

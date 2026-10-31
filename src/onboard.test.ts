@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, describe, it } from 'node:test';
 
-import { Board, repoJson } from './fake-board.test.ts';
+import { BUILT_IN, Board, repoJson, settledViews } from './fake-board.test.ts';
 import { FIELDS, ISSUE_TYPES, LABELS, viewsChecklist } from './board.ts';
 import { AGENT, FakeSys, ROOT, TOKEN, capture } from './fake.test.ts';
 import type { HttpResult } from './types.ts';
@@ -38,8 +38,8 @@ function fresh(): FakeSys {
   sys.route('GET', REPO, PUSH);
   sys.route('GET', `${REPO}/commits/abc123`, VERIFIED);
   new Board(sys);
-  // Settings, hook, workflow; issue types, labels, Project, fields; test commit.
-  sys.answers = Array<string>(11).fill('y');
+  // Settings, hook, workflow; issue types, labels, Project, fields, views; test commit.
+  sys.answers = Array<string>(12).fill('y');
   return sys;
 }
 
@@ -101,7 +101,7 @@ describe('onboard', () => {
     const board = new Board(sys);
     board.issueTypes = ISSUE_TYPES.map((t) => t.name);
     board.labels = LABELS.map((l) => l.name);
-    board.project = { fields: FIELDS.map((f) => f.name), linked: true };
+    board.project = { fields: [...BUILT_IN, ...FIELDS.map((f) => f.name)], linked: true, views: settledViews() };
     const { code } = await run(sys, []);
     assert.equal(code, 0);
     assert.deepEqual(sys.asked.map((q) => q.split(' ')[0]), ['Push']);
@@ -364,7 +364,7 @@ describe('onboard', () => {
 
     it('takes the gh login as owner and the one agent set up here, with Enter', async () => {
       const sys = setUp([AGENT]);
-      sys.answers = ['', '', ...Array<string>(11).fill('y')];
+      sys.answers = ['', '', ...Array<string>(12).fill('y')];
       const { code } = await run(sys, []);
       assert.equal(code, 0);
       assert.deepEqual(sys.asked.slice(0, 2), ['The owner, who approves [example-owner]: ', 'The agent, which builds [ExampleBot]: ']);
@@ -373,7 +373,7 @@ describe('onboard', () => {
 
     it('lists the agents set up here and takes what is typed', async () => {
       const sys = setUp(['OtherBot', AGENT]);
-      sys.answers = ['', 'examplebot', ...Array<string>(11).fill('y')];
+      sys.answers = ['', 'examplebot', ...Array<string>(12).fill('y')];
       const { code, out } = await run(sys, []);
       assert.equal(code, 0);
       assert.ok(out.includes('Accounts set up here for the agent: OtherBot, ExampleBot'));
@@ -467,7 +467,7 @@ describe('onboard', () => {
         invited = true;
         return { code: 0, stdout: '', stderr: '' };
       };
-      sys.answers = Array<string>(12).fill('y');
+      sys.answers = Array<string>(13).fill('y');
       const { code } = await run(sys);
       assert.equal(code, 0);
       assert.equal(sys.requests.find((r) => r.method === 'PATCH')?.token, TOKEN);
@@ -492,7 +492,7 @@ describe('onboard', () => {
         invited = true;
         return { code: 0, stdout: '', stderr: '' };
       };
-      sys.answers = Array<string>(12).fill('y');
+      sys.answers = Array<string>(13).fill('y');
       const { code } = await run(sys);
       assert.equal(code, 0);
       assert.ok(invited, 'grants write access');
@@ -684,7 +684,7 @@ describe('onboard', () => {
     }
   });
 
-  for (const [index, step] of [[0, 'settings file'], [1, 'hook entry'], [2, 'workflow'], [3, 'pre-push hook'], [8, 'test commit']] as const) {
+  for (const [index, step] of [[0, 'settings file'], [1, 'hook entry'], [2, 'workflow'], [3, 'pre-push hook'], [9, 'test commit']] as const) {
     it(`stops without changing anything more when "${step}" is declined`, async () => {
       const sys = fresh();
       sys.answers = [...Array<string>(index).fill('y'), 'n'];
@@ -735,7 +735,7 @@ describe('staged adoption', () => {
     sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity'], project: 'Example work', figma: { library: 'L' } }));
     sys.files.set(HOOKS, JSON.stringify(CLAUDE));
     const board = new Board(sys);
-    sys.answers = ['y', 'y', 'y', 'y', 'y', 'y', 'y'];
+    sys.answers = Array<string>(8).fill('y');
     const { code } = await run(sys, ['--add', 'board']);
     assert.equal(code, 0);
     assert.deepEqual(board.titles, ['Example work']);

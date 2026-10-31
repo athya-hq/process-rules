@@ -101,8 +101,15 @@ days before the token ends.
    (Work item, Slice, State, Decision, Brief), the repo's labels (`approved`,
    `needs-owner`, `mechanical`, `veto`, `expiring`, `cannot-run-here`), and a
    Project "<repo> work" linked to the repo with the fields Step, Decision and
-   Review date. It prints the views to make by hand, since GitHub's API cannot
-   make them. Last, it pushes
+   Review date. It makes the Project's views, or updates the one that already
+   has the name, so a rerun makes no duplicates: Needs you (`label:needs-owner
+   is:open`), Board (a board showing linked pull requests), Work items
+   (`type:"Work item"`, showing Sub-issues progress), Decisions
+   (`type:Decision`) and Reviews due (`"Review date":<=@today`). The default
+   "View 1" becomes the first of these the Project lacks (Needs you, in a new
+   Project) rather than being left. It prints what GitHub's API cannot set, to do
+   by hand: grouping Work items by Step and Decisions by Decision, the Board's
+   columns, and the auto-archive workflow. Last, it pushes
    one signed test commit as the agent to a throwaway branch, checks GitHub
    shows it Verified by the agent (asking again when the network or GitHub
    fails for a moment), and deletes the branch. Each change waits
@@ -208,7 +215,7 @@ release, attaching the CLI package it built and tested. Install that package on
 each machine with pnpm; nothing is built on install:
 
 ```bash
-pnpm add -g https://github.com/athya-hq/process-rules/releases/download/v0.4.0/athya-hq-process-rules-0.4.0.tgz
+pnpm add -g https://github.com/athya-hq/process-rules/releases/download/v0.5.0/athya-hq-process-rules-0.5.0.tgz
 ```
 
 `onboard` pins the client's workflow to one version, the release of the CLI
