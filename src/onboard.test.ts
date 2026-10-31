@@ -36,6 +36,7 @@ function fresh(): FakeSys {
   const sys = new FakeSys().ready();
   sys.files.delete(SETTINGS);
   sys.route('GET', '/users/example-owner', { status: 200, json: { id: 1, login: 'example-owner' } });
+  sys.route('GET', '/users/example-org', { status: 200, json: { login: 'example-org', type: 'Organization' } });
   sys.route('GET', REPO, PUSH);
   sys.route('GET', `${REPO}/commits/abc123`, VERIFIED);
   new Board(sys);
@@ -562,7 +563,7 @@ describe('onboard', () => {
         assert.deepEqual({ code, err }, { code: 1, err: [message] });
         assert.equal(sys.temps.length, 1);
         assert.deepEqual(sys.removed, sys.temps);
-        assert.ok(!sys.requests.some((r) => r.url.includes('/labels')), 'the board is not touched');
+        assert.ok(!sys.requests.some((r) => /\/labels|\/issue-types|\/graphql$/.test(r.url)), 'the board is not touched');
       });
     }
   });

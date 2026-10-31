@@ -233,7 +233,12 @@ export class FakeSys implements Sys {
 
   remove(path: string): void {
     this.removed.push(path);
-    for (const name of this.files.keys()) if (name === path || name.startsWith(`${path}/`)) this.files.delete(name);
+    for (const name of this.files.keys()) {
+      if (name === path || name.startsWith(`${path}/`)) {
+        this.files.delete(name);
+        this.modes.delete(name);
+      }
+    }
     this.dirs = this.dirs.filter((dir) => dir !== path && !dir.startsWith(`${path}/`));
   }
 

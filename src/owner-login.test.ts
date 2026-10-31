@@ -107,14 +107,12 @@ describe('ownerScopes', () => {
 });
 
 describe('isOrganisation', () => {
-  it('reads the account type, counting an account GitHub will not describe as an organisation', async () => {
+  it('reads the account type, and refuses to guess when GitHub will not say', async () => {
     const sys = new FakeSys();
     sys.route('GET', '/users/example-org', { status: 200, json: { login: 'example-org', type: 'Organization' } });
     sys.route('GET', '/users/someone', { status: 200, json: { login: 'someone', type: 'User' } });
     assert.equal(await isOrganisation(sys, 'example-org'), true);
     assert.equal(await isOrganisation(sys, 'someone'), false);
-    assert.equal(await isOrganisation(sys, 'nobody'), true);
-    sys.http = () => Promise.reject(new Error('offline'));
-    assert.equal(await isOrganisation(sys, 'someone'), true);
+    await assert.rejects(isOrganisation(sys, 'nobody'), /cannot tell whether nobody is an organisation \(HTTP 404\)/);
   });
 });

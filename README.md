@@ -84,11 +84,15 @@ over HTTPS and refuse SSH, and the pre-push hook refuses their pushes over
 SSH.
 
 The owner is never signed in to `gh`, and needs no sign-in kept anywhere on
-the Mac. A command that needs the owner's GitHub rights (`onboard`, and
-`onboard --add`) asks for one browser approval each run: it runs
-`gh auth login --web` into a fresh temporary `gh` folder, asking only for
-the scopes the run's features need, reads the token from there, refuses it
-unless it is the owner's, and deletes the folder whatever happens. The
+the Mac. When a run of `onboard` (or `onboard --add`) reaches a step that
+acts as the owner (giving the agent access, or setting up the board), it
+asks for one browser approval, which serves the rest of that run; a run
+with no such step asks for none. It runs `gh auth login --web` into a
+fresh temporary `gh` folder, asking for gh's own scopes (`repo`,
+`read:org`, `gist`) plus only those the run's features add (`project` for
+the board, and `admin:org` in an organisation), reads the token from
+there, refuses it unless it is the owner's, and deletes the folder
+whatever happens. The
 token lives in the command's memory for that run; the owner's own `gh`
 config and keychain are never read or written, so there is nothing to sign
 out of afterwards.
@@ -325,7 +329,7 @@ release, attaching the CLI package it built and tested. Install that package on
 each machine with pnpm; nothing is built on install:
 
 ```bash
-pnpm add -g https://github.com/athya-hq/process-rules/releases/download/v0.5.6/athya-hq-process-rules-0.5.6.tgz
+pnpm add -g https://github.com/athya-hq/process-rules/releases/download/v0.5.7/athya-hq-process-rules-0.5.7.tgz
 ```
 
 `onboard` pins the client's workflow to one version, the release of the CLI

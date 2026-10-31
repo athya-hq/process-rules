@@ -20,10 +20,12 @@ export function ownerScopes(features: readonly Feature[], organisation: boolean)
   return organisation ? ['project', 'admin:org'] : ['project'];
 }
 
-/** Whether GitHub names the account an organisation; an account it will not describe counts as one. */
+/** Whether GitHub names the account an organisation; throws when GitHub will not say. */
 export async function isOrganisation(sys: Sys, login: string): Promise<boolean> {
-  const { status, json } = await sys.http(`${API}/users/${login}`).catch(() => ({ status: 0, json: null }));
-  return status !== 200 || (json as { type?: unknown } | null)?.type === 'Organization';
+  const { status, json } = await sys.http(`${API}/users/${login}`);
+  const type = (json as { type?: unknown } | null)?.type;
+  if (status !== 200 || typeof type !== 'string') throw new Error(`cannot tell whether ${login} is an organisation (HTTP ${status})`);
+  return type === 'Organization';
 }
 
 /**
