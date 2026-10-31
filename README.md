@@ -45,8 +45,8 @@ on that Mac; with none of them set up there, or more than one, session-start
 keeps GitHub locked out rather than guess. Messages that send someone to fix
 a setup name the first owner. `onboard` writes the one-login form, and on a
 repo whose settings list several it works as the owner named, else the
-first, and the agent named, else the one set up on the Mac; it leaves the
-lists as they are.
+one the run's browser sign-in is, which must be listed, and the agent named,
+else the one set up on the Mac; it leaves the lists as they are.
 
 `process-rules machine ExampleBot`, run once per Mac and agent account (inside
 an adopting repo the name can be left out), needs no client repo. It makes the
