@@ -29,7 +29,7 @@ the **owner**, whose labels and comments count as approvals, and the
 1. **Once per machine and agent account:** `process-rules machine`. It needs
    no client repository.
 2. **Once per client repository, by its owner:** `process-rules onboard`.
-   It writes what the client commits and checks the rest.
+   It opens what the client commits as the agent's pull request and checks the rest.
 3. **Every agent session:** the session-start hook `onboard` installed runs
    `process-rules session-start`, which gives the session the agent
    identity or locks GitHub out.
@@ -60,3 +60,6 @@ Slices added since v1 live in their issues; these rows only point to them.
 | id   | issue | title | you will see | status |
 | ---- | ----- | ----- | ------------ | ------ |
 | P-35 | [#83](https://github.com/athya-hq/process-rules/issues/83) | Owner commands sign in for one run only | `onboard` and `onboard --add` ask for one browser approval per run, into a temporary `gh` folder deleted afterwards; the owner stays signed out of `gh`, and nothing tells the owner to sign in or out of it | shipped |
+| P-36 | [#82](https://github.com/athya-hq/process-rules/issues/82) | Onboard opens its changes as the agent's pull request | `onboard` never modifies the owner's checkout: its file changes are committed as the agent, signed, in a temporary repository, pushed and opened as the agent's pull request, whose link it prints | shipped |
+| P-37 | [#88](https://github.com/athya-hq/process-rules/issues/88) | Onboard sets the FIGMA_LIBRARY secret itself | `onboard` seals the Figma library key with the repository's Actions public key and stores the `FIGMA_LIBRARY` secret through GitHub's API, as the owner for one run; it prints no `gh` command and never the key | planned |
+| P-38 | [#91](https://github.com/athya-hq/process-rules/issues/91) | PR identity judges the pusher, not the run's actor | The PR identity check names who pushed each agent commit from GitHub's push record alone; an edit, reopen or re-run by anyone gives the push's result, an unrecorded push fails closed, and sandbox #8 re-run from Cubic's edit fails naming the owner | shipped |

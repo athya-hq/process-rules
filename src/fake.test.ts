@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import { launcherPath, launcherScript } from './agent.ts';
 import type { ExecResult, HttpResult, Sys } from './types.ts';
 
@@ -21,6 +23,13 @@ export const NOW = new Date('2026-10-30T12:00:00Z');
 export const NODE = '/opt/node/bin/node';
 export const CLI = '/opt/process-rules/dist/cli.js';
 export const SETTINGS = JSON.stringify({ owner: 'example-owner', agent: AGENT });
+/** The pull request GitHub opens for onboard's changes. */
+export const PULL_URL = 'https://github.com/example-org/example-app/pull/7';
+
+/** The fake's git object name for some contents. */
+export function blobName(text: string): string {
+  return createHash('sha1').update(text).digest('hex');
+}
 
 export interface Call {
   command: string;
@@ -53,6 +62,14 @@ export class FakeSys implements Sys {
   gitPassword = false;
   /** The token the owner's browser approval gives `gh auth login`; undefined when the owner turns it down. */
   ghToken: string | undefined;
+  /**
+   * The default branch's tip, by path in the repository; undefined: what this
+   * checkout has, as when it is up to date.
+   */
+  tip: Map<string, string> | undefined;
+  /** The files git's index was given in a temporary repository, by path, as onboard commits them. */
+  committed = new Map<string, string>();
+  private objects = new Map<string, string>();
   /** The temporary folders made, and those removed. */
   temps: string[] = [];
   removed: string[] = [];
@@ -71,6 +88,7 @@ export class FakeSys implements Sys {
     this.route('GET', '/user', { status: 401, json: null });
     this.route('GET', '/users/ExampleBot/ssh_signing_keys', { status: 200, json: [] });
     this.route('GET', '/user/ssh_signing_keys', { status: 200, json: [] });
+    this.route('POST', '/repos/example-org/example-app/pulls', { status: 201, json: { number: 7, html_url: PULL_URL } });
   }
 
   route(method: string, path: string, result: HttpResult | (() => HttpResult)): this {
@@ -123,6 +141,24 @@ export class FakeSys implements Sys {
     const ok = (stdout = ''): ExecResult => ({ code: 0, stdout, stderr: '' });
     const fail = (stderr = 'failed'): ExecResult => ({ code: 1, stdout: '', stderr });
     if (command === launcherPath(HOME)) return this.files.has(command) ? ok('0.0.0\n') : fail('not found');
+    // The temporary repository onboard commits its changes in.
+    if (command === 'git' && args.slice(0, 3).join(' ') === 'rev-parse --verify -q') {
+      const path = (args[3] ?? '').replace(/^FETCH_HEAD:/, '');
+      const text = this.tip ? this.tip.get(path) : this.files.get(`${ROOT}/${path}`);
+      return text === undefined ? fail('') : ok(`${blobName(text)}\n`);
+    }
+    if (command === 'git' && args[0] === 'hash-object') {
+      const name = blobName(options.input ?? '');
+      if (args.includes('-w')) this.objects.set(name, options.input ?? '');
+      return ok(`${name}\n`);
+    }
+    if (command === 'git' && args[0] === 'update-index') {
+      const [, name = '', path = ''] = (args.at(-1) ?? '').split(',');
+      this.committed.set(path, this.objects.get(name) ?? '');
+      return ok();
+    }
+    if (command === 'git' && args[0] === 'read-tree') return ok();
+    if (command === 'git' && args[0] === 'write-tree') return ok('tree1\n');
     if (command === 'git' && args[1] === '--git-path') return this.inRepo ? ok(`.git/${args[2]}\n`) : fail('not a git repository');
     if (command === 'git' && args.includes('--git-common-dir')) return this.inRepo ? ok(`${ROOT}/.git\n`) : fail('not a git repository');
     if (command === 'git' && args[0] === 'rev-parse') return this.inRepo ? ok(`${ROOT}\n`) : fail();

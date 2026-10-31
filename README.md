@@ -175,7 +175,17 @@ repo's CODEOWNERS names the owner.
    fails for a moment), and deletes the branch. The steps that act as you
    (giving the agent access, the board) share one browser approval, for
    that run only. Each change waits
-   for a yes; commit the files afterwards. When a rule in the repo's
+   for a yes. The files git tracks in your checkout are never changed: once every step has run,
+   `onboard` commits the files it changes as the agent, signed, on the
+   branch `process-rules/onboard` from the default branch's tip, in a
+   temporary repository it deletes afterwards, pushes it as the agent and
+   opens the agent's pull request (or updates the one an earlier run opened),
+   printing its link; merge it to finish. A run that changes no file, or
+   that stops, opens none. A file the default branch has otherwise than your
+   checkout is refused, so bring the checkout up to date first. The pre-push
+   git hook, which git does not track, is written in place. The work rules
+   pass that pull request without a `Slice:` line while it changes only the
+   files `onboard` writes. When a rule in the repo's
    CODEOWNERS (the file GitHub uses: `.github/CODEOWNERS`, else `CODEOWNERS`,
    else `docs/CODEOWNERS`) names the owner, GitHub will ask the owner to
    review every agent pull request that changes a file those rules match,
@@ -188,7 +198,7 @@ repo's CODEOWNERS names the owner.
    entries an older release wrote where they stand. The repository needs at
    least one commit. The pull request checks read the settings from the base
    branch, so a pull request cannot rename the agent it is checked against.
-   The pull request that first commits them passes PR identity, Work rules
+   The pull request that first commits them, `onboard`'s, passes PR identity, Work rules
    and Design frames, saying the repo is not adopted on its base yet, as for
    a feature that is off; they apply from the next pull request.
 
@@ -196,7 +206,11 @@ The shared checks run five jobs. **Settings** validates
 `.github/process-rules.json`. **PR identity** runs on pull requests: every
 commit that claims the agent (its login or its no-reply address) must be
 Verified as the agent, and agent commits must be pushed by the agent, so agent
-work pushed with the owner's login fails. **Work rules** runs on the agent's
+work pushed with the owner's login fails. Who pushed comes only from GitHub's
+record of the pushes to the pull request's branch (the fork's, for a fork),
+never from whoever started the run, so an edit, a reopen or a re-run by anyone
+gives the result the push gave. A push GitHub has not recorded yet is waited
+for about a minute, then fails until a re-run finds it. **Work rules** runs on the agent's
 pull requests: each names exactly one slice, as a line `Slice: #N`, and that
 slice may be built:
 
@@ -379,7 +393,7 @@ release, attaching the CLI package it built and tested. Install that package on
 each machine with pnpm; nothing is built on install:
 
 ```bash
-pnpm add -g https://github.com/athya-hq/process-rules/releases/download/v0.5.7/athya-hq-process-rules-0.5.7.tgz
+pnpm add -g https://github.com/athya-hq/process-rules/releases/download/v0.5.8/athya-hq-process-rules-0.5.8.tgz
 ```
 
 `onboard` pins the client's workflow to one version, the release of the CLI

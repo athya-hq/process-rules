@@ -217,6 +217,29 @@
   to what `figma` needs and leaves a secrets block holding the client's own
   secrets as it is, saying which job that leaves without FIGMA_LIBRARY.
   Released as v0.5.6, a patch release.
+- **2026-11-01 — Record: P-36, onboard opens its changes as the agent's
+  pull request.** `onboard` wrote `.github/process-rules.json`,
+  `.claude/settings.json`, the workflow and CODEOWNERS into the owner's
+  checkout and left them uncommitted: run on the default branch, as an
+  owner naturally does, it blocked the next `git pull --ff-only`, and a run
+  that stopped early never said the files needed committing. Decided: the
+  owner's checkout is never modified. Each file change is held in memory
+  until every step has run; then `onboard` makes a temporary repository
+  holding the default branch's tip (its trees only, fetched as the agent
+  with `--filter=blob:none`, so a large repository costs little), puts each
+  changed file in its index, commits once, signed as the agent, pushes to
+  `process-rules/onboard` as the agent (forced, so a run again updates the
+  same branch) and opens the agent's pull request, or updates the open one;
+  the temporary repository is deleted in a `finally`. A file the default
+  branch has otherwise than the checkout is refused, so nothing merged
+  since is undone. A run that stops, or changes no file, opens no pull
+  request. Steps that are not files (the agent's access, the board) still
+  act at once, as the owner for one run (P-35); the pre-push hook, which
+  git does not track, is written in place. The work rules pass an agent
+  pull request from `process-rules/onboard` in the repository itself that
+  changes only the files `onboard` writes: the owner confirmed each change
+  at the terminal and merges it. Approval: the owner's 👍 on #82. Released
+  in the next 0.5.x patch release.
 - **2026-11-01 — Record: P-35, owner commands sign in for one run only.**
   `machine` signs the owner out of `gh` so agent sessions cannot use the
   owner's account, but `onboard` read the owner's stored `gh` login (with
@@ -235,6 +258,23 @@
   account, which the owner can revoke under Settings → Applications; no
   token is left on the Mac. Approval: the owner's 👍 on #83. Released as
   v0.5.7, a patch release.
+- **2026-11-01 — Record: P-38, PR identity judges the pusher, not the
+  run's actor.** In sandbox PR #8 on 2026-10-30, the run on `opened` failed
+  the owner's push of an agent commit, and the run started ten seconds
+  later by Cubic editing the description passed, "pushed by
+  cubic-dev-ai[bot]". #11 moved the check to GitHub's push record
+  (`GET /repos/{repo}/activity` on the head branch), but kept the run's
+  actor as the pusher of commits not recorded yet on `opened` and
+  `synchronize`, so the owner pushing and the agent opening the pull
+  request at once still passed. Decided: who pushed comes from the push
+  record alone and `GITHUB_ACTOR` is not read. A commit no recorded push
+  brought is read again for about a minute, then fails closed until a
+  re-run finds it; a push recorded with no actor, and a pull request whose
+  head repository is gone, fail too. The record is the head repository's,
+  so a fork's pull request reads the fork's; a private fork the run's token
+  cannot read fails the check. Merge-queue pushes go to the queue's own
+  branches, not the pull request's, so they never count. Approval: the
+  owner's 👍 on #91. Released in the next 0.5.x patch release.
 - **2026-11-01 — Record: P-27, a declined lockout stays declined.** The
   owner's decision of 2026-10-31 on #57: keep offering the lockout. On a
   team member's laptop or a shared machine, accepting it signs that person

@@ -509,6 +509,6 @@ function settled(view: View, spec: (typeof VIEWS)[number], fieldIds: Map<string 
 }
 
 function stopped(io: Output, step: string): undefined {
-  io.err(`onboard: stopped at "${step}"; nothing after it was changed`);
+  io.err(`onboard: stopped at "${step}"; nothing after it was changed, and no pull request was opened`);
   return undefined;
 }

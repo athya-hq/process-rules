@@ -2,6 +2,7 @@ import { API, NO_TOKEN, loadSettings, repoAt, sameLogin } from './agent.ts';
 import { PERSONAL_REPO, isOn, isPersonal, notAdoptedLine, offLine } from './features.ts';
 import { agentSession, pushIdentityProblem } from './push-identity.ts';
 import { cloudToken } from './cloud.ts';
+import { ONBOARD_BRANCH, ONBOARD_FILES } from './onboard-pull.ts';
 import type { Output, Sys } from './types.ts';
 
 /** How a pull request or a commit names the slice it builds. */
@@ -255,7 +256,9 @@ function report(io: Output, where: string, problems: string[]): number {
 /**
  * The work rules on a pull request, run by the shared workflow. The owner's
  * pull requests pass; an agent's must name exactly one slice, as a line
- * `Slice: #N`, that may be built.
+ * `Slice: #N`, that may be built, but for onboard's own: from ONBOARD_BRANCH
+ * in this repository, changing only the files onboard writes and deleting
+ * none, which the owner confirmed at the terminal and merges.
  */
 export async function prWorkRules(sys: Sys, io: Output): Promise<number> {
   const { GITHUB_EVENT_PATH: eventPath, GITHUB_REPOSITORY: slug, GH_TOKEN: token } = sys.env;
@@ -263,7 +266,7 @@ export async function prWorkRules(sys: Sys, io: Output): Promise<number> {
     throw new Error('pr-work-rules runs in GitHub Actions: GITHUB_EVENT_PATH, GITHUB_REPOSITORY and GH_TOKEN must be set');
   }
   const event = JSON.parse(sys.read(eventPath)) as {
-    pull_request?: { number: number; body: string | null; user: { login: string }; head: { ref: string } };
+    pull_request?: { number: number; body: string | null; user: { login: string }; head: { ref: string; repo?: { full_name: string } | null } };
   };
   const pull = event.pull_request;
   if (!pull) {
@@ -287,6 +290,15 @@ export async function prWorkRules(sys: Sys, io: Output): Promise<number> {
   if (!sameLogin(pull.user.login, agent)) {
     io.out(`pr-work-rules: #${pull.number} is by ${pull.user.login}, not the agent; the work rules bind agent pull requests`);
     return 0;
+  }
+  if (pull.head.ref === ONBOARD_BRANCH && pull.head.repo?.full_name.toLowerCase() === slug.toLowerCase()) {
+    const files = await every<{ filename: string; status?: string; previous_filename?: string }>(sys, token, pull.number, `${API}/repos/${slug}/pulls/${pull.number}/files`);
+    const names = files.flatMap((file) => [file.filename, ...(file.previous_filename ? [file.previous_filename] : [])]);
+    // onboard writes its files and never deletes one: a deleted workflow or settings file would switch the checks off.
+    if (names.every((name) => ONBOARD_FILES.includes(name)) && !files.some((file) => file.status === 'removed')) {
+      io.out(`✓ pr-work-rules: #${pull.number} is onboard's, changing only the files onboard writes, so it names no slice`);
+      return 0;
+    }
   }
   const slices = slicesNamed(pull.body ?? '');
   if (slices.length !== 1) {

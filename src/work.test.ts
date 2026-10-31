@@ -449,6 +449,38 @@ describe('prWorkRules', () => {
     });
   }
 
+  describe("onboard's pull request", () => {
+    const onboardPull = (repo = SLUG): Node => ({ number: 42, body: 'onboard', user: { login: AGENT }, head: { ref: 'process-rules/onboard', repo: { full_name: repo } } });
+    const files = (sys: FakeSys, list: Node[]): void => {
+      sys.route('GET', `/repos/${SLUG}/pulls/42/files?per_page=100&page=1`, { status: 200, json: list });
+    };
+
+    it('passes one changing only the files onboard writes, naming no slice', async () => {
+      const sys = actions(onboardPull('Example-Org/Example-App'));
+      files(sys, [{ filename: '.github/process-rules.json', status: 'modified' }, { filename: '.claude/settings.json', status: 'added' }, { filename: '.github/workflows/process-rules.yml' }, { filename: 'CODEOWNERS' }]);
+      assert.deepEqual(await check(sys), { code: 0, out: ["✓ pr-work-rules: #42 is onboard's, changing only the files onboard writes, so it names no slice"], err: [] });
+      assert.equal(sys.requests[0]?.token, 'ghs_run');
+    });
+
+    for (const [name, list] of [
+      ['changes another file', [{ filename: '.github/process-rules.json' }, { filename: 'src/app.ts' }]],
+      ['moves another file into one onboard writes', [{ filename: 'CODEOWNERS', previous_filename: 'src/owners' }]],
+      ['deletes one onboard writes', [{ filename: '.github/workflows/process-rules.yml', status: 'removed' }]],
+    ] as const) {
+      it(`holds one that ${name} to the work rules`, async () => {
+        const sys = actions(onboardPull());
+        files(sys, [...list]);
+        assert.deepEqual((await check(sys)).err[0], '✗ #42 names no slice; add a line "Slice: #N" to its description');
+      });
+    }
+
+    it("holds a fork's branch of that name to the work rules, without reading its files", async () => {
+      const sys = actions(onboardPull('someone/example-app'));
+      assert.deepEqual((await check(sys)).err[0], '✗ #42 names no slice; add a line "Slice: #N" to its description');
+      assert.ok(!sys.requests.some((r) => r.url.includes('/files')));
+    });
+  });
+
   it("leaves the owner's pull requests alone", async () => {
     const sys = actions({ number: 41, body: null, user: { login: OWNER }, head: { ref: 'x' } });
     assert.deepEqual(await check(sys), { code: 0, out: ['pr-work-rules: #41 is by example-owner, not the agent; the work rules bind agent pull requests'], err: [] });

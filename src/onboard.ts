@@ -20,13 +20,13 @@ import { type OwnerToken, asOwner, isOrganisation, ownerScopes, signInOnce } fro
 import { ownerRules, ownerRulesProblem } from './codeowners.ts';
 import { appendToArray, replaceValues, setMember } from './jsonedit.ts';
 import { DEFAULT_SCHEDULE, type Feature, FEATURES, FIGMA_FILE_KEY, NEEDS_ISSUE_TYPES, featuresIn, parseFeatures, renamedLines, scheduleIn } from './features.ts';
+import { type Change, HOOKS_PATH, WORKFLOW_PATH, openPull } from './onboard-pull.ts';
 import { packageVersion } from './version.ts';
 import type { Output, Sys } from './types.ts';
 
 /** This product's repository: clients call its shared workflow. */
 export const PRODUCT = 'athya-hq/process-rules';
-export const HOOKS_PATH = '.claude/settings.json';
-export const WORKFLOW_PATH = '.github/workflows/process-rules.yml';
+export { HOOKS_PATH, WORKFLOW_PATH } from './onboard-pull.ts';
 /**
  * The pre-push git hook: before a local agent session pushes, that it
  * reaches GitHub as the agent, then the work rules. It needs no Claude Code
@@ -495,7 +495,8 @@ async function choose(sys: Sys, io: Output, role: string, suggestions: (string |
 /**
  * Sets up the client repository the working directory is in, run by its
  * owner on a Mac `machine` has set up for the agent: the settings file, the
- * SessionStart hook entry and the workflow, which the owner then commits;
+ * SessionStart hook entry and the workflow, opened as the agent's pull
+ * request, so the owner's checkout is never modified;
  * the agent's push access, offering to invite it and accept the invitation;
  * the work board (issue types, labels, Project, fields and views); and one signed
  * test commit GitHub must show as Verified by the agent.
@@ -539,13 +540,26 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
   const confirm = async (question: string): Promise<boolean> =>
     /^y(es)?$/i.test((await sys.ask(`${question} [y/N] `)).trim());
   const stop = (step: string): number => {
-    io.err(`onboard: stopped at "${step}"; nothing after it was changed`);
+    io.err(`onboard: stopped at "${step}"; nothing after it was changed, and no pull request was opened`);
     return 1;
   };
   // Whether an organisation owns the repository, asked of GitHub once in this run.
   let organisation: Promise<boolean> | undefined;
   const byOrganisation = (): Promise<boolean> => (organisation ??= isOrganisation(sys, slug.split('/')[0] as string));
   const personal = `${slug} is owned by a personal account, and GitHub has issue types for organisations only`;
+  // The repository's files are changed only through the agent's pull request at the end: until then each
+  // change is held here, and read back from here, so the owner's checkout is never modified.
+  const changes = new Map<string, Change>();
+  const fileAt = (path: string): string | undefined => {
+    const held = changes.get(path);
+    if (held !== undefined) return held.text;
+    return sys.exists(`${root}/${path}`) ? sys.read(`${root}/${path}`) : undefined;
+  };
+  const change = (path: string, text: string, what: string): void => {
+    const held = changes.get(path);
+    const before = held ? held.before : fileAt(path);
+    changes.set(path, { path, before, text, what: held ? `${held.what}; ${what}` : what });
+  };
   // The owner's sign-in for this run: one browser approval at the first step that needs it, never stored.
   let scopes: string[] = [];
   let signedIn: Promise<OwnerToken | { problem: string }> | undefined;
@@ -562,13 +576,12 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     return undefined;
   };
 
-  const settingsFile = `${root}/${SETTINGS_PATH}`;
   let owner: string;
   let agent: string;
   let features: Feature[];
   let pendingSettings: string | undefined;
   let schedule = DEFAULT_SCHEDULE;
-  if (sys.exists(settingsFile)) {
+  if (fileAt(SETTINGS_PATH) !== undefined) {
     const settings = loadSettings(sys, root);
     if (chosen) {
       io.err(`onboard: ${SETTINGS_PATH} already lists its features; turn one more on with --add <feature>`);
@@ -582,7 +595,7 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     // GitHub's spelling, which the keychain, the session file and commits use.
     owner = (await account(sys, settings.owner)).login;
     agent = (await account(sys, settings.agent)).login;
-    let raw = JSON.parse(sys.read(settingsFile)) as Record<string, unknown>;
+    let raw = JSON.parse(fileAt(SETTINGS_PATH) as string) as Record<string, unknown>;
     features = featuresIn(raw);
     schedule = scheduleIn(raw);
     // Before any change, so a refused --add leaves the settings as they were.
@@ -594,14 +607,14 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     const renamed = renamedLines(raw).length > 0;
     if (renamed || raw.figma !== undefined) {
       const library = (raw.figma as { library?: unknown } | null)?.library;
-      const changes = [
+      const updates = [
         ...(renamed ? ['rename the design feature to figma'] : []),
         ...(raw.figma !== undefined ? ['take out "figma", since the library key belongs in the FIGMA_LIBRARY Actions secret'] : []),
       ];
-      if (!(await confirm(`Update ${SETTINGS_PATH}: ${changes.join(' and ')}?`))) return stop('settings file');
+      if (!(await confirm(`Update ${SETTINGS_PATH}: ${updates.join(' and ')}?`))) return stop('settings file');
       const { figma: _figma, ...rest } = raw;
       raw = { ...rest, ...(rest.features === undefined ? {} : { features }) };
-      sys.write(settingsFile, `${JSON.stringify(raw, null, 2)}\n`);
+      change(SETTINGS_PATH, `${JSON.stringify(raw, null, 2)}\n`, updates.join(' and '));
       // Printed as a command only when it is a file key, so copying it runs nothing else.
       if (typeof library === 'string' && FIGMA_FILE_KEY.test(library)) {
         io.out(`! set the FIGMA_LIBRARY Actions secret to the key taken out: gh secret set FIGMA_LIBRARY --repo ${slug} --body ${library}`);
@@ -653,23 +666,20 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     if (!(await confirm(`Write ${SETTINGS_PATH}: owner ${owner} approves, agent ${agent} builds, with ${features.join(', ')} on?`))) {
       return stop('settings file');
     }
-    sys.mkdir(`${root}/.github`);
-    sys.write(settingsFile, `${JSON.stringify({ owner, agent, features }, null, 2)}\n`);
+    change(SETTINGS_PATH, `${JSON.stringify({ owner, agent, features }, null, 2)}\n`, `owner ${owner} approves, agent ${agent} builds, with ${features.join(', ')} on`);
   }
   io.out(`✓ ${SETTINGS_PATH}: owner ${owner}, agent ${agent}; on: ${features.join(', ')}`);
   const on = (feature: Feature): boolean => features.includes(feature);
   const workflowNeeded = on('pr-identity') || on('work-rules') || on('figma') || on('decisions') || on('review');
 
-  const hooksFile = `${root}/${HOOKS_PATH}`;
-  const existing = sys.exists(hooksFile) ? sys.read(hooksFile) : undefined;
+  const existing = fileAt(HOOKS_PATH);
   // Worked out before asking, so a file onboard cannot edit is refused before any question.
   const claude = claudeSettings(existing);
   if (claude.changes.length > 0) {
     if (!(await confirm(`${existing === undefined ? 'Write' : 'Update'} ${HOOKS_PATH}: ${claude.changes.join('; ')}?`))) {
       return stop('hook entry');
     }
-    sys.mkdir(`${root}/.claude`);
-    sys.write(hooksFile, claude.text);
+    change(HOOKS_PATH, claude.text, claude.changes.join('; '));
   }
   io.out(`✓ ${HOOKS_PATH}: GitHub locked out until session-start gives the agent identity, and the guard on gh and git`);
 
@@ -726,9 +736,8 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
 
   // The shared checks run only for features that need them.
   if (workflowNeeded) {
-    const workflowFile = `${root}/${WORKFLOW_PATH}`;
     const version = packageVersion();
-    const update = workflowUpdate(sys.exists(workflowFile) ? sys.read(workflowFile) : undefined, reach.branch, version, on('figma'), schedule);
+    const update = workflowUpdate(fileAt(WORKFLOW_PATH), reach.branch, version, on('figma'), schedule);
     if (update.kind !== 'same') {
       const what = {
         write: `Write ${WORKFLOW_PATH}, which runs the shared process-rules checks`,
@@ -744,11 +753,10 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
       if (!(await confirm(`${what}?`))) {
         return stop('workflow');
       }
-      sys.mkdir(`${root}/.github/workflows`);
-      sys.write(workflowFile, update.text);
+      change(WORKFLOW_PATH, update.text, what.replace(/^\w/, (first) => first.toLowerCase()));
     }
     io.out(`✓ ${WORKFLOW_PATH}`);
-    const unpassed = on('figma') ? jobsWithoutLibrary(sys.read(workflowFile)) : [];
+    const unpassed = on('figma') ? jobsWithoutLibrary(fileAt(WORKFLOW_PATH) as string) : [];
     if (unpassed.length > 0) {
       io.out(`! In ${WORKFLOW_PATH}, ${unpassed.join(' and ')} pass${unpassed.length === 1 ? 'es' : ''} the shared checks no FIGMA_LIBRARY secret, so the design check stays off there; add FIGMA_LIBRARY: \${{ secrets.FIGMA_LIBRARY }} under ${unpassed.length === 1 ? 'its' : 'their'} secrets`);
     }
@@ -776,13 +784,13 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     }
   }
 
-  const projectTitle = (JSON.parse(sys.read(settingsFile)) as { project?: unknown }).project;
+  const projectTitle = (JSON.parse(fileAt(SETTINGS_PATH) as string) as { project?: unknown }).project;
   if (on('board')) {
     const mine = await ownerToken();
     if (!mine || !(await setUpBoard(sys, io, confirm, slug, owner, mine, typeof projectTitle === 'string' ? projectTitle : undefined))) return 1;
   }
   if (pendingSettings) {
-    sys.write(settingsFile, pendingSettings);
+    change(SETTINGS_PATH, pendingSettings, `turn ${add} on`);
     io.out(`✓ ${add} on in ${SETTINGS_PATH}`);
   }
 
@@ -792,22 +800,28 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
   const { id } = await account(sys, agent);
   const verified = await testCommit(sys, io, { agent, id, token, slug });
   if (verified !== 0) return verified;
-  // Optional, and last, so a run stopped earlier and run again still lists the file to commit.
+  // Optional, and last of the questions, so a run stopped earlier and run again still asks it.
   const rules = ownerRules(sys, root, owner);
-  let codeowners: string | undefined;
   if (rules) {
     io.out(`! ${ownerRulesProblem(rules, owner, agent)}`);
     const drop = rules.dropped > 0 ? `, and drop ${rules.dropped === 1 ? 'the rule' : `the ${rules.dropped} rules`} left with no owners, so ${rules.dropped === 1 ? 'its' : 'their'} paths fall to the rules before` : '';
     if (await confirm(`Remove ${owner} from ${rules.lines.length === 1 ? 'that rule' : 'those rules'} in ${rules.path}${drop}?`)) {
-      sys.write(`${root}/${rules.path}`, rules.text);
-      codeowners = rules.path;
+      change(rules.path, rules.text, `remove ${owner}, whom GitHub would otherwise ask to review every pull request ${agent} opens`);
       io.out(`✓ ${rules.path}: ${owner} removed`);
     } else {
       io.out(`! ${rules.path} left as it is`);
     }
   }
-  const files = [SETTINGS_PATH, HOOKS_PATH, ...(workflowNeeded ? [WORKFLOW_PATH] : []), ...(codeowners ? [codeowners] : [])];
-  io.out(`onboard: done. Commit ${files.slice(0, -1).join(', ')} and ${files.at(-1)}; agent sessions then work as ${agent}.`);
+  // A change that puts a file back as it was is no change.
+  const changed = [...changes.values()].filter((one) => one.text !== one.before);
+  if (changed.length === 0) {
+    io.out(`onboard: done; the repository's files need no change, so there is no pull request. Agent sessions work as ${agent}.`);
+  } else {
+    const pull = await openPull(sys, io, { agent, id, token, slug, branch: reach.branch, version: packageVersion() }, changed);
+    if (pull === 1) return 1;
+    io.out(`✓ ${agent}'s pull request with ${changed.map((one) => one.path).join(', ')}: ${pull}`);
+    io.out(`onboard: done; nothing in this checkout was changed. Merge ${pull}; agent sessions then work as ${agent}.`);
+  }
   io.out(`For Claude cloud sessions: connect claude.ai's GitHub as ${agent}, and put what process-rules cloud-setup prints in the cloud environment's Setup script.`);
   return 0;
 }
