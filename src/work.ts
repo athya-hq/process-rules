@@ -1,4 +1,4 @@
-import { API, NO_TOKEN, loadSettings, repoAt, sameLogin } from './agent.ts';
+import { API, NO_TOKEN, type Settings, anyLogin, either, loadSettings, repoAt } from './agent.ts';
 import { PERSONAL_REPO, isOn, isPersonal, notAdoptedLine, offLine } from './features.ts';
 import { agentSession, pushIdentityProblem } from './push-identity.ts';
 import { cloudToken } from './cloud.ts';
@@ -78,11 +78,11 @@ async function every<T>(sys: Sys, token: string, slice: number, url: string, mis
 /** When a comment was last edited, or undefined: GitHub moves `updated_at` on an edit, not on a reaction. */
 const editedAt = (comment: Comment): string | undefined => (comment.updated_at > comment.created_at ? comment.updated_at : undefined);
 
-/** Whether the owner left a `Decision:` comment among `comments`, after `since` when given, mentioning `mention` when given. */
-function decided(comments: Comment[], owner: string, since?: string, mention?: string): boolean {
+/** Whether an owner left a `Decision:` comment among `comments`, after `since` when given, mentioning `mention` when given. */
+function decided(comments: Comment[], owners: string[], since?: string, mention?: string): boolean {
   return comments.some(
     (comment) =>
-      sameLogin(comment.user?.login, owner) &&
+      anyLogin(owners, comment.user?.login) &&
       /^\s*Decision:/i.test(comment.body) &&
       (!since || comment.created_at > since) &&
       (!mention || new RegExp(`${mention}\\b`).test(comment.body)),
@@ -92,9 +92,9 @@ function decided(comments: Comment[], owner: string, since?: string, mention?: s
 /** A proposal's first line, and the issue it names first: what the proposal is for. */
 const PROPOSAL = /^\s*Proposal:[^#\n]*#(\d+)\b/i;
 
-/** The agent's proposals among `comments` for issue `number`. */
-function proposalsFor(comments: Comment[], agent: string, number: number): Comment[] {
-  return comments.filter((comment) => sameLogin(comment.user?.login, agent) && Number(PROPOSAL.exec(comment.body)?.[1]) === number);
+/** The agents' proposals among `comments` for issue `number`. */
+function proposalsFor(comments: Comment[], agents: string[], number: number): Comment[] {
+  return comments.filter((comment) => anyLogin(agents, comment.user?.login) && Number(PROPOSAL.exec(comment.body)?.[1]) === number);
 }
 
 /** A decision the owner owes a slice: its addition after the work item's approval, or a state dropped after it. */
@@ -114,30 +114,30 @@ interface Owed {
 }
 
 /**
- * Whether the owner reacted 👍 to one of `proposals`, after `since` when
+ * Whether an owner reacted 👍 to one of `proposals`, after `since` when
  * given and after the proposal's last edit, from the reactions read by id.
  */
-function thumbsUp(proposals: Comment[], reactions: Map<Comment['id'], Reaction[]>, owner: string, since?: string): boolean {
+function thumbsUp(proposals: Comment[], reactions: Map<Comment['id'], Reaction[]>, owners: string[], since?: string): boolean {
   return proposals.some((proposal) =>
     (reactions.get(proposal.id) ?? []).some((reaction) => {
       const edited = editedAt(proposal);
-      return sameLogin(reaction.user?.login, owner) && (!since || reaction.created_at > since) && (!edited || reaction.created_at > edited);
+      return anyLogin(owners, reaction.user?.login) && (!since || reaction.created_at > since) && (!edited || reaction.created_at > edited);
     }),
   );
 }
 
 /**
- * Whether the slice's `body` links a comment the owner wrote on work item
+ * Whether the slice's `body` links a comment an owner wrote on work item
  * `parent` before `since`, the slice's latest addition: a request on GitHub
  * is its own approval. GitHub, not the link, says who wrote the comment, on
  * which issue and when; one edited since it was written does not count,
  * since REST does not say who edited it.
  */
-function requested(body: string, slug: string, parent: number, comments: Comment[], owner: string, since: string): boolean {
+function requested(body: string, slug: string, parent: number, comments: Comment[], owners: string[], since: string): boolean {
   const link = new RegExp(`https://${GITHUB_HOST_RE}/${slug.replaceAll('.', '\\.')}/issues/${parent}#issuecomment-(\\d+)\\b`, 'gi');
   const linked = new Set([...body.matchAll(link)].map((match) => match[1]));
   return comments.some(
-    (comment) => linked.has(String(comment.id)) && sameLogin(comment.user?.login, owner) && comment.created_at < since && !editedAt(comment),
+    (comment) => linked.has(String(comment.id)) && anyLogin(owners, comment.user?.login) && comment.created_at < since && !editedAt(comment),
   );
 }
 
@@ -163,15 +163,15 @@ async function parentOf(sys: Sys, token: string, issue: Issue): Promise<{ parent
 
 /**
  * Reads slice `slice` against the work rules' approvals: the problems that
- * stop it outright (not a Slice under a Work item the owner approved), else
- * the decisions it owes the owner and whether each was given.
+ * stop it outright (not a Slice under a Work item an owner approved), else
+ * the decisions it owes an owner and whether each was given.
  */
 async function readSlice(
   sys: Sys,
   token: string,
   slug: string,
   slice: number,
-  { owner, agent }: { owner: string; agent: string },
+  { owners, agents }: Settings,
 ): Promise<{ problems: string[]; parent?: number; owed: Owed[] }> {
   const issue = await readIssue(sys, token, slug, slice);
   if (!issue) return { problems: [`#${slice} is not an issue in ${slug}`], owed: [] };
@@ -185,10 +185,10 @@ async function readSlice(
     .filter((event): event is Extract<TimelineEvent, { event: 'labeled' | 'unlabeled' }> => (event.event === 'labeled' || event.event === 'unlabeled') && event.label.name === 'approved')
     .at(-1);
   if (approval?.event !== 'labeled') {
-    return { problems: [`work item #${parent.number} is not approved: ${owner} adds the approved label before any slice starts`], owed: [] };
+    return { problems: [`work item #${parent.number} is not approved: ${either(owners)} adds the approved label before any slice starts`], owed: [] };
   }
-  if (!sameLogin(approval.actor?.login, owner)) {
-    return { problems: [`work item #${parent.number} was labeled approved by ${approval.actor?.login ?? 'someone unknown'}, not ${owner}`], owed: [] };
+  if (!anyLogin(owners, approval.actor?.login)) {
+    return { problems: [`work item #${parent.number} was labeled approved by ${approval.actor?.login ?? 'someone unknown'}, not ${either(owners)}`], owed: [] };
   }
   const approvedAt = approval.created_at;
   const parentComments = events.filter((event): event is { event: 'commented' } & Comment => event.event === 'commented');
@@ -209,11 +209,11 @@ async function readSlice(
       title: issue.title,
       body: issue.body ?? '',
       since: added.created_at,
-      proposals: proposalsFor(comments, agent, slice),
+      proposals: proposalsFor(comments, agents, slice),
       settled:
-        decided(parentComments, owner, added.created_at, `#${slice}`) ||
-        decided(comments, owner, added.created_at) ||
-        requested(issue.body ?? '', slug, parent.number, parentComments, owner, added.created_at),
+        decided(parentComments, owners, added.created_at, `#${slice}`) ||
+        decided(comments, owners, added.created_at) ||
+        requested(issue.body ?? '', slug, parent.number, parentComments, owners, added.created_at),
     });
   }
   for (const state of states) {
@@ -223,8 +223,8 @@ async function readSlice(
       number: state.number,
       title: state.title,
       body: state.body ?? '',
-      proposals: proposalsFor(comments, agent, state.number),
-      settled: decided(comments, owner, undefined, `#${state.number}`) || decided(await every<Comment>(sys, token, slice, `${state.url}/comments`), owner),
+      proposals: proposalsFor(comments, agents, state.number),
+      settled: decided(comments, owners, undefined, `#${state.number}`) || decided(await every<Comment>(sys, token, slice, `${state.url}/comments`), owners),
     });
   }
 
@@ -233,12 +233,15 @@ async function readSlice(
   for (const proposal of owed.filter((one) => !one.settled).flatMap((one) => one.proposals)) {
     reactions.set(proposal.id, await every<Reaction>(sys, token, slice, `${API}/repos/${slug}/issues/comments/${proposal.id}/reactions?content=%2B1`, true));
   }
-  for (const one of owed) one.settled ||= thumbsUp(one.proposals, reactions, owner, one.since);
+  for (const one of owed) one.settled ||= thumbsUp(one.proposals, reactions, owners, one.since);
   return { problems: [], parent: parent.number, owed };
 }
 
 /** Why `owed` stops slice `slice`, and how the owner settles it. */
-function owedProblem(one: Owed, slice: number, parent: number | undefined, { owner, agent }: { owner: string; agent: string }): string {
+function owedProblem(one: Owed, slice: number, parent: number | undefined, { owners, agents }: Settings): string {
+  const owner = either(owners);
+  // The agent proposes as itself; with several, any of them.
+  const agent = either(agents);
   const ask = one.proposals.length > 0 ? '' : `; ${agent} proposes it with: process-rules propose ${one.number}`;
   return one.kind === 'added'
     ? `#${slice} was added to work item #${parent} after its approval; ${owner} reacts 👍 on ${agent}'s proposal on #${slice}, or adds a "Decision:" comment naming #${slice}, or #${slice} links ${owner}'s request for it on #${parent}${ask}`
@@ -257,7 +260,7 @@ export async function sliceProblems(
   token: string,
   slug: string,
   slice: number,
-  accounts: { owner: string; agent: string },
+  accounts: Settings,
   mine: { pull?: number; branch?: string },
 ): Promise<string[]> {
   const read = await readSlice(sys, token, slug, slice, accounts);
@@ -311,7 +314,7 @@ export async function prWorkRules(sys: Sys, io: Output): Promise<number> {
     io.out(notAdopted);
     return 0;
   }
-  const { owner, agent } = loadSettings(sys, sys.cwd);
+  const accounts = loadSettings(sys, sys.cwd);
   if (!isOn(sys, sys.cwd, 'work-rules')) {
     io.out(offLine('pr-work-rules', 'work-rules'));
     return 0;
@@ -320,8 +323,8 @@ export async function prWorkRules(sys: Sys, io: Output): Promise<number> {
     io.out(offLine('pr-work-rules', 'work-rules', PERSONAL_REPO));
     return 0;
   }
-  if (!sameLogin(pull.user.login, agent)) {
-    io.out(`pr-work-rules: #${pull.number} is by ${pull.user.login}, not the agent; the work rules bind agent pull requests`);
+  if (!anyLogin(accounts.agents, pull.user.login)) {
+    io.out(`pr-work-rules: #${pull.number} is by ${pull.user.login}, not an agent; the work rules bind agent pull requests`);
     return 0;
   }
   if (pull.head.ref === ONBOARD_BRANCH && pull.head.repo?.full_name.toLowerCase() === slug.toLowerCase()) {
@@ -342,7 +345,7 @@ export async function prWorkRules(sys: Sys, io: Output): Promise<number> {
     ]);
   }
   const [slice] = slices as [number];
-  const problems = await sliceProblems(sys, token, slug, slice, { owner, agent }, { pull: pull.number });
+  const problems = await sliceProblems(sys, token, slug, slice, accounts, { pull: pull.number });
   if (problems.length === 0) io.out(`✓ pr-work-rules: #${pull.number} builds slice #${slice}, which may be built`);
   return report(io, 'pr-work-rules', problems);
 }
@@ -388,11 +391,11 @@ function branchBeyondMerges(sys: Sys, root: string, range: string[]): string | u
 export async function prePush(sys: Sys, io: Output, refLines: string, url: string): Promise<number> {
   if (!agentSession(sys)) return 0;
   const { root, slug } = repoAt(sys);
-  const { owner, agent } = loadSettings(sys, root);
-  const identity = await pushIdentityProblem(sys, root, url, agent);
+  const accounts = loadSettings(sys, root);
+  const identity = await pushIdentityProblem(sys, root, url, accounts.agents);
   if (identity) {
     io.err(`✗ ${identity}`);
-    io.err(`pre-push: refused; an agent session pushes to GitHub only as ${agent}`);
+    io.err(`pre-push: refused; an agent session pushes to GitHub only as ${either(accounts.agents)}`);
     return 1;
   }
   if (!isOn(sys, root, 'work-rules')) {
@@ -431,7 +434,7 @@ export async function prePush(sys: Sys, io: Output, refLines: string, url: strin
   }
   if (branches.length > 1) return report(io, 'pre-push', [`one push builds one slice on one branch; this one pushes ${where}`]);
   const [slice] = slices as [number];
-  return report(io, 'pre-push', await sliceProblems(sys, token, slug, slice, { owner, agent }, { branch: branches[0] as string }));
+  return report(io, 'pre-push', await sliceProblems(sys, token, slug, slice, accounts, { branch: branches[0] as string }));
 }
 
 /** The label that puts an issue in the owner's Needs you view. */
@@ -464,7 +467,7 @@ function proposalGap(one: Owed): string | undefined {
  * The `Proposal:` comment for `one`: what changes, why, what it costs and
  * what happens if the owner declines, so it stands alone.
  */
-function proposalBody(one: Owed, slice: number, parent: number | undefined, owner: string): string {
+function proposalBody(one: Owed, slice: number, parent: number | undefined, owners: string[]): string {
   // The issue it is for comes first: that is how the work rules match a 👍 to it.
   const lines = one.kind === 'added'
     ? [
@@ -481,7 +484,7 @@ function proposalBody(one: Owed, slice: number, parent: number | undefined, owne
         `**What it costs:** ${section(one.body, 'Cost') ?? `what state #${one.number} would show is not built.`}`,
         `**If you decline:** state #${one.number} is reopened and built as you approved it.`,
       ];
-  return `${lines.join('\n\n')}\n\n@${owner}: react 👍 to this comment to approve it, or comment "Decision:".`;
+  return `${lines.join('\n\n')}\n\n${either(owners.map((owner) => `@${owner}`))}: react 👍 to this comment to approve it, or comment "Decision:".`;
 }
 
 /**
@@ -508,8 +511,8 @@ export async function propose(sys: Sys, io: Output, number: number): Promise<num
   // Only the agent's proposals count, so one posted as anyone else would wait for nothing.
   const user = await sys.http(`${API}/user`, { token });
   const login = (user.json as { login?: string } | null)?.login;
-  if (user.status !== 200 || !sameLogin(login, accounts.agent)) {
-    return report(io, 'propose', [`propose posts as ${accounts.agent}, but this session's token is ${login ?? 'refused'}`]);
+  if (user.status !== 200 || !anyLogin(accounts.agents, login)) {
+    return report(io, 'propose', [`propose posts as ${either(accounts.agents)}, but this session's token is ${login ?? 'refused'}`]);
   }
 
   const issue = await readIssue(sys, token, slug, number);
@@ -519,9 +522,10 @@ export async function propose(sys: Sys, io: Output, number: number): Promise<num
   const slice = state ? parent.number : number;
   const read = await readSlice(sys, token, slug, slice, accounts);
   if (read.problems.length > 0) return report(io, 'propose', read.problems);
+  const owner = either(accounts.owners);
   const asked = read.owed.filter((one) => !state || one.number === number);
   if (asked.length === 0) {
-    io.out(`propose: #${number} needs no decision from ${accounts.owner}`);
+    io.out(`propose: #${number} needs no decision from ${owner}`);
     return 0;
   }
 
@@ -533,11 +537,11 @@ export async function propose(sys: Sys, io: Output, number: number): Promise<num
   for (const one of asked) {
     const what = one.kind === 'added' ? `#${slice}` : `state #${one.number}`;
     if (one.settled) {
-      io.out(`✓ ${what}: ${accounts.owner} has decided`);
+      io.out(`✓ ${what}: ${owner} has decided`);
     } else if (one.proposals.length > 0) {
-      io.out(`${what}: proposed on #${slice}, waiting on ${accounts.owner}'s 👍`);
+      io.out(`${what}: proposed on #${slice}, waiting on ${owner}'s 👍`);
     } else {
-      const posted = await sys.http(`${issues}/comments`, { method: 'POST', token, body: { body: proposalBody(one, slice, read.parent, accounts.owner) } });
+      const posted = await sys.http(`${issues}/comments`, { method: 'POST', token, body: { body: proposalBody(one, slice, read.parent, accounts.owners) } });
       if (posted.status !== 201) throw new Error(`cannot comment on #${slice} (HTTP ${posted.status})`);
       io.out(`✓ ${what}: proposed on #${slice}: ${(posted.json as { html_url?: string } | null)?.html_url ?? ''}`.trimEnd());
     }
@@ -545,12 +549,12 @@ export async function propose(sys: Sys, io: Output, number: number): Promise<num
   if (read.owed.some((one) => !one.settled)) {
     const labeled = await sys.http(`${issues}/labels`, { method: 'POST', token, body: { labels: [NEEDS_OWNER] } });
     if (labeled.status !== 200) throw new Error(`cannot label #${slice} ${NEEDS_OWNER} (HTTP ${labeled.status})`);
-    io.out(`#${slice} is labeled ${NEEDS_OWNER}, so it shows in ${accounts.owner}'s Needs you view`);
+    io.out(`#${slice} is labeled ${NEEDS_OWNER}, so it shows in ${owner}'s Needs you view`);
     return 0;
   }
   const removed = await sys.http(`${issues}/labels/${NEEDS_OWNER}`, { method: 'DELETE', token });
   // 404: the slice had no such label.
   if (removed.status !== 200 && removed.status !== 404) throw new Error(`cannot take ${NEEDS_OWNER} off #${slice} (HTTP ${removed.status})`);
-  io.out(`✓ #${slice}: nothing waits on ${accounts.owner}`);
+  io.out(`✓ #${slice}: nothing waits on ${owner}`);
   return 0;
 }

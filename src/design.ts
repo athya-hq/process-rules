@@ -1,4 +1,4 @@
-import { API, SETTINGS_PATH, loadSettings, sameLogin } from './agent.ts';
+import { API, SETTINGS_PATH, anyLogin, loadSettings } from './agent.ts';
 import type { Output, Sys } from './types.ts';
 import { slicesNamed } from './work.ts';
 import { FIGMA_FILE_KEY, PERSONAL_REPO, isOn, isPersonal, notAdoptedLine, offLine, renamedLines } from './features.ts';
@@ -128,9 +128,9 @@ export async function prDesign(sys: Sys, io: Output): Promise<number> {
   }
   const event = JSON.parse(sys.read(eventPath)) as { pull_request?: { number: number; body: string | null; user: { login: string } } };
   const pull = event.pull_request;
-  const { agent } = loadSettings(sys, sys.cwd);
+  const { agents } = loadSettings(sys, sys.cwd);
   const [slice] = slicesNamed(pull?.body ?? '');
-  if (!pull || !sameLogin(pull.user.login, agent) || slice === undefined) {
+  if (!pull || !anyLogin(agents, pull.user.login) || slice === undefined) {
     io.out('pr-design: not an agent pull request naming a slice; nothing to check');
     return 0;
   }

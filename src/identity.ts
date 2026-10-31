@@ -1,4 +1,4 @@
-import { API, account, loadSettings, noreplyEmail, sameLogin } from './agent.ts';
+import { API, account, anyLogin, either, loadSettings, noreplyEmail, sameLogin } from './agent.ts';
 import { isOn, notAdoptedLine, offLine } from './features.ts';
 import type { Output, Sys } from './types.ts';
 
@@ -18,8 +18,8 @@ const RECORD_WAIT_MS = 10_000;
 
 /**
  * The PR identity check, run by the shared workflow on a pull request. Every
- * commit that claims the agent (its login or its no-reply address) must be
- * Verified as the agent, and pushed by it. Who pushed comes from GitHub's
+ * commit that claims an agent (its login or its no-reply address) must be
+ * Verified as that agent, and pushed by an agent. Who pushed comes from GitHub's
  * record of the branch's pushes alone, never from whoever started the run,
  * so an edit, a label or a re-run gives the result the push itself gave.
  * Reads the event and repository from the Actions environment and asks
@@ -44,13 +44,18 @@ export async function prIdentity(sys: Sys, io: Output): Promise<number> {
     io.out(notAdopted);
     return 0;
   }
-  const { agent } = loadSettings(sys, sys.cwd);
+  const { agents } = loadSettings(sys, sys.cwd);
   if (!isOn(sys, sys.cwd, 'pr-identity')) {
     io.out(offLine('pr-identity', 'pr-identity'));
     return 0;
   }
-  const { id, login } = await account(sys, agent);
-  const email = noreplyEmail(id, login).toLowerCase();
+  // GitHub's spelling of each agent, and the no-reply address its commits carry.
+  const accounts = await Promise.all(agents.map(async (agent) => {
+    const { id, login } = await account(sys, agent);
+    return { login, email: noreplyEmail(id, login).toLowerCase() };
+  }));
+  const logins = accounts.map((one) => one.login);
+  const login = either(logins);
 
   const commits: Commit[] = [];
   for (let page = 1; ; page++) {
@@ -66,21 +71,24 @@ export async function prIdentity(sys: Sys, io: Output): Promise<number> {
     return 1;
   }
 
-  const claimsAgent = (commit: Commit): boolean =>
-    sameLogin(commit.author?.login ?? undefined, login) || commit.commit?.author?.email?.toLowerCase() === email;
+  /** The agent a commit claims, by its author's login or its no-reply address, or undefined. */
+  const claimed = (commit: Commit): string | undefined =>
+    accounts.find((one) => sameLogin(commit.author?.login ?? undefined, one.login) || commit.commit?.author?.email?.toLowerCase() === one.email)?.login;
+  const claimsAgent = (commit: Commit): boolean => claimed(commit) !== undefined;
   const problems: string[] = [];
   for (const commit of commits.filter(claimsAgent)) {
     const verification = commit.commit?.verification;
-    if (verification?.verified !== true || !sameLogin(commit.committer?.login ?? undefined, login)) {
+    const agent = claimed(commit) as string;
+    if (verification?.verified !== true || !sameLogin(commit.committer?.login ?? undefined, agent)) {
       problems.push(
-        `${commit.sha.slice(0, 7)} claims ${login} but is not Verified as ${login} (committer ${commit.committer?.login ?? 'none'}, ${verification?.reason ?? 'no verification'})`,
+        `${commit.sha.slice(0, 7)} claims ${agent} but is not Verified as ${agent} (committer ${commit.committer?.login ?? 'none'}, ${verification?.reason ?? 'no verification'})`,
       );
     }
   }
   // Only commits that claim the agent need their pusher; an owner-only pull request asks GitHub nothing more.
   const agentCommits = commits.filter(claimsAgent);
   const shas = (list: Commit[]): string => list.map((commit) => commit.sha.slice(0, 7)).join(', ');
-  const claim = (list: unknown[]): string => `claim${list.length === 1 ? 's' : ''} ${login}`;
+  const claim = (list: Commit[]): string => `claim${list.length === 1 ? 's' : ''} ${either([...new Set(list.map((commit) => claimed(commit) as string))])}`;
   const head = pull.head.repo?.full_name;
   if (agentCommits.length > 0 && !head) {
     // A deleted fork takes its push record with it.
@@ -98,7 +106,7 @@ export async function prIdentity(sys: Sys, io: Output): Promise<number> {
     for (const commit of agentCommits) {
       const pusher = pushers.get(commit.sha);
       if (pusher === undefined) unrecorded.push(commit);
-      else if (!pusher || !sameLogin(pusher, login)) {
+      else if (!pusher || !anyLogin(logins, pusher)) {
         const key = pusher ?? 'an account GitHub no longer names';
         byPusher.set(key, [...(byPusher.get(key) ?? []), commit]);
       }

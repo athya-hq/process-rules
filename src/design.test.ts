@@ -144,6 +144,16 @@ describe('prDesign', () => {
     assert.deepEqual(await check(sys), { code: 0, out: ['✓ pr-design: 1 state of #12, each a frame built from the design library'], err: [] });
   });
 
+  it("with two agents, checks either agent's pull request, and not an owner's", async () => {
+    const team = (user: string): FakeSys => {
+      const sys = actions([state(30, LINK)], user);
+      sys.files.set(`${ROOT}/.github/process-rules.json`, JSON.stringify({ owner: ['example-owner', 'Second-Owner'], agent: [AGENT, 'OtherBot'] }));
+      return sys;
+    };
+    assert.deepEqual((await check(team('OtherBot'))).out, ['✓ pr-design: 1 state of #12, each a frame built from the design library']);
+    assert.deepEqual((await check(team('Second-Owner'))).out, ['pr-design: not an agent pull request naming a slice; nothing to check']);
+  });
+
   it('counts states in the plural', async () => {
     const sys = actions([state(30, LINK), state(33, LINK)]);
     assert.deepEqual((await check(sys)).out, ['✓ pr-design: 2 states of #12, each a frame built from the design library']);

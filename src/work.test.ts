@@ -6,7 +6,7 @@ import { prePush, prWorkRules, propose, section, sliceProblems, slicesNamed } fr
 
 const SLUG = 'example-org/example-app';
 const OWNER = 'example-owner';
-const ACCOUNTS = { owner: OWNER, agent: AGENT };
+const ACCOUNTS = { owners: [OWNER], agents: [AGENT] };
 const T0 = '2026-10-01T00:00:00Z';
 const APPROVED = '2026-10-02T00:00:00Z';
 const LATER = '2026-10-03T00:00:00Z';
@@ -93,11 +93,17 @@ const comment = (body: string, created_at = LATEST, login = OWNER, edited: strin
 });
 const thumb = (created_at = LATEST, login = OWNER): Node => ({ user: { login }, created_at });
 
-async function problems(issue: Node | null, pulls: Node[] = [], mine: { pull?: number; branch?: string } = {}): Promise<string[]> {
+async function problems(issue: Node | null, pulls: Node[] = [], mine: { pull?: number; branch?: string } = {}, accounts = ACCOUNTS): Promise<string[]> {
   const sys = new FakeSys();
   github(sys, issue, pulls);
-  return sliceProblems(sys, 'tok', SLUG, 12, ACCOUNTS, mine);
+  return sliceProblems(sys, 'tok', SLUG, 12, accounts, mine);
 }
+
+/** A second owner and a second agent, as settings listing two of each name them. */
+const OWNER_2 = 'Second-Owner';
+const AGENT_2 = 'OtherBot';
+const TEAM = { owners: [OWNER, OWNER_2], agents: [AGENT, AGENT_2] };
+const TEAM_SETTINGS = JSON.stringify({ owner: TEAM.owners, agent: TEAM.agents });
 
 describe('slicesNamed', () => {
   it('reads "Slice: #N" lines and issue links, once each', () => {
@@ -562,7 +568,7 @@ describe('prWorkRules', () => {
 
   it("leaves the owner's pull requests alone", async () => {
     const sys = actions({ number: 41, body: null, user: { login: OWNER }, head: { ref: 'x' } });
-    assert.deepEqual(await check(sys), { code: 0, out: ['pr-work-rules: #41 is by example-owner, not the agent; the work rules bind agent pull requests'], err: [] });
+    assert.deepEqual(await check(sys), { code: 0, out: ['pr-work-rules: #41 is by example-owner, not an agent; the work rules bind agent pull requests'], err: [] });
   });
 
   it('skips events that are not pull requests', async () => {
@@ -888,5 +894,140 @@ describe('propose', () => {
     const { code, out } = await run(sys);
     assert.equal(code, 0);
     assert.match(out[0] ?? '', /^propose: .*work-rules/);
+  });
+});
+
+describe('with two owners and two agents', () => {
+  const added = (): ReturnType<typeof graph> => {
+    const g = graph();
+    g.timeline[0] = { event: 'sub_issue_added', created_at: LATER, sub_issue: { number: 12 } };
+    return g;
+  };
+  const dropped = (g = graph()): ReturnType<typeof graph> => {
+    g.states.push({ number: 30, type: { name: 'State' }, state_reason: 'not_planned', closed_at: LATER, comments: [] });
+    return g;
+  };
+
+  it("takes either owner's approval of the work item, and no one else's", async () => {
+    const g = graph();
+    g.timeline[1] = { event: 'labeled', created_at: APPROVED, actor: { login: 'second-owner' }, label: { name: 'approved' } };
+    assert.deepEqual(await problems(g.issue, [], {}, TEAM), []);
+    g.timeline[1] = { event: 'labeled', created_at: APPROVED, actor: { login: AGENT_2 }, label: { name: 'approved' } };
+    assert.deepEqual(await problems(g.issue, [], {}, TEAM), ['work item #10 was labeled approved by OtherBot, not example-owner or Second-Owner']);
+    g.timeline.splice(1, 1);
+    assert.deepEqual(await problems(g.issue, [], {}, TEAM), ['work item #10 is not approved: example-owner or Second-Owner adds the approved label before any slice starts']);
+  });
+
+  it("names both owners and both agents in what a slice added after approval owes", async () => {
+    assert.deepEqual(await problems(added().issue, [], {}, TEAM), [
+      '#12 was added to work item #10 after its approval; example-owner or Second-Owner reacts 👍 on ExampleBot or OtherBot\'s proposal on #12, or adds a "Decision:" comment naming #12, or #12 links example-owner or Second-Owner\'s request for it on #10; ExampleBot or OtherBot proposes it with: process-rules propose 12',
+    ]);
+  });
+
+  it("takes the second owner's Decision: comment, on the work item or the slice", async () => {
+    const g = added();
+    g.timeline.push(comment('Decision: add #12', LATEST, OWNER_2));
+    assert.deepEqual(await problems(g.issue, [], {}, TEAM), []);
+    const h = added();
+    h.comments.push(comment('Decision: keep it', LATEST, OWNER_2));
+    assert.deepEqual(await problems(h.issue, [], {}, TEAM), []);
+    // Not an agent's, either one.
+    const i = added();
+    i.comments.push(comment('Decision: keep it', LATEST, AGENT_2));
+    assert.equal((await problems(i.issue, [], {}, TEAM)).length, 1);
+  });
+
+  it("takes the second owner's request on the work item, which the slice links", async () => {
+    const g = added();
+    const request = { ...comment('Please add a slice for the thing', APPROVED, OWNER_2), id: 777 };
+    g.timeline.push(request);
+    g.issue.body = `${g.issue.body as string}\n\nAsked for in https://github.com/${SLUG}/issues/10#issuecomment-777`;
+    assert.deepEqual(await problems(g.issue, [], {}, TEAM), []);
+  });
+
+  it("takes either owner's 👍 on either agent's proposal", async () => {
+    for (const [agent, owner] of [[AGENT_2, OWNER], [AGENT, OWNER_2], [AGENT_2, 'SECOND-OWNER']] as const) {
+      const g = added();
+      const made = comment('Proposal: add #12 (Add the thing) to work item #10', LATER, agent);
+      g.comments.push(made);
+      g.thumbs.set(made.id as string, [thumb(LATEST, owner)]);
+      assert.deepEqual(await problems(g.issue, [], {}, TEAM), [], `${owner} on ${agent}'s proposal`);
+    }
+    const g = added();
+    const made = comment('Proposal: add #12', LATER, AGENT_2);
+    g.comments.push(made);
+    g.thumbs.set(made.id as string, [thumb(LATEST, AGENT)]);
+    assert.equal((await problems(g.issue, [], {}, TEAM)).length, 1, "an agent's 👍 does not count");
+  });
+
+  it("takes the second owner's Decision: or 👍 on a dropped state", async () => {
+    const g = dropped();
+    assert.deepEqual(await problems(g.issue, [], {}, TEAM), [
+      'state #30 was closed as not planned after approval; example-owner or Second-Owner reacts 👍 on ExampleBot or OtherBot\'s proposal for it on #12, or adds a "Decision:" comment to it; ExampleBot or OtherBot proposes it with: process-rules propose 30',
+    ]);
+    g.comments.push(comment('Decision: drop #30', LATEST, OWNER_2));
+    assert.deepEqual(await problems(g.issue, [], {}, TEAM), []);
+    const h = dropped();
+    const made = comment('Proposal: drop state #30 (Empty list)', LATER, AGENT_2);
+    h.comments.push(made);
+    h.thumbs.set(made.id as string, [thumb(LATEST, OWNER_2)]);
+    assert.deepEqual(await problems(h.issue, [], {}, TEAM), []);
+  });
+
+  it("holds the second agent's pull request to the work rules, and leaves the second owner's alone", async () => {
+    const EVENT = '/tmp/event.json';
+    const actions = (login: string, body: string | null): FakeSys => {
+      const sys = new FakeSys();
+      sys.env = { GITHUB_EVENT_PATH: EVENT, GITHUB_REPOSITORY: SLUG, GH_TOKEN: 'ghs_run' };
+      sys.files.set(`${ROOT}/.github/process-rules.json`, TEAM_SETTINGS);
+      sys.files.set(EVENT, JSON.stringify({ pull_request: { number: 40, body, user: { login }, head: { ref: 'work' } } }));
+      github(sys, graph().issue);
+      return sys;
+    };
+    const check = async (sys: FakeSys): Promise<{ code: number; out: string[]; err: string[] }> => {
+      const { io, out, err } = capture();
+      return { code: await prWorkRules(sys, io), out, err };
+    };
+    assert.deepEqual(await check(actions(AGENT_2, 'Slice: #12')), { code: 0, out: ['✓ pr-work-rules: #40 builds slice #12, which may be built'], err: [] });
+    assert.equal((await check(actions('otherbot', null))).code, 1);
+    assert.deepEqual((await check(actions(OWNER_2, null))).out, ['pr-work-rules: #40 is by Second-Owner, not an agent; the work rules bind agent pull requests']);
+  });
+
+  it('lets either agent push, and refuses an owner', async () => {
+    const push = async (login: string): Promise<{ code: number; err: string[] }> => {
+      const sys = new FakeSys();
+      sys.files.set(`${ROOT}/.github/process-rules.json`, TEAM_SETTINGS);
+      sys.env = { PROCESS_RULES_AGENT: login, GH_TOKEN: 'ghp_good' };
+      sys.execOverride = (call) => (call.args[0] === 'log' ? { code: 0, stdout: 'Slice: #12\n', stderr: '' } : undefined);
+      github(sys, graph().issue);
+      sys.acceptToken('ghp_good', login);
+      const { io, err } = capture();
+      return { code: await prePush(sys, io, `refs/heads/work ${'a'.repeat(40)} refs/heads/work ${'b'.repeat(40)}\n`, 'https://github.com/example-org/example-app.git'), err };
+    };
+    assert.deepEqual(await push(AGENT), { code: 0, err: [] });
+    assert.deepEqual(await push(AGENT_2), { code: 0, err: [] });
+    assert.deepEqual((await push(OWNER_2)).err, [
+      '✗ this push would reach GitHub as Second-Owner, not ExampleBot or OtherBot; agent sessions push only as ExampleBot or OtherBot: this session was not given the agent identity, which sends GitHub over HTTPS; tell the owner',
+      'pre-push: refused; an agent session pushes to GitHub only as ExampleBot or OtherBot',
+    ]);
+  });
+
+  it('proposes as the second agent, asking both owners', async () => {
+    const sys = new FakeSys();
+    sys.files.set(`${ROOT}/.github/process-rules.json`, TEAM_SETTINGS);
+    sys.env = { PROCESS_RULES_AGENT: AGENT_2, GH_TOKEN: 'ghp_good' };
+    sys.acceptToken('ghp_good', AGENT_2);
+    github(sys, added().issue);
+    sys.route('POST', `/repos/${SLUG}/issues/12/comments`, { status: 201, json: {} });
+    sys.route('POST', `/repos/${SLUG}/issues/12/labels`, { status: 200, json: [] });
+    const { io, out } = capture();
+    assert.equal(await propose(sys, io, 12), 0);
+    assert.equal(out.at(-1), "#12 is labeled needs-owner, so it shows in example-owner or Second-Owner's Needs you view");
+    const body = (sys.requests.find((r) => r.method === 'POST' && r.url.endsWith('/comments'))?.body as { body: string }).body;
+    assert.match(body, /\n\n@example-owner or @Second-Owner: react 👍 to this comment to approve it, or comment "Decision:"\.$/);
+    sys.acceptToken('ghp_good', OWNER_2);
+    const refused = capture();
+    assert.equal(await propose(sys, refused.io, 12), 1);
+    assert.equal(refused.err[0], "✗ propose posts as ExampleBot or OtherBot, but this session's token is Second-Owner");
   });
 });

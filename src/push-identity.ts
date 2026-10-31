@@ -1,4 +1,4 @@
-import { API, sameLogin } from './agent.ts';
+import { API, anyLogin, either } from './agent.ts';
 import { cloudLogin } from './cloud.ts';
 import type { Sys } from './types.ts';
 import { GITHUB_HOST, GITHUB_HOST_RE } from './host.ts';
@@ -17,7 +17,7 @@ export function agentSession(sys: Sys): boolean {
 }
 
 /**
- * Why an agent session's push to `url` would not reach GitHub as `agent`, or
+ * Why an agent session's push to `url` would not reach GitHub as one of `agents`, or
  * undefined when it would, or when `url` is neither SSH nor GitHub. Any push
  * over SSH is refused, whatever the host, since a host alias can be GitHub:
  * it uses this Mac's keys, which are the owner's, and the agent's identity
@@ -26,7 +26,8 @@ export function agentSession(sys: Sys): boolean {
  * cloud session pushes through its GitHub proxy as the account connected to
  * claude.ai, which GitHub names through the same proxy.
  */
-export async function pushIdentityProblem(sys: Sys, root: string, url: string, agent: string): Promise<string | undefined> {
+export async function pushIdentityProblem(sys: Sys, root: string, url: string, agents: readonly string[]): Promise<string | undefined> {
+  const agent = either(agents);
   const notSetUp = 'this session was not given the agent identity, which sends GitHub over HTTPS; tell the owner';
   if (!url) return 'git gave the pre-push hook no remote URL, so this push cannot be checked';
   if (SSH.test(url)) {
@@ -36,7 +37,7 @@ export async function pushIdentityProblem(sys: Sys, root: string, url: string, a
   if (sys.env.CLAUDE_CODE_REMOTE === 'true') {
     const asked = await cloudLogin(sys);
     if ('problem' in asked) return `${asked.problem}, so this push cannot be checked as ${agent}`;
-    if (sameLogin(asked.login, agent)) return undefined;
+    if (anyLogin(agents, asked.login)) return undefined;
     return `this cloud session pushes as ${asked.login}, not ${agent}; claude.ai's GitHub connection must be ${agent} for agent sessions`;
   }
   const filled = sys.exec('git', ['credential', 'fill'], {
@@ -61,7 +62,7 @@ export async function pushIdentityProblem(sys: Sys, root: string, url: string, a
   if (typeof login !== 'string') {
     return `GitHub does not accept the credentials git would push with, so this push cannot reach GitHub as ${agent}: ${notSetUp}`;
   }
-  if (!sameLogin(login, agent)) {
+  if (!anyLogin(agents, login)) {
     return `this push would reach GitHub as ${login}, not ${agent}; agent sessions push only as ${agent}: ${notSetUp}`;
   }
   return undefined;

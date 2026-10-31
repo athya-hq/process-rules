@@ -1,5 +1,8 @@
 import {
   BASE_ENV,
+  agentHere,
+  anyLogin,
+  either,
   loadSettings,
   lockScript,
   pathsFor,
@@ -17,16 +20,16 @@ import type { Output, Sys } from './types.ts';
 /**
  * Run by the client's SessionStart hook. Appends to CLAUDE_ENV_FILE, which
  * Claude Code sources before each command: first the lock, then, when this
- * Mac has the session file `machine` writes for the agent the repo's
- * settings name, that file's lines, which replace the lock with the agent's
+ * Mac has the session file `machine` writes for the agent of the repo's
+ * settings that works here (`agentHere`), that file's lines, which replace the lock with the agent's
  * identity. The file is copied only when it is exactly what `machine`
  * writes, so nothing else in it can run. Never the owner's login: any other
  * outcome leaves GitHub locked out. Prints one line for the session,
  * records the outcome for the PreToolUse guard, and always exits 0, so a
  * hook failure never stops the session from starting.
  * A Claude cloud session reaches GitHub through its proxy, as the account
- * connected to claude.ai: it works as the agent only when GitHub says that
- * account is the agent; see `cloudStart`.
+ * connected to claude.ai: it works as an agent only when GitHub says that
+ * account is one of the agents; see `cloudStart`.
  */
 export async function sessionStart(sys: Sys, io: Output): Promise<number> {
   const record = recordFor(sys);
@@ -86,13 +89,15 @@ async function cloudStart(sys: Sys): Promise<Said> {
   } catch (error) {
     return { line: `process-rules: STOP. ${message(error)}, so this cloud session cannot be checked as the agent. Do not push, fetch, or run gh in this session; tell the owner.` };
   }
-  const { owner, agent } = settings;
-  const stop = `Do not push, fetch, or run gh in this session; tell ${owner}.`;
+  const { owners, agents } = settings;
+  const agent = either(agents);
+  // Any owner can set up the agent: the first is the one to tell.
+  const stop = `Do not push, fetch, or run gh in this session; tell ${owners[0]}.`;
   const envFile = sys.env.CLAUDE_ENV_FILE;
   if (!envFile) return { line: `process-rules: STOP. CLAUDE_ENV_FILE is unset, so this cloud session cannot be given the agent identity. ${stop}` };
   const asked = await cloudLogin(sys);
   if ('problem' in asked) return { line: `process-rules: STOP. ${asked.problem}, so it cannot be checked as ${agent}. ${stop}` };
-  if (!sameLogin(asked.login, agent)) {
+  if (!anyLogin(agents, asked.login)) {
     return {
       line: `process-rules: STOP. This cloud session reaches GitHub as ${asked.login}, not ${agent}: claude.ai's GitHub connection must be ${agent} for agent sessions. ${stop}`,
     };
@@ -129,7 +134,8 @@ function start(sys: Sys): Said {
   } catch (error) {
     settingsProblem = message(error);
   }
-  const owner = settings?.owner ?? 'the owner';
+  // Any owner can run machine here: the first is the one to tell.
+  const owner = settings?.owners[0] ?? 'the owner';
   const stop = `Do not push, fetch, or run gh in this session; tell ${owner}.`;
 
   const envFile = sys.env.CLAUDE_ENV_FILE;
@@ -146,7 +152,9 @@ function start(sys: Sys): Said {
     line: `process-rules: GitHub is locked out of this session: ${reason}. Do not work around the lock; ${fix}.`,
   });
   if (!settings) return locked(settingsProblem, `tell ${owner}`);
-  const { agent } = settings;
+  const here = agentHere(sys, settings.agents);
+  if ('problem' in here) return locked(here.problem, `ask ${owner} to run process-rules machine <agent> for one of them`);
+  const { agent } = here;
   const paths = pathsFor(sys.home, agent);
   const fix = `ask ${owner} to run process-rules machine ${agent} (process-rules doctor ${agent} names what is missing)`;
   const store = tokenStore(sys);

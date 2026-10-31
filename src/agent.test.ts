@@ -9,7 +9,11 @@ import {
   NO_TOKEN,
   account,
   agentFrom,
+  agentHere,
+  agentsSetUp,
+  anyLogin,
   checkToken,
+  either,
   keyBody,
   keyPairProblem,
   loadSettings,
@@ -24,9 +28,22 @@ import {
 } from './agent.ts';
 import { AGENT, AGENT_ID, CLASSIC, FakeSys, HOME, KEY, NOW, PRIVATE_KEY, PUBLIC_KEY, ROOT, TOKEN } from './fake.test.ts';
 
+/** A FakeSys whose settings are `settings`, with `machine`'s session file for each of `setUp`. */
+function withSettings(settings: object, setUp: string[] = []): FakeSys {
+  const sys = new FakeSys();
+  sys.files.set(`${ROOT}/.github/process-rules.json`, JSON.stringify(settings));
+  for (const agent of setUp) sys.files.set(pathsFor(HOME, agent).session, sessionScript(agent, AGENT_ID, pathsFor(HOME, agent)));
+  return sys;
+}
+
 describe('loadSettings', () => {
-  it('reads owner and agent', () => {
-    assert.deepEqual(loadSettings(new FakeSys(), ROOT), { owner: 'example-owner', agent: AGENT });
+  it('reads owner and agent, each as a list', () => {
+    assert.deepEqual(loadSettings(new FakeSys(), ROOT), { owners: ['example-owner'], agents: [AGENT] });
+  });
+
+  it('reads lists of owners and agents, and a login listed twice once', () => {
+    const sys = withSettings({ owner: ['example-owner', 'Second-Owner', 'EXAMPLE-OWNER'], agent: [AGENT, 'OtherBot'] });
+    assert.deepEqual(loadSettings(sys, ROOT), { owners: ['example-owner', 'Second-Owner'], agents: [AGENT, 'OtherBot'] });
   });
 
   it('says when the file is missing', () => {
@@ -36,12 +53,17 @@ describe('loadSettings', () => {
   });
 
   for (const [raw, message] of [
-    ['null', /"owner" must be a GitHub login/],
+    ['null', /"owner" must be a GitHub login or a non-empty list of them/],
     ['{"owner":"a b","agent":"x"}', /"owner" must be a GitHub login/],
     ['{"owner":"me","agent":7}', /"agent" must be a GitHub login/],
     ['{"owner":"me","agent":"-bot"}', /"agent" must be a GitHub login/],
-    ['{"owner":"me","agent":"me"}', /must be different accounts/],
+    ['{"owner":[],"agent":"bot"}', /"owner" must be a GitHub login or a non-empty list of them/],
+    ['{"owner":"me","agent":[]}', /"agent" must be a GitHub login or a non-empty list of them/],
+    ['{"owner":["me","a b"],"agent":"bot"}', /"owner" must be a GitHub login/],
+    ['{"owner":"me","agent":["bot",7]}', /"agent" must be a GitHub login/],
+    ['{"owner":"me","agent":"me"}', /me is named as both owner and agent; they must be different accounts/],
     ['{"owner":"Me","agent":"mE"}', /must be different accounts/],
+    ['{"owner":["you","Me"],"agent":["bot","mE"]}', /Me is named as both owner and agent/],
   ] as const) {
     it(`refuses ${raw}`, () => {
       const sys = new FakeSys();
@@ -49,6 +71,47 @@ describe('loadSettings', () => {
       assert.throws(() => loadSettings(sys, ROOT), message);
     });
   }
+});
+
+describe('anyLogin and either', () => {
+  it('finds a login in a list, in any case', () => {
+    assert.equal(anyLogin(['a', 'B'], 'b'), true);
+    assert.equal(anyLogin(['a', 'B'], 'c'), false);
+    assert.equal(anyLogin(['a'], undefined), false);
+  });
+
+  it('names one, two or more logins', () => {
+    assert.equal(either([]), '');
+    assert.equal(either(['a']), 'a');
+    assert.equal(either(['a', 'b']), 'a or b');
+    assert.equal(either(['a', 'b', 'c']), 'a, b or c');
+  });
+});
+
+describe('agentHere', () => {
+  it('takes the one agent listed, set up here or not', () => {
+    assert.deepEqual(agentHere(new FakeSys(), [AGENT]), { agent: AGENT });
+  });
+
+  it('takes the one of two agents machine set up here, as the list spells it', () => {
+    const sys = withSettings({}, ['otherbot', 'ThirdBot']);
+    assert.deepEqual(agentsSetUp(sys), ['otherbot', 'ThirdBot']);
+    assert.deepEqual(agentHere(sys, [AGENT, 'OtherBot']), { agent: 'OtherBot' });
+  });
+
+  it('refuses when none of the agents is set up here', () => {
+    const sys = withSettings({}, ['ThirdBot']);
+    assert.deepEqual(agentHere(sys, [AGENT, 'OtherBot']), {
+      problem: `.github/process-rules.json names the agents ${AGENT} or OtherBot, and process-rules machine has set up none of them on this machine`,
+    });
+  });
+
+  it('refuses rather than guess when two of the agents are set up here', () => {
+    const sys = withSettings({}, [AGENT, 'OtherBot']);
+    const here = agentHere(sys, [AGENT, 'OtherBot']);
+    assert.ok('problem' in here);
+    assert.match(here.problem, new RegExp(`has set up ${AGENT} and OtherBot on this machine, so which one this session works as cannot be told`));
+  });
 });
 
 describe('agentFrom', () => {
@@ -64,6 +127,12 @@ describe('agentFrom', () => {
 
   it("falls back to the repo's settings", () => {
     assert.equal(agentFrom(new FakeSys(), undefined), AGENT);
+  });
+
+  it('with two agents, takes the one set up here, and asks for a name when that cannot be told', () => {
+    const settings = { owner: 'example-owner', agent: [AGENT, 'OtherBot'] };
+    assert.equal(agentFrom(withSettings(settings, ['OtherBot']), undefined), 'OtherBot');
+    assert.throws(() => agentFrom(withSettings(settings), undefined), /set up none of them on this machine; name the agent account after the command/);
   });
 
   for (const [where, change] of [

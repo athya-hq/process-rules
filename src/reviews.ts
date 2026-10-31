@@ -1,4 +1,4 @@
-import { API, loadSettings, repoAt, sameLogin } from './agent.ts';
+import { API, anyLogin, either, loadSettings, repoAt } from './agent.ts';
 import { lastEditors, parseDecision } from './decisions.ts';
 import { PERSONAL_REPO, isOn, isPersonal, offLine } from './features.ts';
 import type { Output, Sys } from './types.ts';
@@ -24,13 +24,13 @@ const WAITING = ['veto', 'needs-owner'];
 /**
  * The open Decision issues whose review date has come, as JSON lines for the
  * review routine: number, title, link, kind, review date, labels and body.
- * Only decisions the owner or the agent wrote and last edited, so no one
+ * Only decisions an owner or an agent wrote and last edited, so no one
  * else's text reaches the routine; and none labeled `veto` or `needs-owner`,
  * which wait on the owner. Runs as the agent, in the client's checkout.
  */
 export async function reviewsDue(sys: Sys, io: Output): Promise<number> {
   const { root, slug } = repoAt(sys);
-  const { owner, agent } = loadSettings(sys, root);
+  const { owners, agents } = loadSettings(sys, root);
   if (!isOn(sys, root, 'review')) {
     io.err(offLine('reviews-due', 'review'));
     return 0;
@@ -42,7 +42,7 @@ export async function reviewsDue(sys: Sys, io: Output): Promise<number> {
     io.err(offLine('reviews-due', 'review', PERSONAL_REPO));
     return 0;
   }
-  const trusted = (login: string | undefined): boolean => sameLogin(login, owner) || sameLogin(login, agent);
+  const trusted = (login: string | undefined): boolean => anyLogin(owners, login) || anyLogin(agents, login);
   const today = sys.now().toISOString().slice(0, 10);
   const open: Issue[] = [];
   for (let page = 1; ; page++) {
@@ -63,7 +63,7 @@ export async function reviewsDue(sys: Sys, io: Output): Promise<number> {
     if (decision.review > today) continue;
     const editor = editors.get(issue.number);
     if (!trusted(issue.user?.login) || (editor !== undefined && !trusted(editor))) {
-      io.err(`#${issue.number}: not reviewed; only ${owner} or ${agent} may write a decision the routine reviews`);
+      io.err(`#${issue.number}: not reviewed; only ${either([...owners, ...agents])} may write a decision the routine reviews`);
       continue;
     }
     if (issue.labels.some((label) => WAITING.includes(label.name))) continue;

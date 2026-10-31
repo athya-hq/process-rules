@@ -412,3 +412,36 @@
   `athya-hq/process-rules` from github.com, since workflow YAML cannot
   import a constant; a host setting would change it there too. The setting
   itself, for GitHub Enterprise Server or GHE.com, is not built.
+- **2026-11-01 — Record: owners and agents as lists, P-26.** The owner, on
+  #56 (31 Oct 2026, in chat): Athya keeps one owner and one agent for now,
+  but the settings become generic: they accept lists of owners and agents,
+  the single-string form still read, and every check accepts anyone in the
+  list. `loadSettings` reads `"owner"` and `"agent"` as a login or a
+  non-empty list of logins and returns lists; it refuses an empty list, a
+  non-login, and any account named as both. A login listed twice, in any
+  case, counts once. The work rules take a 👍, a `Decision:` comment, a
+  request on the work item or the `approved` label from any owner, and
+  proposals and pull requests from any agent; PR identity takes a commit
+  claiming an agent only when it is Verified as that same agent, and
+  pushed by any agent; pre-push, `review-thread`, `propose`, the design,
+  decisions and `reviews-due` checks and the doctor's CODEOWNERS check take
+  any of the list. The guard reads only what session-start recorded, so it
+  needed no change. Where one account must be chosen:
+  - **A Mac's sessions work as one agent.** With one agent listed, that
+    one, as before. With several, session-start, `machine` and `doctor`
+    (without a login named) take the one listed that `machine` set up on
+    this Mac, found by its session file. With none of them set up, or more
+    than one, session-start keeps GitHub locked out and says which, and
+    `machine` and `doctor` ask for the login: two set up on one Mac would
+    make the session's identity a guess. A cloud session works as whichever
+    listed agent claude.ai's GitHub connection is.
+  - **Who to tell is the first owner.** session-start's "tell" and "ask …
+    to run machine" lines name the first owner; checks that list who may
+    act name the whole list ("A or B"); a proposal mentions every owner.
+  - **`onboard` keeps the one-login form.** It writes
+    `{ "owner": "…", "agent": "…" }` as before, so existing settings do not
+    change. On settings that list several, it works as the owner named,
+    else the first, and the agent named, else the one set up here; it
+    refuses a login the lists do not hold, and leaves the lists as they
+    are. Its CODEOWNERS offer removes every listed owner a rule names.
+  Teams as approvers are out of scope.

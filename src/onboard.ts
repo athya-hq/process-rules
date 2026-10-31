@@ -3,7 +3,11 @@ import {
   BASE_ENV,
   SETTINGS_PATH,
   account,
+  agentHere,
+  agentsSetUp,
+  anyLogin,
   checkToken,
+  either,
   isLogin,
   keyPairProblem,
   loadSettings,
@@ -12,7 +16,6 @@ import {
   repoAt,
   sameLogin,
   sessionEnv,
-  sessionNames,
   tokenInfo,
 } from './agent.ts';
 import { setUpBoard } from './board.ts';
@@ -473,16 +476,6 @@ async function signedInLogin(signIn: () => Promise<OwnerToken | { problem: strin
   return signed && 'login' in signed ? signed.login : undefined;
 }
 
-/** The agent accounts `machine` has set up on this Mac, as their session files spell them. */
-function agentsSetUp(sys: Sys): string[] {
-  const dir = `${sys.home}/.config/process-rules`;
-  return sys.list(dir).flatMap((name) => {
-    const session = `${dir}/${name}/session.sh`;
-    const agent = sys.exists(session) ? sessionNames(sys.read(session))?.agent : undefined;
-    return agent ? [agent] : [];
-  });
-}
-
 /**
  * Asks for an account, offering what this Mac suggests: Enter takes the
  * first suggestion. Undefined when there is none and nothing is typed.
@@ -581,6 +574,8 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
 
   let owner: string;
   let agent: string;
+  // Every owner the settings name: GitHub asks each a CODEOWNERS rule names to review the agent's pull requests.
+  let owners: string[];
   let features: Feature[];
   let pendingSettings: string | undefined;
   let schedule = DEFAULT_SCHEDULE;
@@ -591,13 +586,20 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
       return 1;
     }
     const [namedOwner, namedAgent] = named;
-    if ((namedOwner && !sameLogin(namedOwner, settings.owner)) || (namedAgent && !sameLogin(namedAgent, settings.agent))) {
-      io.err(`onboard: ${SETTINGS_PATH} already names owner ${settings.owner} and agent ${settings.agent}; edit or delete it to change them`);
+    if ((namedOwner && !anyLogin(settings.owners, namedOwner)) || (namedAgent && !anyLogin(settings.agents, namedAgent))) {
+      io.err(`onboard: ${SETTINGS_PATH} already names owner ${either(settings.owners)} and agent ${either(settings.agents)}; edit or delete it to change them`);
       return 1;
     }
+    // With several owners, the one named, else the first; with several agents, the one named, else the one set up here.
+    const here = namedAgent ? { agent: namedAgent } : agentHere(sys, settings.agents);
+    if ('problem' in here) {
+      io.err(`onboard: ${here.problem}; name the owner and the agent: process-rules onboard <owner> <agent>`);
+      return 1;
+    }
+    owners = settings.owners;
     // GitHub's spelling, which the keychain, the session file and commits use.
-    owner = (await account(sys, settings.owner)).login;
-    agent = (await account(sys, settings.agent)).login;
+    owner = (await account(sys, namedOwner ?? (settings.owners[0] as string))).login;
+    agent = (await account(sys, here.agent)).login;
     let raw = JSON.parse(fileAt(SETTINGS_PATH) as string) as Record<string, unknown>;
     features = featuresIn(raw);
     schedule = scheduleIn(raw);
@@ -664,6 +666,7 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     }
     owner = (await account(sys, namedOwner)).login;
     agent = (await account(sys, namedAgent)).login;
+    owners = [owner];
     if (sameLogin(owner, agent)) {
       io.err('onboard: the owner and the agent must be different accounts');
       return 1;
@@ -816,13 +819,14 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
   const verified = await testCommit(sys, io, { agent, id, token, slug });
   if (verified !== 0) return verified;
   // Optional, and last of the questions, so a run stopped earlier and run again still asks it.
-  const rules = ownerRules(sys, root, owner);
+  const rules = ownerRules(sys, root, owners);
   if (rules) {
-    io.out(`! ${ownerRulesProblem(rules, owner, agent)}`);
+    const named = rules.owners.join(' and ');
+    io.out(`! ${ownerRulesProblem(rules, agent)}`);
     const drop = rules.dropped > 0 ? `, and drop ${rules.dropped === 1 ? 'the rule' : `the ${rules.dropped} rules`} left with no owners, so ${rules.dropped === 1 ? 'its' : 'their'} paths fall to the rules before` : '';
-    if (await confirm(`Remove ${owner} from ${rules.lines.length === 1 ? 'that rule' : 'those rules'} in ${rules.path}${drop}?`)) {
-      change(rules.path, rules.text, `remove ${owner}, whom GitHub would otherwise ask to review every pull request ${agent} opens`);
-      io.out(`✓ ${rules.path}: ${owner} removed`);
+    if (await confirm(`Remove ${named} from ${rules.lines.length === 1 ? 'that rule' : 'those rules'} in ${rules.path}${drop}?`)) {
+      change(rules.path, rules.text, `remove ${named}, whom GitHub would otherwise ask to review every pull request ${agent} opens`);
+      io.out(`✓ ${rules.path}: ${named} removed`);
     } else {
       io.out(`! ${rules.path} left as it is`);
     }
