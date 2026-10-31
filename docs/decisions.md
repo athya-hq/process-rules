@@ -408,7 +408,10 @@
   settings `env` that `onboard` writes, the session file session-start
   compares, the hook commands and the workflow template. A test fails when
   the host is written out in `src/` outside that module. The shared
-  workflow `.github/workflows/checks.yml` still checks out
-  `athya-hq/process-rules` from github.com, since workflow YAML cannot
-  import a constant; a host setting would change it there too. The setting
-  itself, for GitHub Enterprise Server or GHE.com, is not built.
+  workflow `.github/workflows/checks.yml` names no host: its checkouts of
+  `athya-hq/process-rules` and `actions/checkout` reach whichever host runs
+  the workflow. On another host both must exist there, or the checkout must
+  name github.com; that is for the host setting, which, for GitHub
+  Enterprise Server or GHE.com, is not built. GitHub Enterprise Server's
+  API is `https://<host>/api/v3`, not `api.<host>`, so the setting also
+  changes how the API base is derived.
