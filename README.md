@@ -83,8 +83,9 @@ days before the token ends.
    has the name, so a rerun makes no duplicates: Needs you (`label:needs-owner
    is:open`), Board (a board showing linked pull requests), Work items
    (`type:"Work item"`, showing Sub-issues progress), Decisions
-   (`type:Decision`) and Reviews due (`"Review date":<=@today`); the default
-   "View 1" becomes Needs you. It prints what GitHub's API cannot set, to do
+   (`type:Decision`) and Reviews due (`"Review date":<=@today`). The default
+   "View 1" becomes the first of these the Project lacks (Needs you, in a new
+   Project) rather than being left. It prints what GitHub's API cannot set, to do
    by hand: grouping Work items by Step and Decisions by Decision, the Board's
    columns, and the auto-archive workflow. Last, it pushes
    one signed test commit as the agent to a throwaway branch, checks GitHub

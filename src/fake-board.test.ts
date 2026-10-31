@@ -26,7 +26,7 @@ export function defaultView(): FakeView {
 
 /** The views as onboard leaves them. */
 export function settledViews(): FakeView[] {
-  return VIEWS.map((spec, index) => ({ id: `V_${index + 1}`, name: spec.name, layout: spec.layout, filter: spec.filter, visible: ['Title', ...spec.show] }));
+  return VIEWS.map((spec, index) => ({ id: `V_${index + 1}`, name: spec.name, layout: spec.layout, filter: spec.filter, visible: ['Title', 'Status', ...spec.show] }));
 }
 
 /** GitHub as the owner's `gh` sees it: an organisation with none of the board yet. */

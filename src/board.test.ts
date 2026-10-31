@@ -175,15 +175,26 @@ describe('setUpBoard', () => {
     assert.equal(board.operations.filter((o) => o === 'createProjectV2View').length, VIEWS.length - 1);
   });
 
-  it('only renames a default view whose name is not taken, without an update the view already has', async () => {
+  it('renames the default view to the first view the Project lacks, with no other change', async () => {
     const sys = new FakeSys();
     const board = new Board(sys);
     const views = settledViews();
-    board.project = { fields: [...BUILT_IN, ...FIELDS.map((f) => f.name)], linked: true, views: [{ ...views[0]!, name: 'View 1' }, ...views.slice(1)] };
+    board.project = { fields: [...BUILT_IN, ...FIELDS.map((f) => f.name)], linked: true, views: [views[0]!, { ...views[1]!, name: 'View 1' }, ...views.slice(2)] };
     await setUp(sys, ['y', 'y', 'y']);
-    assert.ok(sys.asked.includes('Set up the views Needs you in "example-app work" (renaming "View 1" to "Needs you")?'));
-    assert.deepEqual(board.project.views?.map((v) => v.name), VIEWS.map((v) => v.name));
+    assert.ok(sys.asked.includes('Set up the views Board in "example-app work" (renaming "View 1" to "Board")?'));
+    assert.deepEqual(board.project.views, settledViews());
     assert.deepEqual(board.operations.filter((o) => o.includes('View')), ['updateProjectV2View']);
+  });
+
+  it('leaves a default view alone once every view is there', async () => {
+    const sys = new FakeSys();
+    const board = new Board(sys);
+    const spare = { id: 'V_9', name: 'View 1', layout: 'TABLE_LAYOUT', filter: null, visible: ['Title'] };
+    board.project = { fields: [...BUILT_IN, ...FIELDS.map((f) => f.name)], linked: true, views: [spare, ...settledViews()] };
+    await setUp(sys, ['y', 'y']);
+    assert.ok(!sys.asked.some((q) => q.startsWith('Set up the views')));
+    assert.deepEqual(board.project.views, [spare, ...settledViews()]);
+    assert.ok(!board.operations.some((o) => o.includes('ProjectV2View')));
   });
 
   for (const [name, change, message] of [
