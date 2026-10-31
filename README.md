@@ -74,7 +74,12 @@ The lock lives in the session's environment, which a session that ignores it
 could change, so `machine` ends by offering to lock the owner away: to sign
 `gh` out of every account other than the agent's, active or not, and to remove a git password for
 github.com saved in the macOS keychain. It warns about SSH keys in `~/.ssh`
-with no passphrase. Declining leaves them, and `doctor` keeps naming them.
+with no passphrase, and names the account SSH reaches GitHub as without
+asking (a key in the SSH agent or the keychain). Declining leaves them, and
+`doctor` keeps naming them. The owner's SSH access is left alone, since it is
+the owner's own way to GitHub (docs/decisions.md); agent sessions send GitHub
+over HTTPS and refuse SSH, and the pre-push hook refuses their pushes over
+SSH.
 
 `process-rules doctor` re-checks the key, the token and its scopes, the key's
 registration, the session file and that the launcher runs, names the step to re-run, and warns 14
@@ -170,12 +175,19 @@ production is held for the owner with a suggestion and `needs-owner`. The
 weekly job removes `veto` once the week has passed.
 
 `onboard` also writes a pre-push git hook running `process-rules pre-push`,
-which applies the same rules before an agent session pushes: all the commits
+for every adopter. In an agent session (one session-start set up, or any
+shell Claude Code runs, which sets `CLAUDECODE`, so it holds where the Claude
+Code hooks never ran) it is the pre-push identity guard: a push to GitHub
+over SSH is refused, since it would use this Mac's SSH keys, the owner's;
+over HTTPS, git is asked for the credentials it would push with and GitHub
+for whose they are, and anyone but the agent is refused. Anyone else's push
+goes ahead. With `work-rules` on, it then applies the same rules before an
+agent session pushes: all the commits
 one push brings, on one branch, name one slice between them as a
 `Slice: #N` trailer. Commits a remote already has, such as the default
 branch's, are not the push's own; a push of only a merge, such as of the
 default branch, is judged by the branch's own commits. In an agent session, a push is refused when the CLI is
-missing or the session has no token. When the repository already has its own
+missing, or, with `work-rules` on, the session has no token. When the repository already has its own
 pre-push hook, or git runs hooks from a folder outside the repository (a
 global `core.hooksPath`), `onboard` leaves it alone and names the line to add:
 `process-rules pre-push "$@"`. The client workflow re-runs the checks when a
@@ -203,8 +215,7 @@ alone; later, `process-rules onboard --add board` turns one more on and sets
 it up. Settings with no `features` key keep every feature on, as before;
 `"features": []` means identity alone. The shared checks,
 the weekly job, `reviews-due` and the pre-push hook each pass, saying so, when
-their feature is off; `onboard` writes the workflow only once a check needs it
-and the pre-push hook only with `work-rules`. `project` names the board's
+their feature is off; `onboard` writes the workflow only once a check needs it. `project` names the board's
 Project (by default `<repo> work`).
 
 ### Releases and upgrading

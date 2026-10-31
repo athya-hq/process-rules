@@ -103,7 +103,7 @@ describe('run', () => {
     agent.stdin = `refs/heads/work ${'a'.repeat(40)} refs/heads/work ${'b'.repeat(40)}\n`;
     const refused = await capture(['pre-push', 'origin', 'https://github.com/a/b.git'], () => agent);
     assert.equal(refused.code, 1);
-    assert.match(refused.err[0] ?? '', /this agent session has no token/);
+    assert.match(refused.err[0] ?? '', /git has no credentials for github.com here/, 'git\'s URL reaches the identity guard');
     assert.equal((await capture(['pre-push', 'origin', 'url', 'extra'])).code, 2);
   });
 

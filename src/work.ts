@@ -1,5 +1,6 @@
 import { API, NO_TOKEN, loadSettings, repoAt, sameLogin } from './agent.ts';
 import { isOn, notAdoptedLine, offLine } from './features.ts';
+import { agentSession, pushIdentityProblem } from './push-identity.ts';
 import type { Output, Sys } from './types.ts';
 
 /** How a pull request or a commit names the slice it builds. */
@@ -247,8 +248,10 @@ function branchBeyondMerges(sys: Sys, root: string, range: string[]): string | u
 }
 
 /**
- * The work rules before a push from an agent session, run by the client's
- * pre-push git hook with git's ref lines on stdin. All the commits one push
+ * Before a push from an agent session, run by the client's pre-push git hook
+ * with git's ref lines on stdin and the remote's URL: first that it reaches
+ * GitHub as the agent, the pre-push identity guard, which holds even in a
+ * session whose Claude Code hooks never ran. Then the work rules: all the commits one push
  * brings, across every ref, must name exactly one slice between them, as a
  * trailer `Slice: #N`, that may be built. Commits a remote already has, such
  * as the default branch's, are not the push's own; a push whose own commits
@@ -256,10 +259,16 @@ function branchBeyondMerges(sys: Sys, root: string, range: string[]): string | u
  * branch's commits that the merges did not bring. Pushes outside agent
  * sessions pass; an agent session with no token is refused.
  */
-export async function prePush(sys: Sys, io: Output, refLines: string): Promise<number> {
-  if (!sys.env.PROCESS_RULES_AGENT) return 0;
+export async function prePush(sys: Sys, io: Output, refLines: string, url = ''): Promise<number> {
+  if (!agentSession(sys)) return 0;
   const { root, slug } = repoAt(sys);
-  const { owner } = loadSettings(sys, root);
+  const { owner, agent } = loadSettings(sys, root);
+  const identity = await pushIdentityProblem(sys, root, url, agent);
+  if (identity) {
+    io.err(`✗ ${identity}`);
+    io.err(`pre-push: refused; an agent session pushes to GitHub only as ${agent}`);
+    return 1;
+  }
   if (!isOn(sys, root, 'work-rules')) {
     io.err(offLine('pre-push', 'work-rules'));
     return 0;
