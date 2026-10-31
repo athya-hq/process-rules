@@ -11,9 +11,11 @@ import {
   repoAt,
   sameLogin,
   sessionEnv,
+  sessionNames,
   tokenInfo,
 } from './agent.ts';
 import { setUpBoard } from './board.ts';
+import { appendToArray, replaceValues } from './jsonedit.ts';
 import { type Feature, FEATURES, featuresIn, parseFeatures } from './features.ts';
 import { packageVersion } from './version.ts';
 import type { Output, Sys } from './types.ts';
@@ -144,7 +146,7 @@ function hasHook(settings: object): boolean {
   return sessionStartHooks(settings).some((hook) => hook.command === HOOK_COMMAND);
 }
 
-/** The command entries under SessionStart, as written in the settings object (so they can be changed in place). */
+/** The command entries under SessionStart, as written in the settings object. */
 function sessionStartHooks(settings: object): { command?: unknown }[] {
   const groups = (settings as { hooks?: { SessionStart?: unknown } }).hooks?.SessionStart;
   if (!Array.isArray(groups)) return [];
@@ -152,6 +154,36 @@ function sessionStartHooks(settings: object): { command?: unknown }[] {
     const hooks = (group as { hooks?: unknown } | null)?.hooks;
     return Array.isArray(hooks) ? hooks.filter((hook): hook is { command?: unknown } => typeof hook === 'object' && hook !== null) : [];
   });
+}
+
+/** The account the owner's `gh` is signed in as, the owner's likely login. */
+async function ghLogin(sys: Sys): Promise<string | undefined> {
+  const token = sys.exec('gh', ['auth', 'token', '-h', 'github.com'], { env: { ...sys.env, GH_TOKEN: undefined, GITHUB_TOKEN: undefined } });
+  if (token.code !== 0 || !token.stdout.trim()) return undefined;
+  const { status, json } = await sys.http(`${API}/user`, { token: token.stdout.trim() }).catch(() => ({ status: 0, json: null }));
+  const login = (json as { login?: unknown } | null)?.login;
+  return status === 200 && typeof login === 'string' ? login : undefined;
+}
+
+/** The agent accounts `machine` has set up on this Mac, as their session files spell them. */
+function agentsSetUp(sys: Sys): string[] {
+  const dir = `${sys.home}/.config/process-rules`;
+  return sys.list(dir).flatMap((name) => {
+    const session = `${dir}/${name}/session.sh`;
+    const agent = sys.exists(session) ? sessionNames(sys.read(session))?.agent : undefined;
+    return agent ? [agent] : [];
+  });
+}
+
+/**
+ * Asks for an account, offering what this Mac suggests: Enter takes the
+ * first suggestion. Undefined when there is none and nothing is typed.
+ */
+async function choose(sys: Sys, io: Output, role: string, suggestions: (string | undefined)[]): Promise<string | undefined> {
+  const offered = suggestions.filter((login): login is string => !!login);
+  if (offered.length > 1) io.out(`Accounts set up here for the ${role.split(',')[0]}: ${offered.join(', ')}`);
+  const typed = (await sys.ask(`The ${role}${offered[0] ? ` [${offered[0]}]` : ''}: `)).trim();
+  return typed || offered[0];
 }
 
 /**
@@ -238,7 +270,8 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
       return 1;
     }
     features = chosen ?? [...FEATURES];
-    const [namedOwner, namedAgent] = named;
+    const namedOwner = named[0] ?? (await choose(sys, io, 'owner, who approves', [await ghLogin(sys)]));
+    const namedAgent = named[1] ?? (await choose(sys, io, 'agent, which builds', agentsSetUp(sys)));
     if (!namedOwner || !namedAgent) {
       io.err('onboard: name the owner and the agent account: process-rules onboard <owner> <agent>');
       return 1;
@@ -267,26 +300,34 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
   if (typeof hooks !== 'object' || hooks === null || Array.isArray(hooks)) {
     throw new Error(`${HOOKS_PATH} is not a JSON object`);
   }
-  // An entry an older release wrote is replaced where it stands, not added to.
-  const older = sessionStartHooks(hooks).filter((hook) => typeof hook.command === 'string' && OLDER_HOOK_COMMANDS.includes(hook.command));
-  if (older.length > 0) {
+  // An entry an older release wrote is replaced where it stands, not added to;
+  // both edits are made in the text itself, so the rest of the client's file keeps its layout.
+  const older = sys.exists(hooksFile)
+    ? replaceValues(sys.read(hooksFile), ['hooks', 'SessionStart', '*', 'hooks', '*', 'command'], (command) =>
+        typeof command === 'string' && OLDER_HOOK_COMMANDS.includes(command) ? HOOK_COMMAND : undefined,
+      )
+    : { text: '', replaced: 0 };
+  if (older.replaced > 0) {
     if (!(await confirm(`Replace the older process-rules SessionStart hook in ${HOOKS_PATH} with this release's?`))) {
       return stop('hook entry');
     }
-    for (const hook of older) hook.command = HOOK_COMMAND;
-    sys.write(hooksFile, `${JSON.stringify(hooks, null, 2)}\n`);
+    sys.write(hooksFile, older.text);
   } else if (!hasHook(hooks)) {
+    const entry = { hooks: [{ type: 'command', command: HOOK_COMMAND }] };
+    // Worked out before asking, so a file onboard cannot add to is refused before any question.
+    let text = `${JSON.stringify({ hooks: { SessionStart: [entry] } }, null, 2)}\n`;
+    if (sys.exists(hooksFile)) {
+      try {
+        text = appendToArray(sys.read(hooksFile), ['hooks'], 'SessionStart', entry);
+      } catch (error) {
+        throw new Error(`${HOOKS_PATH}: ${(error as Error).message}`);
+      }
+    }
     if (!(await confirm(`Add the SessionStart hook that runs process-rules session-start to ${HOOKS_PATH}?`))) {
       return stop('hook entry');
     }
-    const settings = hooks as { hooks?: Record<string, unknown[]> };
-    settings.hooks ??= {};
-    settings.hooks.SessionStart = [
-      ...(settings.hooks.SessionStart ?? []),
-      { hooks: [{ type: 'command', command: HOOK_COMMAND }] },
-    ];
     sys.mkdir(`${root}/.claude`);
-    sys.write(hooksFile, `${JSON.stringify(settings, null, 2)}\n`);
+    sys.write(hooksFile, text);
   }
   io.out(`✓ ${HOOKS_PATH}: SessionStart runs process-rules session-start`);
 
