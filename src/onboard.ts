@@ -191,7 +191,7 @@ async function choose(sys: Sys, io: Output, role: string, suggestions: (string |
  * owner on a Mac `machine` has set up for the agent: the settings file, the
  * SessionStart hook entry and the workflow, which the owner then commits;
  * the agent's push access, offering to invite it and accept the invitation;
- * the work board (issue types, labels, Project and fields); and one signed
+ * the work board (issue types, labels, Project, fields and views); and one signed
  * test commit GitHub must show as Verified by the agent.
  * Every change waits for a yes.
  */
