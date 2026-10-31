@@ -1,0 +1,19 @@
+docs/roadmap.md
+  s_c6e3d43e8a90f6::t_b3c889cf845e34 46
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "dc39aae393cb6edd439019897da6051adc1da4a6",
+  "prompts": {},
+  "sessions": {
+    "s_c6e3d43e8a90f6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9ab6b241-f1f5-439b-9679-a6f90c040631",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Alok Bansal <alokagrawal8@gmail.com>"
+    }
+  }
+}
