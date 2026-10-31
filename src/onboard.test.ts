@@ -995,6 +995,35 @@ describe('workflowUpdate', () => {
     assert.deepEqual(update, { kind: 'repin', text: workflow('trunk', '0.5.3'), from: '0.5.2', branch: 'trunk' });
   });
 
+  for (const [quote, written] of [
+    ['"', '"it\'s \\"new\\""'],
+    ["'", "'it''s \"new\"'"],
+    ['', '"it\'s \\"new\\""'],
+  ] as const) {
+    it(`escapes a default branch with quotes in it, ${quote ? `in ${quote} quotes` : 'bare'}`, () => {
+      const before = workflow('main', '0.5.3').replace('branches: ["main"]', `branches: [${quote}main${quote}]`);
+      const update = workflowUpdate(before, 'it\'s "new"', '0.5.3');
+      assert.ok(update.kind === 'repin');
+      assert.ok(update.text.includes(`\n    branches: [${written}]\n`));
+    });
+  }
+
+  for (const branch of ['1.0', '2026', '2026-11-01', 'true', 'No', 'null', '0x1F']) {
+    it(`quotes a bare default branch YAML would not read as a string, ${branch}`, () => {
+      const before = workflow('main', '0.5.3').replace('branches: ["main"]', 'branches: [main]');
+      const update = workflowUpdate(before, branch, '0.5.3');
+      assert.ok(update.kind === 'repin');
+      assert.ok(update.text.includes(`\n    branches: ["${branch}"]\n`));
+    });
+  }
+
+  it('leaves a bare branch bare', () => {
+    const before = workflow('main', '0.5.3').replace('branches: ["main"]', 'branches: [main]');
+    const update = workflowUpdate(before, 'release/2.0', '0.5.3');
+    assert.ok(update.kind === 'repin');
+    assert.match(update.text, /^ {4}branches: \[release\/2\.0\]$/m);
+  });
+
   it('leaves a push trigger listing several branches as it is', () => {
     const before = workflow('main', '0.5.2').replace('branches: ["main"]', 'branches: ["main", "release"]');
     const update = workflowUpdate(before, 'trunk', '0.5.3');
