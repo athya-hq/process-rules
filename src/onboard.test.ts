@@ -951,6 +951,15 @@ describe('workflowUpdate', () => {
     });
   }
 
+  for (const branch of ['1.0', '2026', '2026-11-01', 'true', 'No', 'null', '0x1F']) {
+    it(`quotes a bare default branch YAML would not read as a string, ${branch}`, () => {
+      const before = workflow('main', '0.5.3').replace('branches: ["main"]', 'branches: [main]');
+      const update = workflowUpdate(before, branch, '0.5.3');
+      assert.ok(update.kind === 'repin');
+      assert.ok(update.text.includes(`\n    branches: ["${branch}"]\n`));
+    });
+  }
+
   it('leaves a bare branch bare', () => {
     const before = workflow('main', '0.5.3').replace('branches: ["main"]', 'branches: [main]');
     const update = workflowUpdate(before, 'release/2.0', '0.5.3');

@@ -207,12 +207,14 @@ const PUSH_BRANCH = /^( {2}push:\n {4}branches: \[\s*)(['"]?)([^,'"\]\s]+)\2(\s*
 
 /**
  * `value` as a YAML flow scalar in the `quote` style the line already uses:
- * single quotes double themselves, double quotes and a bare value that needs
- * quoting are written as JSON, which YAML reads alike.
+ * single quotes double themselves; double quotes, and a bare value YAML would
+ * not read as that string (a number, a date, true or null), are written as
+ * JSON, which YAML reads alike.
  */
 function flowScalar(value: string, quote: string): string {
   if (quote === "'") return `'${value.replaceAll("'", "''")}'`;
-  if (quote === '' && /^[A-Za-z0-9][\w./-]*$/.test(value)) return value;
+  // Bare only when YAML reads it as a string: starting with a letter rules out numbers and dates.
+  if (quote === '' && /^[A-Za-z][\w./-]*$/.test(value) && !/^(?:true|false|yes|no|on|off|y|n|null)$/i.test(value)) return value;
   return JSON.stringify(value);
 }
 
