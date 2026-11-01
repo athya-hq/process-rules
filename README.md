@@ -20,6 +20,13 @@ Server and GitHub Enterprise Cloud with data residency (GHE.com) are not
 supported yet; every GitHub address in the CLI comes from one host constant,
 so a host setting can be added later.
 
+Claude Code is the only supported agent runner. The agent identity and the
+GitHub lock reach a session through Claude Code's SessionStart hook and
+`CLAUDE_ENV_FILE`, so an agent run from another tool (Codex, Cursor,
+Copilot's agent, Aider, a plain script) gets neither, and only the pull
+request's PR identity check catches its work, after the push. Other runners
+wait for adoption outside Athya (#50).
+
 ## Agent identity on a Mac
 
 macOS is the supported platform: the agent's token lives in the macOS
