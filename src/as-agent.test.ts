@@ -101,6 +101,7 @@ describe('as-agent', () => {
     ['no record for the session', (sys) => sys.files.delete(RECORD), 'session-start did not run for this session, so it was not given the agent identity'],
     ['a record of a locked session', (sys) => sys.files.set(RECORD, '{"problem":"process-rules: GitHub is locked out of this session: x."}\n'), 'session-start said: process-rules: GitHub is locked out of this session: x'],
     ['a record session-start did not write', (sys) => sys.files.set(RECORD, 'nope'), `${RECORD} is not what session-start writes`],
+    ['a record of null', (sys) => sys.files.set(RECORD, 'null\n'), `${RECORD} is not what session-start writes`],
     ['a record naming an account the settings do not', (sys) => sys.files.set(RECORD, '{"agent":"OtherBot"}\n'), "session-start recorded OtherBot, and the repo's settings name the agents ExampleBot"],
     ['no settings', (sys) => sys.files.delete(`${ROOT}/.github/process-rules.json`), ''],
     ['no repository', (sys) => { sys.inRepo = false; }, `${ROOT} is not inside a git repository`],
@@ -208,7 +209,7 @@ describe('hooksHittingLock', () => {
       {
         SessionStart: [HOOK_COMMAND],
         PreToolUse: [GUARD_COMMAND, 'gh api graphql -f query=x', '"$CLAUDE_PROJECT_DIR"/.claude/hooks/pr.sh', 'bash .claude/hooks/wrapped.sh'],
-        Stop: ['sid=$(jq -r .session_id); process-rules as-agent --session "$sid" -- gh pr view', 'echo done', './missing.sh', '/usr/local/bin/x.sh'],
+        Stop: ['sid=$(jq -r .session_id); process-rules as-agent --session "$sid" -- gh pr view', 'echo done', './missing.sh', '/usr/local/bin/x.sh', 'gh pr list && process-rules as-agent --session "$sid" -- gh pr view'],
       },
       {
         '.claude/hooks/pr.sh': '#!/bin/sh\ngh pr view --json state\n',
@@ -218,6 +219,7 @@ describe('hooksHittingLock', () => {
     assert.deepEqual(hooksHittingLock(sys), [
       '.claude/settings.json PreToolUse hook "gh api graphql -f query=x"',
       '.claude/settings.json PreToolUse hook .claude/hooks/pr.sh',
+      '.claude/settings.json Stop hook "gh pr list && process-rules as-agent --session \\"$sid\\" -- gh pr view"',
     ]);
   });
 

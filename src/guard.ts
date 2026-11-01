@@ -49,12 +49,13 @@ export function recordedAgent(sys: Sys, sessionId: unknown): { agent: string } |
   if (!path || !sys.exists(path)) {
     return { problem: 'session-start did not run for this session, so it was not given the agent identity' };
   }
-  let entry: { agent?: unknown; problem?: unknown };
+  let entry: { agent?: unknown; problem?: unknown } | null;
   try {
     entry = JSON.parse(sys.read(path)) as typeof entry;
   } catch {
-    return { problem: `${path} is not what session-start writes` };
+    entry = null;
   }
+  if (typeof entry !== 'object' || entry === null) return { problem: `${path} is not what session-start writes` };
   if (typeof entry.agent === 'string') return { agent: entry.agent };
   return { problem: typeof entry.problem === 'string' ? `session-start said: ${entry.problem}` : `${path} names no agent` };
 }

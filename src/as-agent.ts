@@ -153,9 +153,9 @@ export function hooksHittingLock(sys: Sys): string[] {
   return found;
 }
 
-/** The text with each line that runs `as-agent` taken out. */
+/** The text with each command that runs `as-agent` taken out, the rest of its line kept. */
 function withoutAsAgent(text: string): string {
-  return text.split('\n').filter((line) => !/\bas-agent\b/.test(line)).join('\n');
+  return text.split(/[;&|\n]+/).filter((command) => !/\bas-agent\b/.test(command)).join('\n');
 }
 
 /** The script in the repo a hook command runs, by its first word. */

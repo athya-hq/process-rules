@@ -427,9 +427,10 @@ JSON input:
 input=$(cat)
 sid=$(printf '%s' "$input" | jq -r .session_id)
 cli="$HOME/.config/process-rules/bin/process-rules"; [ -x "$cli" ] || cli=process-rules
-"$cli" as-agent --session "$sid" -- gh pr view --json state
+printf '%s' "$input" | "$cli" as-agent --session "$sid" -- gh pr view --json state
 status=$?
 [ "$status" -eq 77 ] && exit 0  # locked: this session does not work as the agent
+exit "$status"
 ```
 
 `process-rules as-agent --session <session_id> -- <command> [args...]` runs
