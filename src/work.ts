@@ -201,22 +201,28 @@ async function readSlice(
   const owed: Owed[] = [];
   // When the slice was last added to its work item. A workflow's GITHUB_TOKEN on a private repository reads the
   // work item's sub_issue_added events with `sub_issue` null, so the slice's own parent_issue_added events say it.
-  const own = await every<TimelineEvent>(sys, token, slice, `${issue.url}/timeline`);
-  const added = [
-    ...own.filter((event) => event.event === 'parent_issue_added'),
-    ...events.filter((event) => event.event === 'sub_issue_added' && event.sub_issue?.number === slice),
-  ]
-    .map((event) => (event as { created_at: string }).created_at)
-    .sort()
-    .at(-1);
-  // An addition after approval that names no issue may be this slice's, so with no addition of its own the check fails closed.
-  const hidden = events.some((event) => event.event === 'sub_issue_added' && !event.sub_issue && event.created_at > approvedAt);
-  if (!added && hidden) {
-    return {
-      problems: [`cannot tell when #${slice} was added to work item #${parent.number}: GitHub names no issue in an addition after its approval, and #${slice}'s own timeline records none`],
-      owed: [],
-    };
+  const joined = async (number: number, url: string): Promise<string[]> =>
+    (await every<TimelineEvent>(sys, token, number, `${url}/timeline`))
+      .filter((event) => event.event === 'parent_issue_added')
+      .map((event) => (event as { created_at: string }).created_at);
+  const mine = [
+    ...(await joined(slice, issue.url)),
+    ...events.flatMap((event) => (event.event === 'sub_issue_added' && event.sub_issue?.number === slice ? [event.created_at] : [])),
+  ];
+  // An addition after approval that names no issue may be this slice's. It is put down to another sub-issue of the
+  // work item only when that one's own timeline records an addition at the same moment; any other counts as this
+  // slice's, so it owes the owner's say rather than passing.
+  let hidden = events.flatMap((event) =>
+    event.event === 'sub_issue_added' && !event.sub_issue && event.created_at > approvedAt && !mine.includes(event.created_at) ? [event.created_at] : [],
+  );
+  if (hidden.length > 0) {
+    for (const sibling of await every<Issue>(sys, token, slice, `${parent.url}/sub_issues`)) {
+      if (sibling.number === slice || hidden.length === 0) continue;
+      const theirs = await joined(slice, sibling.url);
+      hidden = hidden.filter((at) => !theirs.includes(at));
+    }
   }
+  const added = [...mine, ...hidden].sort().at(-1);
   if (added && added > approvedAt) {
     owed.push({
       kind: 'added',

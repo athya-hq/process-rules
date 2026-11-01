@@ -15,13 +15,15 @@ const LATEST = '2026-10-04T00:00:00Z';
 type Node = Record<string, unknown>;
 
 /** Slice #12 under work item #10, approved by the owner, with nothing else. */
-function graph(): { issue: Node; timeline: Node[]; own: Node[]; states: Node[]; comments: Node[]; thumbs: Map<string, Node[]> } {
+function graph(): { issue: Node; timeline: Node[]; own: Node[]; siblings: Node[]; states: Node[]; comments: Node[]; thumbs: Map<string, Node[]> } {
   const timeline: Node[] = [
     { event: 'sub_issue_added', created_at: T0, sub_issue: { number: 12 } },
     { event: 'labeled', created_at: APPROVED, actor: { login: OWNER }, label: { name: 'approved' } },
   ];
   // The slice's own timeline: when it was put under its work item, as GITHUB_TOKEN reads it, naming no parent.
   const own: Node[] = [{ event: 'parent_issue_added', created_at: T0, parent_issue: null }];
+  // The work item's other sub-issues, each with its own timeline.
+  const siblings: Node[] = [];
   const states: Node[] = [];
   const comments: Node[] = [];
   const issue: Node = {
@@ -33,10 +35,11 @@ function graph(): { issue: Node; timeline: Node[]; own: Node[]; states: Node[]; 
     parent: { number: 10, type: { name: 'Work item' } },
     timeline,
     own,
+    siblings,
     states,
     thumbs: new Map<string, Node[]>(),
   };
-  return { issue, timeline, own, states, comments, thumbs: issue.thumbs as Map<string, Node[]> };
+  return { issue, timeline, own, siblings, states, comments, thumbs: issue.thumbs as Map<string, Node[]> };
 }
 
 const ISSUES = `https://api.github.com/repos/${SLUG}/issues`;
@@ -61,6 +64,10 @@ function answer(issue: Node | null, url: string): { status: number; json: unknow
   }
   if (path === '/10/timeline') return page(issue.timeline as Node[]);
   if (path === '/12/timeline') return page(issue.own as Node[]);
+  const siblings = (issue.siblings as Node[] | undefined) ?? [];
+  if (path === '/10/sub_issues') return page([{ ...issue, url: `${ISSUES}/12` }, ...siblings.map((one) => ({ ...one, url: `${ISSUES}/${one.number}` }))]);
+  const sibling = siblings.find((one) => path === `/${one.number}/timeline`);
+  if (sibling) return page(sibling.own as Node[]);
   if (path === '/12/comments') return page(issue.comments as Node[]);
   if (path === '/12/sub_issues') return page(states);
   const own = /^\/(\d+)(\/comments|\/parent)?$/.exec(path);
@@ -269,8 +276,9 @@ describe('sliceProblems', () => {
 
     it('ignores the add of another slice', async () => {
       const g = graph();
-      g.timeline.push({ event: 'sub_issue_added', created_at: LATER, sub_issue: null });
+      g.timeline.push({ event: 'sub_issue_added', created_at: LATEST, sub_issue: null });
       g.timeline.push({ event: 'sub_issue_added', created_at: LATER, sub_issue: { number: 13 } });
+      g.siblings.push({ number: 14, type: { name: 'Slice' }, own: [{ event: 'parent_issue_added', created_at: LATEST, parent_issue: null }] });
       assert.deepEqual(await problems(g.issue), []);
     });
 
@@ -282,16 +290,25 @@ describe('sliceProblems', () => {
       assert.deepEqual(await problems(g.issue), [refused]);
     });
 
-    it('fails closed when a hidden addition follows approval and the slice records none of its own', async () => {
+    it("owes the owner's say for a hidden late addition no sub-issue accounts for", async () => {
       const g = graph();
-      g.own.length = 0;
       g.timeline[0] = { event: 'sub_issue_added', created_at: T0, sub_issue: null };
       g.timeline.push({ event: 'sub_issue_added', created_at: LATER, sub_issue: null });
-      assert.deepEqual(await problems(g.issue), [
-        "cannot tell when #12 was added to work item #10: GitHub names no issue in an addition after its approval, and #12's own timeline records none",
-      ]);
+      // The slice's own record is only its first addition, before approval: the later one may be it, added again.
+      assert.deepEqual(await problems(g.issue), [refused]);
+      g.own.length = 0;
+      assert.deepEqual(await problems(g.issue), [refused], 'with no record of its own either');
       g.timeline.pop();
       assert.deepEqual(await problems(g.issue), [], 'hidden additions before approval owe nothing');
+    });
+
+    it("puts a hidden late addition down to the sibling whose own timeline records it", async () => {
+      const g = graph();
+      g.timeline.push({ event: 'sub_issue_added', created_at: LATER, sub_issue: null });
+      g.siblings.push({ number: 13, type: { name: 'Slice' }, own: [{ event: 'parent_issue_added', created_at: LATER, parent_issue: null }] });
+      assert.deepEqual(await problems(g.issue), []);
+      g.siblings[0] = { number: 13, type: { name: 'Slice' }, own: [{ event: 'parent_issue_added', created_at: LATEST, parent_issue: null }] };
+      assert.deepEqual(await problems(g.issue), [refused], 'a sibling added at another moment does not account for it');
     });
 
     describe("the owner's 👍 on the agent's proposal", () => {
