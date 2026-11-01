@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { AGENT, FakeSys, HOME, capture } from './fake.test.ts';
-import { declinedPath, exposure, exposureLines, lockOwnerAway, readDeclined, setAside } from './lockout.ts';
+import { AGENT, FakeSys, HOME, NOW, capture } from './fake.test.ts';
+import { declinedPath, desktopAppStarted, exposure, exposureLines, lockOwnerAway, movedLines, movedPath, ownerSteps, readDeclined, readMoved, setAside } from './lockout.ts';
 
 const OWNER_KEY = `${HOME}/.ssh/id_ed25519`;
 
@@ -183,5 +183,69 @@ describe('a declined lockout', () => {
     assert.deepEqual(readDeclined(sys, AGENT), { ghLogins: ['a'], gitPassword: false });
     sys.files.set(declinedPath(HOME, AGENT), JSON.stringify({ ghLogins: 'a' }));
     assert.deepEqual(readDeclined(sys, AGENT), { ghLogins: [], gitPassword: false });
+  });
+});
+
+/** The Mac with the Claude desktop app running since `started`. */
+function since(sys: FakeSys, started: Date): FakeSys {
+  sys.appStarted = started;
+  return sys;
+}
+
+describe('moving gh to the agent', () => {
+  const STEPS = ownerSteps(['example-owner', 'old-owner']);
+
+  it('ends with the two owner steps, printed together, and records the move', async () => {
+    const sys = exposed();
+    const out = await lock(sys, ['y', 'y', 'y']);
+    assert.deepEqual(out.slice(-3), [`! ${STEPS[0]}`, ...STEPS.slice(1)]);
+    assert.deepEqual(STEPS, [
+      'two steps only you can do, now that gh here works as the agent:',
+      '  1. Restart the Claude desktop app. It keeps the gh token it read before, so its own GitHub actions (Auto-fix, the PR bar) run as example-owner or old-owner until it restarts.',
+      '  2. Revoke the old token on GitHub, signed in as example-owner or old-owner: Settings → Applications → Authorized OAuth Apps → GitHub CLI → Revoke (https://github.com/settings/applications). gh auth logout deleted it from this Mac, but GitHub still accepts it.',
+    ]);
+    assert.deepEqual(readMoved(sys, AGENT), { at: NOW.toISOString(), logins: ['example-owner', 'old-owner'] });
+    assert.equal(sys.modes.get(movedPath(HOME, AGENT)), 0o600);
+  });
+
+  it('names only the accounts it signed out, and nothing when none', async () => {
+    const sys = exposed();
+    const out = await lock(sys, ['n', 'y', 'n']);
+    assert.ok(out.at(-2)?.includes('run as old-owner until'));
+    const none = exposed();
+    const kept = await lock(none, ['n', 'n', 'n']);
+    assert.ok(!kept.some((line) => line.includes('two steps')));
+    assert.equal(none.exists(movedPath(HOME, AGENT)), false);
+  });
+
+  it('prints no steps when gh could not sign out', async () => {
+    const sys = exposed();
+    sys.execOverride = (call) => (call.command === 'gh' && call.args[1] === 'logout' ? { code: 1, stdout: '', stderr: 'no\n' } : undefined);
+    assert.ok(!(await lock(sys, ['y', 'y', 'n'])).some((line) => line.includes('two steps')));
+  });
+
+  it("reads the desktop app's start time, not its helpers'", () => {
+    const started = new Date('2026-10-28T09:30:15Z');
+    assert.equal(desktopAppStarted(since(new FakeSys().ready(), started))?.getTime(), started.getTime());
+    assert.equal(desktopAppStarted(new FakeSys().ready()), undefined, 'not running, or ps cannot say');
+  });
+
+  it('gives doctor the steps only while the app started before the move', async () => {
+    const sys = exposed();
+    await lock(sys, ['y', 'y', 'y']);
+    assert.deepEqual(movedLines(since(sys, new Date(NOW.getTime() - 60_000)), AGENT), STEPS);
+    assert.deepEqual(movedLines(since(exposed(), new Date(NOW.getTime() - 60_000)), AGENT), [], 'no move recorded');
+    assert.deepEqual(movedLines(since(sys, new Date(NOW.getTime() + 60_000)), AGENT), [], 'restarted since');
+    sys.appStarted = undefined;
+    assert.deepEqual(movedLines(sys, AGENT), [], 'not running');
+  });
+
+  it('reads no record, or a broken one, as no move', () => {
+    const sys = new FakeSys().ready();
+    assert.equal(readMoved(sys, AGENT), undefined);
+    for (const text of ['{not json', JSON.stringify({ at: 'soon', logins: ['a'] }), JSON.stringify({ at: NOW.toISOString(), logins: [] })]) {
+      sys.files.set(movedPath(HOME, AGENT), text);
+      assert.equal(readMoved(sys, AGENT), undefined, text);
+    }
   });
 });

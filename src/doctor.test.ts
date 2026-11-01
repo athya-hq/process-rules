@@ -3,8 +3,8 @@ import { describe, it } from 'node:test';
 
 import { launcherPath, pathsFor, sessionScript } from './agent.ts';
 import { doctor } from './doctor.ts';
-import { declinedPath } from './lockout.ts';
-import { AGENT, AGENT_ID, CLASSIC, FakeSys, HOME, KEY, TOKEN, capture } from './fake.test.ts';
+import { declinedPath, movedPath, ownerSteps } from './lockout.ts';
+import { AGENT, AGENT_ID, CLASSIC, FakeSys, HOME, KEY, NOW, TOKEN, capture } from './fake.test.ts';
 
 const SESSION = `${HOME}/.config/process-rules/examplebot/session.sh`;
 const LAUNCHER = launcherPath(HOME);
@@ -35,6 +35,18 @@ describe('doctor', () => {
       out: ['✓ signing key', '✓ token', '✓ key registered', '✓ session file', '✓ launcher', 'doctor: ready; agent sessions work as ExampleBot'],
       err: [],
     });
+  });
+
+  it('gives the owner steps while the desktop app started before gh moved to the agent, and still passes', async () => {
+    const sys = healthy();
+    sys.files.set(movedPath(HOME, AGENT), JSON.stringify({ at: NOW.toISOString(), logins: ['example-owner'] }));
+    sys.appStarted = new Date(NOW.getTime() - 3_600_000);
+    const steps = ownerSteps(['example-owner']);
+    const stale = await check(sys);
+    assert.equal(stale.code, 0);
+    assert.deepEqual(stale.err, [`! ${steps[0]}`, ...steps.slice(1)]);
+    sys.appStarted = new Date(NOW.getTime() + 60_000);
+    assert.deepEqual((await check(sys)).err, [], 'restarted since');
   });
 
   it("warns when the repo's CODEOWNERS names the owner, and still passes", async () => {

@@ -12,7 +12,7 @@ import {
   tokenInfo,
 } from './agent.ts';
 import { ownerRulesHere } from './codeowners.ts';
-import { exposure, exposureLines, readDeclined, setAside } from './lockout.ts';
+import { exposure, exposureLines, movedLines, readDeclined, setAside } from './lockout.ts';
 import { tokenStore, unsupported } from './token-store.ts';
 import type { Output, Sys } from './types.ts';
 
@@ -103,6 +103,9 @@ export async function doctor(sys: Sys, io: Output, named?: string): Promise<numb
   const codeowners = ownerRulesHere(sys, agent);
   if (codeowners) warnings.push(codeowners);
   for (const warning of warnings) io.err(`! ${warning}`);
+  const [first, ...rest] = movedLines(sys, agent);
+  if (first) io.err(`! ${first}`);
+  for (const line of rest) io.err(line);
   if (checks.some((check) => check.problem)) {
     io.err(`doctor: agent sessions must not push as ${agent} until fixed; run process-rules machine`);
     return 1;

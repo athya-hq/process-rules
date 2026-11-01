@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 
 import { launcherPath, launcherScript, pathsFor, sessionScript } from './agent.ts';
 import { AGENT, AGENT_ID, CLASSIC, CLI, FakeSys, HOME, NODE, KEY, PRIVATE_KEY, PUBLIC_KEY, TOKEN, capture } from './fake.test.ts';
+import { ownerSteps } from './lockout.ts';
 import { TOKEN_PAGE, machine, tokenInstructions } from './machine.ts';
 
 const SESSION = `${HOME}/.config/process-rules/examplebot/session.sh`;
@@ -88,10 +89,12 @@ describe('machine', () => {
       'gh is signed in as example-owner. Sign it out, so agent sessions cannot use it? [y/N] ',
       'The macOS keychain holds a saved git password for github.com. Remove it? [y/N] ',
     ]);
-    assert.deepEqual(out.slice(-4), [
+    assert.deepEqual(out.slice(-7), [
       '✓ gh signed out of example-owner',
       '✓ removed the saved git password for github.com',
       `! ${HOME}/.ssh/id_ed25519 has no passphrase; add one with: ssh-keygen -p -f ${HOME}/.ssh/id_ed25519`,
+      `! ${ownerSteps(['example-owner'])[0]}`,
+      ...ownerSteps(['example-owner']).slice(1),
       `machine: done. Agent sessions act as ExampleBot once they source ${SESSION}.`,
     ]);
     assert.deepEqual(sys.ghAccounts, []);

@@ -75,6 +75,8 @@ export class FakeSys implements Sys {
   removed: string[] = [];
   /** Overrides for exec, by "command firstArg"; return undefined to fall through. */
   execOverride: (call: Call) => ExecResult | undefined = () => undefined;
+  /** When the Claude desktop app started, as `ps` lists it; undefined while it is not running. */
+  appStarted: Date | undefined;
   routes = new Map<string, HttpResult | (() => HttpResult)>();
   answers: string[] = [];
   secrets: string[] = [];
@@ -205,6 +207,10 @@ export class FakeSys implements Sys {
     if (command === 'git' && args.slice(0, 2).join(' ') === 'fetch -q') return ok();
     if (command === 'git' && args.slice(0, 2).join(' ') === 'push -q') return ok();
     if (command === 'mktemp') return ok('/tmp/verify\n');
+    if (command === 'ps') {
+      const app = this.appStarted ? `${lstart(this.appStarted)}     /Applications/Claude.app/Contents/MacOS/Claude\n` : '';
+      return ok(`${lstart(new Date(0))}     /sbin/launchd\n${app}${lstart(NOW)}     /Applications/Claude.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper\n`);
+    }
     if (command === 'rm') return ok();
     if (command === 'ssh-keygen' && args[0] === '-y') {
       const body = /^private:(.*)$/.exec(this.files.get(args[2] ?? '') ?? '')?.[1];
@@ -341,4 +347,10 @@ export function capture(): { out: string[]; err: string[]; io: { out(line: strin
   const out: string[] = [];
   const err: string[] = [];
   return { out, err, io: { out: (line) => out.push(line), err: (line) => err.push(line) } };
+}
+
+/** How `ps -o lstart` prints a start time, in local time. */
+function lstart(date: Date): string {
+  const [day, month, dayOfMonth = '', year] = date.toDateString().split(' ');
+  return `${day} ${month} ${dayOfMonth.padStart(2)} ${date.toTimeString().slice(0, 8)} ${year}`;
 }
