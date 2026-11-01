@@ -92,10 +92,11 @@ describe('onboard', () => {
     assert.ok(out.includes('✓ ExampleBot can push to example-org/example-app'));
     assert.ok(out.includes('✓ GitHub shows the test commit Verified by ExampleBot'));
     assert.ok(out.includes('Deleted the throwaway branch process-rules/verify-examplebot-1793361600000.'));
-    assert.deepEqual(out.slice(-3), [
+    assert.deepEqual(out.slice(-4), [
       `✓ ExampleBot's pull request with .github/process-rules.json, .claude/settings.json, .github/workflows/process-rules.yml: ${PULL_URL}`,
       `onboard: done; nothing in this checkout was changed. Merge ${PULL_URL}; agent sessions then work as ExampleBot.`,
       "For Claude cloud sessions: connect claude.ai's GitHub as ExampleBot, and put what process-rules cloud-setup prints in the cloud environment's Setup script.",
+      `For the review routine: create a weekly Claude routine on example-org/example-app (claude.ai/code/routines, or /schedule in Claude Code), with claude.ai's GitHub connected as ExampleBot, and give it the prompt below the line in https://github.com/athya-hq/process-rules/blob/v${packageVersion()}/routines/review.md. Until it gives its verdicts, the weekly job labels needs-owner each decision over a week past its review date.`,
     ]);
     const git = sys.calls.filter((c) => c.command === 'git' && c.env);
     assert.deepEqual(git.map((c) => c.args.slice(0, 2).join(' ')), [
@@ -155,7 +156,7 @@ describe('onboard', () => {
     assert.deepEqual(sys.asked.map((q) => q.split(' ')[0]), ['Push']);
     assert.ok(!sys.requests.some((r) => r.url.endsWith('/pulls')), 'nothing to change, no pull request');
     assert.ok(!sys.calls.some((c) => c.args[0] === 'read-tree'));
-    assert.equal(out.at(-2), "onboard: done; the repository's files need no change, so there is no pull request. Agent sessions work as ExampleBot.");
+    assert.equal(out.at(-3), "onboard: done; the repository's files need no change, so there is no pull request. Agent sessions work as ExampleBot.");
   });
 
   it("offers to remove the owner from CODEOWNERS, which would ask them to review every agent pull request", async () => {

@@ -471,3 +471,26 @@
   owner's authorised OAuth apps, and asking the owner to confirm would add
   a step to every `doctor` run. A second move before a restart keeps the
   first move's accounts in the record.
+- **2026-11-01 — Record: P-25, the review routine watched.** The owner, on
+  #60: "`onboard --add review` creates the scheduled routine itself (through
+  Claude's API, if one is usable) and checks it runs as the agent; and the
+  weekly job labels `needs-owner` any decision whose review is over a week
+  overdue with no `Kept:`/`Settled:` from the agent". The watch is built:
+  with `review` on, the weekly job labels and comments on each open decision
+  the routine reviews (one an owner or agent wrote and last edited, not
+  `veto` or already `needs-owner`) whose `Review:` date is more than seven
+  days past with no `Kept:` or `Settled:` from an agent since that date; it
+  takes off only a `needs-owner` it added itself (the issue's last such
+  label event is the workflow's), once an agent's verdict comes after it,
+  so the routine's holds and the owner's vetoes stay. Since `needs-owner`
+  would hide the decision from the routine, `reviews-due` still lists one
+  the job labeled until the agent comments on it, so a hold is not asked
+  again. Only an agent's comments count as verdicts, wherever they are read;
+  `reviews-due` read none before. Creating the routine is not built:
+  Claude's routines (`/schedule`, the `RemoteTrigger` tool) call claude.ai's
+  `/v1/code/triggers` with the Claude Code session's own sign-in, which a
+  command such as `onboard` cannot reach, and a routine works as claude.ai's
+  GitHub connection, which nothing reports and which the owner has not yet
+  switched to the agent (P-22 is unproven in a cloud session). So `onboard`
+  prints the steps and the prompt's link, and creating or checking the
+  routine waits on P-22's proof.

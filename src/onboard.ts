@@ -857,6 +857,12 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     io.out(`onboard: done; nothing in this checkout was changed. Merge ${pull}; agent sessions then work as ${agent}.`);
   }
   io.out(`For Claude cloud sessions: connect claude.ai's GitHub as ${agent}, and put what process-rules cloud-setup prints in the cloud environment's Setup script.`);
+  // Claude's routines API answers only a Claude Code session's own sign-in, and a routine works as claude.ai's GitHub connection, so onboard cannot create one or check it.
+  if (on('review')) {
+    io.out(
+      `For the review routine: create a weekly Claude routine on ${slug} (claude.ai/code/routines, or /schedule in Claude Code), with claude.ai's GitHub connected as ${agent}, and give it the prompt below the line in ${GITHUB_WEB}/${PRODUCT}/blob/v${packageVersion()}/routines/review.md. Until it gives its verdicts, the weekly job labels needs-owner each decision over a week past its review date.`,
+    );
+  }
   return 0;
 }
 

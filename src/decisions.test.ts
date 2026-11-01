@@ -29,6 +29,7 @@ function weekly(decisions: Node[], checks: Record<string, number> = {}, undos: N
   for (const d of decisions) sys.route('POST', `/repos/${SLUG}/issues/${d.number}/comments`, { status: 201, json: {} });
   sys.route('POST', `/repos/${SLUG}/issues`, { status: 201, json: { number: 99 } });
   sys.route('GET', `/repos/${SLUG}/issues?state=all&type=Decision&labels=veto&per_page=100&page=1`, { status: 200, json: [] });
+  sys.route('GET', `/repos/${SLUG}/issues?state=all&type=Decision&labels=needs-owner&per_page=100&page=1`, { status: 200, json: [] });
   // The wrapper prints the check's own status; a timed-out check (124 here) prints none.
   sys.execOverride = (call) => {
     if (call.command !== 'timeout') return undefined;
@@ -155,7 +156,7 @@ describe('decisionsWeekly', () => {
     const sys = weekly([decision(5, 'Check: `true`'), decision(6, 'Check: `true`')]);
     const start = sys.now().getTime();
     let calls = 0;
-    sys.now = () => new Date(start + (calls++ > 2 ? 46 * 60_000 : 0));
+    sys.now = () => new Date(start + (calls++ > 3 ? 46 * 60_000 : 0));
     const { out } = await run(sys);
     assert.deepEqual(out.slice(0, 2), ['#5: holds', "#6: not run; this week's run has spent its time, so it waits for next week"]);
   });
@@ -234,7 +235,7 @@ describe('decisionsWeekly', () => {
 
   for (const [name, change, message] of [
     ['the environment', (sys: FakeSys) => (sys.env = {}), /decisions-weekly runs in GitHub Actions/],
-    ['listing issues', (sys: FakeSys) => sys.route('GET', DECISIONS, { status: 500, json: null }), /cannot list open issues \(HTTP 500\)/],
+    ['listing issues', (sys: FakeSys) => sys.route('GET', DECISIONS, { status: 500, json: null }), /cannot list open decisions \(HTTP 500\)/],
     ['reading editors', (sys: FakeSys) => sys.route('POST', '/graphql', { status: 502, json: null }), /cannot read who edited the decisions \(HTTP 502\)/],
     ['labeling', (sys: FakeSys) => sys.route('POST', `/repos/${SLUG}/issues/7/labels`, { status: 403, json: null }), /cannot label #7 cannot-run-here \(HTTP 403\)/],
     ['opening the undo issue', (sys: FakeSys) => sys.route('POST', `/repos/${SLUG}/issues`, { status: 410, json: null }), /cannot open the undo issue for #6 \(HTTP 410\)/],
