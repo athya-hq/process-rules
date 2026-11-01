@@ -37,6 +37,7 @@ interface Issue {
 type TimelineEvent =
   | { event: 'labeled' | 'unlabeled'; created_at: string; actor: { login: string } | null; label: { name: string } }
   | { event: 'sub_issue_added'; created_at: string; sub_issue: { number: number } | null }
+  | { event: 'parent_issue_added'; created_at: string }
   | ({ event: 'commented' } & Comment)
   | { event: 'other' };
 
@@ -198,22 +199,42 @@ async function readSlice(
   const states = await every<Issue>(sys, token, slice, `${issue.url}/sub_issues`);
 
   const owed: Owed[] = [];
-  // The latest addition counts: a slice removed and added again after approval needs the owner's say.
-  const added = events
-    .filter((event): event is Extract<TimelineEvent, { event: 'sub_issue_added' }> => event.event === 'sub_issue_added' && event.sub_issue?.number === slice)
-    .at(-1);
-  if (added && added.created_at > approvedAt) {
+  // When the slice was last added to its work item. A workflow's GITHUB_TOKEN on a private repository reads the
+  // work item's sub_issue_added events with `sub_issue` null, so the slice's own parent_issue_added events say it.
+  const joined = async (number: number, url: string): Promise<string[]> =>
+    (await every<TimelineEvent>(sys, token, number, `${url}/timeline`))
+      .filter((event) => event.event === 'parent_issue_added')
+      .map((event) => (event as { created_at: string }).created_at);
+  const mine = [
+    ...(await joined(slice, issue.url)),
+    ...events.flatMap((event) => (event.event === 'sub_issue_added' && event.sub_issue?.number === slice ? [event.created_at] : [])),
+  ];
+  // An addition after approval that names no issue may be this slice's. It is put down to another sub-issue of the
+  // work item only when that one's own timeline records an addition at the same moment; any other counts as this
+  // slice's, so it owes the owner's say rather than passing.
+  let hidden = events.flatMap((event) =>
+    event.event === 'sub_issue_added' && !event.sub_issue && event.created_at > approvedAt && !mine.includes(event.created_at) ? [event.created_at] : [],
+  );
+  if (hidden.length > 0) {
+    for (const sibling of await every<Issue>(sys, token, slice, `${parent.url}/sub_issues`)) {
+      if (sibling.number === slice || hidden.length === 0) continue;
+      const theirs = await joined(slice, sibling.url);
+      hidden = hidden.filter((at) => !theirs.includes(at));
+    }
+  }
+  const added = [...mine, ...hidden].sort().at(-1);
+  if (added && added > approvedAt) {
     owed.push({
       kind: 'added',
       number: slice,
       title: issue.title,
       body: issue.body ?? '',
-      since: added.created_at,
+      since: added,
       proposals: proposalsFor(comments, agents, slice),
       settled:
-        decided(parentComments, owners, added.created_at, `#${slice}`) ||
-        decided(comments, owners, added.created_at) ||
-        requested(issue.body ?? '', slug, parent.number, parentComments, owners, added.created_at),
+        decided(parentComments, owners, added, `#${slice}`) ||
+        decided(comments, owners, added) ||
+        requested(issue.body ?? '', slug, parent.number, parentComments, owners, added),
     });
   }
   for (const state of states) {
