@@ -12,7 +12,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import * as http from 'node:http';
-import { homedir, tmpdir } from 'node:os';
+import { constants, homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { isatty } from 'node:tty';
@@ -40,7 +40,7 @@ export function realSys(): Sys {
         ...(options.interactive ? { stdio: 'inherit' as const } : {}),
       });
       return {
-        code: result.status ?? 1,
+        code: result.status ?? exitCode(result),
         stdout: result.stdout ?? '',
         stderr: result.stderr ?? (result.error ? String(result.error) : ''),
       };
@@ -133,4 +133,15 @@ function readHidden(question: string): Promise<string> {
     };
     stdin.on('data', onData);
   });
+}
+
+/**
+ * What a shell would exit with for a command that did not exit itself: 128
+ * plus the signal that ended it, 127 when it was not found, 126 when it
+ * could not be run, and 1 otherwise.
+ */
+function exitCode(result: { signal: NodeJS.Signals | null; error?: Error }): number {
+  if (result.signal) return 128 + (constants.signals[result.signal] ?? 0);
+  const code = (result.error as NodeJS.ErrnoException | undefined)?.code;
+  return code === 'ENOENT' ? 127 : code === 'EACCES' ? 126 : 1;
 }

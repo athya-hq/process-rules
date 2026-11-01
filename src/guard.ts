@@ -35,21 +35,36 @@ export function guard(sys: Sys, io: Output, stdin: string): number {
   if (typeof command !== 'string') return 0;
   if (!reachesGitHub(command)) return 0;
 
-  const path = typeof input.session_id === 'string' ? sessionRecord(sys.home, input.session_id) : undefined;
+  const recorded = recordedAgent(sys, input.session_id);
+  return 'agent' in recorded ? 0 : refuse(io, recorded.problem);
+}
+
+/**
+ * The agent session-start recorded this session as working as, or why it
+ * names none: no record for the id, one it did not write, or the problem it
+ * recorded instead. `as-agent` reads the same record.
+ */
+export function recordedAgent(sys: Sys, sessionId: unknown): { agent: string } | { problem: string } {
+  const path = typeof sessionId === 'string' ? sessionRecord(sys.home, sessionId) : undefined;
   if (!path || !sys.exists(path)) {
-    return refuse(io, 'session-start did not run for this session, so it was not given the agent identity');
+    return { problem: 'session-start did not run for this session, so it was not given the agent identity' };
   }
   let entry: { agent?: unknown; problem?: unknown };
   try {
     entry = JSON.parse(sys.read(path)) as typeof entry;
   } catch {
-    return refuse(io, `${path} is not what session-start writes`);
+    return { problem: `${path} is not what session-start writes` };
   }
-  if (typeof entry.agent === 'string') return 0;
-  return refuse(io, typeof entry.problem === 'string' ? `session-start said: ${entry.problem}` : `${path} names no agent`);
+  if (typeof entry.agent === 'string') return { agent: entry.agent };
+  return { problem: typeof entry.problem === 'string' ? `session-start said: ${entry.problem}` : `${path} names no agent` };
+}
+
+/** The line a refusal prints, for the guard and `as-agent` alike. */
+export function refusal(reason: string): string {
+  return `process-rules: refused, because this session does not work as the agent on GitHub: ${reason.replace(/\.$/, '')}. Do not work around it; tell the owner.`;
 }
 
 function refuse(io: Output, reason: string): number {
-  io.err(`process-rules: refused, because this session does not work as the agent on GitHub: ${reason.replace(/\.$/, '')}. Do not work around it; tell the owner.`);
+  io.err(refusal(reason));
   return 2;
 }
