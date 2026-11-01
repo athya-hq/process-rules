@@ -502,7 +502,7 @@ release, attaching the CLI package it built and tested. Install that package on
 each machine with pnpm; nothing is built on install:
 
 ```bash
-pnpm add -g https://github.com/athya-hq/process-rules/releases/download/v0.5.13/athya-hq-process-rules-0.5.13.tgz
+pnpm add -g https://github.com/athya-hq/process-rules/releases/download/v0.5.14/athya-hq-process-rules-0.5.14.tgz
 ```
 
 `onboard` pins the client's workflow to one version, the release of the CLI
