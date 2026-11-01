@@ -471,3 +471,12 @@
   owner's authorised OAuth apps, and asking the owner to confirm would add
   a step to every `doctor` run. A second move before a restart keeps the
   first move's accounts in the record.
+- **2026-11-01 — Record: P-44, Claude Code is the only supported agent
+  runner.** The owner decided on #50 on 2026-10-31: "Athya's agents run in
+  Claude Code only. Deferred: the README names Claude Code as the only
+  supported agent runner, and this stays open for adoption outside Athya."
+  The README never said so; it now does, beside the supported host. The
+  identity and the lock reach a session only through Claude Code's
+  SessionStart hook and `CLAUDE_ENV_FILE`, so another tool's agent gets
+  neither, and only PR identity catches its work after the push. #50 stays
+  open.
