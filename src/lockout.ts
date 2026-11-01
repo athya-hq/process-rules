@@ -1,6 +1,6 @@
 import { pathsFor, sameLogin } from './agent.ts';
 import type { Output, Sys } from './types.ts';
-import { GITHUB_HOST, GITHUB_HOST_RE, GITHUB_SSH } from './host.ts';
+import { GITHUB_HOST, GITHUB_HOST_RE, GITHUB_SSH, GITHUB_WEB } from './host.ts';
 
 /**
  * What of the owner's on this Mac an agent session could reach if it ignored
@@ -128,6 +128,71 @@ export function setAside(found: Exposure, declined: Declined): { left: Exposure;
 }
 
 /**
+ * When `machine` last signed owner accounts out of `gh`, and which: the
+ * desktop app started before then still holds a token it read from them.
+ */
+export interface Moved {
+  at: string;
+  logins: string[];
+}
+
+/** Where `machine` records the move, beside the session file. */
+export function movedPath(home: string, agent: string): string {
+  return `${pathsFor(home, agent).dir}/gh-moved.json`;
+}
+
+/** The last move on this Mac; undefined when there is none or it cannot be read. */
+export function readMoved(sys: Sys, agent: string): Moved | undefined {
+  const path = movedPath(sys.home, agent);
+  if (!sys.exists(path)) return undefined;
+  try {
+    const record = JSON.parse(sys.read(path)) as Partial<Moved>;
+    const logins = Array.isArray(record.logins) ? record.logins.filter((login): login is string => typeof login === 'string') : [];
+    return typeof record.at === 'string' && !Number.isNaN(Date.parse(record.at)) && logins.length > 0 ? { at: record.at, logins } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+const DESKTOP_APP = '/Claude.app/Contents/MacOS/Claude';
+
+/** When the Claude desktop app started; undefined when it is not running or `ps` cannot say. */
+export function desktopAppStarted(sys: Sys): Date | undefined {
+  const listed = sys.exec('ps', ['-axo', 'lstart=,comm='], { env: { ...sys.env, LC_ALL: 'C' } });
+  if (listed.code !== 0) return undefined;
+  const starts = listed.stdout
+    .split('\n')
+    .filter((line) => line.trimEnd().endsWith(DESKTOP_APP))
+    .map((line) => new Date(line.trim().slice(0, 24)))
+    .filter((date) => !Number.isNaN(date.getTime()));
+  return starts.length > 0 ? new Date(Math.min(...starts.map((date) => date.getTime()))) : undefined;
+}
+
+/**
+ * The two steps only the owner can take once `gh` works as the agent: the
+ * desktop app keeps the token it read before until it restarts, and
+ * `gh auth logout` deletes the token from this Mac without revoking it.
+ */
+export function ownerSteps(logins: string[]): string[] {
+  const as = logins.join(' or ');
+  return [
+    `two steps only you can do, now that gh here works as the agent:`,
+    `  1. Restart the Claude desktop app. It keeps the gh token it read before, so its own GitHub actions (Auto-fix, the PR bar) run as ${as} until it restarts.`,
+    `  2. Revoke the old token on GitHub, signed in as ${as}: Settings → Applications → Authorized OAuth Apps → GitHub CLI → Revoke (${GITHUB_WEB}/settings/applications). gh auth logout deleted it from this Mac, but GitHub still accepts it.`,
+  ];
+}
+
+/**
+ * `doctor`'s lines for a move the desktop app has not caught up with: the
+ * owner steps while the app runs and started before the move, else none.
+ */
+export function movedLines(sys: Sys, agent: string): string[] {
+  const moved = readMoved(sys, agent);
+  const started = moved && desktopAppStarted(sys);
+  return moved && started && started.getTime() < Date.parse(moved.at) ? ownerSteps(moved.logins) : [];
+}
+
+/**
  * `machine`'s last step: offers to sign `gh` out and to remove the saved git
  * password, and warns about keys with no passphrase. What is declined stays
  * in place and is recorded, so `doctor` reports it as chosen; each run offers
@@ -141,10 +206,12 @@ export async function lockOwnerAway(
 ): Promise<void> {
   const found = exposure(sys, agent);
   const declined: Declined = { ghLogins: [], gitPassword: false };
+  const signedOut: string[] = [];
   for (const login of found.ghLogins) {
     if (await confirm(`gh is signed in as ${login}. Sign it out, so agent sessions cannot use it?`)) {
       const out = sys.exec('gh', ['auth', 'logout', '-h', GITHUB_HOST, '-u', login], { env: ownerEnv(sys) });
       io.out(out.code === 0 ? `✓ gh signed out of ${login}` : `! gh could not sign out of ${login}: ${out.stderr.trim()}`);
+      if (out.code === 0) signedOut.push(login);
     } else {
       declined.ghLogins.push(login);
       io.out(`! gh stays signed in as ${login}`);
@@ -172,5 +239,15 @@ export async function lockOwnerAway(
   if (found.sshLogin) io.out(`! ${sshLine(found.sshLogin)}`);
   if (found.ghLogins.length === 0 && !found.gitPassword && found.openKeys.length === 0 && !found.sshLogin) {
     io.out('✓ nothing of the owner here for an agent session to reach');
+  }
+  if (signedOut.length > 0) {
+    // A move the desktop app has not restarted since still holds its accounts' tokens.
+    const pending = movedLines(sys, agent).length > 0 ? (readMoved(sys, agent)?.logins ?? []) : [];
+    const logins = [...pending.filter((login) => !signedOut.some((other) => sameLogin(other, login))), ...signedOut];
+    sys.mkdir(pathsFor(sys.home, agent).dir);
+    sys.write(movedPath(sys.home, agent), `${JSON.stringify({ at: sys.now().toISOString(), logins }, null, 2)}\n`, 0o600);
+    const [first, ...rest] = ownerSteps(logins);
+    io.out(`! ${first}`);
+    for (const line of rest) io.out(line);
   }
 }

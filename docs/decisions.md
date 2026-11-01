@@ -453,3 +453,21 @@
     run plain `onboard`; the sign-in, which `onboard` needs anyway, says
     which owner is at the terminal.) Its CODEOWNERS offer removes every listed owner a rule names.
   Teams as approvers are out of scope.
+- **2026-11-01 — Record: moving `gh` to the agent names the owner's two
+  steps, P-42.** The owner asked for this in the P-30 session and had the
+  coordinator file it. Sessions could not turn on Auto-fix for the agent's
+  pull requests: the desktop app checks the PR's author against the account
+  of the `gh` token it read, keeps that token until GitHub rejects it, and
+  had read the owner's before the Mac's `gh` login moved to the agent. After
+  a restart, Auto-fix turned on for an agent pull request with no per-PR
+  step. `gh auth logout` also leaves the old token valid on GitHub, and only
+  the owner can revoke it there. So when `machine`'s lockout signs an
+  account out, it ends with both steps together and records when and which
+  accounts beside the session file. `doctor` repeats them while the desktop
+  app, as `ps` lists it, started before that time; it cannot see whether the
+  token was revoked, so the revoke step goes with the restart step and both
+  stop once the app has restarted: a revoke skipped then is not raised
+  again. That is accepted, since the agent's token cannot list or check the
+  owner's authorised OAuth apps, and asking the owner to confirm would add
+  a step to every `doctor` run. A second move before a restart keeps the
+  first move's accounts in the record.

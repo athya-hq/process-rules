@@ -131,6 +131,18 @@ which ones in `~/.config/process-rules/<agent, lowercased>/lockout-declined.json
 signed in later is still a warning. Each `machine` run offers again, and
 accepting clears that part of the record.
 
+When `machine` signs an account out of `gh`, it ends with two steps only you
+can take, printed together. Restart the Claude desktop app: it keeps the `gh`
+token it read before the move until it restarts, so until then its own
+GitHub actions (Auto-fix, the PR bar) run as you, and Auto-fix refuses the
+agent's pull requests. And revoke the old token on GitHub (Settings →
+Applications → Authorized OAuth Apps → GitHub CLI): `gh auth logout` deletes
+it from the Mac but does not revoke it. `machine` records the move in
+`~/.config/process-rules/<agent, lowercased>/gh-moved.json`, and `doctor`
+repeats both steps while the desktop app was started before it. `doctor`
+cannot see whether the token was revoked, so once the app has restarted it
+no longer reminds you to revoke it.
+
 The owner is never signed in to `gh`, and needs no sign-in kept anywhere on
 the Mac. When a run of `onboard` (or `onboard --add`) reaches a step that
 acts as the owner (giving the agent access, setting up the board, or
