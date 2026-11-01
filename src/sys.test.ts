@@ -29,8 +29,14 @@ describe('realSys', () => {
   it('reports a failing or missing command', () => {
     assert.equal(sys.exec('sh', ['-c', 'echo e >&2; exit 3']).code, 3);
     const missing = sys.exec('/no/such/command', []);
-    assert.equal(missing.code, 1);
+    assert.equal(missing.code, 127);
     assert.match(missing.stderr, /ENOENT/);
+  });
+
+  it('gives an interactive command the terminal and its exit code, as a shell would', () => {
+    assert.deepEqual(sys.exec('sh', ['-c', 'exit 5'], { interactive: true }), { code: 5, stdout: '', stderr: '' });
+    assert.equal(sys.exec('sh', ['-c', 'kill -TERM $$'], { interactive: true }).code, 143);
+    assert.equal(sys.exec('/no/such/command', [], { interactive: true }).code, 127);
   });
 
   it('reads and writes files, private when asked', () => {

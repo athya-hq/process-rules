@@ -11,6 +11,7 @@ import {
   signingKeys,
   tokenInfo,
 } from './agent.ts';
+import { LOCKED, hooksHittingLock } from './as-agent.ts';
 import { ownerRulesHere } from './codeowners.ts';
 import { exposure, exposureLines, movedLines, readDeclined, setAside } from './lockout.ts';
 import { tokenStore, unsupported } from './token-store.ts';
@@ -102,6 +103,9 @@ export async function doctor(sys: Sys, io: Output, named?: string): Promise<numb
   warnings.push(...exposureLines(left));
   const codeowners = ownerRulesHere(sys, agent);
   if (codeowners) warnings.push(codeowners);
+  for (const hook of hooksHittingLock(sys)) {
+    warnings.push(`${hook} reaches GitHub outside process-rules as-agent, so it gets the lock's token and GitHub answers 401; run its gh or git through process-rules as-agent --session <session_id> -- (exit ${LOCKED} when the session does not work as the agent)`);
+  }
   for (const warning of warnings) io.err(`! ${warning}`);
   const [first, ...rest] = movedLines(sys, agent);
   if (first) io.err(`! ${first}`);

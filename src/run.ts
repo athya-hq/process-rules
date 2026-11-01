@@ -1,3 +1,4 @@
+import { LOCKED, asAgent, asAgentArgs } from './as-agent.ts';
 import { cloudSetup } from './cloud.ts';
 import { decisionsWeekly } from './decisions.ts';
 import { prDesign } from './design.ts';
@@ -27,6 +28,8 @@ Commands:
   cloud-setup      Print the setup script for a Claude cloud environment's agent sessions
   session-start    Run by a client's SessionStart hook: the agent identity, or GitHub locked out
   guard            Run by a client's PreToolUse hook: gh and git's remote commands only as the agent
+  as-agent --session <session_id> -- <command> [args...]
+                   For a client's hook: run one command as the session's agent, or nothing (exit ${LOCKED})
   pr-identity      Run by the shared workflow: agent commits Verified and pushed by the agent
   pr-work-rules    Run by the shared workflow: an agent pull request builds one slice it may build
   pr-design        Run by the shared workflow: each state of the slice links a frame from the design library
@@ -39,6 +42,8 @@ Commands:
   help             Show this text
   version          Print the installed version
 
+as-agent's command gets the session's agent identity, stdin, stdout and stderr, and its
+exit code is as-agent's; exit ${LOCKED} means the session does not work as the agent, and nothing ran.
 Without [agent], machine and doctor use the agent account .github/process-rules.json names
 in the repo around the working directory.
 onboard suggests the owner and agent the first time (or name them); after that it reads them from that file.
@@ -52,17 +57,17 @@ export async function run(
   sys: () => Sys | Promise<Sys>,
 ): Promise<number> {
   const [command, ...rest] = args;
-  const allowed = command === 'onboard' || command === 'review-thread' ? Infinity : command === 'pre-push' ? 2 : command === 'machine' || command === 'doctor' || command === 'propose' ? 1 : 0;
+  const allowed = command === 'onboard' || command === 'review-thread' || command === 'as-agent' ? Infinity : command === 'pre-push' ? 2 : command === 'machine' || command === 'doctor' || command === 'propose' ? 1 : 0;
   const extra = rest[allowed];
   if (extra !== undefined) {
     io.err(`process-rules: unexpected argument "${extra}"`);
     io.err(USAGE);
     return 2;
   }
-  if (command === 'onboard' || command === 'review-thread') {
+  if (command === 'onboard' || command === 'review-thread' || command === 'as-agent') {
     // Their options are checked here, so a bad one is bad usage (exit 2).
     try {
-      (command === 'onboard' ? onboardArgs : threadArgs)(rest);
+      (command === 'onboard' ? onboardArgs : command === 'as-agent' ? asAgentArgs : threadArgs)(rest);
     } catch (error) {
       io.err(`process-rules: ${error instanceof Error ? error.message : String(error)}`);
       io.err(USAGE);
@@ -98,6 +103,14 @@ export async function run(
       } catch (error) {
         io.err(`process-rules guard: refused, because the check failed: ${error instanceof Error ? error.message : String(error)}`);
         return 2;
+      }
+    case 'as-agent':
+      // Any failure runs nothing and says so with the locked code, never the command's own.
+      try {
+        return asAgent(await sys(), io, asAgentArgs(rest));
+      } catch (error) {
+        io.err(`process-rules as-agent: ran nothing, because the check failed: ${error instanceof Error ? error.message : String(error)}`);
+        return LOCKED;
       }
     case 'machine':
     case 'doctor':
