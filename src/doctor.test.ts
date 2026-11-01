@@ -37,6 +37,16 @@ describe('doctor', () => {
     });
   });
 
+  it('warns about client hooks that reach GitHub outside as-agent, and still passes', async () => {
+    const sys = healthy();
+    sys.files.set('/repo/.claude/settings.json', JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: 'gh pr view' }] }] } }));
+    const { code, err } = await check(sys);
+    assert.equal(code, 0);
+    assert.deepEqual(err, [
+      '! .claude/settings.json Stop hook "gh pr view" reaches GitHub outside process-rules as-agent, so it gets the lock\'s token and GitHub answers 401; run its gh or git through process-rules as-agent --session <session_id> -- (exit 77 when the session does not work as the agent)',
+    ]);
+  });
+
   it('gives the owner steps while the desktop app started before gh moved to the agent, and still passes', async () => {
     const sys = healthy();
     sys.files.set(movedPath(HOME, AGENT), JSON.stringify({ at: NOW.toISOString(), logins: ['example-owner'] }));
