@@ -37,6 +37,7 @@ interface Issue {
 type TimelineEvent =
   | { event: 'labeled' | 'unlabeled'; created_at: string; actor: { login: string } | null; label: { name: string } }
   | { event: 'sub_issue_added'; created_at: string; sub_issue: { number: number } | null }
+  | { event: 'parent_issue_added'; created_at: string }
   | ({ event: 'commented' } & Comment)
   | { event: 'other' };
 
@@ -198,22 +199,36 @@ async function readSlice(
   const states = await every<Issue>(sys, token, slice, `${issue.url}/sub_issues`);
 
   const owed: Owed[] = [];
-  // The latest addition counts: a slice removed and added again after approval needs the owner's say.
-  const added = events
-    .filter((event): event is Extract<TimelineEvent, { event: 'sub_issue_added' }> => event.event === 'sub_issue_added' && event.sub_issue?.number === slice)
+  // When the slice was last added to its work item. A workflow's GITHUB_TOKEN on a private repository reads the
+  // work item's sub_issue_added events with `sub_issue` null, so the slice's own parent_issue_added events say it.
+  const own = await every<TimelineEvent>(sys, token, slice, `${issue.url}/timeline`);
+  const added = [
+    ...own.filter((event) => event.event === 'parent_issue_added'),
+    ...events.filter((event) => event.event === 'sub_issue_added' && event.sub_issue?.number === slice),
+  ]
+    .map((event) => (event as { created_at: string }).created_at)
+    .sort()
     .at(-1);
-  if (added && added.created_at > approvedAt) {
+  // An addition after approval that names no issue may be this slice's, so with no addition of its own the check fails closed.
+  const hidden = events.some((event) => event.event === 'sub_issue_added' && !event.sub_issue && event.created_at > approvedAt);
+  if (!added && hidden) {
+    return {
+      problems: [`cannot tell when #${slice} was added to work item #${parent.number}: GitHub names no issue in an addition after its approval, and #${slice}'s own timeline records none`],
+      owed: [],
+    };
+  }
+  if (added && added > approvedAt) {
     owed.push({
       kind: 'added',
       number: slice,
       title: issue.title,
       body: issue.body ?? '',
-      since: added.created_at,
+      since: added,
       proposals: proposalsFor(comments, agents, slice),
       settled:
-        decided(parentComments, owners, added.created_at, `#${slice}`) ||
-        decided(comments, owners, added.created_at) ||
-        requested(issue.body ?? '', slug, parent.number, parentComments, owners, added.created_at),
+        decided(parentComments, owners, added, `#${slice}`) ||
+        decided(comments, owners, added) ||
+        requested(issue.body ?? '', slug, parent.number, parentComments, owners, added),
     });
   }
   for (const state of states) {

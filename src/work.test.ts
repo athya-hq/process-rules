@@ -15,11 +15,13 @@ const LATEST = '2026-10-04T00:00:00Z';
 type Node = Record<string, unknown>;
 
 /** Slice #12 under work item #10, approved by the owner, with nothing else. */
-function graph(): { issue: Node; timeline: Node[]; states: Node[]; comments: Node[]; thumbs: Map<string, Node[]> } {
+function graph(): { issue: Node; timeline: Node[]; own: Node[]; states: Node[]; comments: Node[]; thumbs: Map<string, Node[]> } {
   const timeline: Node[] = [
     { event: 'sub_issue_added', created_at: T0, sub_issue: { number: 12 } },
     { event: 'labeled', created_at: APPROVED, actor: { login: OWNER }, label: { name: 'approved' } },
   ];
+  // The slice's own timeline: when it was put under its work item, as GITHUB_TOKEN reads it, naming no parent.
+  const own: Node[] = [{ event: 'parent_issue_added', created_at: T0, parent_issue: null }];
   const states: Node[] = [];
   const comments: Node[] = [];
   const issue: Node = {
@@ -30,10 +32,11 @@ function graph(): { issue: Node; timeline: Node[]; states: Node[]; comments: Nod
     comments,
     parent: { number: 10, type: { name: 'Work item' } },
     timeline,
+    own,
     states,
     thumbs: new Map<string, Node[]>(),
   };
-  return { issue, timeline, states, comments, thumbs: issue.thumbs as Map<string, Node[]> };
+  return { issue, timeline, own, states, comments, thumbs: issue.thumbs as Map<string, Node[]> };
 }
 
 const ISSUES = `https://api.github.com/repos/${SLUG}/issues`;
@@ -57,6 +60,7 @@ function answer(issue: Node | null, url: string): { status: number; json: unknow
     return parent ? { status: 200, json: { ...parent, url: `${ISSUES}/10` } } : { status: 404, json: { message: 'No parent issue found' } };
   }
   if (path === '/10/timeline') return page(issue.timeline as Node[]);
+  if (path === '/12/timeline') return page(issue.own as Node[]);
   if (path === '/12/comments') return page(issue.comments as Node[]);
   if (path === '/12/sub_issues') return page(states);
   const own = /^\/(\d+)(\/comments|\/parent)?$/.exec(path);
@@ -266,7 +270,28 @@ describe('sliceProblems', () => {
     it('ignores the add of another slice', async () => {
       const g = graph();
       g.timeline.push({ event: 'sub_issue_added', created_at: LATER, sub_issue: null });
+      g.timeline.push({ event: 'sub_issue_added', created_at: LATER, sub_issue: { number: 13 } });
       assert.deepEqual(await problems(g.issue), []);
+    });
+
+    it("reads a late addition from the slice's own timeline when GITHUB_TOKEN hides which issue was added", async () => {
+      const g = graph();
+      g.timeline[0] = { event: 'sub_issue_added', created_at: T0, sub_issue: null };
+      g.timeline.push({ event: 'sub_issue_added', created_at: LATER, sub_issue: null });
+      g.own.push({ event: 'parent_issue_added', created_at: LATER, parent_issue: null });
+      assert.deepEqual(await problems(g.issue), [refused]);
+    });
+
+    it('fails closed when a hidden addition follows approval and the slice records none of its own', async () => {
+      const g = graph();
+      g.own.length = 0;
+      g.timeline[0] = { event: 'sub_issue_added', created_at: T0, sub_issue: null };
+      g.timeline.push({ event: 'sub_issue_added', created_at: LATER, sub_issue: null });
+      assert.deepEqual(await problems(g.issue), [
+        "cannot tell when #12 was added to work item #10: GitHub names no issue in an addition after its approval, and #12's own timeline records none",
+      ]);
+      g.timeline.pop();
+      assert.deepEqual(await problems(g.issue), [], 'hidden additions before approval owe nothing');
     });
 
     describe("the owner's 👍 on the agent's proposal", () => {
