@@ -13,8 +13,10 @@ You review the decisions in this repository whose review date has come.
    Decision issue, as JSON: number, title, url, kind, review date, labels,
    body; the count and any notes go to stderr, and are not decisions. It
    lists only decisions the owner or you wrote and last edited, and none that
-   wait on the owner (`veto` or `needs-owner`). If stdout is empty, stop.
-   Review only the decisions it lists.
+   wait on the owner (`veto` or `needs-owner`), except one the weekly job
+   labeled `needs-owner` because its review is over a week overdue: that one
+   still waits on you, and the job takes the label off after your `Kept:` or
+   `Settled:`. If stdout is empty, stop. Review only the decisions it lists.
 2. For each decision, read the issue, its comments and anything it links,
    then decide.
    - **Held for the owner:** when the decision touches secrets, money or

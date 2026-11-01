@@ -165,9 +165,12 @@ describe('checks of features that are off', () => {
     const sys = identityOnly();
     sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['review'] }));
     sys.route('GET', '/repos/example-org/example-app/issues?state=all&type=Decision&labels=veto&per_page=100&page=1', { status: 200, json: [] });
+    sys.route('GET', '/repos/example-org/example-app/issues?state=all&type=Decision&labels=needs-owner&per_page=100&page=1', { status: 200, json: [] });
+    sys.route('GET', '/repos/example-org/example-app/issues?state=open&type=Decision&per_page=100&page=1', { status: 200, json: [] });
     const { io, out } = capture();
     assert.equal(await decisionsWeekly(sys, io), 0);
     assert.ok(sys.requests.some((r) => r.url.includes('labels=veto')));
+    assert.ok(sys.requests.some((r) => r.url.includes('labels=needs-owner')));
     assert.deepEqual(out, ['decisions-weekly: decisions is off in .github/process-rules.json; nothing to check']);
   });
 

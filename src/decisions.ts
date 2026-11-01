@@ -1,6 +1,6 @@
 import { API, anyLogin, either, loadSettings } from './agent.ts';
 import { PERSONAL_REPO, isOn, isPersonal, offLine } from './features.ts';
-import { expireVetoes } from './reviews.ts';
+import { WORKFLOW_BOT, expireVetoes, watchReviews } from './reviews.ts';
 import type { Output, Sys } from './types.ts';
 
 /** How long one decision's check may run, in seconds. */
@@ -12,8 +12,6 @@ const TIMED_OUT = 124;
 /** The line the wrapper prints with the check's own exit status. */
 const STATUS_MARK = 'process-rules-check-exit=';
 const STATUS_WRAPPER = `sh -c "$1"; echo "${STATUS_MARK}$?"`;
-/** Who writes comments for the workflow's token: only its comments can say an undo issue was opened. */
-const WORKFLOW_BOT = 'github-actions[bot]';
 /** An Override is labeled `expiring` this many days before its expiry. */
 const EXPIRING_DAYS = 30;
 const DAY_MS = 86_400_000;
@@ -79,8 +77,11 @@ export async function decisionsWeekly(sys: Sys, io: Output): Promise<number> {
     io.out(offLine('decisions-weekly', on ? 'decisions' : 'review', PERSONAL_REPO));
     return 0;
   }
-  // Vetoes belong to the review routine, so they expire whether decisions are on or not.
-  if (review) await expireVetoes(sys, io, slug, token);
+  // Vetoes and the routine's watch belong to the review routine, so they run whether decisions are on or not.
+  if (review) {
+    await expireVetoes(sys, io, slug, token);
+    await watchReviews(sys, io, slug, token, { owners, agents });
+  }
   if (!on) {
     io.out(offLine('decisions-weekly', 'decisions'));
     return 0;
@@ -170,6 +171,7 @@ export async function decisionsWeekly(sys: Sys, io: Output): Promise<number> {
         if (reply.json.length < 100) break;
       }
       const told = comments.some(
+        // Only the workflow's comments can say an undo issue was opened.
         (comment) => comment.user?.login === WORKFLOW_BOT && comment.body?.includes(`Opened #${open.number} to undo it.`),
       );
       if (told) {

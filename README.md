@@ -345,6 +345,21 @@ the owner has a week to reverse it. A decision touching secrets, money or
 production is held for the owner with a suggestion and `needs-owner`. The
 weekly job removes `veto` once the week has passed.
 
+The weekly job also watches the routine: an open decision the routine reviews
+whose `Review:` date is over a week past, with no `Kept:` or `Settled:` from
+the agent since, is labeled `needs-owner` with a comment, so a routine that
+was never created, or has stopped, shows up. Only the agent's comments count
+as verdicts: anyone can write `Kept:`. `reviews-due` still lists a decision
+the job labeled so, until the agent comments on it, and the job takes the
+label off once the agent's verdict follows it; a `needs-owner` the routine or
+the owner added stays. `onboard`, with `review` on, prints how to create the
+routine: a weekly Claude routine on the repository (claude.ai/code/routines,
+or `/schedule`), with claude.ai's GitHub connected as the agent, and the
+prompt from `routines/review.md` at the release in use. It cannot create the
+routine itself: Claude's routines API answers only a Claude Code session's own
+sign-in, not a command, and a routine works as claude.ai's GitHub connection,
+which no API names.
+
 `onboard` also writes a pre-push git hook running `process-rules pre-push`,
 for every adopter. In a local agent session (one session-start set up, or
 any shell Claude Code runs on the Mac, which sets `CLAUDECODE`, so it holds
