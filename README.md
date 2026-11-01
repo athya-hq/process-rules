@@ -427,6 +427,47 @@ feature is off on a personal account's repository and why, rather than
 failing every pull request. They ask GitHub whose the repository is once per
 run.
 
+### Hooks that call GitHub
+
+The lock in the settings' `env` reaches every hook, and session-start lifts
+it only for the session's shells, through `CLAUDE_ENV_FILE`, which Claude
+Code gives the SessionStart, Setup, CwdChanged and FileChanged hooks alone.
+So a client's own hook that runs `gh` or git's remote commands, a
+PreToolUse or Stop hook say, presents the lock's token, and GitHub answers
+`HTTP 401: Bad credentials`; in a cloud session too. Run each such command
+through `as-agent`, with the `session_id` Claude Code puts in every hook's
+JSON input:
+
+```sh
+input=$(cat)
+sid=$(printf '%s' "$input" | jq -r .session_id)
+cli="$HOME/.config/process-rules/bin/process-rules"; [ -x "$cli" ] || cli=process-rules
+printf '%s' "$input" | "$cli" as-agent --session "$sid" -- gh pr view --json state
+status=$?
+[ "$status" -eq 77 ] && exit 0  # locked: this session does not work as the agent
+exit "$status"
+```
+
+`process-rules as-agent --session <session_id> -- <command> [args...]` runs
+the command only when session-start recorded, for that session id, that the
+session works as one of the agents `.github/process-rules.json` names, the
+record the guard reads. On a Mac the command gets what the session file
+gives a shell: the agent's identity, the lock's variables removed, and
+`GH_TOKEN` read from the keychain as it starts. In a cloud session it gets
+the proxy's placeholder token, which the proxy swaps for the connected
+account's. Its standard input, output and error are the hook's, and its exit
+code is `as-agent`'s. Otherwise nothing runs: one line on standard error says
+why, in the guard's words, and `as-agent` exits **77**, a code
+`gh`, git and the shell do not use, so a hook can tell "locked" from
+the command's own failure. A missing `--` or command is bad usage, exit 2. The token is
+only ever in the command's environment, never on a command line, in output
+or in a file, and it never falls back to the owner's `gh` logins, git
+password or SSH. Use the launcher line above, as the hooks `onboard` writes do:
+the app's hooks may have no node on their `PATH`. `process-rules doctor`,
+run in the client repo, warns about each hook in `.claude/settings.json` or
+`.claude/settings.local.json` whose command, or the repo script it runs,
+calls `gh` or git's remote commands outside `as-agent`.
+
 ### Claude cloud sessions
 
 A Claude cloud session has no keychain and no session file: it reaches

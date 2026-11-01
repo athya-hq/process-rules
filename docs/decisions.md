@@ -471,6 +471,47 @@
   owner's authorised OAuth apps, and asking the owner to confirm would add
   a step to every `doctor` run. A second move before a restart keeps the
   first move's accounts in the record.
+- **2026-11-01 — Record: client hooks act on GitHub as the session's agent,
+  P-43.** The owner, in chat: "New process-rules roadmap work: let a
+  client's hooks act on GitHub as the session's agent." The first client saw
+  a PreToolUse hook's `gh api graphql` get "HTTP 401: Bad credentials" while
+  `gh` in the same session's shell worked as the agent. Claude Code's hooks
+  docs (https://code.claude.com/docs/en/hooks, "Persist environment
+  variables") give `CLAUDE_ENV_FILE` to SessionStart, Setup, CwdChanged and
+  FileChanged hooks only, as P-17 says, so every other hook keeps the lock
+  the settings' `env` gives. P-17 and P-18 stay as they are: the lock still
+  reaches every hook, and nothing reaches GitHub as the owner. Instead a
+  hook runs its GitHub command through `process-rules as-agent --session
+  <session_id> -- <command>`, which runs it only when the session record the
+  guard reads names one of the settings' agents. On a Mac the child gets
+  `sessionEnv`, the session file's variables, over the hook's environment
+  with the lock's removed, and only after the session file is checked as
+  session-start checks it; the token is read from the token store as it
+  starts and goes only into the child's environment. In a cloud session the
+  child gets what session-start's `CLAUDE_ENV_FILE` lines give a shell
+  there: the lock unset and the proxy's placeholder token. A cloud
+  session's hooks see only the lock's token too: session-start's unset goes
+  through `CLAUDE_ENV_FILE` as on a Mac, and the proxy swaps its own
+  placeholder, not the lock's (read from the code and the docs; not seen in
+  a live cloud session). The choices:
+  - **Exit 77 means locked.** sysexits' `EX_NOPERM`. Not 0, 1 or 2, which
+    are done, failed and bad usage here, and 2 blocks a tool call in
+    Claude Code's hooks; not a code `gh` (1, 2, 4, 8) or git (1, 128, 129)
+    exits with, nor the shell's 126, 127 or 128 plus a signal, which the
+    child's own exit is reported as. A session id `sessionRecord` would not
+    take, and any failure of the check itself, are locked too, since nothing
+    ran; a missing `--` or command is bad usage, exit 2.
+  - **Pass-through by inherited standard streams.** `Sys.exec`'s
+    `interactive` option, already in the interface the fake implements,
+    gives the child the hook's standard input, output and error;
+    `as-agent` returns the child's code, which the real Sys now reports as
+    a shell would for a signal or a command not found.
+  - **`doctor` reports hooks that would hit the lock.** It was cheap: it
+    reads the hooks in `.claude/settings.json` and
+    `.claude/settings.local.json`, skips process-rules' own, and warns about
+    each whose command, or the repo script its first word names, reaches
+    GitHub by the guard's test outside a line running `as-agent`. Like the
+    guard, it reads text, so a script another script runs is missed.
 - **2026-11-01 — Record: P-25, the review routine watched.** The owner, on
   #60: "`onboard --add review` creates the scheduled routine itself (through
   Claude's API, if one is usable) and checks it runs as the agent; and the
