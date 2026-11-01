@@ -466,4 +466,8 @@
   accounts beside the session file. `doctor` repeats them while the desktop
   app, as `ps` lists it, started before that time; it cannot see whether the
   token was revoked, so the revoke step goes with the restart step and both
-  stop once the app has restarted.
+  stop once the app has restarted: a revoke skipped then is not raised
+  again. That is accepted, since the agent's token cannot list or check the
+  owner's authorised OAuth apps, and asking the owner to confirm would add
+  a step to every `doctor` run. A second move before a restart keeps the
+  first move's accounts in the record.

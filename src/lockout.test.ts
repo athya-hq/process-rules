@@ -218,6 +218,19 @@ describe('moving gh to the agent', () => {
     assert.equal(none.exists(movedPath(HOME, AGENT)), false);
   });
 
+  it('keeps the accounts of a move the desktop app has not restarted since', async () => {
+    const sys = exposed();
+    sys.files.set(movedPath(HOME, AGENT), JSON.stringify({ at: new Date(NOW.getTime() - 60_000).toISOString(), logins: ['first-owner', 'Old-Owner'] }));
+    sys.appStarted = new Date(NOW.getTime() - 120_000);
+    await lock(sys, ['y', 'y', 'n']);
+    assert.deepEqual(readMoved(sys, AGENT)?.logins, ['first-owner', 'example-owner', 'old-owner']);
+    sys.files.set(movedPath(HOME, AGENT), JSON.stringify({ at: new Date(NOW.getTime() - 60_000).toISOString(), logins: ['first-owner'] }));
+    sys.appStarted = new Date(NOW.getTime() - 30_000);
+    sys.ghAccounts = ['example-owner'];
+    await lock(sys, ['y']);
+    assert.deepEqual(readMoved(sys, AGENT)?.logins, ['example-owner'], 'restarted since: the earlier move is done');
+  });
+
   it('prints no steps when gh could not sign out', async () => {
     const sys = exposed();
     sys.execOverride = (call) => (call.command === 'gh' && call.args[1] === 'logout' ? { code: 1, stdout: '', stderr: 'no\n' } : undefined);

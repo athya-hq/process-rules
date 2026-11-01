@@ -241,9 +241,12 @@ export async function lockOwnerAway(
     io.out('✓ nothing of the owner here for an agent session to reach');
   }
   if (signedOut.length > 0) {
+    // A move the desktop app has not restarted since still holds its accounts' tokens.
+    const pending = movedLines(sys, agent).length > 0 ? (readMoved(sys, agent)?.logins ?? []) : [];
+    const logins = [...pending.filter((login) => !signedOut.some((other) => sameLogin(other, login))), ...signedOut];
     sys.mkdir(pathsFor(sys.home, agent).dir);
-    sys.write(movedPath(sys.home, agent), `${JSON.stringify({ at: sys.now().toISOString(), logins: signedOut }, null, 2)}\n`, 0o600);
-    const [first, ...rest] = ownerSteps(signedOut);
+    sys.write(movedPath(sys.home, agent), `${JSON.stringify({ at: sys.now().toISOString(), logins }, null, 2)}\n`, 0o600);
+    const [first, ...rest] = ownerSteps(logins);
     io.out(`! ${first}`);
     for (const line of rest) io.out(line);
   }
