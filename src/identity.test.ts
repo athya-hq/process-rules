@@ -272,6 +272,54 @@ describe('prIdentity', () => {
     assert.deepEqual(await check(sys), { code: 0, out: ['pr-identity: not a pull request; nothing to check'], err: [] });
   });
 
+  it('skips a merge group run', async () => {
+    const sys = actions('checks_requested', 'mergify[bot]', []);
+    sys.env.GITHUB_EVENT_NAME = 'merge_group';
+    sys.files.set(EVENT, JSON.stringify({ action: 'checks_requested', merge_group: { head_ref: 'refs/heads/gh-readonly-queue/main/pr-7' } }));
+    assert.deepEqual(await check(sys), { code: 0, out: ['pr-identity: a merge queue run; each queued pull request passed this check on its own'], err: [] });
+    assert.equal(sys.requests.length, 0);
+  });
+
+  describe("Mergify's merge queue", () => {
+    /** A pull request opened by `author` from `ref`, with an agent commit mergify[bot] pushed. */
+    const queued = (author: string, ref: string, head = 'example-org/example-app'): FakeSys => {
+      const repo = `/repos/${head}`;
+      const sys = actions('opened', 'mergify[bot]', [commit('a1', 'agent', false)], [created('mergify[bot]', ['a1'])]);
+      sys.files.set(EVENT, JSON.stringify({ action: 'opened', pull_request: { number: 7, user: { login: author }, base: { sha: BASE }, head: { ref, repo: { full_name: head } } } }));
+      sys.route('GET', `${repo}/activity?ref=${encodeURIComponent(`refs/heads/${ref}`)}&per_page=100`, {
+        status: 200,
+        json: [{ activity_type: 'branch_creation', actor: { login: 'mergify[bot]' }, before: ZERO, after: 'h1' }],
+      });
+      sys.route('GET', `${repo}/compare/${BASE}...h1?per_page=100&page=1`, { status: 200, json: { commits: [{ sha: 'a1' }] } });
+      return sys;
+    };
+    const QUEUE = 'mergify/merge-queue/0123456789';
+
+    it("skips mergify[bot]'s test pull request on a merge queue branch", async () => {
+      const sys = queued('mergify[bot]', QUEUE);
+      assert.deepEqual(await check(sys), {
+        code: 0,
+        out: ["pr-identity: #7 is mergify[bot]'s merge queue test of pull requests each checked on its own; nothing to check"],
+        err: [],
+      });
+      assert.equal(sys.requests.length, 0);
+    });
+
+    it('checks anyone else on a merge queue branch', async () => {
+      for (const author of ['example-owner', AGENT, 'other[bot]']) {
+        assert.equal((await check(queued(author, QUEUE))).code, 1, author);
+      }
+    });
+
+    it('checks mergify[bot] on any other branch, or from a fork', async () => {
+      for (const sys of [queued('mergify[bot]', 'work'), queued('mergify[bot]', 'mergify/bp/main/pr-7'), queued('mergify[bot]', QUEUE, 'someone/example-app')]) {
+        const { code, err } = await check(sys);
+        assert.equal(code, 1);
+        assert.equal(err.at(-1), 'pr-identity: #7 fails the identity check');
+      }
+    });
+  });
+
   it('needs the Actions environment', async () => {
     await assert.rejects(check(new FakeSys()), /pr-identity runs in GitHub Actions/);
   });

@@ -12,6 +12,10 @@ interface Commit {
 /** GitHub lists at most 250 commits for a pull request. */
 const MOST_COMMITS = 250;
 
+/** The branches Mergify's merge queue tests on, and the account that opens and pushes them. */
+const MERGE_QUEUE_BRANCH = 'mergify/merge-queue/';
+const MERGE_QUEUE_BOT = 'mergify[bot]';
+
 /** GitHub may record a push a moment after the run starts: the record is read this many times, this far apart. */
 const RECORD_READS = 6;
 const RECORD_WAIT_MS = 10_000;
@@ -26,17 +30,32 @@ const RECORD_WAIT_MS = 10_000;
  * GitHub with GH_TOKEN.
  */
 export async function prIdentity(sys: Sys, io: Output): Promise<number> {
-  const { GITHUB_EVENT_PATH: eventPath, GITHUB_REPOSITORY: slug, GH_TOKEN: token } = sys.env;
+  const { GITHUB_EVENT_PATH: eventPath, GITHUB_EVENT_NAME: eventName, GITHUB_REPOSITORY: slug, GH_TOKEN: token } = sys.env;
   if (!eventPath || !slug || !token) {
     throw new Error('pr-identity runs in GitHub Actions: GITHUB_EVENT_PATH, GITHUB_REPOSITORY and GH_TOKEN must be set');
   }
+  if (eventName === 'merge_group') {
+    io.out('pr-identity: a merge queue run; each queued pull request passed this check on its own');
+    return 0;
+  }
   const event = JSON.parse(sys.read(eventPath)) as {
-    pull_request?: { number?: number; base?: { sha: string }; head?: { ref: string; repo: { full_name: string } | null } };
+    pull_request?: {
+      number?: number;
+      user?: { login?: string } | null;
+      base?: { sha: string };
+      head?: { ref: string; repo: { full_name: string } | null };
+    };
   };
   const pull = event.pull_request;
   const number = pull?.number;
   if (typeof number !== 'number' || !pull?.base || !pull.head) {
     io.out('pr-identity: not a pull request; nothing to check');
+    return 0;
+  }
+  // Mergify's merge queue tests queued pull requests together on a branch of its own, which it opens and pushes.
+  // Each queued pull request passed this check on its own; anyone else's pull request on such a branch is checked.
+  if (pull.head.ref.startsWith(MERGE_QUEUE_BRANCH) && pull.user?.login === MERGE_QUEUE_BOT && pull.head.repo?.full_name === slug) {
+    io.out(`pr-identity: #${number} is ${MERGE_QUEUE_BOT}'s merge queue test of pull requests each checked on its own; nothing to check`);
     return 0;
   }
   const notAdopted = notAdoptedLine(sys, sys.cwd, 'pr-identity');
