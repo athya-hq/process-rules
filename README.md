@@ -196,8 +196,8 @@ repo's CODEOWNERS names the owner.
    Project "<repo> work" linked to the repo. It makes that Project by copying
    the product's public [process-rules template](https://github.com/orgs/athya-hq/projects/4),
    which holds the fields Step, Decision and Review date and the views Needs
-   you (`label:needs-owner is:open`), Board (showing linked pull requests),
-   Work items (`type:"Work item"`, grouped by Step), Decisions
+   you (`label:needs-owner is:open`), Board (`type:Slice,Brief`, by Status,
+   showing linked pull requests), Work items (`type:"Work item"`, grouped by Step), Decisions
    (`type:Decision`, grouped by Decision) and Reviews due (`"Review
    date":<=@today`), with its workflows; so the board needs nothing done by
    hand. Issue types are an organisation-wide setting: before adding any,
@@ -207,7 +207,12 @@ repo's CODEOWNERS names the owner.
    date, and the old one is closed as "<title> (old)". When GitHub refuses the
    copy, or the owner keeps the old Project, `onboard` adds the fields and
    makes or updates the views itself, and prints the two things GitHub's API
-   cannot set: the grouping and the auto-archive workflow. Last, it pushes
+   cannot set: the grouping and the auto-archive workflow. The Board keeps a
+   closed slice or brief in Done until that workflow archives it, with the
+   filter `is:closed updated:<@today-7d`: a week. A view's filter cannot do
+   this, since GitHub's Project filters join different fields with AND alone
+   and have no closed date, and GitHub's API can neither read nor set a
+   workflow's filter. Last, it pushes
    one signed test commit as the agent to a throwaway branch, checks GitHub
    shows it Verified by the agent (asking again when the network or GitHub
    fails for a moment), and deletes the branch. The steps that act as you
@@ -269,6 +274,20 @@ slice may be built:
   carries the owner's approval: a 👍 on the agent's proposal for it, or a
   `Decision:` comment;
 - no other open pull request names it.
+
+**The board follows the work.** When an agent session's push names a slice
+the work rules let it build, pre-push moves the board on, as the agent, on
+every Project that holds the issues: the slice's Status to In Progress; its
+work item's Step to Build, since its first slice has started; and any open
+Work item with no Step to Frame, where a new one starts. A workflow's
+`GITHUB_TOKEN` cannot write to a Project, so the agent's push does this, with
+the agent token's `project` scope; one it cannot move, such as from a Claude
+cloud session whose GitHub proxy refuses GraphQL, is said and does not stop
+the push. When a pull request naming a slice merges into the default branch,
+the shared workflow comments on the slice, linking the pull request, and
+closes it, and the Project's Item closed workflow moves it to Done: a
+`Slice: #N` line is not one of GitHub's closing keywords, so GitHub does not
+close it. That job alone of a pull request's runs writes to issues.
 
 **What needs the owner.** A request the owner made on the work item is its
 own approval, linked as above. A fix needs none: it restores what the owner
@@ -393,8 +412,10 @@ global `core.hooksPath`), `onboard` leaves it alone and names the line to add:
 pull request's description is edited. After upgrading process-rules, run
 `onboard` again: it upgrades the hook entries in `.claude/settings.json` and
 the workflow. An older release's workflow, one job that let every run write
-to issues, is replaced; a workflow already split into `process-rules` and
-`process-rules-weekly` keeps everything but its version pins, which move to the
+to issues, is replaced; a workflow split into `process-rules` and
+`process-rules-weekly` alone gets the `process-rules-merged` job, which
+closes a merged pull request's slice, and runs on closed pull requests; a
+workflow already split into its jobs keeps everything but its version pins, which move to the
 new release, the one branch pushes run on, which follows a changed default
 branch, and the one cron the weekly job runs on, which follows a changed
 `schedule` (a schedule with more crons, or a comment on its cron line, is the

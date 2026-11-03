@@ -5,6 +5,7 @@ import { cloudToken } from './cloud.ts';
 import { ONBOARD_BRANCH, ONBOARD_FILES } from './onboard-pull.ts';
 import type { Output, Sys } from './types.ts';
 import { GITHUB_HOST_RE } from './host.ts';
+import { boardStarted } from './board.ts';
 
 /** How a pull request or a commit names the slice it builds. */
 const SLICE_LINE = new RegExp(`^Slice:\\s*(?:#|https://${GITHUB_HOST_RE}/[^/\\s]+/[^/\\s]+/issues/)(\\d+)\\s*$`, 'gim');
@@ -29,6 +30,7 @@ interface Issue {
   /** The issue's address in GitHub's REST API, from which its comments, sub-issues and timeline are read. */
   url: string;
   type: { name: string } | null;
+  state?: string;
   state_reason: string | null;
   closed_at: string | null;
   pull_request?: unknown;
@@ -455,7 +457,86 @@ export async function prePush(sys: Sys, io: Output, refLines: string, url: strin
   }
   if (branches.length > 1) return report(io, 'pre-push', [`one push builds one slice on one branch; this one pushes ${where}`]);
   const [slice] = slices as [number];
-  return report(io, 'pre-push', await sliceProblems(sys, token, slug, slice, accounts, { branch: branches[0] as string }));
+  const problems = await sliceProblems(sys, token, slug, slice, accounts, { branch: branches[0] as string });
+  if (problems.length === 0) await moveBoard(sys, io, token, slug, slice);
+  return report(io, 'pre-push', problems);
+}
+
+/**
+ * Moves the board on for slice `slice`, which a push is starting to build;
+ * one it cannot move, such as from a Claude cloud session whose GitHub proxy
+ * refuses GraphQL, is said and does not stop the push.
+ */
+async function moveBoard(sys: Sys, io: Output, token: string, slug: string, slice: number): Promise<void> {
+  try {
+    for (const line of await boardStarted(sys, token, slug, slice)) io.err(line);
+  } catch (error) {
+    io.err(`! board: #${slice}'s Status and its work item's Step are left as they are (${(error as Error).message}); the push goes on`);
+  }
+}
+
+/**
+ * Closes the slices a merged pull request names, run by the shared workflow
+ * when one merges into the default branch: each open Slice it names with a
+ * line `Slice: #N` gets a comment linking the pull request and is closed as
+ * completed, which the Project's Item closed workflow moves to Done. A slice
+ * line is not one of GitHub's closing keywords, so GitHub does not.
+ */
+export async function prMerged(sys: Sys, io: Output): Promise<number> {
+  const { GITHUB_EVENT_PATH: eventPath, GITHUB_REPOSITORY: slug, GH_TOKEN: token } = sys.env;
+  if (!eventPath || !slug || !token) {
+    throw new Error('pr-merged runs in GitHub Actions: GITHUB_EVENT_PATH, GITHUB_REPOSITORY and GH_TOKEN must be set');
+  }
+  const event = JSON.parse(sys.read(eventPath)) as {
+    pull_request?: { number: number; body: string | null; merged?: boolean; base: { ref: string } };
+    repository?: { default_branch?: string };
+  };
+  const pull = event.pull_request;
+  if (!pull?.merged) {
+    io.out('pr-merged: not a merged pull request; nothing to close');
+    return 0;
+  }
+  const notAdopted = notAdoptedLine(sys, sys.cwd, 'pr-merged');
+  if (notAdopted) {
+    io.out(notAdopted);
+    return 0;
+  }
+  if (!isOn(sys, sys.cwd, 'work-rules')) {
+    io.out(offLine('pr-merged', 'work-rules'));
+    return 0;
+  }
+  if (await isPersonal(sys, slug, token)) {
+    io.out(offLine('pr-merged', 'work-rules', PERSONAL_REPO));
+    return 0;
+  }
+  const branch = event.repository?.default_branch;
+  if (branch && pull.base.ref !== branch) {
+    io.out(`pr-merged: #${pull.number} merged into ${pull.base.ref}, not ${branch}; its slices stay open until their work reaches ${branch}`);
+    return 0;
+  }
+  const slices = slicesNamed(pull.body ?? '');
+  if (slices.length === 0) io.out(`pr-merged: #${pull.number} names no slice; nothing to close`);
+  for (const slice of slices) {
+    const issue = await readIssue(sys, token, slug, slice);
+    if (issue?.type?.name !== 'Slice') {
+      io.out(`- #${slice} is not a Slice in ${slug}; left as it is`);
+      continue;
+    }
+    if (issue.state === 'closed') {
+      io.out(`✓ #${slice} is closed already`);
+      continue;
+    }
+    const posted = await sys.http(`${issue.url}/comments`, { method: 'POST', token, body: { body: `Built in #${pull.number}, merged into ${pull.base.ref}.` } });
+    const closed = posted.status === 201 ? await sys.http(issue.url, { method: 'PATCH', token, body: { state: 'closed', state_reason: 'completed' } }) : posted;
+    if (closed.status !== 200 && closed.status !== 201) {
+      const why = (closed.json as { message?: string } | null)?.message ?? `HTTP ${closed.status}`;
+      // A client workflow from before this release grants this job no issues: write.
+      const hint = /not accessible/i.test(why) ? '; the client workflow needs a job with issues: write for merged pull requests, so run process-rules onboard to update it' : '';
+      throw new Error(`cannot close #${slice}: ${why}${hint}`);
+    }
+    io.out(`✓ #${slice}: closed, built in #${pull.number}`);
+  }
+  return 0;
 }
 
 /** The label that puts an issue in the owner's Needs you view. */

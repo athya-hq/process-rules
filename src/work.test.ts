@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { AGENT, FakeSys, ROOT, SETTINGS, capture } from './fake.test.ts';
-import { prePush, prWorkRules, propose, section, sliceProblems, slicesNamed } from './work.ts';
+import { prMerged, prePush, prWorkRules, propose, section, sliceProblems, slicesNamed } from './work.ts';
 
 const SLUG = 'example-org/example-app';
 const OWNER = 'example-owner';
@@ -91,6 +91,8 @@ function github(sys: FakeSys, issue: Node | null, pulls: Node[] = []): void {
     return http(url, options);
   };
   sys.route('GET', `/repos/${SLUG}/pulls?state=open&per_page=100&page=1`, { status: 200, json: pulls });
+  // A board that holds none of the issues, so a push moves nothing on it.
+  sys.route('POST', '/graphql', { status: 200, json: { data: { repository: { issue: null }, search: { nodes: [] } } } });
 }
 
 let ids = 0;
@@ -757,6 +759,191 @@ describe('prePush', () => {
     const sys = session('');
     sys.execOverride = (call) => (call.args[0] === 'log' ? { code: 128, stdout: '', stderr: 'bad revision\n' } : undefined);
     await assert.rejects(push(sys, `refs/heads/work ${LOCAL} refs/heads/work ${REMOTE}`), /git log failed: bad revision/);
+  });
+
+  describe('the work board', () => {
+    const select = (id: string, names: string[]): Node => ({ id, options: names.map((name) => ({ id: `${id}_${name}`, name })) });
+    const STATUS = select('F_status', ['Todo', 'In Progress', 'Done']);
+    const STEP = select('F_step', ['Frame', 'Specify', 'Slice', 'Build']);
+    const item = (id: string, field: Node | null, value: string | null, title = 'example-app work'): Node => ({
+      id,
+      project: { id: 'P_1', title, field },
+      value: value === null ? null : { name: value },
+    });
+    /** Slice #12 in Todo under work item #10 at Slice, beside work item #20 with no Step and #21 at Frame. */
+    function board(sys: FakeSys, change: (data: Node) => void = () => undefined): void {
+      const data: Node = {
+        repository: {
+          issue: {
+            state: 'OPEN',
+            projectItems: { nodes: [item('I_12', STATUS, 'Todo')] },
+            parent: { number: 10, issueType: { name: 'Work item' }, projectItems: { nodes: [item('I_10', STEP, 'Slice')] } },
+          },
+        },
+        search: {
+          nodes: [
+            { number: 21, projectItems: { nodes: [item('I_21', STEP, 'Frame')] } },
+            { number: 20, projectItems: { nodes: [item('I_20', STEP, null)] } },
+            { number: 10, projectItems: { nodes: [item('I_10', STEP, null)] } },
+            null,
+          ],
+        },
+      };
+      change(data);
+      sys.route('POST', '/graphql', () => {
+        const last = sys.requests.at(-1)?.body as { query: string };
+        return { status: 200, json: { data: last.query.startsWith('mutation') ? { updateProjectV2ItemFieldValue: { projectV2Item: { id: 'x' } } } : data } };
+      });
+    }
+    const moves = (sys: FakeSys): unknown[] =>
+      sys.requests.filter((r) => r.url.endsWith('/graphql') && (r.body as { query: string }).query.startsWith('mutation')).map((r) => (r.body as { variables: unknown }).variables);
+
+    it('moves the slice to In Progress, its work item to Build, and a work item with no Step to Frame', async () => {
+      const sys = session('Slice: #12');
+      board(sys);
+      assert.deepEqual(await push(sys, `refs/heads/work ${LOCAL} refs/heads/work ${REMOTE}`), {
+        code: 0,
+        err: [
+          '✓ board: slice #12 is In Progress in "example-app work"',
+          '✓ board: work item #10 is at Step Build in "example-app work"',
+          '✓ board: work item #20 had no Step; it is at Frame in "example-app work"',
+        ],
+      });
+      assert.deepEqual(moves(sys), [
+        { project: 'P_1', item: 'I_12', field: 'F_status', option: 'F_status_In Progress' },
+        { project: 'P_1', item: 'I_10', field: 'F_step', option: 'F_step_Build' },
+        { project: 'P_1', item: 'I_20', field: 'F_step', option: 'F_step_Frame' },
+      ]);
+      const read = sys.requests.find((r) => r.url.endsWith('/graphql'));
+      assert.equal(read?.token, 'ghp_good');
+      assert.deepEqual((read?.body as { variables: unknown }).variables, {
+        owner: 'example-org',
+        name: 'example-app',
+        number: 12,
+        workItems: 'repo:example-org/example-app is:issue is:open type:"Work item" sort:created-desc',
+      });
+    });
+
+    it('moves nothing already there, closed, or on a Project without the field or option', async () => {
+      const sys = session('Slice: #12');
+      board(sys, (data) => {
+        const issue = (data.repository as Node).issue as Node;
+        issue.projectItems = { nodes: [item('I_12', STATUS, 'in progress'), item('I_12b', {}, null, 'other'), item('I_12c', select('F', ['Todo']), 'Todo', 'other')] };
+        (issue.parent as Node).projectItems = { nodes: [item('I_10', STEP, 'Build')] };
+        data.search = { nodes: [{ number: 20, projectItems: { nodes: [item('I_20', null, null, 'other')] } }, {}] };
+      });
+      assert.deepEqual(await push(sys, `refs/heads/work ${LOCAL} refs/heads/work ${REMOTE}`), { code: 0, err: [] });
+      assert.deepEqual(moves(sys), []);
+      const closed = session('Slice: #12');
+      board(closed, (data) => {
+        const issue = (data.repository as Node).issue as Node;
+        issue.state = 'CLOSED';
+        issue.parent = { number: 10, issueType: { name: 'Slice' }, projectItems: { nodes: [item('I_10', STEP, 'Slice')] } };
+        data.search = { nodes: [] };
+      });
+      assert.deepEqual(await push(closed, `refs/heads/work ${LOCAL} refs/heads/work ${REMOTE}`), { code: 0, err: [] });
+      assert.deepEqual(moves(closed), []);
+    });
+
+    it('says when it cannot move the board, and lets the push go on', async () => {
+      const sys = session('Slice: #12');
+      sys.route('POST', '/graphql', { status: 403, json: { message: 'Forbidden' } });
+      assert.deepEqual(await push(sys, `refs/heads/work ${LOCAL} refs/heads/work ${REMOTE}`), {
+        code: 0,
+        err: ["! board: #12's Status and its work item's Step are left as they are (GitHub's GraphQL API refused: HTTP 403); the push goes on"],
+      });
+    });
+
+    it('moves nothing for a push the work rules refuse', async () => {
+      const sys = session('Slice: #12');
+      const g = graph();
+      g.timeline.splice(1, 1);
+      github(sys, g.issue);
+      board(sys);
+      assert.equal((await push(sys, `refs/heads/work ${LOCAL} refs/heads/work ${REMOTE}`)).code, 1);
+      assert.ok(!sys.requests.some((r) => r.url.endsWith('/graphql')));
+    });
+  });
+});
+
+describe('prMerged', () => {
+  const EVENT = '/tmp/event.json';
+  const ISSUE = `/repos/${SLUG}/issues/12`;
+  function actions(pull: Node | undefined, defaultBranch = 'main'): FakeSys {
+    const sys = new FakeSys();
+    sys.env = { GITHUB_EVENT_PATH: EVENT, GITHUB_REPOSITORY: SLUG, GH_TOKEN: 'ghs_run' };
+    sys.files.set(EVENT, JSON.stringify({ ...(pull ? { pull_request: pull } : {}), repository: { default_branch: defaultBranch } }));
+    github(sys, graph().issue);
+    sys.route('POST', `${ISSUE}/comments`, { status: 201, json: {} });
+    sys.route('PATCH', ISSUE, { status: 200, json: {} });
+    return sys;
+  }
+  const merged = (body: string | null, base = 'main'): Node => ({ number: 40, body, merged: true, base: { ref: base } });
+  async function run(sys: FakeSys): Promise<{ code: number; out: string[] }> {
+    const { io, out } = capture();
+    return { code: await prMerged(sys, io), out };
+  }
+  const writes = (sys: FakeSys): unknown[] => sys.requests.filter((r) => r.method !== 'GET').map((r) => [r.method, r.url.replace('https://api.github.com', ''), r.body, r.token]);
+
+  it('closes the slice a merged pull request names, with a comment linking it', async () => {
+    const sys = actions(merged('Builds the thing.\n\nSlice: #12'));
+    assert.deepEqual(await run(sys), { code: 0, out: ['✓ #12: closed, built in #40'] });
+    assert.deepEqual(writes(sys), [
+      ['POST', `${ISSUE}/comments`, { body: 'Built in #40, merged into main.' }, 'ghs_run'],
+      ['PATCH', ISSUE, { state: 'closed', state_reason: 'completed' }, 'ghs_run'],
+    ]);
+  });
+
+  it('leaves a closed slice, and an issue that is not a slice, as they are', async () => {
+    const sys = actions(merged('Slice: #12\nSlice: #99'));
+    const g = graph();
+    g.issue.state = 'closed';
+    github(sys, g.issue);
+    assert.deepEqual(await run(sys), { code: 0, out: ['✓ #12 is closed already', '- #99 is not a Slice in example-org/example-app; left as it is'] });
+    assert.deepEqual(writes(sys), []);
+  });
+
+  for (const [name, pull, line] of [
+    ['a pull request closed unmerged', { number: 40, body: 'Slice: #12', merged: false, base: { ref: 'main' } }, 'pr-merged: not a merged pull request; nothing to close'],
+    ['an event that is not a pull request', undefined, 'pr-merged: not a merged pull request; nothing to close'],
+    ['a merge into another branch', merged('Slice: #12', 'stack'), 'pr-merged: #40 merged into stack, not main; its slices stay open until their work reaches main'],
+    ['a pull request naming no slice', merged('Tidy up'), 'pr-merged: #40 names no slice; nothing to close'],
+  ] as const) {
+    it(`closes nothing for ${name}`, async () => {
+      const sys = actions(pull as Node | undefined);
+      assert.deepEqual(await run(sys), { code: 0, out: [line] });
+      assert.deepEqual(writes(sys), []);
+    });
+  }
+
+  it('closes nothing with the work rules off, or before the repo adopts process-rules', async () => {
+    const off = actions(merged('Slice: #12'));
+    off.files.set(`${ROOT}/.github/process-rules.json`, JSON.stringify({ owner: OWNER, agent: AGENT, features: ['identity'] }));
+    assert.equal((await run(off)).out[0], 'pr-merged: work-rules is off in .github/process-rules.json; nothing to check');
+    const before = actions(merged('Slice: #12'));
+    before.files.delete(`${ROOT}/.github/process-rules.json`);
+    assert.match((await run(before)).out[0] ?? '', /^pr-merged: /);
+    assert.deepEqual([...writes(off), ...writes(before)], []);
+  });
+
+  it('closes nothing in a personal repository', async () => {
+    const sys = actions(merged('Slice: #12'));
+    sys.ownerType = 'User';
+    assert.match((await run(sys)).out[0] ?? '', /^pr-merged: work-rules is off on a repository owned by a personal account/);
+    assert.deepEqual(writes(sys), []);
+  });
+
+  it('says how to fix a client workflow that grants no issues: write', async () => {
+    const sys = actions(merged('Slice: #12'));
+    sys.route('POST', `${ISSUE}/comments`, { status: 403, json: { message: 'Resource not accessible by integration' } });
+    await assert.rejects(run(sys), /cannot close #12: Resource not accessible by integration; the client workflow needs a job with issues: write/);
+    const refused = actions(merged('Slice: #12'));
+    refused.route('PATCH', ISSUE, { status: 500, json: null });
+    await assert.rejects(run(refused), /^Error: cannot close #12: HTTP 500$/);
+  });
+
+  it('needs the Actions environment', async () => {
+    await assert.rejects(run(new FakeSys()), /pr-merged runs in GitHub Actions/);
   });
 });
 
