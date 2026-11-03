@@ -49,9 +49,10 @@ export interface Sys {
   tempDir(): string;
   /** Deletes a file or folder and all in it; nothing there is fine. */
   remove(path: string): void;
+  /** With timeoutMs, rejects with an error named TimeoutError once that long has passed. */
   http(
     url: string,
-    options?: { method?: string; token?: string; body?: unknown; headers?: Record<string, string> },
+    options?: { method?: string; token?: string; body?: unknown; headers?: Record<string, string>; timeoutMs?: number },
   ): Promise<HttpResult>;
   /** Everything on standard input, as a git hook receives it. */
   readStdin(): string;

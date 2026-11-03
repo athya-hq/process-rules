@@ -8,6 +8,10 @@ const FIGMA = 'https://api.figma.com/v1';
 const FRAME_LINK = /https:\/\/(?:www\.)?figma\.com\/(?:design|file)\/([A-Za-z0-9]+)\/[^\s)?]*\?[^\s)]*?node-id=(\d+)[-:](\d+)/;
 /** An image covering at least this share of a frame makes it a capture, not a design. */
 const CAPTURED_SHARE = 0.5;
+/** How long one Figma call may take, and all of a check's Figma calls together: well inside a job's limit. */
+const FIGMA_CALL_MS = 30_000;
+const FIGMA_BUDGET_MS = 120_000;
+const FIGMA_HINT = "check Figma's status (status.figma.com), that the FIGMA_TOKEN secret is valid, and how large the linked file is";
 
 /**
  * The client's design library, as the FIGMA_LIBRARY Actions secret names it,
@@ -46,10 +50,26 @@ function walk(node: FigmaNode, visit: (node: FigmaNode) => void): void {
 
 const area = (node: FigmaNode): number => (node.absoluteBoundingBox ? node.absoluteBoundingBox.width * node.absoluteBoundingBox.height : 0);
 
-async function figma(sys: Sys, token: string, path: string): Promise<unknown> {
-  const { status, json } = await sys.http(`${FIGMA}${path}`, { headers: { 'x-figma-token': token } });
-  if (status !== 200) throw new Error(`Figma refused ${path} (HTTP ${status})`);
-  return json;
+const seconds = (ms: number): string => `${Math.ceil(ms / 1000)}s`;
+
+/** When a check's Figma calls must be done by, in epoch milliseconds. */
+const figmaDeadline = (sys: Sys): number => sys.now().getTime() + FIGMA_BUDGET_MS;
+
+/** One Figma call, given up on after its own time limit or at the deadline, whichever comes first. */
+async function figma(sys: Sys, token: string, path: string, deadline: number): Promise<unknown> {
+  const left = deadline - sys.now().getTime();
+  if (left <= 0) throw new Error(`Figma ${path} not asked: the ${seconds(FIGMA_BUDGET_MS)} for all of the design check's Figma calls ran out; ${FIGMA_HINT}`);
+  const timeoutMs = Math.min(FIGMA_CALL_MS, left);
+  let reply;
+  try {
+    reply = await sys.http(`${FIGMA}${path}`, { headers: { 'x-figma-token': token }, timeoutMs });
+  } catch (error) {
+    if ((error as Error).name !== 'TimeoutError') throw error;
+    const limit = timeoutMs < FIGMA_CALL_MS ? `what was left of the ${seconds(FIGMA_BUDGET_MS)} for all of the design check's Figma calls` : 'the limit for one call';
+    throw new Error(`Figma did not answer ${path} within ${seconds(timeoutMs)}, ${limit}; ${FIGMA_HINT}`);
+  }
+  if (reply.status !== 200) throw new Error(`Figma refused ${path} (HTTP ${reply.status})`);
+  return reply.json;
 }
 
 /**
@@ -57,12 +77,12 @@ async function figma(sys: Sys, token: string, path: string): Promise<unknown> {
  * built from the design library: it exists, it is a frame, it holds at least
  * one instance of a library component, and no image covers most of it.
  */
-export async function frameProblem(sys: Sys, token: string, link: string, libraryKeys: Set<string>): Promise<string | undefined> {
+export async function frameProblem(sys: Sys, token: string, link: string, libraryKeys: Set<string>, deadline = figmaDeadline(sys)): Promise<string | undefined> {
   const match = FRAME_LINK.exec(link);
   if (!match) return 'links no Figma frame (a figma.com/design link with node-id)';
   const [, file, a, b] = match as unknown as [string, string, string, string];
   const id = `${a}:${b}`;
-  const reply = (await figma(sys, token, `/files/${file}/nodes?ids=${encodeURIComponent(id)}`)) as {
+  const reply = (await figma(sys, token, `/files/${file}/nodes?ids=${encodeURIComponent(id)}`, deadline)) as {
     nodes?: Record<string, { document: FigmaNode; components?: Record<string, { key?: string }> } | null>;
   };
   const found = reply.nodes?.[id];
@@ -154,7 +174,8 @@ export async function prDesign(sys: Sys, io: Output): Promise<number> {
     after = page.pageInfo.endCursor;
   }
 
-  const published = (await figma(sys, figmaToken, `/files/${library}/components`)) as { meta?: { components?: { key?: string }[] } };
+  const deadline = figmaDeadline(sys);
+  const published = (await figma(sys, figmaToken, `/files/${library}/components`, deadline)) as { meta?: { components?: { key?: string }[] } };
   const keys = new Set((published.meta?.components ?? []).flatMap((component) => (component.key ? [component.key] : [])));
 
   const problems: string[] = [];
@@ -162,7 +183,7 @@ export async function prDesign(sys: Sys, io: Output): Promise<number> {
   for (const state of states) {
     if (state.issueType?.name !== 'State' || state.stateReason === 'NOT_PLANNED') continue;
     checked++;
-    const problem = await frameProblem(sys, figmaToken, state.body, keys);
+    const problem = await frameProblem(sys, figmaToken, state.body, keys, deadline);
     if (problem) problems.push(`state #${state.number} ${problem}`);
   }
   for (const problem of problems) io.err(`✗ ${problem}`);
