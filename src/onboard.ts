@@ -168,8 +168,66 @@ function scheduleComment(schedule: string): string {
     : `  # The decisions job: cron ${schedule}, UTC, as "schedule" in ${SETTINGS_PATH} sets it.`;
 }
 
+/** The pull request events the workflow runs on, with why: since P-46, closed too. */
+const TRIGGER_TYPES = [
+  '    # edited: a changed "Slice: #N" line is checked again; closed: a merged pull request closes its slice.',
+  '    types: [opened, synchronize, reopened, edited, closed]',
+];
+/** The pull request events before P-46. */
+const OLDER_TRIGGER_TYPES = ['    # edited: a changed "Slice: #N" line is checked again.', '    types: [opened, synchronize, reopened, edited]'];
+/** The read-only job's condition: a closed pull request runs the merged job alone. */
+const READ_ONLY_IF = "    if: (github.event_name == 'pull_request' && github.event.action != 'closed') || github.event_name == 'push'";
+const SPLIT_COMMENT = '# The weekly and merged jobs are split out so pull request and push runs stay read-only.';
+
+/** The job that closes the slice a merged pull request names, which alone of a pull request's runs writes to issues. */
+function mergedJob(version: string, secrets: string[]): string[] {
+  return [
+    '  # A merged pull request closes the slice it names, which moves it to Done on the board.',
+    '  process-rules-merged:',
+    // Into the default branch alone, and from this repository: a fork's run gets a read-only token.
+    '    if: >-',
+    "      github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged &&",
+    '      github.event.pull_request.base.ref == github.event.repository.default_branch &&',
+    '      github.event.pull_request.head.repo.full_name == github.repository',
+    '    permissions:',
+    '      contents: read',
+    '      issues: write',
+    '      pull-requests: read',
+    ...callChecks(version, secrets),
+    '',
+  ];
+}
+
+/**
+ * The lines a workflow from before the merged job has where this release's
+ * differs, each with what this release writes there; the comment is
+ * optional, the others mark the template.
+ */
+const BEFORE_MERGED: { was: string; now: string; optional?: true }[] = [
+  { was: '# The weekly job is split out so pull request and push runs stay read-only.', now: SPLIT_COMMENT, optional: true },
+  { was: OLDER_TRIGGER_TYPES.join('\n'), now: TRIGGER_TYPES.join('\n') },
+  { was: "    if: github.event_name == 'pull_request' || github.event_name == 'push'", now: READ_ONLY_IF },
+];
+
+/**
+ * A two-job workflow from before the merged job, as `before`, with the
+ * merged job added at the version it pins and the pull request runs made to
+ * leave it alone; undefined when its lines are not the template's.
+ */
+function addMergedJob(before: string, version: string, figma: boolean): string | undefined {
+  let text = before;
+  for (const { was, now, optional } of BEFORE_MERGED) {
+    if (text.split(was).length !== 2) {
+      if (optional) continue;
+      return undefined;
+    }
+    text = text.replace(was, now);
+  }
+  return `${text.replace(/\n*$/, '\n')}\n${mergedJob(version, figma ? FIGMA_SECRETS : []).join('\n')}`;
+}
+
 /** The workflow's head, down to its jobs, which every template shares. */
-function workflowHead(branch: string, version: string, comments: string[], schedule = DEFAULT_SCHEDULE): string[] {
+function workflowHead(branch: string, version: string, comments: string[], schedule = DEFAULT_SCHEDULE, types = TRIGGER_TYPES): string[] {
   return [
     `# Written by process-rules onboard: the shared process-rules checks at v${version}.`,
     ...comments,
@@ -177,8 +235,7 @@ function workflowHead(branch: string, version: string, comments: string[], sched
     '',
     'on:',
     '  pull_request:',
-    '    # edited: a changed "Slice: #N" line is checked again.',
-    '    types: [opened, synchronize, reopened, edited]',
+    ...types,
     '  push:',
     `    branches: [${JSON.stringify(branch)}]`,
     scheduleComment(schedule),
@@ -244,13 +301,13 @@ export function workflow(branch: string, version: string, figma: boolean, schedu
       version,
       [
         '# To upgrade, change the version on every line that names it (two per job).',
-        '# The weekly job is split out so pull request and push runs stay read-only.',
+        SPLIT_COMMENT,
       ],
       schedule,
     ),
     '  # Pull request and push runs: read-only.',
     '  process-rules:',
-    "    if: github.event_name == 'pull_request' || github.event_name == 'push'",
+    READ_ONLY_IF,
     ...callChecks(version, secrets),
     '',
     '  # The weekly run alone writes to issues: it comments and opens undo issues.',
@@ -262,6 +319,7 @@ export function workflow(branch: string, version: string, figma: boolean, schedu
     '      pull-requests: read',
     ...callChecks(version, secrets),
     '',
+    ...mergedJob(version, secrets),
   ].join('\n');
 }
 
@@ -272,7 +330,7 @@ export function workflow(branch: string, version: string, figma: boolean, schedu
 export function olderWorkflows(branch: string, version: string): string[] {
   return [
     [
-      ...workflowHead(branch, version, ['# To upgrade, change the version on both lines that name it.']),
+      ...workflowHead(branch, version, ['# To upgrade, change the version on both lines that name it.'], DEFAULT_SCHEDULE, OLDER_TRIGGER_TYPES),
       '  process-rules:',
       '    # Write to issues for this job only: the weekly run comments and opens undo issues.',
       '    permissions:',
@@ -335,7 +393,7 @@ export function workflowUpdate(
 ):
   | { kind: 'same' }
   | { kind: 'write' | 'replace-older' | 'replace'; text: string; from?: string }
-  | { kind: 'repin'; text: string; from?: string; branch?: string; schedule?: string; secrets?: true } {
+  | { kind: 'repin'; text: string; from?: string; branch?: string; schedule?: string; secrets?: true; merged?: true } {
   const wanted = workflow(branch, version, figma, schedule);
   if (before === undefined) return { kind: 'write', text: wanted };
   if (before === wanted) return { kind: 'same' };
@@ -346,7 +404,13 @@ export function workflowUpdate(
     return { kind: 'replace-older', text: wanted, from };
   }
   const split = /^ {2}process-rules:\s*$/m.test(before) && /^ {2}process-rules-weekly:\s*$/m.test(before);
-  if (split && pins.length === 4) {
+  const merged = /^ {2}process-rules-merged:\s*$/m.test(before);
+  const added = split && !merged && pins.length === 4 && from !== undefined ? addMergedJob(before, from, figma) : undefined;
+  if (added !== undefined) {
+    const update = workflowUpdate(added, branch, version, figma, schedule);
+    return { ...(update.kind === 'repin' ? update : { text: added }), kind: 'repin', merged: true };
+  }
+  if (split && merged && pins.length === 6) {
     const moved = pushed !== undefined && pushed !== branch;
     const cron = SCHEDULE.exec(before)?.[4]?.trim();
     const rescheduled = cron !== undefined && cron.split(/\s+/).join(' ') !== schedule;
@@ -781,6 +845,7 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
           ...(update.kind === 'repin' && update.branch ? [`run pushes on the default branch, ${update.branch}`] : []),
           ...(update.kind === 'repin' && update.schedule ? [`run the weekly decisions job on the schedule ${SETTINGS_PATH} sets, cron ${update.schedule} UTC`] : []),
           ...(update.kind === 'repin' && update.secrets ? [on('figma') ? 'pass the FIGMA_TOKEN and FIGMA_LIBRARY secrets' : 'stop passing Figma secrets, with figma off'] : []),
+          ...(update.kind === 'repin' && update.merged ? ['add a job that closes the slice a merged pull request names, the one pull request run that writes to issues'] : []),
         ].join(' and ') || `set the version in its header comment to v${version}`}, leaving the rest as it is`,
       }[update.kind];
       if (!(await confirm(`${what}?`))) {
@@ -791,7 +856,8 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     io.out(`✓ ${WORKFLOW_PATH}`);
     const unpassed = on('figma') ? jobsWithoutLibrary(fileAt(WORKFLOW_PATH) as string) : [];
     if (unpassed.length > 0) {
-      io.out(`! In ${WORKFLOW_PATH}, ${unpassed.join(' and ')} pass${unpassed.length === 1 ? 'es' : ''} the shared checks no FIGMA_LIBRARY secret, so the design check stays off there; add FIGMA_LIBRARY: \${{ secrets.FIGMA_LIBRARY }} under ${unpassed.length === 1 ? 'its' : 'their'} secrets`);
+      const jobs = unpassed.length === 1 ? unpassed[0] : `${unpassed.slice(0, -1).join(', ')} and ${unpassed.at(-1)}`;
+      io.out(`! In ${WORKFLOW_PATH}, ${jobs} pass${unpassed.length === 1 ? 'es' : ''} the shared checks no FIGMA_LIBRARY secret, so the design check stays off there; add FIGMA_LIBRARY: \${{ secrets.FIGMA_LIBRARY }} under ${unpassed.length === 1 ? 'its' : 'their'} secrets`);
     }
   }
 

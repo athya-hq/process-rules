@@ -36,7 +36,7 @@ describe('setUpBoard', () => {
     assert.deepEqual(out.slice(6), viewsChecklist(URL));
     assert.deepEqual(board.project?.views, [
       { id: 'V_1', name: 'Needs you', layout: 'TABLE_LAYOUT', filter: 'label:needs-owner is:open', visible: ['Title', 'Status'] },
-      { id: 'V_2', name: 'Board', layout: 'BOARD_LAYOUT', filter: '', visible: ['Title', 'Status', 'Linked pull requests'] },
+      { id: 'V_2', name: 'Board', layout: 'BOARD_LAYOUT', filter: 'type:Slice,Brief', visible: ['Title', 'Status', 'Linked pull requests'] },
       { id: 'V_3', name: 'Work items', layout: 'TABLE_LAYOUT', filter: 'type:"Work item"', visible: ['Title', 'Status', 'Sub-issues progress'] },
       { id: 'V_4', name: 'Decisions', layout: 'TABLE_LAYOUT', filter: 'type:Decision', visible: ['Title', 'Status'] },
       { id: 'V_5', name: 'Reviews due', layout: 'TABLE_LAYOUT', filter: '"Review date":<=@today', visible: ['Title', 'Status'] },
@@ -117,6 +117,7 @@ describe('setUpBoard', () => {
       `✓ Project "example-app work": ${COPY_URL}`,
       '✓ fields: Step, Decision, Review date',
       '✓ views: Needs you, Board, Work items, Decisions, Reviews due',
+      "- Board shows slices and briefs; Done keeps one until the Auto-archive items workflow archives it, with the template's filter is:closed updated:<@today-7d, which GitHub's API can neither read nor set",
     ]);
     assert.ok(!board.operations.some((o) => o === 'createProjectV2(' || o === 'createProjectV2Field' || o.includes('ProjectV2View')));
   });
@@ -298,7 +299,7 @@ describe('setUpBoard', () => {
     assert.ok(out.includes('✓ views: Needs you, Board, Work items, Decisions, Reviews due'));
     assert.ok(sys.asked.includes('Set up the views Board, Reviews due in "example-app work"?'));
     assert.deepEqual(board.project.views?.map((v) => v.name), ['Needs you', 'Board', 'Work items', 'Decisions', 'Mine', 'Reviews due']);
-    assert.deepEqual(board.project.views?.[1], { id: 'V_2', name: 'Board', layout: 'BOARD_LAYOUT', filter: '', visible: ['Title', 'Assignees', 'Linked pull requests'] });
+    assert.deepEqual(board.project.views?.[1], { id: 'V_2', name: 'Board', layout: 'BOARD_LAYOUT', filter: 'type:Slice,Brief', visible: ['Title', 'Assignees', 'Linked pull requests'] });
     assert.deepEqual(board.project.views?.[4], { id: 'V_9', name: 'Mine', layout: 'TABLE_LAYOUT', filter: null, visible: ['Title'] });
   });
 

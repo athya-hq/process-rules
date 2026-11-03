@@ -21,6 +21,7 @@ on:
 # `if`, when a job here asks for more than the calling job grants. So the
 # read-only jobs say so each, and the weekly job takes what its caller grants:
 # `issues: write` from the client's weekly job, nothing more from the others.
+# The merged job does too: `issues: write` from the client's merged job.
 jobs:
   settings:
     name: Settings
@@ -56,7 +57,7 @@ jobs:
       contents: read
       issues: read
       pull-requests: read
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && github.event.action != 'closed'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -86,7 +87,7 @@ jobs:
       contents: read
       issues: read
       pull-requests: read
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && github.event.action != 'closed'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -115,7 +116,7 @@ jobs:
       contents: read
       issues: read
       pull-requests: read
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && github.event.action != 'closed'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -139,6 +140,36 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           FIGMA_TOKEN: ${{ secrets.FIGMA_TOKEN }}
           FIGMA_LIBRARY: ${{ secrets.FIGMA_LIBRARY }}
+
+  merged:
+    name: Slice done
+    # Into the default branch alone, and from this repository: a fork's run gets a read-only token.
+    if: >-
+      github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged &&
+      github.event.pull_request.base.ref == github.event.repository.default_branch &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # The caller's permissions: the client's merged job grants issues: write.
+    steps:
+      # The settings come from the branch the pull request merged into.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: athya-hq/process-rules
+          ref: ${{ inputs.process-rules-ref }}
+          path: .process-rules
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      # The slice the pull request names is closed, which moves it to Done on the board.
+      - run: node .process-rules/src/cli.ts pr-merged
+        env:
+          GH_TOKEN: ${{ github.token }}
 
   decisions:
     name: Decisions, weekly

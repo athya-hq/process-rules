@@ -10,7 +10,7 @@ import { reviewsDue } from './reviews.ts';
 import { reviewThread, threadArgs } from './review-thread.ts';
 import { onboard, onboardArgs } from './onboard.ts';
 import { sessionStart } from './session-start.ts';
-import { prePush, prWorkRules, propose } from './work.ts';
+import { prMerged, prePush, prWorkRules, propose } from './work.ts';
 import type { Output, Sys } from './types.ts';
 
 import { packageVersion } from './version.ts';
@@ -32,6 +32,7 @@ Commands:
                    For a client's hook: run one command as the session's agent, or nothing (exit ${LOCKED})
   pr-identity      Run by the shared workflow: agent commits Verified and pushed by the agent
   pr-work-rules    Run by the shared workflow: an agent pull request builds one slice it may build
+  pr-merged        Run by the shared workflow: a merged pull request closes the slice it names
   pr-design        Run by the shared workflow: each state of the slice links a frame from the design library
   decisions-weekly Run by the shared workflow weekly: decision checks, undo issues, expiring labels
   reviews-due      For the review routine: open decisions whose review date has come, as JSON lines
@@ -117,6 +118,7 @@ export async function run(
     case 'onboard':
     case 'pr-identity':
     case 'pr-work-rules':
+    case 'pr-merged':
     case 'pr-design':
     case 'decisions-weekly':
     case 'reviews-due':
@@ -131,6 +133,7 @@ export async function run(
         if (command === 'pr-design') return await prDesign(await sys(), io);
         if (command === 'pr-identity') return await prIdentity(await sys(), io);
         if (command === 'pr-work-rules') return await prWorkRules(await sys(), io);
+        if (command === 'pr-merged') return await prMerged(await sys(), io);
         if (command === 'pre-push') {
           const real = await sys();
           return await prePush(real, io, real.readStdin(), rest[1] ?? '');

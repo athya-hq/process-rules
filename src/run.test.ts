@@ -104,6 +104,7 @@ describe('run', () => {
 
   it('runs pr-work-rules and pre-push, which takes git\'s two arguments and no third', async () => {
     assert.match((await capture(['pr-work-rules'], () => new FakeSys())).err[0] ?? '', /pr-work-rules runs in GitHub Actions/);
+    assert.match((await capture(['pr-merged'], () => new FakeSys())).err[0] ?? '', /pr-merged runs in GitHub Actions/);
     const agent = new FakeSys();
     agent.env = { PROCESS_RULES_AGENT: 'ExampleBot' };
     agent.stdin = `refs/heads/work ${'a'.repeat(40)} refs/heads/work ${'b'.repeat(40)}\n`;

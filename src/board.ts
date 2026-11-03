@@ -28,7 +28,8 @@ export const FIELDS = [
 /** The Project's views; onboard makes them, or updates the view that has the name. */
 export const VIEWS = [
   { name: 'Needs you', layout: 'TABLE_LAYOUT', filter: 'label:needs-owner is:open', show: [] },
-  { name: 'Board', layout: 'BOARD_LAYOUT', filter: '', show: ['Linked pull requests'] },
+  // The work in motion: slices and briefs. Closed ones leave Done when the auto-archive workflow archives them.
+  { name: 'Board', layout: 'BOARD_LAYOUT', filter: 'type:Slice,Brief', show: ['Linked pull requests'] },
   { name: 'Work items', layout: 'TABLE_LAYOUT', filter: 'type:"Work item"', show: ['Sub-issues progress'] },
   { name: 'Decisions', layout: 'TABLE_LAYOUT', filter: 'type:Decision', show: [] },
   { name: 'Reviews due', layout: 'TABLE_LAYOUT', filter: '"Review date":<=@today', show: [] },
@@ -50,13 +51,21 @@ const GROUPING = [
   { view: 'Decisions', field: 'Decision' },
 ];
 
+/**
+ * How long Done keeps an item on the Board: a view's filter cannot say
+ * "open, or closed this week", since GitHub's Project filters join different
+ * fields with AND alone and have no closed date, so the auto-archive
+ * workflow takes closed items off after it.
+ */
+const ARCHIVE_FILTER = 'is:closed updated:<@today-7d';
+
 /** What GitHub's API cannot set on a Project not copied from the template, so the owner does it by hand. */
 export function viewsChecklist(url: string): string[] {
   return [
     `Finish the Project ${url} by hand (GitHub's API cannot):`,
     '  [ ] Work items: group by Step',
     '  [ ] Decisions: group by Decision',
-    '  [ ] Workflows → Auto-archive items: is:closed updated:<@today-7d',
+    `  [ ] Workflows → Auto-archive items: ${ARCHIVE_FILTER}`,
   ];
 }
 
@@ -253,6 +262,7 @@ export async function setUpBoard(
   io.out(`✓ views: ${VIEWS.map((v) => v.name).join(', ')}`);
   const done = await finished(sys, token, project.id);
   if (!done.grouped) for (const line of viewsChecklist(project.url)) io.out(line);
+  else io.out(`- Board shows slices and briefs; Done keeps one until the Auto-archive items workflow archives it, with the template's filter ${ARCHIVE_FILTER}, which GitHub's API can neither read nor set`);
   if (done.off.length > 0) io.out(`Turn on the workflows ${done.off.join(', ')} in ${project.url} → Workflows (GitHub's API cannot)`);
   return project.url;
 }
@@ -506,6 +516,84 @@ function hidden(view: View, spec: (typeof VIEWS)[number], fieldIds: Map<string |
 /** Whether the view already is what the spec asks for. */
 function settled(view: View, spec: (typeof VIEWS)[number], fieldIds: Map<string | undefined, string | undefined>): boolean {
   return view.name === spec.name && view.layout === spec.layout && (view.filter ?? '') === spec.filter && hidden(view, spec, fieldIds).length === 0;
+}
+
+/** A Project item; a field that is not a single select reads as an empty object. */
+type BoardItem = {
+  id: string;
+  project: { id: string; title: string; field: { id?: string; options?: { id: string; name: string }[] } | null };
+  value: { name?: string } | null;
+};
+
+/** An issue's items on Projects, each with the Project's single-select field `field` and the item's value of it. */
+function boardItems(field: string): string {
+  return `projectItems(first: 20, includeArchived: false) { nodes { id project { id title field(name: "${field}") { ... on ProjectV2SingleSelectField { id options { id name } } } } value: fieldValueByName(name: "${field}") { ... on ProjectV2ItemFieldSingleSelectValue { name } } } }`;
+}
+
+/**
+ * Sets `item`'s field to the option named `option`, in any case, unless the
+ * Project lacks the field or the option, or the item has it already. Returns
+ * the Project's title when it moved the item.
+ */
+async function moveTo(sys: Sys, token: string, item: BoardItem, option: string): Promise<string | undefined> {
+  const field = item.project.field;
+  const chosen = field?.options?.find((had) => had.name.toLowerCase() === option.toLowerCase());
+  if (!field?.id || !chosen || item.value?.name?.toLowerCase() === option.toLowerCase()) return undefined;
+  await graphql(
+    sys,
+    token,
+    'mutation($project: ID!, $item: ID!, $field: ID!, $option: String!) { updateProjectV2ItemFieldValue(input: { projectId: $project, itemId: $item, fieldId: $field, value: { singleSelectOptionId: $option } }) { projectV2Item { id } } }',
+    { project: item.project.id, item: item.id, field: field.id, option: chosen.id },
+  );
+  return item.project.title;
+}
+
+/**
+ * Moves the work board on as an agent starts building slice `slice` of
+ * `slug`, with the agent's token, on every Project that holds the issues:
+ * the open slice's Status to In Progress; its Work item's Step to Build, as
+ * its first slice has started; and an open Work item with no Step to Frame,
+ * where every new one starts. A workflow's GITHUB_TOKEN cannot write a
+ * Project, so the agent's push does this. Returns what moved, as lines.
+ */
+export async function boardStarted(sys: Sys, token: string, slug: string, slice: number): Promise<string[]> {
+  const [owner, name] = slug.split('/') as [string, string];
+  const read = (await graphql(
+    sys,
+    token,
+    `query($owner: String!, $name: String!, $number: Int!, $workItems: String!) { repository(owner: $owner, name: $name) { issue(number: $number) { state ${boardItems('Status')} parent { number issueType { name } ${boardItems('Step')} } } } search(type: ISSUE, query: $workItems, first: 100) { nodes { ... on Issue { number ${boardItems('Step')} } } } }`,
+    // The newest first, so a new work item is among the hundred read.
+    { owner, name, number: slice, workItems: `repo:${slug} is:issue is:open type:"Work item" sort:created-desc` },
+  )) as {
+    repository: {
+      issue: { state: string; projectItems: { nodes: BoardItem[] }; parent: { number: number; issueType: { name: string } | null; projectItems: { nodes: BoardItem[] } } | null } | null;
+    } | null;
+    search: { nodes: ({ number?: number; projectItems?: { nodes: BoardItem[] } } | null)[] };
+  };
+  const issue = read.repository?.issue;
+  // A closed slice is built already: a fix to it starts nothing on the board.
+  if (issue?.state !== 'OPEN') return [];
+  const parent = issue.parent?.issueType?.name === 'Work item' ? issue.parent : undefined;
+  const moves = [
+    ...issue.projectItems.nodes.map((item) => ({ item, option: 'In Progress', name: `slice #${slice}`, what: `slice #${slice} is In Progress` })),
+    ...(parent?.projectItems.nodes ?? []).map((item) => ({ item, option: 'Build', name: `work item #${parent?.number}`, what: `work item #${parent?.number} is at Step Build` })),
+    ...read.search.nodes.flatMap((node) =>
+      !node?.number || node.number === parent?.number
+        ? []
+        : (node.projectItems?.nodes ?? []).filter((item) => !item.value?.name).map((item) => ({ item, option: 'Frame', name: `work item #${node.number}`, what: `work item #${node.number} had no Step; it is at Frame` })),
+    ),
+  ];
+  // Each move stands alone, so one GitHub refuses leaves the others made.
+  const moved: string[] = [];
+  for (const { item, option, name, what } of moves) {
+    try {
+      const project = await moveTo(sys, token, item, option);
+      if (project) moved.push(`✓ board: ${what} in "${project}"`);
+    } catch (error) {
+      moved.push(`! board: ${name} was not moved to ${option} in "${item.project.title}" (${(error as Error).message})`);
+    }
+  }
+  return moved;
 }
 
 function stopped(io: Output, step: string): undefined {
