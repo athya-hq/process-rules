@@ -248,7 +248,11 @@ work pushed with the owner's login fails. Who pushed comes only from GitHub's
 record of the pushes to the pull request's branch (the fork's, for a fork),
 never from whoever started the run, so an edit, a reopen or a re-run by anyone
 gives the result the push gave. A push GitHub has not recorded yet is waited
-for about a minute, then fails until a re-run finds it. **Work rules** runs on the agent's
+for about a minute, then fails until a re-run finds it. A merge queue's test runs
+pass with nothing to check, since each queued pull request was checked on its own:
+a `merge_group` run, and a pull request `mergify[bot]` opened from a
+`mergify/merge-queue/` branch of the repository itself (anyone else's pull request
+on such a branch is checked). **Work rules** runs on the agent's
 pull requests: each names exactly one slice, as a line `Slice: #N`, and that
 slice may be built:
 
