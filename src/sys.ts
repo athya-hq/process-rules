@@ -67,7 +67,7 @@ export function realSys(): Sys {
           ...options.headers,
         },
         ...(options.body ? { body: JSON.stringify(options.body) } : {}),
-        ...(options.timeoutMs ? { signal: AbortSignal.timeout(options.timeoutMs) } : {}),
+        ...(options.timeoutMs !== undefined ? { signal: AbortSignal.timeout(options.timeoutMs) } : {}),
       });
       const text = await response.text();
       return {

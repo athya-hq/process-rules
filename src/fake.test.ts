@@ -293,7 +293,7 @@ export class FakeSys implements Sys {
       ...(options.token ? { token: options.token } : {}),
       ...(options.body ? { body: options.body } : {}),
       ...(options.headers ? { headers: options.headers } : {}),
-      ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}),
+      ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
     });
     // GitHub finds a login in /users/ paths in any case, and answers with its own spelling.
     const wanted = `${method} ${url}`;
