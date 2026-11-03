@@ -838,8 +838,6 @@ describe('prePush', () => {
       board(closed, (data) => {
         const issue = (data.repository as Node).issue as Node;
         issue.state = 'CLOSED';
-        issue.parent = { number: 10, issueType: { name: 'Slice' }, projectItems: { nodes: [item('I_10', STEP, 'Slice')] } };
-        data.search = { nodes: [] };
       });
       assert.deepEqual(await push(closed, `refs/heads/work ${LOCAL} refs/heads/work ${REMOTE}`), { code: 0, err: [] });
       assert.deepEqual(moves(closed), []);
@@ -850,8 +848,34 @@ describe('prePush', () => {
       sys.route('POST', '/graphql', { status: 403, json: { message: 'Forbidden' } });
       assert.deepEqual(await push(sys, `refs/heads/work ${LOCAL} refs/heads/work ${REMOTE}`), {
         code: 0,
-        err: ["! board: #12's Status and its work item's Step are left as they are (GitHub's GraphQL API refused: HTTP 403); the push goes on"],
+        err: ["! board: could not read where #12 and its work item are on the board, so nothing moved (GitHub's GraphQL API refused: HTTP 403); the push goes on"],
       });
+    });
+
+    it('makes the other moves when GitHub refuses one', async () => {
+      const sys = session('Slice: #12');
+      board(sys);
+      const answer = sys.routes.get('POST https://api.github.com/graphql') as () => { status: number; json: unknown };
+      sys.route('POST', '/graphql', () => {
+        const last = sys.requests.at(-1)?.body as { variables?: { item?: string } };
+        return last.variables?.item === 'I_10' ? { status: 200, json: { errors: [{ message: 'no write access' }] } } : answer();
+      });
+      assert.deepEqual(await push(sys, `refs/heads/work ${LOCAL} refs/heads/work ${REMOTE}`), {
+        code: 0,
+        err: [
+          '✓ board: slice #12 is In Progress in "example-app work"',
+          `! board: work item #10 was not moved to Build in "example-app work" (GitHub's GraphQL API refused: no write access)`,
+          '✓ board: work item #20 had no Step; it is at Frame in "example-app work"',
+        ],
+      });
+    });
+
+    it('moves nothing with the board feature off', async () => {
+      const sys = session('Slice: #12');
+      sys.files.set(`${ROOT}/.github/process-rules.json`, JSON.stringify({ owner: OWNER, agent: AGENT, features: ['identity', 'work-rules'] }));
+      board(sys);
+      assert.deepEqual(await push(sys, `refs/heads/work ${LOCAL} refs/heads/work ${REMOTE}`), { code: 0, err: [] });
+      assert.ok(!sys.requests.some((r) => r.url.endsWith('/graphql')));
     });
 
     it('moves nothing for a push the work rules refuse', async () => {

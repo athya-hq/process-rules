@@ -281,13 +281,17 @@ every Project that holds the issues: the slice's Status to In Progress; its
 work item's Step to Build, since its first slice has started; and any open
 Work item with no Step to Frame, where a new one starts. A workflow's
 `GITHUB_TOKEN` cannot write to a Project, so the agent's push does this, with
-the agent token's `project` scope; one it cannot move, such as from a Claude
-cloud session whose GitHub proxy refuses GraphQL, is said and does not stop
-the push. When a pull request naming a slice merges into the default branch,
+the agent token's `project` scope, with `board` on. It reads the newest
+hundred open Work items, so a new one is always among them. A board it cannot
+read, such as from a Claude cloud session whose GitHub proxy refuses GraphQL,
+or a move GitHub refuses, is said and does not stop the push; a push for a
+closed slice, such as a fix, moves nothing. When a pull request naming a slice merges into the default branch,
 the shared workflow comments on the slice, linking the pull request, and
 closes it, and the Project's Item closed workflow moves it to Done: a
 `Slice: #N` line is not one of GitHub's closing keywords, so GitHub does not
-close it. That job alone of a pull request's runs writes to issues.
+close it. That job alone of a pull request's runs writes to issues. It runs only for
+pull requests from the repository itself: a fork's run gets a read-only token, so
+a slice a fork's pull request builds is closed by hand.
 
 **What needs the owner.** A request the owner made on the work item is its
 own approval, linked as above. A fix needs none: it restores what the owner

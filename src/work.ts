@@ -458,20 +458,21 @@ export async function prePush(sys: Sys, io: Output, refLines: string, url: strin
   if (branches.length > 1) return report(io, 'pre-push', [`one push builds one slice on one branch; this one pushes ${where}`]);
   const [slice] = slices as [number];
   const problems = await sliceProblems(sys, token, slug, slice, accounts, { branch: branches[0] as string });
-  if (problems.length === 0) await moveBoard(sys, io, token, slug, slice);
+  if (problems.length === 0 && isOn(sys, root, 'board')) await moveBoard(sys, io, token, slug, slice);
   return report(io, 'pre-push', problems);
 }
 
 /**
- * Moves the board on for slice `slice`, which a push is starting to build;
- * one it cannot move, such as from a Claude cloud session whose GitHub proxy
- * refuses GraphQL, is said and does not stop the push.
+ * Moves the board on for slice `slice`, which a push is starting to build,
+ * with the board feature on; a board it cannot read, such as from a Claude
+ * cloud session whose GitHub proxy refuses GraphQL, or a move GitHub
+ * refuses, is said and does not stop the push.
  */
 async function moveBoard(sys: Sys, io: Output, token: string, slug: string, slice: number): Promise<void> {
   try {
     for (const line of await boardStarted(sys, token, slug, slice)) io.err(line);
   } catch (error) {
-    io.err(`! board: #${slice}'s Status and its work item's Step are left as they are (${(error as Error).message}); the push goes on`);
+    io.err(`! board: could not read where #${slice} and its work item are on the board, so nothing moved (${(error as Error).message}); the push goes on`);
   }
 }
 

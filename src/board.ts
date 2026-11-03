@@ -571,25 +571,26 @@ export async function boardStarted(sys: Sys, token: string, slug: string, slice:
     search: { nodes: ({ number?: number; projectItems?: { nodes: BoardItem[] } } | null)[] };
   };
   const issue = read.repository?.issue;
-  if (!issue) return [];
-  const moved: string[] = [];
-  if (issue.state === 'OPEN') {
-    for (const item of issue.projectItems.nodes) {
-      const project = await moveTo(sys, token, item, 'In Progress');
-      if (project) moved.push(`✓ board: slice #${slice} is In Progress in "${project}"`);
-    }
-  }
+  // A closed slice is built already: a fix to it starts nothing on the board.
+  if (issue?.state !== 'OPEN') return [];
   const parent = issue.parent?.issueType?.name === 'Work item' ? issue.parent : undefined;
-  for (const item of parent?.projectItems.nodes ?? []) {
-    const project = await moveTo(sys, token, item, 'Build');
-    if (project) moved.push(`✓ board: work item #${parent?.number} is at Step Build in "${project}"`);
-  }
-  for (const node of read.search.nodes) {
-    if (!node?.number || node.number === parent?.number) continue;
-    for (const item of node.projectItems?.nodes ?? []) {
-      if (item.value?.name) continue;
-      const project = await moveTo(sys, token, item, 'Frame');
-      if (project) moved.push(`✓ board: work item #${node.number} had no Step; it is at Frame in "${project}"`);
+  const moves = [
+    ...issue.projectItems.nodes.map((item) => ({ item, option: 'In Progress', name: `slice #${slice}`, what: `slice #${slice} is In Progress` })),
+    ...(parent?.projectItems.nodes ?? []).map((item) => ({ item, option: 'Build', name: `work item #${parent?.number}`, what: `work item #${parent?.number} is at Step Build` })),
+    ...read.search.nodes.flatMap((node) =>
+      !node?.number || node.number === parent?.number
+        ? []
+        : (node.projectItems?.nodes ?? []).filter((item) => !item.value?.name).map((item) => ({ item, option: 'Frame', name: `work item #${node.number}`, what: `work item #${node.number} had no Step; it is at Frame` })),
+    ),
+  ];
+  // Each move stands alone, so one GitHub refuses leaves the others made.
+  const moved: string[] = [];
+  for (const { item, option, name, what } of moves) {
+    try {
+      const project = await moveTo(sys, token, item, option);
+      if (project) moved.push(`✓ board: ${what} in "${project}"`);
+    } catch (error) {
+      moved.push(`! board: ${name} was not moved to ${option} in "${item.project.title}" (${(error as Error).message})`);
     }
   }
   return moved;

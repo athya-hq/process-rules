@@ -1390,7 +1390,12 @@ describe('workflow', () => {
     assert.doesNotMatch(prJob, /permissions:|: write/);
     assert.match(weeklyJob, /^ {4}if: github\.event_name == 'schedule' \|\| github\.event_name == 'workflow_dispatch'$/m);
     assert.match(weeklyJob, /^ {4}permissions:\n {6}contents: read\n {6}issues: write\n {6}pull-requests: read$/m);
-    assert.match(mergedJob, /^ {4}if: github\.event_name == 'pull_request' && github\.event\.action == 'closed' && github\.event\.pull_request\.merged$/m);
+    assert.ok(
+      mergedJob.includes(
+        "    if: >-\n      github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged &&\n      github.event.pull_request.base.ref == github.event.repository.default_branch &&\n      github.event.pull_request.head.repo.full_name == github.repository\n",
+      ),
+      'only a merge into the default branch from the repository itself',
+    );
     assert.match(mergedJob, /^ {4}permissions:\n {6}contents: read\n {6}issues: write\n {6}pull-requests: read$/m);
     assert.equal(text.match(/issues: write/g)?.length, 2);
   });

@@ -184,7 +184,11 @@ function mergedJob(version: string, secrets: string[]): string[] {
   return [
     '  # A merged pull request closes the slice it names, which moves it to Done on the board.',
     '  process-rules-merged:',
-    "    if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged",
+    // Into the default branch alone, and from this repository: a fork's run gets a read-only token.
+    '    if: >-',
+    "      github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged &&",
+    '      github.event.pull_request.base.ref == github.event.repository.default_branch &&',
+    '      github.event.pull_request.head.repo.full_name == github.repository',
     '    permissions:',
     '      contents: read',
     '      issues: write',

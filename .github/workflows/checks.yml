@@ -143,7 +143,11 @@ jobs:
 
   merged:
     name: Slice done
-    if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged
+    # Into the default branch alone, and from this repository: a fork's run gets a read-only token.
+    if: >-
+      github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged &&
+      github.event.pull_request.base.ref == github.event.repository.default_branch &&
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 5
     # The caller's permissions: the client's merged job grants issues: write.
