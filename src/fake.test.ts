@@ -81,7 +81,7 @@ export class FakeSys implements Sys {
   answers: string[] = [];
   secrets: string[] = [];
   calls: Call[] = [];
-  requests: { url: string; method: string; token?: string; body?: unknown; headers?: Record<string, string> }[] = [];
+  requests: { url: string; method: string; token?: string; body?: unknown; headers?: Record<string, string>; timeoutMs?: number }[] = [];
   opened: string[] = [];
   asked: string[] = [];
 
@@ -285,7 +285,7 @@ export class FakeSys implements Sys {
     this.dirs = this.dirs.filter((dir) => dir !== path && !dir.startsWith(`${path}/`));
   }
 
-  http(url: string, options: { method?: string; token?: string; body?: unknown; headers?: Record<string, string> } = {}): Promise<HttpResult> {
+  http(url: string, options: { method?: string; token?: string; body?: unknown; headers?: Record<string, string>; timeoutMs?: number } = {}): Promise<HttpResult> {
     const method = options.method ?? 'GET';
     this.requests.push({
       url,
@@ -293,6 +293,7 @@ export class FakeSys implements Sys {
       ...(options.token ? { token: options.token } : {}),
       ...(options.body ? { body: options.body } : {}),
       ...(options.headers ? { headers: options.headers } : {}),
+      ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
     });
     // GitHub finds a login in /users/ paths in any case, and answers with its own spelling.
     const wanted = `${method} ${url}`;
@@ -301,8 +302,12 @@ export class FakeSys implements Sys {
       (url.includes('/users/')
         ? [...this.routes].find(([key]) => key.toLowerCase() === wanted.toLowerCase())?.[1]
         : undefined);
-    const result = typeof route === 'function' ? route() : route ?? this.unrouted(url);
-    return Promise.resolve(result);
+    // A route may throw, as fetch rejects when its time runs out.
+    try {
+      return Promise.resolve(typeof route === 'function' ? route() : route ?? this.unrouted(url));
+    } catch (error) {
+      return Promise.reject(error as Error);
+    }
   }
 
   /** The repository's owner's account type, which a check reads when no test routes the repository. */

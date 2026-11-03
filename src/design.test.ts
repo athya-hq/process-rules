@@ -31,6 +31,11 @@ async function problem(reply: unknown, link = LINK): Promise<string | undefined>
   return frameProblem(sys, 'figd_tok', link, KEYS);
 }
 
+/** What fetch rejects with when its time runs out. */
+const timesOut = (): never => {
+  throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+};
+
 const button = { id: '1:1', type: 'INSTANCE', componentId: 'c:1', absoluteBoundingBox: box(20, 10) };
 
 describe('frameProblem', () => {
@@ -85,6 +90,30 @@ describe('frameProblem', () => {
     const sys = new FakeSys();
     figma(sys, null, 403);
     await assert.rejects(frameProblem(sys, 'figd_tok', LINK, KEYS), /Figma refused \/files\/FILE1\/nodes\?ids=12%3A34 \(HTTP 403\)/);
+  });
+
+  it('gives a Figma call 30 seconds', async () => {
+    const sys = new FakeSys();
+    figma(sys, frameReply([button]));
+    await frameProblem(sys, 'figd_tok', LINK, KEYS);
+    assert.equal(sys.requests[0]?.timeoutMs, 30_000);
+  });
+
+  it('gives up on a Figma call that runs out of time, and says what to check', async () => {
+    const sys = new FakeSys();
+    sys.route('GET', `${FIGMA}/files/FILE1/nodes?ids=12%3A34`, timesOut);
+    await assert.rejects(
+      frameProblem(sys, 'figd_tok', LINK, KEYS),
+      { message: "Figma did not answer /files/FILE1/nodes?ids=12%3A34 within 30s, the limit for one call; check Figma's status (status.figma.com), that the FIGMA_TOKEN secret is valid, and how large the linked file is" },
+    );
+  });
+
+  it('passes on a failure other than running out of time', async () => {
+    const sys = new FakeSys();
+    sys.route('GET', `${FIGMA}/files/FILE1/nodes?ids=12%3A34`, () => {
+      throw new TypeError('fetch failed');
+    });
+    await assert.rejects(frameProblem(sys, 'figd_tok', LINK, KEYS), { name: 'TypeError', message: 'fetch failed' });
   });
 });
 
@@ -239,5 +268,33 @@ describe('prDesign', () => {
     const sys = actions([state(30, LINK)]);
     sys.route('GET', `${FIGMA}/files/LIB1/components`, { status: 200, json: {} });
     assert.equal((await check(sys)).err[0], '✗ state #30 links a frame that uses no component from the design library');
+  });
+
+  /** A clock that each Figma call moves on by the seconds it took. */
+  function slowFigma(sys: FakeSys, secondsEach: number, last?: () => never): void {
+    let at = 0;
+    sys.now = () => new Date(Date.UTC(2026, 0, 1) + at);
+    const reply = (json: unknown) => () => {
+      at += secondsEach * 1000;
+      return { status: 200, json };
+    };
+    sys.route('GET', `${FIGMA}/files/LIB1/components`, reply({ meta: { components: [{ key: 'lib-button' }] } }));
+    sys.route('GET', `${FIGMA}/files/FILE1/nodes?ids=12%3A34`, () => (last && at >= 100_000 ? last() : reply(frameReply([button]))()));
+  }
+
+  it("keeps all of a check's Figma calls within one budget", async () => {
+    const sys = actions([state(30, LINK), state(31, LINK), state(32, LINK)]);
+    slowFigma(sys, 50);
+    await assert.rejects(
+      check(sys),
+      { message: "Figma /files/FILE1/nodes?ids=12%3A34 not asked: the 120s for all of the design check's Figma calls ran out; check Figma's status (status.figma.com), that the FIGMA_TOKEN secret is valid, and how large the linked file is" },
+    );
+    assert.deepEqual(sys.requests.filter((request) => request.url.startsWith(FIGMA)).map((request) => request.timeoutMs), [30_000, 30_000, 20_000]);
+  });
+
+  it('says so when a call runs out of what was left of the budget', async () => {
+    const sys = actions([state(30, LINK), state(31, LINK)]);
+    slowFigma(sys, 50, timesOut);
+    await assert.rejects(check(sys), /Figma did not answer \/files\/FILE1\/nodes\?ids=12%3A34 within 20s, what was left of the 120s for all of the design check's Figma calls; check Figma's status/);
   });
 });
