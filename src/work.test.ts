@@ -918,13 +918,39 @@ describe('prMerged', () => {
     ]);
   });
 
-  it('leaves a closed slice, and an issue that is not a slice, as they are', async () => {
-    const sys = actions(merged('Slice: #12\nSlice: #99'));
+  it('comments on a slice GitHub closed already, and leaves an issue that is not a slice as it is', async () => {
+    const sys = actions(merged('Closes #12\n\nSlice: #12\nSlice: #99'));
     const g = graph();
     g.issue.state = 'closed';
     github(sys, g.issue);
-    assert.deepEqual(await run(sys), { code: 0, out: ['✓ #12 is closed already', '- #99 is not a Slice in example-org/example-app; left as it is'] });
-    assert.deepEqual(writes(sys), []);
+    assert.deepEqual(await run(sys), {
+      code: 0,
+      out: ['✓ #12 is closed already; commented that it was built in #40', '- #99 is not a Slice in example-org/example-app; left as it is'],
+    });
+    assert.deepEqual(writes(sys), [['POST', `${ISSUE}/comments`, { body: 'Built in #40, merged into main.' }, 'ghs_run']]);
+  });
+
+  it('comments only once, closed or open, however often it runs', async () => {
+    const g = graph();
+    g.comments.push(comment('Built in #400, merged into main.', LATEST, 'github-actions[bot]'), comment('Built in #40, merged into main.', LATEST, 'github-actions[bot]'));
+    const open = actions(merged('Slice: #12'));
+    github(open, g.issue);
+    assert.deepEqual(await run(open), { code: 0, out: ['✓ #12: closed, built in #40'] });
+    assert.deepEqual(writes(open), [['PATCH', ISSUE, { state: 'closed', state_reason: 'completed' }, 'ghs_run']]);
+    g.issue.state = 'closed';
+    const closed = actions(merged('Slice: #12'));
+    github(closed, g.issue);
+    assert.deepEqual(await run(closed), { code: 0, out: ['✓ #12 is closed already and says it was built in #40'] });
+    assert.deepEqual(writes(closed), []);
+  });
+
+  it('comments on a slice whose only comment names another pull request', async () => {
+    const g = graph();
+    g.issue.state = 'closed';
+    g.comments.push(comment('Built in #400, merged into main.', LATEST, 'github-actions[bot]'));
+    const sys = actions(merged('Slice: #12'));
+    github(sys, g.issue);
+    assert.deepEqual((await run(sys)).out, ['✓ #12 is closed already; commented that it was built in #40']);
   });
 
   for (const [name, pull, line] of [
@@ -964,6 +990,12 @@ describe('prMerged', () => {
     const refused = actions(merged('Slice: #12'));
     refused.route('PATCH', ISSUE, { status: 500, json: null });
     await assert.rejects(run(refused), /^Error: cannot close #12: HTTP 500$/);
+    const g = graph();
+    g.issue.state = 'closed';
+    const closed = actions(merged('Slice: #12'));
+    github(closed, g.issue);
+    closed.route('POST', `${ISSUE}/comments`, { status: 403, json: { message: 'Resource not accessible by integration' } });
+    await assert.rejects(run(closed), /cannot comment on #12: Resource not accessible by integration; the client workflow needs a job with issues: write/);
   });
 
   it('needs the Actions environment', async () => {
