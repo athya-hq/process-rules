@@ -1,5 +1,5 @@
 import { API, NO_TOKEN, type Settings, anyLogin, either, loadSettings, repoAt } from './agent.ts';
-import { PERSONAL_REPO, isOn, isPersonal, notAdoptedLine, offLine } from './features.ts';
+import { PERSONAL_REPO, isOn, isPersonal, notAdoptedLine, offLine, readRepo } from './features.ts';
 import { agentSession, pushIdentityProblem } from './push-identity.ts';
 import { cloudToken } from './cloud.ts';
 import { ONBOARD_BRANCH, ONBOARD_FILES } from './onboard-pull.ts';
@@ -399,17 +399,45 @@ function branchBeyondMerges(sys: Sys, root: string, range: string[]): string | u
   return gitLog(sys, root, ['--no-merges', '--format=%B', range[0] as string, '--not', ...parents.flatMap((commit) => commit.slice(1))]);
 }
 
+/** A full commit id, as GitHub's API and `git rev-parse` give one. */
+const COMMIT_ID = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
+
+/**
+ * The commits in this clone where the remote's default branch is, every
+ * commit they reach being the default branch's, not a push's own: its tip as
+ * GitHub names it, when the clone has that commit, and its remote-tracking
+ * ref on origin, when there is one. Either may be missing or behind in a
+ * clone, such as a single-branch clone that fetched the default branch into
+ * FETCH_HEAD alone. None when GitHub names no default branch.
+ */
+async function defaultBranchTips(sys: Sys, root: string, slug: string, token: string): Promise<string[]> {
+  const branch = ((await readRepo(sys, slug, token)).json as { default_branch?: unknown } | null)?.default_branch;
+  if (typeof branch !== 'string' || !branch) return [];
+  const ref = await sys.http(`${API}/repos/${slug}/git/ref/heads/${branch.split('/').map(encodeURIComponent).join('/')}`, { token });
+  const sha = ref.status === 200 ? (ref.json as { object?: { sha?: unknown } } | null)?.object?.sha : undefined;
+  const tips: string[] = [];
+  for (const where of [...(typeof sha === 'string' && COMMIT_ID.test(sha) ? [sha] : []), `refs/remotes/origin/${branch}`]) {
+    const found = sys.exec('git', ['rev-parse', '--verify', '--quiet', `${where}^{commit}`], { cwd: root });
+    const commit = found.stdout.trim();
+    if (found.code === 0 && COMMIT_ID.test(commit) && !tips.includes(commit)) tips.push(commit);
+  }
+  return tips;
+}
+
 /**
  * Before a push from an agent session, run by the client's pre-push git hook
  * with git's ref lines on stdin and the remote's URL: first that it reaches
  * GitHub as the agent, the pre-push identity guard, which holds even in a
  * session whose Claude Code hooks never ran. Then the work rules: all the commits one push
  * brings, across every ref, must name exactly one slice between them, as a
- * trailer `Slice: #N`, that may be built. Commits a remote already has, such
- * as the default branch's, are not the push's own; a push whose own commits
- * are all merges, such as a merge of the default branch, is judged by the
- * branch's commits that the merges did not bring. Pushes outside agent
- * sessions pass; an agent session with no token is refused.
+ * trailer `Slice: #N`, that may be built. Commits a remote already has, and
+ * every commit on the remote's default branch, are not the push's own, so a
+ * merge of the default branch brings none of its slices. A push whose own
+ * commits name no slice, such as a merge or a commit with no trailer, is
+ * judged by the branch's own commits: those the default branch does not
+ * reach or, where the clone cannot tell where the default branch is and the
+ * push's commits are all merges, those the merges did not bring. Pushes
+ * outside agent sessions pass; an agent session with no token is refused.
  */
 export async function prePush(sys: Sys, io: Output, refLines: string, url: string): Promise<number> {
   if (!agentSession(sys)) return 0;
@@ -433,15 +461,18 @@ export async function prePush(sys: Sys, io: Output, refLines: string, url: strin
     io.err(offLine('pre-push', 'work-rules', PERSONAL_REPO));
     return 0;
   }
+  const base = await defaultBranchTips(sys, root, slug, token);
   let messages = '';
   const branches: string[] = [];
   for (const line of refLines.split('\n').filter(Boolean)) {
     const [, local, remoteRef, remote] = line.split(' ');
     if (!local || !remoteRef || ZERO.test(local)) continue;
-    const range = [local, '--not', ...(remote && !ZERO.test(remote) ? [remote] : []), '--remotes'];
+    const range = [local, '--not', ...(remote && !ZERO.test(remote) ? [remote] : []), '--remotes', ...base];
     let log = gitLog(sys, root, ['--format=%B', ...range]);
     if (!log.trim()) continue;
-    if (slicesNamed(log).length === 0) log = branchBeyondMerges(sys, root, range) ?? log;
+    if (slicesNamed(log).length === 0) {
+      log = (base.length > 0 ? gitLog(sys, root, ['--format=%B', local, '--not', ...base]) : branchBeyondMerges(sys, root, range)) ?? log;
+    }
     messages += `${log}\n`;
     branches.push(remoteRef.replace(/^refs\/heads\//, ''));
   }
