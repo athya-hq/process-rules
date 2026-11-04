@@ -812,8 +812,12 @@ describe('prePush', () => {
       git(other, 'push', '-q', 'origin', 'main');
       return { clone, other };
     }
-    /** An agent session in `clone`, whose git log and rev-parse --verify are real; GitHub names main's tip as `tip`. */
-    function real(clone: string, tip?: string): FakeSys {
+    /**
+     * An agent session in `clone`, whose git log and rev-parse --verify are
+     * real; GitHub names main's tip as `tip`, and compares main with each
+     * commit `compared` names as its status says.
+     */
+    function real(clone: string, tip?: string, compared: Record<string, string> = {}): FakeSys {
       const sys = session('');
       sys.execOverride = (call) => {
         if (call.args[0] !== 'log' && call.args.slice(0, 3).join(' ') !== 'rev-parse --verify --quiet') return undefined;
@@ -822,6 +826,7 @@ describe('prePush', () => {
       };
       sys.route('GET', `/repos/${SLUG}`, { status: 200, json: { owner: { type: 'Organization' }, default_branch: 'main' } });
       sys.route('GET', `/repos/${SLUG}/git/ref/heads/main`, tip ? { status: 200, json: { object: { sha: tip } } } : { status: 404, json: { message: 'Not Found' } });
+      for (const [commit, status] of Object.entries(compared)) sys.route('GET', `/repos/${SLUG}/compare/main...${commit}?per_page=1`, { status: 200, json: { status } });
       return sys;
     }
     const line = (clone: string, remote = ZERO): string => `refs/heads/work ${git(clone, 'rev-parse', 'HEAD')} refs/heads/work ${remote}\n`;
@@ -846,10 +851,27 @@ describe('prePush', () => {
       git(clone, 'push', '-q', 'origin', 'work');
       const pushed = git(clone, 'rev-parse', 'HEAD');
       mergeFetched(clone);
+      const fetched = git(other, 'rev-parse', 'HEAD');
+      assert.deepEqual(await push(real(clone, fetched), line(clone, pushed)), { code: 0, err: [] });
+      // Main moves on after the fetch: GitHub's tip is not in the clone, so GitHub says what the merge brought.
+      commit(other, 'Build P-22 (#32)\n\nSlice: #22');
+      git(other, 'push', '-q', 'origin', 'main');
       const tip = git(other, 'rev-parse', 'HEAD');
-      assert.deepEqual(await push(real(clone, tip), line(clone, pushed)), { code: 0, err: [] });
-      // Without GitHub's tip, main's commits count as the push's own, as before.
-      assert.equal((await push(real(clone), line(clone, pushed))).err[0], '✗ the commits for work name 2 slices (#21, #20); one push builds one slice');
+      const sys = real(clone, tip, { [fetched]: 'behind' });
+      assert.deepEqual(await push(sys, line(clone, pushed)), { code: 0, err: [] });
+      assert.ok(sys.requests.some((r) => r.url.endsWith(`/compare/main...${fetched}?per_page=1`)));
+      // Where GitHub cannot say, or says the merged commit is not on main, main's commits count as the push's own, as before.
+      for (const compared of [{}, { [fetched]: 'diverged' }]) {
+        assert.equal((await push(real(clone, tip, compared), line(clone, pushed))).err[0], '✗ the commits for work name 2 slices (#21, #20); one push builds one slice');
+      }
+    });
+
+    it('asks GitHub nothing when the push names its one slice', async () => {
+      const { clone } = history('asked');
+      commit(clone, 'Add the thing\n\nSlice: #12');
+      const sys = real(clone);
+      assert.deepEqual(await push(sys, line(clone)), { code: 0, err: [] });
+      assert.ok(!sys.requests.some((r) => r.url.includes('/compare/')));
     });
 
     it('passes a merge tip with no trailer, and a commit with none, on a branch that already names its slice', async () => {
