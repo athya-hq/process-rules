@@ -476,12 +476,22 @@ async function moveBoard(sys: Sys, io: Output, token: string, slug: string, slic
   }
 }
 
+/** Throws for a write to an issue that GitHub refused, saying how to fix a workflow that grants no issues: write. */
+function refused(result: { status: number; json: unknown }, what: string): never {
+  const why = (result.json as { message?: string } | null)?.message ?? `HTTP ${result.status}`;
+  // A client workflow from before this release grants this job no issues: write.
+  const hint = /not accessible/i.test(why) ? '; the client workflow needs a job with issues: write for merged pull requests, so run process-rules onboard to update it' : '';
+  throw new Error(`cannot ${what}: ${why}${hint}`);
+}
+
 /**
  * Closes the slices a merged pull request names, run by the shared workflow
  * when one merges into the default branch: each open Slice it names with a
  * line `Slice: #N` gets a comment linking the pull request and is closed as
  * completed, which the Project's Item closed workflow moves to Done. A slice
- * line is not one of GitHub's closing keywords, so GitHub does not.
+ * line is not one of GitHub's closing keywords, so GitHub does not; a slice
+ * GitHub already closed, through one beside it, still gets the comment. A
+ * slice that has the comment already gets no second one.
  */
 export async function prMerged(sys: Sys, io: Output): Promise<number> {
   const { GITHUB_EVENT_PATH: eventPath, GITHUB_REPOSITORY: slug, GH_TOKEN: token } = sys.env;
@@ -523,18 +533,20 @@ export async function prMerged(sys: Sys, io: Output): Promise<number> {
       io.out(`- #${slice} is not a Slice in ${slug}; left as it is`);
       continue;
     }
+    // GitHub closes a slice itself when the pull request also says "Closes #N"; the slice still gets its comment, once.
+    const built = new RegExp(`\\bBuilt in #${pull.number}\\b`);
+    const comments = await every<Comment>(sys, token, slice, `${issue.url}/comments`);
+    const commented = comments.some((one) => built.test(one.body ?? ''));
+    if (!commented) {
+      const posted = await sys.http(`${issue.url}/comments`, { method: 'POST', token, body: { body: `Built in #${pull.number}, merged into ${pull.base.ref}.` } });
+      if (posted.status !== 201) refused(posted, `${issue.state === 'closed' ? 'comment on' : 'close'} #${slice}`);
+    }
     if (issue.state === 'closed') {
-      io.out(`✓ #${slice} is closed already`);
+      io.out(commented ? `✓ #${slice} is closed already and says it was built in #${pull.number}` : `✓ #${slice} is closed already; commented that it was built in #${pull.number}`);
       continue;
     }
-    const posted = await sys.http(`${issue.url}/comments`, { method: 'POST', token, body: { body: `Built in #${pull.number}, merged into ${pull.base.ref}.` } });
-    const closed = posted.status === 201 ? await sys.http(issue.url, { method: 'PATCH', token, body: { state: 'closed', state_reason: 'completed' } }) : posted;
-    if (closed.status !== 200 && closed.status !== 201) {
-      const why = (closed.json as { message?: string } | null)?.message ?? `HTTP ${closed.status}`;
-      // A client workflow from before this release grants this job no issues: write.
-      const hint = /not accessible/i.test(why) ? '; the client workflow needs a job with issues: write for merged pull requests, so run process-rules onboard to update it' : '';
-      throw new Error(`cannot close #${slice}: ${why}${hint}`);
-    }
+    const closed = await sys.http(issue.url, { method: 'PATCH', token, body: { state: 'closed', state_reason: 'completed' } });
+    if (closed.status !== 200) refused(closed, `close #${slice}`);
     io.out(`✓ #${slice}: closed, built in #${pull.number}`);
   }
   return 0;

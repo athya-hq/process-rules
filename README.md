@@ -289,7 +289,9 @@ closed slice, such as a fix, moves nothing. When a pull request naming a slice m
 the shared workflow comments on the slice, linking the pull request, and
 closes it, and the Project's Item closed workflow moves it to Done: a
 `Slice: #N` line is not one of GitHub's closing keywords, so GitHub does not
-close it. That job alone of a pull request's runs writes to issues. It runs only for
+close it. A slice GitHub closed already, through a closing keyword such as
+"Closes #N" beside it, still gets the comment; a slice that has it gets no
+second one. That job alone of a pull request's runs writes to issues. It runs only for
 pull requests from the repository itself: a fork's run gets a read-only token, so
 a slice a fork's pull request builds is closed by hand.
 
