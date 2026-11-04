@@ -1,5 +1,5 @@
 import { API, SETTINGS_PATH } from './agent.ts';
-import type { Sys } from './types.ts';
+import type { HttpResult, Sys } from './types.ts';
 
 /**
  * What a client can turn on, one at a time. identity is always on: the
@@ -70,26 +70,29 @@ export const NEEDS_ISSUE_TYPES: readonly Feature[] = ['work-rules', 'figma', 'de
 /** Why a feature that needs issue types cannot run on a repository a personal account owns. */
 export const PERSONAL_REPO = 'on a repository owned by a personal account, since GitHub has issue types for organisations only';
 
-/** Whether a repository is a personal account's, by repository, asked of GitHub once per run. */
-const personal = new WeakMap<Sys, Map<string, Promise<boolean>>>();
+/** GitHub's record of each repository, asked of GitHub once per run. */
+const repos = new WeakMap<Sys, Map<string, Promise<HttpResult>>>();
 
-/** Whether a personal account owns repository `slug`, from GitHub's `owner.type`; throws when GitHub will not say. */
-export function isPersonal(sys: Sys, slug: string, token: string): Promise<boolean> {
-  const asked = personal.get(sys) ?? new Map<string, Promise<boolean>>();
-  personal.set(sys, asked);
+/** GitHub's answer for repository `slug`, read once per run however many checks ask. */
+export function readRepo(sys: Sys, slug: string, token: string): Promise<HttpResult> {
+  const asked = repos.get(sys) ?? new Map<string, Promise<HttpResult>>();
+  repos.set(sys, asked);
   let answer = asked.get(slug);
   if (!answer) {
-    answer = (async () => {
-      const { status, json } = await sys.http(`${API}/repos/${slug}`, { token });
-      const type = (json as { owner?: { type?: unknown } } | null)?.owner?.type;
-      if (status !== 200 || typeof type !== 'string') throw new Error(`cannot tell whether a personal account owns ${slug} (HTTP ${status})`);
-      if (type === 'Organization') return false;
-      if (type === 'User') return true;
-      throw new Error(`cannot tell whether a personal account owns ${slug}: GitHub names its owner a ${JSON.stringify(type)}`);
-    })();
+    answer = sys.http(`${API}/repos/${slug}`, { token });
     asked.set(slug, answer);
   }
   return answer;
+}
+
+/** Whether a personal account owns repository `slug`, from GitHub's `owner.type`; throws when GitHub will not say. */
+export async function isPersonal(sys: Sys, slug: string, token: string): Promise<boolean> {
+  const { status, json } = await readRepo(sys, slug, token);
+  const type = (json as { owner?: { type?: unknown } } | null)?.owner?.type;
+  if (status !== 200 || typeof type !== 'string') throw new Error(`cannot tell whether a personal account owns ${slug} (HTTP ${status})`);
+  if (type === 'Organization') return false;
+  if (type === 'User') return true;
+  throw new Error(`cannot tell whether a personal account owns ${slug}: GitHub names its owner a ${JSON.stringify(type)}`);
 }
 
 /**

@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { after, describe, it } from 'node:test';
 
 import { AGENT, FakeSys, ROOT, SETTINGS, capture } from './fake.test.ts';
 import { prMerged, prePush, prWorkRules, propose, section, sliceProblems, slicesNamed } from './work.ts';
@@ -759,6 +763,150 @@ describe('prePush', () => {
     const sys = session('');
     sys.execOverride = (call) => (call.args[0] === 'log' ? { code: 128, stdout: '', stderr: 'bad revision\n' } : undefined);
     await assert.rejects(push(sys, `refs/heads/work ${LOCAL} refs/heads/work ${REMOTE}`), /git log failed: bad revision/);
+  });
+
+  describe('on a real git history, where the default branch carries other slices', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'process-rules-pre-push-'));
+    after(() => rmSync(dir, { recursive: true, force: true }));
+    const ENV = {
+      PATH: process.env.PATH,
+      HOME: dir,
+      GIT_CONFIG_GLOBAL: '/dev/null',
+      GIT_CONFIG_NOSYSTEM: '1',
+      GIT_AUTHOR_NAME: 'a',
+      GIT_AUTHOR_EMAIL: 'a@example.invalid',
+      GIT_COMMITTER_NAME: 'a',
+      GIT_COMMITTER_EMAIL: 'a@example.invalid',
+    };
+    let made = 0;
+    /** Runs real git in `cwd`, failing the test on an error. */
+    const git = (cwd: string, ...args: string[]): string => {
+      const result = spawnSync('git', args, { cwd, encoding: 'utf8', env: ENV });
+      assert.equal(result.status, 0, `git ${args.join(' ')}: ${result.stderr}`);
+      return result.stdout.trim();
+    };
+    const commit = (cwd: string, message: string): string => {
+      writeFileSync(join(cwd, `file-${++made}`), message);
+      git(cwd, 'add', '.');
+      git(cwd, 'commit', '-q', '-m', message);
+      return git(cwd, 'rev-parse', 'HEAD');
+    };
+    /**
+     * A remote whose default branch, main, has squash-merged two other
+     * slices, and a clone `name` of it with its work branch at main's first
+     * commit; `other` is a second clone, from which main moves on.
+     */
+    function history(name: string): { clone: string; other: string } {
+      const remote = join(dir, `${name}.git`);
+      git(dir, 'init', '-q', '--bare', '-b', 'main', remote);
+      const other = join(dir, `${name}-other`);
+      git(dir, 'clone', '-q', remote, other);
+      git(other, 'switch', '-q', '-c', 'main');
+      commit(other, 'Start');
+      git(other, 'push', '-q', 'origin', 'main');
+      const clone = join(dir, name);
+      git(dir, 'clone', '-q', remote, clone);
+      git(clone, 'switch', '-q', '-c', 'work');
+      commit(other, 'Build P-20 (#30)\n\nSlice: #20');
+      commit(other, 'Build P-21 (#31)\n\nSlice: #21');
+      git(other, 'push', '-q', 'origin', 'main');
+      return { clone, other };
+    }
+    /**
+     * An agent session in `clone`, whose git log and rev-parse --verify are
+     * real; GitHub names main's tip as `tip`, and compares main with each
+     * commit `compared` names as its status says.
+     */
+    function real(clone: string, tip?: string, compared: Record<string, string> = {}): FakeSys {
+      const sys = session('');
+      sys.execOverride = (call) => {
+        if (call.args[0] !== 'log' && call.args.slice(0, 3).join(' ') !== 'rev-parse --verify --quiet') return undefined;
+        const result = spawnSync('git', call.args, { cwd: clone, encoding: 'utf8', env: ENV });
+        return { code: result.status ?? 1, stdout: result.stdout, stderr: result.stderr };
+      };
+      sys.route('GET', `/repos/${SLUG}`, { status: 200, json: { owner: { type: 'Organization' }, default_branch: 'main' } });
+      sys.route('GET', `/repos/${SLUG}/git/ref/heads/main`, tip ? { status: 200, json: { object: { sha: tip } } } : { status: 404, json: { message: 'Not Found' } });
+      for (const [commit, status] of Object.entries(compared)) sys.route('GET', `/repos/${SLUG}/compare/main...${commit}?per_page=1`, { status: 200, json: { status } });
+      return sys;
+    }
+    const line = (clone: string, remote = ZERO): string => `refs/heads/work ${git(clone, 'rev-parse', 'HEAD')} refs/heads/work ${remote}\n`;
+    /** Fetches main into FETCH_HEAD alone, as a single-branch clone does, and merges it. */
+    const mergeFetched = (clone: string): void => {
+      git(clone, 'fetch', '-q', 'origin', 'main');
+      git(clone, 'update-ref', '-d', 'refs/remotes/origin/main');
+      git(clone, 'merge', '-q', '--no-edit', 'FETCH_HEAD');
+    };
+
+    it("passes a new branch's first push, naming its slice, beside main's slices", async () => {
+      const { clone, other } = history('first');
+      git(clone, 'fetch', '-q', 'origin');
+      git(clone, 'reset', '-q', '--hard', 'origin/main');
+      commit(clone, 'Add the thing\n\nSlice: #12');
+      assert.deepEqual(await push(real(clone, git(other, 'rev-parse', 'HEAD')), line(clone)), { code: 0, err: [] });
+    });
+
+    it("passes a merge of main whose commits name other slices, though the clone's ref for main is missing", async () => {
+      const { clone, other } = history('merge');
+      commit(clone, 'Add the thing\n\nSlice: #12');
+      git(clone, 'push', '-q', 'origin', 'work');
+      const pushed = git(clone, 'rev-parse', 'HEAD');
+      mergeFetched(clone);
+      const fetched = git(other, 'rev-parse', 'HEAD');
+      assert.deepEqual(await push(real(clone, fetched), line(clone, pushed)), { code: 0, err: [] });
+      // Main moves on after the fetch: GitHub's tip is not in the clone, so GitHub says what the merge brought.
+      commit(other, 'Build P-22 (#32)\n\nSlice: #22');
+      git(other, 'push', '-q', 'origin', 'main');
+      const tip = git(other, 'rev-parse', 'HEAD');
+      const sys = real(clone, tip, { [fetched]: 'behind' });
+      assert.deepEqual(await push(sys, line(clone, pushed)), { code: 0, err: [] });
+      assert.ok(sys.requests.some((r) => r.url.endsWith(`/compare/main...${fetched}?per_page=1`)));
+      // Where GitHub cannot say, or says the merged commit is not on main, main's commits count as the push's own, as before.
+      for (const compared of [{}, { [fetched]: 'diverged' }]) {
+        assert.equal((await push(real(clone, tip, compared), line(clone, pushed))).err[0], '✗ the commits for work name 2 slices (#21, #20); one push builds one slice');
+      }
+    });
+
+    it('asks GitHub nothing when the push names its one slice', async () => {
+      const { clone } = history('asked');
+      commit(clone, 'Add the thing\n\nSlice: #12');
+      const sys = real(clone);
+      assert.deepEqual(await push(sys, line(clone)), { code: 0, err: [] });
+      assert.ok(!sys.requests.some((r) => r.url.includes('/compare/')));
+    });
+
+    it('passes a merge tip with no trailer, and a commit with none, on a branch that already names its slice', async () => {
+      const { clone, other } = history('tip');
+      commit(clone, 'Add the thing\n\nSlice: #12');
+      git(clone, 'push', '-q', 'origin', 'work');
+      const pushed = git(clone, 'rev-parse', 'HEAD');
+      git(clone, 'fetch', '-q', 'origin');
+      commit(clone, 'Tidy up');
+      git(clone, 'merge', '-q', '--no-edit', 'origin/main');
+      // GitHub's tip is newer than the clone has, so the remote-tracking ref alone says where main is.
+      commit(other, 'Build P-22 (#32)\n\nSlice: #22');
+      git(other, 'push', '-q', 'origin', 'main');
+      assert.deepEqual(await push(real(clone, git(other, 'rev-parse', 'HEAD')), line(clone, pushed)), { code: 0, err: [] });
+    });
+
+    it("refuses a push naming no slice on a branch whose own commits name two", async () => {
+      const { clone, other } = history('two');
+      commit(clone, 'Add the thing\n\nSlice: #12');
+      commit(clone, 'Add another\n\nSlice: #13');
+      git(clone, 'push', '-q', 'origin', 'work');
+      const pushed = git(clone, 'rev-parse', 'HEAD');
+      mergeFetched(clone);
+      commit(clone, 'Tidy up');
+      assert.deepEqual(await push(real(clone, git(other, 'rev-parse', 'HEAD')), line(clone, pushed)), {
+        code: 1,
+        err: ['✗ the commits for work name 2 slices (#13, #12); one push builds one slice', 'pre-push: refused by the work rules'],
+      });
+    });
+
+    it('refuses a push naming no slice on a branch whose own commits name none', async () => {
+      const { clone, other } = history('none');
+      commit(clone, 'Tidy up');
+      assert.equal((await push(real(clone, git(other, 'rev-parse', 'HEAD')), line(clone))).err[0], '✗ the commits for work name no slice; add a trailer "Slice: #N" to a commit message');
+    });
   });
 
   describe('the work board', () => {

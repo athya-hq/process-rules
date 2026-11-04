@@ -408,9 +408,19 @@ session, GitHub is asked through its proxy whose account the session is. The
 owner's pushes from their own terminal are not checked. With `work-rules` on, it then applies the same rules before an
 agent session pushes: all the commits
 one push brings, on one branch, name one slice between them as a
-`Slice: #N` trailer. Commits a remote already has, such as the default
-branch's, are not the push's own; a push of only a merge, such as of the
-default branch, is judged by the branch's own commits. In an agent session, a push is refused when the CLI is
+`Slice: #N` trailer. Commits a remote already has are not the push's own,
+and neither are the default branch's commits the clone can find: those its
+tip as GitHub names it reaches, when the clone has that commit, and those
+its remote-tracking ref reaches. Where those are behind, as in a
+single-branch clone that merged the default branch from `FETCH_HEAD`, and the
+push would be refused, GitHub is asked which commits the push's merges
+brought are on the default branch, and those are left out too. So a merge of
+the default branch brings none of the slices its commits name. A push whose
+own commits name no slice, such as a merge or a commit with no trailer, is
+judged by the branch's own commits, those not on the default branch: it
+passes when they name exactly one slice. Where the clone cannot find the
+default branch at all, a push of only merges is judged by the commits the
+merges did not bring, as before. In an agent session, a push is refused when the CLI is
 missing, or, with `work-rules` on, the session has no token. When the repository already has its own
 pre-push hook, or git runs hooks from a folder outside the repository (a
 global `core.hooksPath`), `onboard` leaves it alone and names the line to add:
