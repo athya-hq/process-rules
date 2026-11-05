@@ -94,7 +94,7 @@ describe('run', () => {
   it('runs session-start, which always exits 0', async () => {
     const { code, out } = await capture(['session-start'], () => new FakeSys());
     assert.equal(code, 0);
-    assert.match(out[0] ?? '', /CLAUDE_ENV_FILE is unset/);
+    assert.match(out[0] ?? '', /CLAUDE_ENV_FILE is unset.*runs only as the SessionStart hook, so a run by hand says nothing about this session/);
   });
 
   it('passes the named agent on', async () => {

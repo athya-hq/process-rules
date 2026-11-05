@@ -16,6 +16,7 @@ const OWNER_LOGIN = 'example-owner';
 const ENV = '/tmp/claude-env';
 const SESSION = pathsFor(HOME, AGENT).session;
 const SCRIPT = sessionScript(AGENT, AGENT_ID, pathsFor(HOME, AGENT));
+const HOOK_ONLY = "session-start runs only as the SessionStart hook, so a run by hand says nothing about this session: the hook's own line at session start is what counts.";
 const FIX = 'ask example-owner to run process-rules machine ExampleBot (process-rules doctor ExampleBot names what is missing)';
 
 /** A Mac `machine` has set up, in a session with an env file. */
@@ -180,7 +181,7 @@ describe('sessionStart', () => {
       assert.match((await start(bare)).out[0] ?? '', /^process-rules: STOP\. .*, so this cloud session cannot be checked as the agent\. .*tell the owner\.$/);
       const noFile = cloud(AGENT);
       delete noFile.env.CLAUDE_ENV_FILE;
-      assert.deepEqual((await start(noFile)).out, [`process-rules: STOP. CLAUDE_ENV_FILE is unset, so this cloud session cannot be given the agent identity. ${STOP}`]);
+      assert.deepEqual((await start(noFile)).out, [`process-rules: STOP. CLAUDE_ENV_FILE is unset, so this cloud session cannot be given the agent identity. ${STOP} ${HOOK_ONLY}`]);
       const readOnly = cloud(AGENT);
       readOnly.append = () => {
         throw new Error('read-only');
@@ -198,7 +199,7 @@ describe('sessionStart', () => {
     assert.equal(code, 0);
     assert.equal(env, undefined);
     assert.deepEqual(out, [
-      'process-rules: STOP. CLAUDE_ENV_FILE is unset, so this session cannot be given the agent identity and gh and git would act as the owner. Do not push, fetch, or run gh in this session; tell example-owner.',
+      'process-rules: STOP. CLAUDE_ENV_FILE is unset, so this session cannot be given the agent identity and gh and git would act as the owner. Do not push, fetch, or run gh in this session; tell example-owner. ' + HOOK_ONLY,
     ]);
   });
 
