@@ -16,8 +16,9 @@ You review the decisions in this repository whose review date has come.
    wait on the owner (`veto` or `needs-owner`), except one the weekly job
    labeled `needs-owner` because its review is over a week overdue: that one
    still waits on you, and the job takes the label off after your `Kept:` or
-   `Settled:`. A decision edited since the weekly job last vetted its text
-   waits for the job's next run: stderr names it. If stdout is empty, stop.
+   `Settled:`. A decision whose text is not the one the weekly job last
+   vetted is left out, and stderr names it: the job vets the owner's or your
+   edits on its next run. If stdout is empty, stop.
    Review only the decisions it lists.
 2. For each decision, read the issue, its comments and anything it links,
    then decide.

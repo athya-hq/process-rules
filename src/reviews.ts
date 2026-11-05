@@ -232,12 +232,18 @@ export async function watchReviews(sys: Sys, io: Output, slug: string, token: st
     io.out(`#${issue.number}: vetted its text for the review routine`);
   }
 
+  // Its review date from that same body, so an edit moving the date since the listing counts.
+  const reviewOf = (issue: Issue): string | undefined => {
+    const review = parseDecision((editors.get(issue.number) as Edited).body).review;
+    return review !== undefined && DATE.test(review) && !Number.isNaN(Date.parse(review)) ? review : undefined;
+  };
   const overdue = theirs.filter((issue) => {
     if (issue.labels.some((label) => WAITING.includes(label.name)) && !cleared.has(issue.number)) return false;
-    return (Date.parse(today) - Date.parse(parseDecision(issue.body ?? '').review as string)) / DAY_MS > OVERDUE_DAYS;
+    const review = reviewOf(issue);
+    return review !== undefined && (Date.parse(today) - Date.parse(review)) / DAY_MS > OVERDUE_DAYS;
   });
   for (const issue of overdue) {
-    const review = parseDecision(issue.body ?? '').review as string;
+    const review = reviewOf(issue) as string;
     if (verdictSince(agentComments(await commentsOf(issue.number), agents), Date.parse(review))) continue;
     const added = await sys.http(`${API}/repos/${slug}/issues/${issue.number}/labels`, { method: 'POST', token, body: { labels: ['needs-owner'] } });
     if (added.status !== 200) throw new Error(`cannot label #${issue.number} needs-owner (HTTP ${added.status})`);
