@@ -528,8 +528,9 @@ the proxy's placeholder token (`proxy-injected`), which the proxy swaps for
 the connected account's. As anyone else, GitHub stays locked out and the
 session is told to stop. The pre-push hook asks GitHub the same through
 the proxy before each push. `session-start` runs only as the SessionStart
-hook: Claude Code sets `CLAUDE_ENV_FILE` only then, so run by hand from the
-session's shell it always says STOP, which says nothing about the session.
+hook: Claude Code sets `CLAUDE_ENV_FILE` for its hooks, never in the
+session's shell, so run by hand there it always says STOP, which says
+nothing about the session.
 The hook's own line at session start is what counts.
 
 A cloud session's git commits are authored and committed as Claude's own

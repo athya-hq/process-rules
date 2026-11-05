@@ -40,8 +40,8 @@ export async function sessionStart(sys: Sys, io: Output): Promise<number> {
 }
 
 /**
- * Claude Code sets CLAUDE_ENV_FILE only while it runs the SessionStart hook,
- * so session-start run by hand from a session's shell always finds it unset.
+ * Claude Code sets CLAUDE_ENV_FILE for its hooks, never in a session's shell,
+ * so session-start run by hand there always finds it unset.
  * The STOP stands, as the hook itself may lack it, but says so.
  */
 const HOOK_ONLY = 'session-start runs only as the SessionStart hook, so a run by hand says nothing about this session: the hook\'s own line at session start is what counts.';
