@@ -99,24 +99,33 @@ async function list(sys: Sys, token: string, url: string): Promise<{ name: strin
   }
 }
 
+/** The board's steps a yes is asked for, so a caller can answer each kind its own way. */
+export type BoardStep = 'issue types' | 'labels' | 'project' | 'replace' | 'link' | 'fields' | 'views';
+
+/** What setUpBoard leaves: the Project, and what GitHub's API cannot do there, for the owner to do by hand. */
+export interface BoardSetUp {
+  url: string;
+  byHand: string[];
+}
+
 /**
  * Sets up the client's work board as the owner, with the owner's token for
  * this run (owner-login.ts): the organisation's issue types, the repo's
  * labels, and a Project linked to the repo with the work model's fields. Creates only what is
- * missing; every change waits for a yes. Returns the Project's URL, or
- * undefined when it stopped.
+ * missing; every change waits for `confirm`'s yes. Returns the Project and
+ * what is left to do by hand, or undefined when it stopped.
  */
 export async function setUpBoard(
   sys: Sys,
   io: Output,
-  confirm: (question: string) => Promise<boolean>,
+  confirm: (question: string, step: BoardStep) => Promise<boolean>,
   slug: string,
   owner: string,
   /** The owner's token, with the project scope, and admin:org for an organisation's repository. */
   token: string,
   /** The Project's title; `<repo> work` when the settings name none. */
   projectTitle?: string,
-): Promise<string | undefined> {
+): Promise<BoardSetUp | undefined> {
   const found = await sys.http(`${API}/repos/${slug}`, { token });
   const raw = found.json as { node_id?: unknown; name?: unknown; owner?: { login?: unknown; type?: unknown } } | null;
   if (found.status !== 200 || typeof raw?.node_id !== 'string' || typeof raw.name !== 'string' || typeof raw.owner?.login !== 'string') {
@@ -136,7 +145,7 @@ export async function setUpBoard(
     if (absent.length > 0) {
       // Said before asking, since GitHub keeps issue types for the whole organisation, not this repository.
       const names = absent.map((t) => t.name).join(', ');
-      if (!(await confirm(`Issue types are an organisation-wide setting, so they apply to every repository in ${repo.ownerLogin}, not only ${repo.name}. Add the issue types ${names} to the ${repo.ownerLogin} organisation?`))) {
+      if (!(await confirm(`Issue types are an organisation-wide setting, so they apply to every repository in ${repo.ownerLogin}, not only ${repo.name}. Add the issue types ${names} to the ${repo.ownerLogin} organisation?`, 'issue types'))) {
         return stopped(io, 'issue types');
       }
       for (const type of absent) {
@@ -156,7 +165,7 @@ export async function setUpBoard(
   const labels = await list(sys, token, `${API}/repos/${slug}/labels`);
   const newLabels = LABELS.filter((label) => !labels.some((had) => had.name.toLowerCase() === label.name));
   if (newLabels.length > 0) {
-    if (!(await confirm(`Add the labels ${newLabels.map((l) => l.name).join(', ')} to ${slug}?`))) {
+    if (!(await confirm(`Add the labels ${newLabels.map((l) => l.name).join(', ')} to ${slug}?`, 'labels'))) {
       return stopped(io, 'labels');
     }
     for (const label of newLabels) {
@@ -186,7 +195,7 @@ export async function setUpBoard(
     after = holder.projectsV2.pageInfo.endCursor;
   }
   if (!project) {
-    if (!(await confirm(`Create the Project "${title}" for ${repo.ownerLogin} from the process-rules template, linked to ${slug}?`))) {
+    if (!(await confirm(`Create the Project "${title}" for ${repo.ownerLogin} from the process-rules template, linked to ${slug}?`, 'project'))) {
       return stopped(io, 'project');
     }
     const copy = await copyTemplate(sys, io, token, holderId as string, title, 'building the Project instead');
@@ -210,7 +219,7 @@ export async function setUpBoard(
       `"${title}" lacks what only the process-rules template sets (the views' grouping, the workflows). ` +
       `Replace it with a copy of the template, moving its ${moving.items.length} open item${moving.items.length === 1 ? '' : 's'} with their Status, Step, Decision and Review date` +
       `${lost.length > 0 ? ` (not ${lost.join(', ')}, which the template lacks)` : ''}, and close it as "${title} (old)"?`;
-    if (await confirm(question)) {
+    if (await confirm(question, 'replace')) {
       // Renamed first, so a rerun after a failure finds the copy by the title, not the old Project.
       await retitle(sys, token, old.id, `${title} (old)`);
       const copy = await copyTemplate(sys, io, token, holderId as string, title, 'keeping the Project as it is');
@@ -225,7 +234,7 @@ export async function setUpBoard(
     }
   }
   if (!project.repositories.nodes.some((linked) => linked.id === repo.nodeId)) {
-    if (!(await confirm(`Link the Project "${title}" to ${slug}?`))) return stopped(io, 'project');
+    if (!(await confirm(`Link the Project "${title}" to ${slug}?`, 'link'))) return stopped(io, 'project');
     await link(sys, token, project.id, repo.nodeId);
   }
   io.out(`✓ Project "${title}": ${project.url}`);
@@ -239,7 +248,7 @@ export async function setUpBoard(
   const names = fields.node.fields.nodes.map((node) => node.name?.toLowerCase());
   const newFields = FIELDS.filter((field) => !names.includes(field.name.toLowerCase()));
   if (newFields.length > 0) {
-    if (!(await confirm(`Add the fields ${newFields.map((f) => f.name).join(', ')} to "${title}"?`))) {
+    if (!(await confirm(`Add the fields ${newFields.map((f) => f.name).join(', ')} to "${title}"?`, 'fields'))) {
       return stopped(io, 'fields');
     }
     for (const field of newFields) {
@@ -261,10 +270,16 @@ export async function setUpBoard(
   if (!(await setUpViews(sys, token, confirm, project.id, title))) return stopped(io, 'views');
   io.out(`✓ views: ${VIEWS.map((v) => v.name).join(', ')}`);
   const done = await finished(sys, token, project.id);
-  if (!done.grouped) for (const line of viewsChecklist(project.url)) io.out(line);
-  else io.out(`- Board shows slices and briefs; Done keeps one until the Auto-archive items workflow archives it, with the template's filter ${ARCHIVE_FILTER}, which GitHub's API can neither read nor set`);
-  if (done.off.length > 0) io.out(`Turn on the workflows ${done.off.join(', ')} in ${project.url} → Workflows (GitHub's API cannot)`);
-  return project.url;
+  const byHand: string[] = [];
+  if (!done.grouped) {
+    for (const line of viewsChecklist(project.url)) io.out(line);
+    byHand.push(`group 2 views, auto-archive → ${project.url}`);
+  } else io.out(`- Board shows slices and briefs; Done keeps one until the Auto-archive items workflow archives it, with the template's filter ${ARCHIVE_FILTER}, which GitHub's API can neither read nor set`);
+  if (done.off.length > 0) {
+    io.out(`Turn on the workflows ${done.off.join(', ')} in ${project.url} → Workflows (GitHub's API cannot)`);
+    byHand.push(`turn on ${done.off.length} project workflow${done.off.length === 1 ? '' : 's'} → ${project.url}/workflows`);
+  }
+  return { url: project.url, byHand };
 }
 
 /** Renames a Project, and closes it when asked; otherwise it stays open or closed as it was. */
@@ -452,7 +467,7 @@ const VIEW = 'id name layout filter configuration { visibleFields(first: 50) { n
 export async function setUpViews(
   sys: Sys,
   token: string,
-  confirm: (question: string) => Promise<boolean>,
+  confirm: (question: string, step: BoardStep) => Promise<boolean>,
   projectId: string,
   title: string,
 ): Promise<boolean> {
@@ -474,7 +489,7 @@ export async function setUpViews(
   if (changes.length === 0) return true;
   const renamed = changes.find((step) => step.view?.name === DEFAULT_VIEW);
   const question = `Set up the views ${changes.map((step) => step.spec.name).join(', ')} in "${title}"${renamed ? ` (renaming "${DEFAULT_VIEW}" to "${renamed.spec.name}")` : ''}?`;
-  if (!(await confirm(question))) return false;
+  if (!(await confirm(question, 'views'))) return false;
 
   for (const { spec, view: had } of changes) {
     const view =

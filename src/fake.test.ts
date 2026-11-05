@@ -333,6 +333,56 @@ export class FakeSys implements Sys {
     return Promise.resolve(this.secrets.shift() ?? '');
   }
 
+  /** Whether a person is at the terminal; onboard asks its question only there. */
+  tty = true;
+  /** The yes-or-no choices asked, in order; each takes the next of `answers`, yes when it starts with y. */
+  chosen: string[] = [];
+  choose(question: string): Promise<boolean> {
+    this.chosen.push(question);
+    return Promise.resolve(/^y/i.test(this.answers.shift() ?? ''));
+  }
+
+  /** The spinners shown, by label, and how many are still turning. */
+  spun: string[] = [];
+  spinning = 0;
+  spin(label: string): { stop(): void } {
+    this.spun.push(label);
+    this.spinning++;
+    let stopped = false;
+    return {
+      stop: () => {
+        if (!stopped) this.spinning--;
+        stopped = true;
+      },
+    };
+  }
+
+  /** What gh prints during the browser sign-in, as gh 2.103 does with its output not a terminal. */
+  ghSignInLines = [
+    '',
+    '! One-time code (1881-F156) copied to clipboard',
+    'Open this URL to continue in your web browser: https://github.com/login/device',
+  ];
+  /** What gh prints once the sign-in has finished. */
+  ghSignedInLines = [
+    '✓ Authentication complete.',
+    '- gh config set -h github.com git_protocol ssh',
+    '✓ Configured git protocol',
+    '! Authentication credentials saved in plain text',
+    '✓ Logged in as example-owner',
+  ];
+  converse(
+    command: string,
+    args: readonly string[],
+    options: { cwd?: string; env?: Record<string, string | undefined> },
+    line: (text: string) => void,
+  ): Promise<number> {
+    const result = this.exec(command, args, { ...options, interactive: true });
+    if (command === 'gh' && args[1] === 'login') for (const text of [...this.ghSignInLines, ...(result.code === 0 ? this.ghSignedInLines : [])]) line(text);
+    for (const text of `${result.stdout}${result.stderr}`.split('\n').filter(Boolean)) line(text);
+    return Promise.resolve(result.code);
+  }
+
   open(url: string): void {
     this.opened.push(url);
   }

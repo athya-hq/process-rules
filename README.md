@@ -166,14 +166,20 @@ the Mac. When a run of `onboard` (or `onboard --add`) reaches a step that
 acts as the owner (giving the agent access, setting up the board, or
 setting the `FIGMA_LIBRARY` secret from an older setting), it
 asks for one browser approval, which serves the rest of that run; a run
-with no such step asks for none. It runs `gh auth login --web` into a
+with no such step asks for none. That approval comes after the plan's yes,
+unless only it can tell what the plan is: which of several owners the
+settings list ran it, or, on a first run with no owner named, whom to
+suggest; the pull request then says so. It runs `gh auth login --web` into a
 fresh temporary `gh` folder, asking for gh's own scopes (`repo`,
 `read:org`, `gist`) plus only those the run's features add (`project` for
 the board, and `admin:org` in an organisation), reads the token from
 there, refuses it unless it is the owner's, and deletes the folder
 whatever happens. Its line names the account to sign in as (each owner the
-settings list, while the run has not chosen one) and says that `gh`'s own
-lines about saving credentials mean that temporary folder. The
+settings list, while the run has not chosen one). `onboard` reads `gh`'s
+output rather than showing it: it shows the one-time code and opens the
+link in the browser, drops `gh`'s tips and its notes about setting up that
+temporary folder, and shows any other line, an error included, as `gh`
+wrote it. The
 token lives in the command's memory for that run; the owner's own `gh`
 config and keychain are never read or written, so there is nothing to sign
 out of afterwards.
@@ -189,8 +195,7 @@ again.
 
 `process-rules doctor` re-checks the key, the token and its scopes, the key's
 registration, the session file and that the launcher runs, names the step to re-run, and warns 14
-days before the token ends. Run in an adopting repo, it also warns when the
-repo's CODEOWNERS names the owner.
+days before the token ends.
 
 ## Adopting
 
@@ -198,7 +203,39 @@ repo's CODEOWNERS names the owner.
 2. In the client repository, as its owner: `process-rules onboard`. It
    suggests the owner from the run's browser sign-in (below) and the agent from the accounts
    `machine` set up on this Mac, for you to confirm (or name them:
-   `process-rules onboard <owner> <agent>`). It writes `.github/process-rules.json`, adds to `.claude/settings.json`
+   `process-rules onboard <owner> <agent>`). It first works out everything
+   it would change, changing nothing, and prints that as one plan, then asks
+   once:
+
+   ```
+   ◆  process-rules onboard   v0.5.17 → v0.5.20
+   │  owner/repo · owner OWNER · agent AGENT
+   │
+   ◇  Pull request — you merge it
+   │    workflow  pins → v0.5.20
+   │
+   ◇  GitHub — one sign-in as OWNER
+   │    board        set up or check
+   │    issue types  org-wide, if missing
+   │
+   ◇  This Mac
+   │    pre-push hook  new
+   │
+   ◇  Check
+   │    one signed test commit by AGENT, deleted after
+   │
+   ◆  Go ahead?   ● Yes  ○ No
+   ```
+
+   It shows only what changes, in a few words each; the pull request's
+   description holds each change in full. No changes nothing and opens no
+   pull request. `--yes` goes ahead without asking, and `--dry-run` prints
+   the plan and stops, changing nothing; without a terminal and without
+   `--yes`, `onboard` refuses. After the yes it shows one line per step, a
+   spinner while it works, and ends with the pull request to merge and a
+   short "By hand:" list of what GitHub's API cannot do.
+
+   It writes `.github/process-rules.json`, adds to `.claude/settings.json`
    the lock in `env`, a SessionStart hook running `process-rules
    session-start`, a PreToolUse hook running `process-rules guard` and a
    `permissions.allow` rule for `process-rules review-thread`, and
@@ -207,8 +244,8 @@ repo's CODEOWNERS names the owner.
    on pull requests and pushes, read-only, and `process-rules-weekly` on the
    weekly run, the only one that writes to issues. It checks the agent can
    push. With no access, or read access only (a public repo, or an
-   organisation's base permission), `onboard` offers to give it write access
-   as you and to accept the invitation as the agent; and it names
+   organisation's base permission), the plan gives it write access as you
+   and accepts the invitation as the agent; and `onboard` names
    an organisation that
    requires SAML authorisation or blocks classic tokens. As the owner (with
    the `project` scope, and `admin:org` in an organisation), it sets up the
@@ -222,13 +259,14 @@ repo's CODEOWNERS names the owner.
    showing linked pull requests), Work items (`type:"Work item"`, grouped by Step), Decisions
    (`type:Decision`, grouped by Decision) and Reviews due (`"Review
    date":<=@today`), with its workflows; so the board needs nothing done by
-   hand. Issue types are an organisation-wide setting: before adding any,
-   `onboard` says they apply to every repository in the organisation and
-   names the ones it would add; it says nothing when they are all there. If a copy's workflows arrive off, `onboard` names the ones to turn on. A Project of that title made before the template is offered a move
-   to a copy: its open items move with their Status, Step, Decision and Review
-   date, and the old one is closed as "<title> (old)". When GitHub refuses the
-   copy, or the owner keeps the old Project, `onboard` adds the fields and
-   makes or updates the views itself, and prints the two things GitHub's API
+   hand. What the board lacks is known only once you have signed in, so the
+   plan says "set up or check"; issue types are an organisation-wide
+   setting, so it says they would be added for the whole organisation. If
+   a copy's workflows arrive off, "By hand:" links where to turn them on. A
+   Project of that title made before the template is left as it is: the plan's
+   yes does not replace it. When GitHub refuses the copy, or for such an
+   older Project, `onboard` adds the fields and makes or updates the views
+   itself, and "By hand:" links the Project for the two things GitHub's API
    cannot set: the grouping and the auto-archive workflow. The Board keeps a
    closed slice or brief in Done until that workflow archives it, with the
    filter `is:closed updated:<@today-7d`: a week. A view's filter cannot do
@@ -239,26 +277,21 @@ repo's CODEOWNERS names the owner.
    shows it Verified by the agent (asking again when the network or GitHub
    fails for a moment), and deletes the branch. The steps that act as you
    (giving the agent access, the board, the `FIGMA_LIBRARY` secret) share one browser approval, for
-   that run only. Each change waits
-   for a yes. The files git tracks in your checkout are never changed: once every step has run,
+   that run only. The files git tracks in your checkout are never changed: once every step has run,
    `onboard` commits the files it changes as the agent, signed, on the
    branch `process-rules/onboard` from the default branch's tip, in a
    temporary repository it deletes afterwards, pushes it as the agent and
    opens the agent's pull request (or updates the one an earlier run opened),
-   printing its link; merge it to finish. A run that changes no file, or
-   that stops, opens none. A file the default branch has otherwise than your
+   titled `chore(process-rules): onboard at v<version>`, as Conventional
+   Commits reads it, and its commit the same; merge it to finish. A run
+   that changes no file, or that stops, opens none. A file the default branch has otherwise than your
    checkout is refused, so bring the checkout up to date first. The pre-push
    git hook, which git does not track, is written in place. The work rules
    pass that pull request without a `Slice:` line while it changes only the
-   files `onboard` writes. When a rule in the repo's
-   CODEOWNERS (the file GitHub uses: `.github/CODEOWNERS`, else `CODEOWNERS`,
-   else `docs/CODEOWNERS`) names the owner, GitHub will ask the owner to
-   review every agent pull request that changes a file those rules match,
-   since the agent authors them and GitHub never asks a pull request's
-   author. Once the test commit is Verified, `onboard` says so and offers to
-   remove the owner's handle from those rules, dropping a rule left with no
-   owners (its paths then fall to the rules before it). Teams, other owners
-   and comments stay, and without a yes the file stays as it is. An existing `.claude/settings.json`
+   files `onboard` writes. `onboard` leaves the repo's CODEOWNERS as it is:
+   when a rule there names you, GitHub asks you to review the agent's pull
+   requests that change the files it matches, and the repo's own rules
+   decide whether that review is required. An existing `.claude/settings.json`
    keeps its layout: `onboard` adds only its entries, and replaces the hook
    entries an older release wrote where they stand. The repository needs at
    least one commit. The pull request checks read the settings from the base
@@ -422,8 +455,8 @@ was never created, or has stopped, shows up. Only the agent's comments count
 as verdicts: anyone can write `Kept:`. `reviews-due` still lists a decision
 the job labeled so, until the agent comments on it, and the job takes the
 label off once the agent's verdict follows it; a `needs-owner` the routine or
-the owner added stays. `onboard`, with `review` on, prints how to create the
-routine: a weekly Claude routine on the repository (claude.ai/code/routines,
+the owner added stays. `onboard`, with `review` on, lists the routine under
+"By hand:", and its pull request says how to create it: a weekly Claude routine on the repository (claude.ai/code/routines,
 or `/schedule`), with claude.ai's GitHub connected as the agent, and the
 prompt from `routines/review.md` at the release in use. It cannot create the
 routine itself: Claude's routines API answers only a Claude Code session's own
@@ -457,8 +490,8 @@ default branch at all, a push of only merges is judged by the commits the
 merges did not bring, as before. In an agent session, a push is refused when the CLI is
 missing, or, with `work-rules` on, the session has no token. When the repository already has its own
 pre-push hook, or git runs hooks from a folder outside the repository (a
-global `core.hooksPath`), `onboard` leaves it alone and names the line to add:
-`process-rules pre-push "$@"`. The client workflow re-runs the checks when a
+global `core.hooksPath`), `onboard` leaves it alone and lists the line to add
+under "By hand:": `process-rules pre-push "$@"`. The client workflow re-runs the checks when a
 pull request's description is edited. After upgrading process-rules, run
 `onboard` again: it upgrades the hook entries in `.claude/settings.json` and
 the workflow. An older release's workflow, one job that let every run write

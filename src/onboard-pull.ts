@@ -1,5 +1,4 @@
 import { API, SETTINGS_PATH, pathsFor, sessionEnv } from './agent.ts';
-import { CODEOWNERS_PATHS } from './codeowners.ts';
 import type { Output, Sys } from './types.ts';
 import { GITHUB_WEB } from './host.ts';
 
@@ -8,7 +7,12 @@ export const ONBOARD_BRANCH = 'process-rules/onboard';
 export const HOOKS_PATH = '.claude/settings.json';
 export const WORKFLOW_PATH = '.github/workflows/process-rules.yml';
 /** Every file onboard's pull request may change. */
-export const ONBOARD_FILES = [SETTINGS_PATH, HOOKS_PATH, WORKFLOW_PATH, ...CODEOWNERS_PATHS];
+export const ONBOARD_FILES = [SETTINGS_PATH, HOOKS_PATH, WORKFLOW_PATH];
+
+/** onboard's commit header and pull request title: Conventional Commits, scoped to the product. */
+export function pullTitle(version: string): string {
+  return `chore(process-rules): onboard at v${version}`;
+}
 
 /** A file onboard changes: what this checkout has (undefined when none), and what onboard writes. */
 export interface Change {
@@ -37,9 +41,10 @@ export interface PullTarget {
  * and a pull request opened, or the open one updated. A file the default
  * branch has otherwise than this checkout is refused, so nothing on the
  * default branch is undone. The temporary repository is deleted whatever
- * happens. Returns the pull request's link, or 1 having said why not.
+ * happens. `notes`, lines of Markdown, follow the list of files in the
+ * description. Returns the pull request's link, or 1 having said why not.
  */
-export async function openPull(sys: Sys, io: Output, target: PullTarget, changes: readonly Change[]): Promise<string | 1> {
+export async function openPull(sys: Sys, io: Output, target: PullTarget, changes: readonly Change[], notes: readonly string[] = []): Promise<string | 1> {
   const { agent, id, token, slug, branch, version } = target;
   const dir = sys.tempDir();
   const env = sessionEnv(sys.env, agent, id, token, pathsFor(sys.home, agent));
@@ -74,7 +79,7 @@ export async function openPull(sys: Sys, io: Output, target: PullTarget, changes
     // --missing-ok: the files onboard leaves alone have no contents here.
     const tree = git(['write-tree', '--missing-ok']);
     if (tree.code !== 0) return failed('git write-tree', tree.stderr);
-    const title = `process-rules onboard at v${version}`;
+    const title = pullTitle(version);
     const made = git(['commit-tree', '-S', tree.stdout.trim(), '-p', 'FETCH_HEAD', '-m', title]);
     const sha = made.stdout.trim();
     if (made.code !== 0 || !sha) return failed('signing the commit', made.stderr);
@@ -83,10 +88,11 @@ export async function openPull(sys: Sys, io: Output, target: PullTarget, changes
     if (push.code !== 0) return failed(`pushing as ${agent}`, push.stderr);
 
     const body = [
-      `\`process-rules onboard\` v${version}, run by the owner, sets this repository up. Every change below was confirmed at the terminal:`,
+      `\`process-rules onboard\` v${version}, run by the owner, sets this repository up. The owner approved the plan holding every change below at the terminal:`,
       '',
       ...changes.map((change) => `- \`${change.path}\`: ${change.what}`),
       '',
+      ...(notes.length > 0 ? [...notes, ''] : []),
       `Merge it to finish onboarding; agent sessions then work as ${agent}. Running onboard again updates this pull request.`,
     ].join('\n');
     const pulls = `${API}/repos/${slug}/pulls`;

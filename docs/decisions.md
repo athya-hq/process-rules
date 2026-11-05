@@ -186,6 +186,7 @@
   is the client's to change, and GitHub's API does not say who a team's
   review would reach without more scopes. `doctor`, in an adopting repo,
   warns about the same rules and changes nothing.
+  Reversed on 2026-11-05: onboard keeps CODEOWNERS (below).
 - **2026-11-01 — Record: P-34, agent sessions answer review threads
   without asking.** The owner, in chat, when replying to and resolving a
   review thread waited on approval in auto mode: "This shouldn't be a
@@ -604,3 +605,42 @@
   tries, and a timeout keeps its own error and is not repeated, so a
   caller's time budget holds. A label's removal counts a 404 as done, since
   a repeated DELETE after one whose answer was lost finds it already off.
+- **2026-11-05 — Record: onboard keeps CODEOWNERS, reversing P-33's
+  offer.** The owner, in chat: "Don't remove the CODEOWNERS in the
+  onboarding." This reverses the 2026-11-01 record for P-33. The owner
+  prefers to be asked to review the agent's pull requests, and the repo's
+  own rules (its branch protection or rulesets) decide whether that review
+  is required, so `onboard` no longer offers to remove the owner from
+  CODEOWNERS, `doctor` no longer warns about such a rule, and the
+  CODEOWNERS files leave the list of files onboard writes: a pull request
+  from onboard's branch that changes one is held to the work rules like any
+  other. Fixed with State #153 of P-04.
+- **2026-11-05 — Record: P-04, onboard asks once, from one plan.** The
+  owner ran onboard in a client and found it too complex: about eight y/N
+  questions, each a long sentence, with a browser sign-in in the middle, and
+  output they did not read. Its pull request's title, "process-rules
+  onboard at v0.5.19", failed that client's commitlint. The owner approved
+  the layout this State (#153) builds. `onboard` now works out every change
+  first, changing nothing, prints one plan grouped by where each change
+  lands (the pull request you merge, GitHub as you, this Mac, the check),
+  with short labels and only what changes, and asks once; the long
+  explanations move into the pull request's description. `--yes` skips the
+  question and `--dry-run` stops at the plan; with no terminal and no
+  `--yes` it refuses rather than read an answer from a pipe. The browser
+  sign-in comes after the yes, except where only it tells what the plan is
+  (which of several owners ran it, or whom to suggest as the owner on a
+  first run), which the pull request then says. What the board lacks is
+  known only to the owner's token, so the plan says "set up or check", and
+  the one yes covers every board step but replacing a Project made before
+  the template, which moves its items and closes it: that is left as it is,
+  with the template's grouping and auto-archive under "By hand:". `gh`'s
+  output during the sign-in is read rather than shown: with it not a
+  terminal, `gh` prints the one-time code and link instead of asking for
+  Enter, so onboard shows the code and opens the link, drops `gh`'s tips
+  and notes about its temporary folder, and shows any other line as `gh`
+  wrote it, so an error still reaches the owner. The confirm and spinner
+  come from `@clack/prompts`, loaded only by onboard, since the shared
+  checks run the CLI from source with no packages installed; colour shows
+  only on a terminal that has it, never with `NO_COLOR`. The title and the
+  commit read `chore(process-rules): onboard at v<version>`, which
+  Conventional Commits accepts.

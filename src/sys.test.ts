@@ -66,6 +66,22 @@ describe('realSys', () => {
     assert.deepEqual(sys.exec('sh', ['-c', 'exit 0'], { interactive: true }), { code: 0, stdout: '', stderr: '' });
   });
 
+  it("hands a conversing command's lines from both streams to the caller, with its exit code", async () => {
+    const lines: string[] = [];
+    const code = await sys.converse('sh', ['-c', 'echo one; echo two >&2; printf three; exit 3'], { env: { PATH: '/usr/bin:/bin', SEEN: 'x' } }, (line) => lines.push(line));
+    assert.equal(code, 3);
+    assert.deepEqual([...lines].sort(), ['one', 'three', 'two']);
+    assert.equal(await sys.converse('/no/such/command', [], {}, () => {}), 127);
+    assert.equal(await sys.converse('sh', ['-c', 'kill -TERM $$'], {}, () => {}), 128 + 15);
+  });
+
+  it('shows no spinner without a terminal', () => {
+    if (process.stdout.isTTY) return;
+    const spinner = sys.spin('working');
+    spinner.stop();
+    spinner.stop();
+  });
+
   it('knows home, cwd, env and the time', () => {
     assert.equal(sys.cwd, process.cwd());
     assert.ok(sys.home.length > 0);

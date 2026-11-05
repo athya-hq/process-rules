@@ -62,6 +62,23 @@ export interface Sys {
   readStdin(): string;
   ask(question: string): Promise<string>;
   askSecret(question: string): Promise<string>;
+  /** Whether a person is at the terminal: standard input and output are both one. */
+  tty: boolean;
+  /** Asks yes or no at the terminal as a choice, Yes first; false for No, or for a cancel. */
+  choose(question: string): Promise<boolean>;
+  /** Shows a spinner by `label` on the terminal until stop() takes it off; nothing without a terminal. */
+  spin(label: string): { stop(): void };
+  /**
+   * Runs a command that reads the person at the terminal through standard
+   * input, handing each line it prints, from standard output or error, to
+   * `line` instead of printing it. Resolves with its exit code.
+   */
+  converse(
+    command: string,
+    args: readonly string[],
+    options: { cwd?: string; env?: Record<string, string | undefined> },
+    line: (text: string) => void,
+  ): Promise<number>;
   open(url: string): void;
   now(): Date;
   sleep(ms: number): Promise<void>;
