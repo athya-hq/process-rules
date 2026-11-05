@@ -8,7 +8,8 @@ import { after, describe, it } from 'node:test';
 import { BASE_ENV, NO_TOKEN, lockScript, pathsFor, sessionNames, sessionRecord, sessionScript } from './agent.ts';
 import { AGENT, AGENT_ID, FakeSys, HOME, ROOT, capture } from './fake.test.ts';
 import { PROXY_TOKEN } from './cloud.ts';
-import { OLDER_PRE_PUSH_HOOKS, PRE_PUSH_HOOK } from './onboard.ts';
+import { OLDER_PRE_PUSH_HOOKS, PRE_PUSH_HOOK, workflow } from './onboard.ts';
+import { packageVersion } from './version.ts';
 import { AUTO_FIX, sessionStart } from './session-start.ts';
 
 const OWNER_LOGIN = 'example-owner';
@@ -151,6 +152,45 @@ describe('sessionStart', () => {
         `process-rules: STOP. Writing the pre-push git hook failed (read-only), so this cloud session's pushes cannot be checked. ${STOP}`,
       ]);
       assert.equal(sys.files.get(ENV), undefined, 'the lock stays');
+    });
+
+    it("says, warning only, when the installed CLI is not the version the repo's workflow pins", async () => {
+      const pinned = (version: string, login: string | null = AGENT): FakeSys => {
+        const sys = cloud(login);
+        sys.files.set(`${ROOT}/.github/workflows/process-rules.yml`, workflow('main', version, false));
+        return sys;
+      };
+      const same = pinned(packageVersion());
+      assert.deepEqual((await start(same)).out, ['process-rules: this cloud session works as ExampleBot on GitHub.']);
+      const drift = `process-rules: this cloud session runs process-rules ${packageVersion()}, but .github/workflows/process-rules.yml pins v0.0.1. Print the Setup script again with process-rules cloud-setup from 0.0.1, and paste it over the process-rules part of the cloud environment's Setup script.`;
+      const older = pinned('0.0.1');
+      assert.deepEqual((await start(older)).out, ['process-rules: this cloud session works as ExampleBot on GitHub.', drift]);
+      assert.equal(older.files.get(RECORD), '{"agent":"ExampleBot"}\n', 'it never blocks');
+      const stopped = pinned('0.0.1', OWNER_LOGIN);
+      const { out } = await start(stopped);
+      assert.deepEqual(out.slice(1), [drift]);
+      assert.deepEqual(JSON.parse(stopped.files.get(RECORD) ?? ''), { problem: out[0] }, 'the STOP alone is the problem');
+    });
+
+    it("says nothing of versions without the repo's workflow, or when it pins none or several", async () => {
+      const unpinned = cloud(AGENT);
+      unpinned.files.set(`${ROOT}/.github/workflows/process-rules.yml`, 'name: process-rules\n');
+      assert.equal((await start(unpinned)).out.length, 1);
+      const several = cloud(AGENT);
+      several.files.set(`${ROOT}/.github/workflows/process-rules.yml`, workflow('main', '0.0.1', false).replace('process-rules-ref: v0.0.1', 'process-rules-ref: v0.0.2'));
+      assert.equal((await start(several)).out.length, 1);
+      const unreadable = cloud(AGENT);
+      unreadable.files.set(`${ROOT}/.github/workflows/process-rules.yml`, workflow('main', '0.0.1', false));
+      const read = unreadable.read.bind(unreadable);
+      unreadable.read = (path) => {
+        if (path.endsWith('process-rules.yml')) throw new Error('unreadable');
+        return read(path);
+      };
+      assert.equal((await start(unreadable)).out.length, 1);
+      const outside = cloud(AGENT);
+      outside.files.set(`${ROOT}/.github/workflows/process-rules.yml`, workflow('main', '0.0.1', false));
+      outside.execOverride = (call) => (call.args[0] === 'rev-parse' && call.args[1] === '--show-toplevel' ? { code: 128, stdout: '', stderr: 'not a repo' } : undefined);
+      assert.equal((await start(outside)).out.length, 1);
     });
 
     it("asks with a token the cloud environment set", async () => {

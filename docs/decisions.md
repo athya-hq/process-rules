@@ -677,3 +677,24 @@
   and the 14-day warning. It now prints them all on standard output as one
   picture. The layout lives in `src/layout.ts`, which all three commands
   share.
+- **2026-11-06 — Record: cloud setup shares the Setup field, and says when
+  it drifts.** A client's cloud environment held only `cloud-setup`'s
+  script in its Setup field, which holds one script, so the repo's own
+  setup never ran and sessions came up on the image's Node without the
+  repo's tools. The owner then pasted both, with process-rules' install
+  wrapped in a shell of its own followed by the repo's own script, which
+  ends with `exit 0`; it worked. The field had also installed an older
+  release than the repo's workflow pinned, and nothing said so.
+  `cloud-setup` now prints its install inside `bash <<'PROCESS_RULES' …
+  PROCESS_RULES || echo … >&2`, so its `set -euo pipefail` and a failed
+  download stay in that shell and the commands after it run; it, `onboard`
+  and the README say to put it first, then the repo's own, because a repo's
+  script may end with `exit`. The install's last command reads
+  `/dev/null`, as the rest of its script is on standard input. In a cloud
+  session `session-start` compares the installed CLI with the one version
+  `.github/workflows/process-rules.yml` pins and, when they differ, says so
+  in a second line naming the fix: print `cloud-setup` again from that
+  version and paste it over the process-rules part. It only warns: the
+  agent check, the record for the guard and the exit code are unchanged,
+  and a missing or unreadable workflow, or one pinning no single version,
+  says nothing, as `onboard` and `doctor` own the workflow itself.

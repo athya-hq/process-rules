@@ -1,5 +1,5 @@
 import { API, NO_TOKEN } from './agent.ts';
-import { PRODUCT } from './onboard.ts';
+import { PRODUCT, SETUP_FIRST } from './onboard.ts';
 import type { Output, Sys } from './types.ts';
 import { packageVersion } from './version.ts';
 import { GITHUB_WEB } from './host.ts';
@@ -36,18 +36,25 @@ export const CLOUD_NODE_SHA256 = {
   arm64: '6ad1325edbdb5649c379b75a237147a666c95d4f9ae8d340fef2d1575d289ad2',
 };
 
+/** What the setup script says when its install fails: the commands after it in the Setup script still run. */
+export const INSTALL_FAILED = 'process-rules: the install failed, so sessions start without process-rules; the rest of the Setup script still runs.';
+
 /**
  * The setup script for a Claude cloud environment, which runs as root
  * before its sessions start: Node and this release of the CLI, unpacked
  * under /opt/process-rules, and a `process-rules` on PATH that runs one
  * with the other, leaving the image's own Node alone. Node is checked
  * against the sha256 pinned here before it is unpacked.
+ * The environment's Setup field holds one script, so the install runs in a
+ * shell of its own: its `set` and its failures stay there, and the repo's
+ * own setup can follow it in the same field.
  */
 export function cloudSetupScript(version: string): string {
   const tarball = `${GITHUB_WEB}/${PRODUCT}/releases/download/v${version}/athya-hq-process-rules-${version}.tgz`;
   return [
     '#!/bin/bash',
-    `# process-rules ${version} for Claude cloud sessions: Node ${CLOUD_NODE} and the CLI, as process-rules on PATH.`,
+    `# process-rules ${version} for Claude cloud sessions: Node ${CLOUD_NODE} and the CLI, as process-rules on PATH. Put the repo's own setup after it.`,
+    `bash <<'PROCESS_RULES' || echo "${INSTALL_FAILED}" >&2`,
     'set -euo pipefail',
     'dir=/opt/process-rules',
     `node=${CLOUD_NODE}`,
@@ -60,14 +67,18 @@ export function cloudSetupScript(version: string): string {
     `curl -fsSL ${tarball} | tar -xz -C "$dir"`,
     'printf \'#!/bin/sh\\nexec %s %s "$@"\\n\' "$dir/node-v$node-linux-$arch/bin/node" "$dir/package/dist/cli.js" > /usr/local/bin/process-rules',
     'chmod 755 /usr/local/bin/process-rules',
-    'process-rules version',
+    // Nothing in the install reads standard input, which holds the rest of its script.
+    'process-rules version </dev/null',
+    'PROCESS_RULES',
     '',
   ].join('\n');
 }
 
 /** Prints the setup script for a Claude cloud environment, with what else agent sessions there need. */
 export function cloudSetup(io: Output): number {
-  io.err('process-rules: put this in the Claude cloud environment\'s Setup script; connect claude.ai\'s GitHub as the agent account the repo\'s settings name.');
+  io.err(
+    `process-rules: put this in the Claude cloud environment's Setup script; connect claude.ai's GitHub as the agent account the repo's settings name. ${SETUP_FIRST}`,
+  );
   io.out(cloudSetupScript(packageVersion()).trimEnd());
   return 0;
 }

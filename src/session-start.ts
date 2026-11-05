@@ -13,7 +13,9 @@ import {
   type Settings,
 } from './agent.ts';
 import { cloudLogin, cloudToken } from './cloud.ts';
-import { PRE_PUSH_HOOK, prePushHook } from './onboard.ts';
+import { WORKFLOW_PATH } from './onboard-pull.ts';
+import { PRE_PUSH_HOOK, prePushHook, workflowPins } from './onboard.ts';
+import { packageVersion } from './version.ts';
 import { tokenStore, unsupported } from './token-store.ts';
 import type { Output, Sys } from './types.ts';
 
@@ -24,7 +26,9 @@ import type { Output, Sys } from './types.ts';
  * settings that works here (`agentHere`), that file's lines, which replace the lock with the agent's
  * identity. The file is copied only when it is exactly what `machine`
  * writes, so nothing else in it can run. Never the owner's login: any other
- * outcome leaves GitHub locked out. Prints one line for the session,
+ * outcome leaves GitHub locked out. Prints one line for the session (a
+ * cloud session may get a second, warning that its CLI is not the version
+ * the repo's workflow pins; see `cloudDrift`),
  * records the outcome for the PreToolUse guard, and always exits 0, so a
  * hook failure never stops the session from starting.
  * A Claude cloud session reaches GitHub through its proxy, as the account
@@ -33,10 +37,33 @@ import type { Output, Sys } from './types.ts';
  */
 export async function sessionStart(sys: Sys, io: Output): Promise<number> {
   const record = recordFor(sys);
-  const said = sys.env.CLAUDE_CODE_REMOTE === 'true' ? await cloudStart(sys) : start(sys);
+  const cloud = sys.env.CLAUDE_CODE_REMOTE === 'true';
+  const said = cloud ? await cloudStart(sys) : start(sys);
   io.out(said.line);
+  const drift = cloud ? cloudDrift(sys) : undefined;
+  if (drift) io.out(drift);
   record(said.agent ? { agent: said.agent } : { problem: said.line });
   return 0;
+}
+
+/**
+ * A cloud environment's Setup script installs the release it was printed
+ * from, which stays put when the repo's workflow moves to another, so a
+ * cloud session says when the two differ. A warning only: the session works
+ * on, and says nothing when the workflow is missing, unreadable, or pins no
+ * one version.
+ */
+function cloudDrift(sys: Sys): string | undefined {
+  let pins: Set<string>;
+  try {
+    pins = new Set(workflowPins(sys.read(`${repoRoot(sys)}/${WORKFLOW_PATH}`)));
+  } catch {
+    return undefined;
+  }
+  const [pinned] = pins;
+  const installed = packageVersion();
+  if (pins.size !== 1 || !pinned || pinned === installed) return undefined;
+  return `process-rules: this cloud session runs process-rules ${installed}, but ${WORKFLOW_PATH} pins v${pinned}. Print the Setup script again with process-rules cloud-setup from ${pinned}, and paste it over the process-rules part of the cloud environment's Setup script.`;
 }
 
 /**
