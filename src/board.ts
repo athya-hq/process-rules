@@ -636,8 +636,11 @@ export async function boardStarted(sys: Sys, token: string, slug: string, slice:
   // A closed slice is built already: a fix to it starts nothing on the board.
   if (issue.state !== 'open') return [];
   const { status, json } = await sys.http(`${issue.url ?? `${API}/repos/${slug}/issues/${slice}`}/parent`, { token });
-  // An issue with no parent reads as 404.
-  if (status !== 200 && status !== 404) throw new Error(`GitHub's REST API refused GET /repos/${slug}/issues/${slice}/parent: HTTP ${status}`);
+  // An issue with no parent reads as 404 "No parent issue found"; any other failure is a read that failed, not a missing parent.
+  const message = (json as { message?: unknown } | null)?.message;
+  if (status !== 200 && !(status === 404 && typeof message === 'string' && /no parent/i.test(message))) {
+    throw new Error(`GitHub's REST API refused GET /repos/${slug}/issues/${slice}/parent: HTTP ${status}${typeof message === 'string' ? ` ${message}` : ''}`);
+  }
   const parent = status === 200 && (json as RestIssue | null)?.type?.name === 'Work item' ? (json as RestIssue).number : undefined;
   // Newest first, as the moves are said.
   const workItems = (await all<RestIssue>(sys, token, `${API}/repos/${slug}/issues?state=open&type=${encodeURIComponent('Work item')}&sort=created&direction=desc&per_page=100`))

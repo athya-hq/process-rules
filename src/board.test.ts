@@ -414,7 +414,16 @@ describe('boardStarted', () => {
     const parent = new FakeSys();
     slice(parent, { status: 403, json: { message: 'Forbidden' } });
     new RestBoard(parent);
-    await assert.rejects(boardStarted(parent, 'tok', SLUG, 12), { message: `GitHub's REST API refused GET /repos/${SLUG}/issues/12/parent: HTTP 403` });
+    await assert.rejects(boardStarted(parent, 'tok', SLUG, 12), { message: `GitHub's REST API refused GET /repos/${SLUG}/issues/12/parent: HTTP 403 Forbidden` });
+    // A 404 that does not say the slice has no parent is a read that failed.
+    const hidden = new FakeSys();
+    slice(hidden, { status: 404, json: { message: 'Not Found' } });
+    new RestBoard(hidden);
+    await assert.rejects(boardStarted(hidden, 'tok', SLUG, 12), { message: `GitHub's REST API refused GET /repos/${SLUG}/issues/12/parent: HTTP 404 Not Found` });
+    const bare = new FakeSys();
+    slice(bare, { status: 500, json: null });
+    new RestBoard(bare);
+    await assert.rejects(boardStarted(bare, 'tok', SLUG, 12), { message: `GitHub's REST API refused GET /repos/${SLUG}/issues/12/parent: HTTP 500` });
     const fields = new FakeSys();
     slice(fields);
     new RestBoard(fields).refuse = (method, path) => (path.endsWith('/fields') ? { status: 502, json: null } : undefined);
