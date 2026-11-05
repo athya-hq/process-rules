@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, describe, it } from 'node:test';
 
+import { RestBoard } from './fake-board.test.ts';
 import { AGENT, FakeSys, ROOT, SETTINGS, capture } from './fake.test.ts';
 import { prMerged, prePush, prWorkRules, propose, section, sliceProblems, slicesNamed } from './work.ts';
 
@@ -34,6 +35,7 @@ function graph(): { issue: Node; timeline: Node[]; own: Node[]; siblings: Node[]
     number: 12,
     title: 'Add the thing',
     body: 'Slice P-01 of #10.\n\n**You will see:** the thing.\n- on every page\n\n**Why:** it is asked for.\n\n**Needs:** —',
+    state: 'open',
     type: { name: 'Slice' },
     comments,
     parent: { number: 10, type: { name: 'Work item' } },
@@ -95,8 +97,9 @@ function github(sys: FakeSys, issue: Node | null, pulls: Node[] = []): void {
     return http(url, options);
   };
   sys.route('GET', `/repos/${SLUG}/pulls?state=open&per_page=100&page=1`, { status: 200, json: pulls });
-  // A board that holds none of the issues, so a push moves nothing on it.
-  sys.route('POST', '/graphql', { status: 200, json: { data: { repository: { issue: null }, search: { nodes: [] } } } });
+  // No open Work items and no Projects, so a push moves nothing on the board.
+  sys.route('GET', `${ISSUES}?state=open&type=Work%20item&sort=created&direction=desc&per_page=100`, { status: 200, json: [] });
+  sys.route('GET', '/orgs/example-org/projectsV2?per_page=100', { status: 200, json: [] });
 }
 
 let ids = 0;
@@ -910,46 +913,15 @@ describe('prePush', () => {
   });
 
   describe('the work board', () => {
-    const select = (id: string, names: string[]): Node => ({ id, options: names.map((name) => ({ id: `${id}_${name}`, name })) });
-    const STATUS = select('F_status', ['Todo', 'In Progress', 'Done']);
-    const STEP = select('F_step', ['Frame', 'Specify', 'Slice', 'Build']);
-    const item = (id: string, field: Node | null, value: string | null, title = 'example-app work'): Node => ({
-      id,
-      project: { id: 'P_1', title, field },
-      value: value === null ? null : { name: value },
-    });
-    /** Slice #12 in Todo under work item #10 at Slice, beside work item #20 with no Step and #21 at Frame. */
-    function board(sys: FakeSys, change: (data: Node) => void = () => undefined): void {
-      const data: Node = {
-        repository: {
-          issue: {
-            state: 'OPEN',
-            projectItems: { nodes: [item('I_12', STATUS, 'Todo')] },
-            parent: { number: 10, issueType: { name: 'Work item' }, projectItems: { nodes: [item('I_10', STEP, 'Slice')] } },
-          },
-        },
-        search: {
-          nodes: [
-            { number: 21, projectItems: { nodes: [item('I_21', STEP, 'Frame')] } },
-            { number: 20, projectItems: { nodes: [item('I_20', STEP, null)] } },
-            { number: 10, projectItems: { nodes: [item('I_10', STEP, null)] } },
-            null,
-          ],
-        },
-      };
-      change(data);
-      sys.route('POST', '/graphql', () => {
-        const last = sys.requests.at(-1)?.body as { query: string };
-        return { status: 200, json: { data: last.query.startsWith('mutation') ? { updateProjectV2ItemFieldValue: { projectV2Item: { id: 'x' } } } : data } };
-      });
-    }
-    const moves = (sys: FakeSys): unknown[] =>
-      sys.requests.filter((r) => r.url.endsWith('/graphql') && (r.body as { query: string }).query.startsWith('mutation')).map((r) => (r.body as { variables: unknown }).variables);
+    /** The board's writes, as the option each sets on which item. */
+    const moves = (board: RestBoard): string[] =>
+      board.writes.map(({ path, body }) => `${path.split('/').at(-1)} ${(body as { fields: { id: number; value: string }[] }).fields.map((field) => `${field.id}:${field.value}`).join(' ')}`);
+    const pushing = `refs/heads/work ${LOCAL} refs/heads/work ${REMOTE}`;
 
-    it('moves the slice to In Progress, its work item to Build, and a work item with no Step to Frame', async () => {
+    it('moves the slice to In Progress, its work item to Build, and a work item with no Step to Frame, through REST alone', async () => {
       const sys = session('Slice: #12');
-      board(sys);
-      assert.deepEqual(await push(sys, `refs/heads/work ${LOCAL} refs/heads/work ${REMOTE}`), {
+      const board = new RestBoard(sys);
+      assert.deepEqual(await push(sys, pushing), {
         code: 0,
         err: [
           '✓ board: slice #12 is In Progress in "example-app work"',
@@ -957,62 +929,56 @@ describe('prePush', () => {
           '✓ board: work item #20 had no Step; it is at Frame in "example-app work"',
         ],
       });
-      assert.deepEqual(moves(sys), [
-        { project: 'P_1', item: 'I_12', field: 'F_status', option: 'F_status_In Progress' },
-        { project: 'P_1', item: 'I_10', field: 'F_step', option: 'F_step_Build' },
-        { project: 'P_1', item: 'I_20', field: 'F_step', option: 'F_step_Frame' },
-      ]);
-      const read = sys.requests.find((r) => r.url.endsWith('/graphql'));
-      assert.equal(read?.token, 'ghp_good');
-      assert.deepEqual((read?.body as { variables: unknown }).variables, {
-        owner: 'example-org',
-        name: 'example-app',
-        number: 12,
-        workItems: 'repo:example-org/example-app is:issue is:open type:"Work item" sort:created-desc',
-      });
+      assert.deepEqual(moves(board), ['100 2:2_In-Progress', '101 3:3_Build', '102 3:3_Frame']);
+      assert.deepEqual(
+        board.projects[0]?.items.map((item) => item.values),
+        [{ Status: 'In Progress' }, { Status: 'Todo', Step: 'Build' }, { Step: 'Frame' }, { Step: 'Frame' }],
+      );
+      // A cloud session's proxy refuses GraphQL, so the push never asks it.
+      assert.ok(!sys.requests.some((r) => r.url.endsWith('/graphql')));
+      assert.ok(sys.requests.filter((r) => r.url.includes('projectsV2')).every((r) => r.token === 'ghp_good'));
     });
 
     it('moves nothing already there, closed, or on a Project without the field or option', async () => {
       const sys = session('Slice: #12');
-      board(sys, (data) => {
-        const issue = (data.repository as Node).issue as Node;
-        issue.projectItems = { nodes: [item('I_12', STATUS, 'in progress'), item('I_12b', {}, null, 'other'), item('I_12c', select('F', ['Todo']), 'Todo', 'other')] };
-        (issue.parent as Node).projectItems = { nodes: [item('I_10', STEP, 'Build')] };
-        data.search = { nodes: [{ number: 20, projectItems: { nodes: [item('I_20', null, null, 'other')] } }, {}] };
-      });
-      assert.deepEqual(await push(sys, `refs/heads/work ${LOCAL} refs/heads/work ${REMOTE}`), { code: 0, err: [] });
-      assert.deepEqual(moves(sys), []);
+      const board = new RestBoard(sys);
+      const project = board.projects[0]!;
+      project.items = [{ issue: 12, values: { Status: 'in progress' } }, { issue: 10, values: { Step: 'Build' } }, { issue: 21, values: { Step: 'Frame' } }];
+      board.projects.push(
+        { number: 5, title: 'other', fields: { Title: null, Status: ['Todo'], Notes: null }, items: [{ issue: 12, values: { Status: 'Todo' } }, { issue: 20, values: {} }] },
+        { number: 6, title: 'no board', fields: { Title: null }, items: [{ issue: 12, values: {} }] },
+      );
+      assert.deepEqual(await push(sys, pushing), { code: 0, err: [] });
+      assert.deepEqual(moves(board), []);
+      // A Project with neither field is not read for its items.
+      assert.ok(!sys.requests.some((r) => r.url.includes('/projectsV2/6/items')));
       const closed = session('Slice: #12');
-      board(closed, (data) => {
-        const issue = (data.repository as Node).issue as Node;
-        issue.state = 'CLOSED';
-      });
-      assert.deepEqual(await push(closed, `refs/heads/work ${LOCAL} refs/heads/work ${REMOTE}`), { code: 0, err: [] });
-      assert.deepEqual(moves(closed), []);
+      github(closed, { ...graph().issue, state: 'closed' });
+      const untouched = new RestBoard(closed);
+      assert.deepEqual(await push(closed, pushing), { code: 0, err: [] });
+      assert.deepEqual(moves(untouched), []);
+      assert.ok(!closed.requests.some((r) => r.url.includes('projectsV2')));
     });
 
-    it('says when it cannot move the board, and lets the push go on', async () => {
+    it('says when it cannot read the board, and lets the push go on', async () => {
       const sys = session('Slice: #12');
-      sys.route('POST', '/graphql', { status: 403, json: { message: 'Forbidden' } });
-      assert.deepEqual(await push(sys, `refs/heads/work ${LOCAL} refs/heads/work ${REMOTE}`), {
+      const board = new RestBoard(sys);
+      board.refuse = (method, path) => (path === '/orgs/example-org/projectsV2' ? { status: 403, json: { message: 'Forbidden' } } : undefined);
+      assert.deepEqual(await push(sys, pushing), {
         code: 0,
-        err: ["! board: could not read where #12 and its work item are on the board, so nothing moved (GitHub's GraphQL API refused: HTTP 403); the push goes on"],
+        err: ["! board: could not read where #12 and its work item are on the board, so nothing moved (GitHub's REST API refused GET /orgs/example-org/projectsV2?per_page=100: HTTP 403 Forbidden); the push goes on"],
       });
     });
 
     it('makes the other moves when GitHub refuses one', async () => {
       const sys = session('Slice: #12');
-      board(sys);
-      const answer = sys.routes.get('POST https://api.github.com/graphql') as () => { status: number; json: unknown };
-      sys.route('POST', '/graphql', () => {
-        const last = sys.requests.at(-1)?.body as { variables?: { item?: string } };
-        return last.variables?.item === 'I_10' ? { status: 200, json: { errors: [{ message: 'no write access' }] } } : answer();
-      });
-      assert.deepEqual(await push(sys, `refs/heads/work ${LOCAL} refs/heads/work ${REMOTE}`), {
+      const board = new RestBoard(sys);
+      board.refuse = (method, path) => (method === 'PATCH' && path.endsWith('/items/101') ? { status: 403, json: { message: 'Resource not accessible by integration' } } : undefined);
+      assert.deepEqual(await push(sys, pushing), {
         code: 0,
         err: [
           '✓ board: slice #12 is In Progress in "example-app work"',
-          `! board: work item #10 was not moved to Build in "example-app work" (GitHub's GraphQL API refused: no write access)`,
+          '! board: work item #10 was not moved to Build in "example-app work" (GitHub\'s REST API refused PATCH /orgs/example-org/projectsV2/3/items/101: HTTP 403 Resource not accessible by integration)',
           '✓ board: work item #20 had no Step; it is at Frame in "example-app work"',
         ],
       });
@@ -1021,9 +987,10 @@ describe('prePush', () => {
     it('moves nothing with the board feature off', async () => {
       const sys = session('Slice: #12');
       sys.files.set(`${ROOT}/.github/process-rules.json`, JSON.stringify({ owner: OWNER, agent: AGENT, features: ['identity', 'work-rules'] }));
-      board(sys);
-      assert.deepEqual(await push(sys, `refs/heads/work ${LOCAL} refs/heads/work ${REMOTE}`), { code: 0, err: [] });
-      assert.ok(!sys.requests.some((r) => r.url.endsWith('/graphql')));
+      const board = new RestBoard(sys);
+      assert.deepEqual(await push(sys, pushing), { code: 0, err: [] });
+      assert.deepEqual(moves(board), []);
+      assert.ok(!sys.requests.some((r) => r.url.includes('projectsV2')));
     });
 
     it('moves nothing for a push the work rules refuse', async () => {
@@ -1031,9 +998,10 @@ describe('prePush', () => {
       const g = graph();
       g.timeline.splice(1, 1);
       github(sys, g.issue);
-      board(sys);
-      assert.equal((await push(sys, `refs/heads/work ${LOCAL} refs/heads/work ${REMOTE}`)).code, 1);
-      assert.ok(!sys.requests.some((r) => r.url.endsWith('/graphql')));
+      const board = new RestBoard(sys);
+      assert.equal((await push(sys, pushing)).code, 1);
+      assert.deepEqual(moves(board), []);
+      assert.ok(!sys.requests.some((r) => r.url.includes('projectsV2')));
     });
   });
 });

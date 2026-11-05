@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { FIELDS, ISSUE_TYPES, LABELS, VIEWS, setUpBoard, viewsChecklist } from './board.ts';
-import { BUILT_IN, Board, COPY_URL, OWNER_TOKEN, SLUG, URL, defaultView, settledViews } from './fake-board.test.ts';
+import { FIELDS, ISSUE_TYPES, LABELS, VIEWS, boardStarted, setUpBoard, viewsChecklist } from './board.ts';
+import { BUILT_IN, Board, COPY_URL, OWNER_TOKEN, RestBoard, SLUG, STATUS_OPTIONS, URL, defaultView, settledViews } from './fake-board.test.ts';
 import type { FakeItem } from './fake-board.test.ts';
 import { FakeSys, capture } from './fake.test.ts';
 
@@ -354,4 +354,91 @@ describe('setUpBoard', () => {
       await assert.rejects(setUp(sys), message);
     });
   }
+});
+
+describe('boardStarted', () => {
+  const ISSUE = `https://api.github.com/repos/${SLUG}/issues`;
+  /** Slice #12, open, under work item #10, read through REST. */
+  function slice(sys: FakeSys, parent: { status: number; json: unknown } = { status: 200, json: { number: 10, type: { name: 'Work item' } } }): void {
+    sys.route('GET', `${ISSUE}/12`, { status: 200, json: { number: 12, state: 'open', url: `${ISSUE}/12`, type: { name: 'Slice' } } });
+    sys.route('GET', `${ISSUE}/12/parent`, parent);
+  }
+
+  it("moves a user's own board, reading every page", async () => {
+    const sys = new FakeSys();
+    slice(sys);
+    const board = new RestBoard(sys, 'users');
+    board.perPage = 1;
+    board.projects.unshift({ number: 1, title: 'old', closed: true, fields: { Status: STATUS_OPTIONS }, items: [{ issue: 12, values: {} }] });
+    board.workItems = [22, 21, 20, 10];
+    board.projects[1]!.items.push({ issue: 22, values: {} });
+    assert.deepEqual(await boardStarted(sys, 'tok', SLUG, 12), [
+      '✓ board: slice #12 is In Progress in "example-app work"',
+      '✓ board: work item #10 is at Step Build in "example-app work"',
+      '✓ board: work item #22 had no Step; it is at Frame in "example-app work"',
+      '✓ board: work item #20 had no Step; it is at Frame in "example-app work"',
+    ]);
+    // A closed Project is not anyone's board.
+    assert.ok(!sys.requests.some((r) => r.url.includes('/projectsV2/1/')));
+    assert.ok(sys.requests.some((r) => r.url.startsWith('https://api.github.com/users/example-org/projectsV2?')));
+  });
+
+  it('moves only open issues of this repository, on the board and not archived', async () => {
+    const sys = new FakeSys();
+    slice(sys);
+    const board = new RestBoard(sys);
+    board.projects[0]!.items = [
+      { issue: 12, repo: 'example-org/other', values: { Status: 'Todo' } },
+      { issue: 12, kind: 'PullRequest', values: { Status: 'Todo' } },
+      { issue: 12, kind: 'DraftIssue', values: {} },
+      { issue: 10, archived: true, values: { Step: 'Slice' } },
+      // An issue that is not an open Work item keeps no Step.
+      { issue: 31, values: {} },
+      { issue: 30, values: {} },
+    ];
+    assert.deepEqual(await boardStarted(sys, 'tok', SLUG, 12), []);
+    assert.deepEqual(board.writes, []);
+  });
+
+  it("moves no work item for a slice with no parent, or one that is not a Work item's", async () => {
+    for (const parent of [{ status: 404, json: { message: 'No parent issue found' } }, { status: 200, json: { number: 10, type: { name: 'Slice' } } }]) {
+      const sys = new FakeSys();
+      slice(sys, parent);
+      const board = new RestBoard(sys);
+      board.workItems = [21];
+      assert.deepEqual(await boardStarted(sys, 'tok', SLUG, 12), ['✓ board: slice #12 is In Progress in "example-app work"']);
+    }
+  });
+
+  it("throws when GitHub's REST API refuses a read, naming it", async () => {
+    const parent = new FakeSys();
+    slice(parent, { status: 403, json: { message: 'Forbidden' } });
+    new RestBoard(parent);
+    await assert.rejects(boardStarted(parent, 'tok', SLUG, 12), { message: `GitHub's REST API refused GET /repos/${SLUG}/issues/12/parent: HTTP 403 Forbidden` });
+    // A 404 that does not say the slice has no parent is a read that failed.
+    const hidden = new FakeSys();
+    slice(hidden, { status: 404, json: { message: 'Not Found' } });
+    new RestBoard(hidden);
+    await assert.rejects(boardStarted(hidden, 'tok', SLUG, 12), { message: `GitHub's REST API refused GET /repos/${SLUG}/issues/12/parent: HTTP 404 Not Found` });
+    const bare = new FakeSys();
+    slice(bare, { status: 500, json: null });
+    new RestBoard(bare);
+    await assert.rejects(boardStarted(bare, 'tok', SLUG, 12), { message: `GitHub's REST API refused GET /repos/${SLUG}/issues/12/parent: HTTP 500` });
+    const fields = new FakeSys();
+    slice(fields);
+    new RestBoard(fields).refuse = (method, path) => (path.endsWith('/fields') ? { status: 502, json: null } : undefined);
+    await assert.rejects(boardStarted(fields, 'tok', SLUG, 12), { message: "GitHub's REST API refused GET /orgs/example-org/projectsV2/3/fields?per_page=100: HTTP 502" });
+    const list = new FakeSys();
+    slice(list);
+    new RestBoard(list).refuse = (method, path) => (path === '/orgs/example-org/projectsV2' ? { status: 200, json: { message: 'not a list' } } : undefined);
+    await assert.rejects(boardStarted(list, 'tok', SLUG, 12), { message: "GitHub's REST API did not answer a list (/orgs/example-org/projectsV2?per_page=100)" });
+  });
+
+  it('reads nothing more for a closed slice', async () => {
+    const sys = new FakeSys();
+    sys.route('GET', `${ISSUE}/12`, { status: 200, json: { number: 12, state: 'closed' } });
+    new RestBoard(sys);
+    assert.deepEqual(await boardStarted(sys, 'tok', SLUG, 12), []);
+    assert.equal(sys.requests.length, 1);
+  });
 });

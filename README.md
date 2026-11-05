@@ -288,15 +288,15 @@ slice may be built:
 
 **The board follows the work.** When an agent session's push names a slice
 the work rules let it build, pre-push moves the board on, as the agent, on
-every Project that holds the issues: the slice's Status to In Progress; its
-work item's Step to Build, since its first slice has started; and any open
-Work item with no Step to Frame, where a new one starts. A workflow's
-`GITHUB_TOKEN` cannot write to a Project, so the agent's push does this, with
-the agent token's `project` scope, with `board` on. It reads the newest
-hundred open Work items, so a new one is always among them. A board it cannot
-read, such as from a Claude cloud session whose GitHub proxy refuses GraphQL,
-or a move GitHub refuses, is said and does not stop the push; a push for a
-closed slice, such as a fix, moves nothing. When a pull request naming a slice merges into the default branch,
+every open Project of the repository's owner that holds the issues: the
+slice's Status to In Progress; its work item's Step to Build, since its first
+slice has started; and any open Work item with no Step to Frame, where a new
+one starts. A workflow's `GITHUB_TOKEN` cannot write to a Project, so the
+agent's push does this, with the agent token's `project` scope, with `board`
+on. It uses GitHub's REST API for Projects alone, as the work rules do, so it
+works through a Claude cloud session's GitHub proxy, which refuses GraphQL.
+A board it cannot read, or a move GitHub refuses, is said and does not stop
+the push; a push for a closed slice, such as a fix, moves nothing. When a pull request naming a slice merges into the default branch,
 the shared workflow comments on the slice, linking the pull request, and
 closes it, and the Project's Item closed workflow moves it to Done: a
 `Slice: #N` line is not one of GitHub's closing keywords, so GitHub does not
@@ -391,6 +391,18 @@ keeps it (comment `Kept:` with reasoning and a new review date) or settles it
 the owner has a week to reverse it. A decision touching secrets, money or
 production is held for the owner with a suggestion and `needs-owner`. The
 weekly job removes `veto` once the week has passed.
+
+`reviews-due` lists only a decision the owner or the agent wrote and last
+edited, so no one else's text reaches the routine. It reads only GitHub's REST
+API, which a cloud session's GitHub proxy allows, and REST does not say who
+last edited an issue's body, so the weekly job, whose token reads GraphQL,
+vets the text for it: on each open decision with a `Review:` date that the
+owner or the agent wrote and last edited, it keeps one comment naming the
+text's SHA-256, and updates it after their edits. `reviews-due` lists a
+decision only while its text has the hash in the workflow's latest such
+comment. Any other text is left out, and `reviews-due` says so: a decision
+the owner or the agent wrote or edited since the job last ran comes up after
+its next run.
 
 The weekly job also watches the routine: an open decision the routine reviews
 whose `Review:` date is over a week past, with no `Kept:` or `Settled:` from
@@ -550,8 +562,8 @@ while the push is the agent's. PR identity checks only commits that claim
 an agent, so these pass, and GitHub records the agent as having pushed
 them.
 
-The proxy refuses GitHub's GraphQL API, so the work rules read only its
-REST API, here and everywhere else. The cloud environment's Setup script,
+The proxy refuses GitHub's GraphQL API, so the work rules and `reviews-due`
+read only its REST API, here and everywhere else. The cloud environment's Setup script,
 which runs as root before each session, installs the CLI:
 `process-rules cloud-setup` prints one for the installed release. It
 unpacks Node, once it matches the sha256 the release pins, and the CLI

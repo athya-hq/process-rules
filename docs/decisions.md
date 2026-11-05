@@ -544,6 +544,33 @@
   SessionStart hook and `CLAUDE_ENV_FILE`, so another tool's agent gets
   neither, and only PR identity catches its work after the push. #50 stays
   open.
+- **2026-11-05 — Record: P-25, `reviews-due` reads only REST.** The
+  routine's first run, in a Claude cloud session, stopped with "cannot read
+  who edited the decisions (HTTP 403)": `reviews-due` asked GraphQL for each
+  decision's last editor, and the cloud session's GitHub proxy refuses
+  GraphQL. REST has no such field: an issue names its author, not who last
+  edited its body, and a body edit leaves no event in the issue's events or
+  timeline (a title edit leaves `renamed`). Fixed as State #140. The weekly
+  job, whose token reads GraphQL, now vets: for each open decision with a
+  `Review:` date that an owner or an agent wrote and last edited, it keeps
+  one comment of its own naming the body's SHA-256, posted once and edited
+  when the hash changes. It hashes the body GraphQL returns with the editor,
+  so an edit landing between the job's listing and that read is not vetted
+  under the earlier editor. `reviews-due` still checks the author, and lists
+  a decision only when the workflow's latest such comment names the hash of
+  the body it reads; REST and GraphQL return the same bytes for a body. A
+  label the job adds, trusted while the issue's `updated_at` is not later,
+  was weighed and dropped: every comment and label moves `updated_at`, the
+  routine's own included, so it would wrongly hide decisions, and it cannot
+  tell a body edit from a comment. The hash ties the vetting to the text
+  itself: someone else's edit changes the hash, so the decision is left out
+  until the job sees an owner's or the agent's edit; an edit that puts back
+  the vetted text exactly leaves only vetted text. Only the workflow writes
+  as `github-actions[bot]`, so a pasted mark counts for nothing; someone
+  who can edit the workflow's comment can also change the workflow, so the
+  vetting trusts no more than the job already did. A decision written or
+  edited since the job's last run waits up to a week for its next one, and
+  `reviews-due` names it.
 - **2026-11-05 — Record: agent sessions turn Auto-fix on themselves, #142
   of P-42.** The owner saw Auto-fix off on the agent's pull requests and
   asked for it on. #137, #139 and #141 opened with it off although the
@@ -554,7 +581,8 @@
   slice sessions a coordinator starts in the background are not, and no
   Code tab setting changes that. So session-start's line for a local agent
   session tells it to turn Auto-fix on with `set_monitor` after each
-  `gh pr create` when `get_status` shows it off. `set_monitor` checks that
+  `gh pr create`, when the app's `ccd_pr` tools are there and `get_status`
+  shows it off. `set_monitor` checks that
   the session opened the pull request and that the app's `gh` login wrote
   it, so a session can do this only for the agent's own pull requests. A
   cloud session has no such switch, and its line is unchanged.

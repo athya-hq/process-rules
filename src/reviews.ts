@@ -1,5 +1,7 @@
+import { createHash } from 'node:crypto';
+
 import { API, anyLogin, either, loadSettings, repoAt } from './agent.ts';
-import { lastEditors, parseDecision } from './decisions.ts';
+import { type Edited, lastEditors, parseDecision } from './decisions.ts';
 import { PERSONAL_REPO, isOn, isPersonal, offLine } from './features.ts';
 import type { Output, Sys } from './types.ts';
 
@@ -24,6 +26,7 @@ interface Issue {
 }
 
 interface Comment {
+  id?: number;
   body?: string;
   user?: { login?: string } | null;
   created_at: string;
@@ -39,13 +42,30 @@ interface Event {
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 /** Labels that mean a decision waits on the owner: the routine leaves it alone. */
 const WAITING = ['veto', 'needs-owner'];
+/** The mark in the weekly job's comment naming the decision text it vetted, by its SHA-256. */
+const VETTED = /<!-- process-rules vetted sha256:([0-9a-f]{64}) -->/;
+
+/** The SHA-256 of a decision's body, as GitHub returns it, in hex. */
+export function textHash(body: string): string {
+  return createHash('sha256').update(body).digest('hex');
+}
+
+/** The text the weekly job last vetted, as its hash, from the workflow's own comment: only the workflow writes as its bot. */
+function vettedHash(comments: Comment[]): { hash: string; id: number | undefined } | undefined {
+  const mark = comments.filter((comment) => comment.user?.login === WORKFLOW_BOT && VETTED.test(comment.body ?? '')).at(-1);
+  const hash = mark && VETTED.exec(mark.body ?? '')?.[1];
+  return hash ? { hash, id: mark.id } : undefined;
+}
 
 /**
  * The open Decision issues whose review date has come, as JSON lines for the
  * review routine: number, title, link, kind, review date, labels and body.
  * Only decisions an owner or an agent wrote and last edited, so no one
  * else's text reaches the routine; and none labeled `veto` or `needs-owner`,
- * which wait on the owner. Runs as the agent, in the client's checkout.
+ * which wait on the owner. Runs as the agent, in the client's checkout, and
+ * reads only GitHub's REST API, as a cloud session's GitHub proxy allows:
+ * REST names no body's last editor, so a body counts as theirs only while
+ * its hash is the one the weekly job last vetted, in its own comment.
  */
 export async function reviewsDue(sys: Sys, io: Output): Promise<number> {
   const { root, slug } = repoAt(sys);
@@ -70,7 +90,6 @@ export async function reviewsDue(sys: Sys, io: Output): Promise<number> {
     open.push(...(json as Issue[]));
     if (json.length < 100) break;
   }
-  const editors = await lastEditors(sys, token, open);
   let due = 0;
   for (const issue of open) {
     const decision = parseDecision(issue.body ?? '');
@@ -80,14 +99,21 @@ export async function reviewsDue(sys: Sys, io: Output): Promise<number> {
       continue;
     }
     if (decision.review > today) continue;
-    const editor = editors.get(issue.number);
-    if (!trusted(issue.user?.login) || (editor !== undefined && !trusted(editor))) {
+    if (!trusted(issue.user?.login)) {
       io.err(`#${issue.number}: not reviewed; only ${either([...owners, ...agents])} may write a decision the routine reviews`);
       continue;
     }
+    let read: Promise<Comment[]> | undefined;
+    const comments = (): Promise<Comment[]> => (read ??= all<Comment>(sys, token, `/repos/${slug}/issues/${issue.number}/comments`, `read #${issue.number}'s comments`));
     const waiting = issue.labels.filter((label) => WAITING.includes(label.name)).map((label) => label.name);
     // A decision the weekly job labeled for want of a verdict still waits on the routine, until the agent has had its say.
-    if (waiting.length > 0 && !(waiting.join() === 'needs-owner' && (await overdueUnanswered(sys, token, slug, issue.number, agents)))) continue;
+    if (waiting.length > 0 && !(waiting.join() === 'needs-owner' && (await overdueUnanswered(sys, token, slug, issue.number, agents, comments)))) continue;
+    if (vettedHash(await comments())?.hash !== textHash(issue.body ?? '')) {
+      io.err(
+        `#${issue.number}: not reviewed; the weekly job has not vetted this text as written and last edited by ${either([...owners, ...agents])}. It vets their edits on its next run`,
+      );
+      continue;
+    }
     due++;
     io.out(
       JSON.stringify({
@@ -122,32 +148,42 @@ async function lastLabeled(sys: Sys, token: string, slug: string, number: number
   return events.filter((event) => event.event === 'labeled' && event.label?.name === name).at(-1);
 }
 
-/** The agent's comments on the issue, oldest first: only those can be the routine's. */
-async function agentComments(sys: Sys, token: string, slug: string, number: number, agents: readonly string[]): Promise<Comment[]> {
-  const comments = await all<Comment>(sys, token, `/repos/${slug}/issues/${number}/comments`, `read #${number}'s comments`);
+/** The agent's comments among an issue's, oldest first: only those can be the routine's. */
+function agentComments(comments: Comment[], agents: readonly string[]): Comment[] {
   return comments.filter((comment) => anyLogin(agents, comment.user?.login ?? undefined));
 }
 
 /** Whether the weekly job last labeled the issue `needs-owner`, for want of a verdict, and the agent has not commented since. */
-async function overdueUnanswered(sys: Sys, token: string, slug: string, number: number, agents: readonly string[]): Promise<boolean> {
+async function overdueUnanswered(sys: Sys, token: string, slug: string, number: number, agents: readonly string[], comments: () => Promise<Comment[]>): Promise<boolean> {
   const labeled = await lastLabeled(sys, token, slug, number, 'needs-owner');
   if (labeled?.actor?.login !== WORKFLOW_BOT) return false;
-  const comments = await agentComments(sys, token, slug, number, agents);
-  return !comments.some((comment) => Date.parse(comment.created_at) >= Date.parse(labeled.created_at));
+  return !agentComments(await comments(), agents).some((comment) => Date.parse(comment.created_at) >= Date.parse(labeled.created_at));
 }
 
 /**
- * Watches the review routine. Labels `needs-owner`, with a comment, each open
- * decision the routine reviews whose review date is over a week past with no
- * `Kept:` or `Settled:` from an agent since, so a routine that is missing or
- * has stopped shows up; and takes that label off once an agent's verdict
- * follows it. Only an agent's comments count: anyone may write `Kept:`.
- * Part of the weekly job.
+ * Watches the review routine, and vets what it may read. Labels
+ * `needs-owner`, with a comment, each open decision the routine reviews whose
+ * review date is over a week past with no `Kept:` or `Settled:` from an agent
+ * since, so a routine that is missing or has stopped shows up; and takes that
+ * label off once an agent's verdict follows it. Only an agent's comments
+ * count: anyone may write `Kept:`. For each open decision with a review date
+ * that an owner or an agent wrote and last edited, keeps one comment naming
+ * its text's SHA-256, which `reviews-due` reads in place of the last editor
+ * GitHub's REST API cannot name. Part of the weekly job.
  */
 export async function watchReviews(sys: Sys, io: Output, slug: string, token: string, settings: { owners: string[]; agents: string[] }): Promise<void> {
   const { owners, agents } = settings;
   const verdictSince = (comments: Comment[], since: number): boolean =>
     comments.some((comment) => VERDICT.test(comment.body ?? '') && Date.parse(comment.created_at) >= since);
+  const read = new Map<number, Promise<Comment[]>>();
+  const commentsOf = (number: number): Promise<Comment[]> => {
+    let comments = read.get(number);
+    if (!comments) {
+      comments = all<Comment>(sys, token, `/repos/${slug}/issues/${number}/comments`, `read #${number}'s comments`);
+      read.set(number, comments);
+    }
+    return comments;
+  };
 
   // Taken off first, so this run sees the labels it leaves.
   const flagged = await all<Issue>(sys, token, `/repos/${slug}/issues?state=all&type=Decision&labels=needs-owner`, 'list decisions waiting on the owner');
@@ -156,30 +192,59 @@ export async function watchReviews(sys: Sys, io: Output, slug: string, token: st
     const labeled = await lastLabeled(sys, token, slug, issue.number, 'needs-owner');
     // Only the label this job added: the routine's hold and the owner's veto stay.
     if (!labeled || labeled.actor?.login !== WORKFLOW_BOT) continue;
-    if (!verdictSince(await agentComments(sys, token, slug, issue.number, agents), Date.parse(labeled.created_at))) continue;
+    if (!verdictSince(agentComments(await commentsOf(issue.number), agents), Date.parse(labeled.created_at))) continue;
     const removed = await sys.http(`${API}/repos/${slug}/issues/${issue.number}/labels/needs-owner`, { method: 'DELETE', token });
     if (removed.status !== 200) throw new Error(`cannot remove needs-owner from #${issue.number} (HTTP ${removed.status})`);
     cleared.add(issue.number);
     io.out(`#${issue.number}: the review routine gave its verdict; removed needs-owner`);
   }
 
-  const today = Date.parse(sys.now().toISOString().slice(0, 10));
+  const today = sys.now().toISOString().slice(0, 10);
   const open = await all<Issue>(sys, token, `/repos/${slug}/issues?state=open&type=Decision`, 'list open decisions');
-  const overdue = open.filter((issue) => {
+  const dated = open.filter((issue) => {
     const review = parseDecision(issue.body ?? '').review;
-    if (!review || !DATE.test(review) || Number.isNaN(Date.parse(review))) return false;
-    if (issue.labels.some((label) => WAITING.includes(label.name)) && !cleared.has(issue.number)) return false;
-    return (today - Date.parse(review)) / DAY_MS > OVERDUE_DAYS;
+    return review !== undefined && DATE.test(review) && !Number.isNaN(Date.parse(review));
   });
-  if (overdue.length === 0) return;
+  if (dated.length === 0) return;
   const trusted = (login: string | undefined): boolean => anyLogin(owners, login) || anyLogin(agents, login);
-  const editors = await lastEditors(sys, token, overdue);
+  const editors = await lastEditors(sys, token, dated);
+  // reviews-due leaves out the rest, saying why, so the routine is neither shown them nor late on them.
+  const theirs = dated.filter((issue) => {
+    const edited = editors.get(issue.number);
+    return edited !== undefined && trusted(issue.user?.login) && (edited.editor === undefined || trusted(edited.editor));
+  });
+
+  // The body GitHub gave with its editor, not the listing's, so an edit between the two reads is not vetted as theirs.
+  for (const issue of theirs) {
+    const hash = textHash((editors.get(issue.number) as Edited).body);
+    const mark = vettedHash(await commentsOf(issue.number));
+    if (mark?.hash === hash) continue;
+    const body = {
+      body: `Vetted for the review routine on ${today}: ${either([...owners, ...agents])} wrote and last edited this decision's text, so \`reviews-due\` lists it while its text is this one. This job vets it again after their next edit.\n\n<!-- process-rules vetted sha256:${hash} -->`,
+    };
+    if (mark?.id !== undefined) {
+      const edited = await sys.http(`${API}/repos/${slug}/issues/comments/${mark.id}`, { method: 'PATCH', token, body });
+      if (edited.status !== 200) throw new Error(`cannot update #${issue.number}'s vetted comment (HTTP ${edited.status})`);
+    } else {
+      const commented = await sys.http(`${API}/repos/${slug}/issues/${issue.number}/comments`, { method: 'POST', token, body });
+      if (commented.status !== 201) throw new Error(`cannot comment on #${issue.number} (HTTP ${commented.status})`);
+    }
+    io.out(`#${issue.number}: vetted its text for the review routine`);
+  }
+
+  // Its review date from that same body, so an edit moving the date since the listing counts.
+  const reviewOf = (issue: Issue): string | undefined => {
+    const review = parseDecision((editors.get(issue.number) as Edited).body).review;
+    return review !== undefined && DATE.test(review) && !Number.isNaN(Date.parse(review)) ? review : undefined;
+  };
+  const overdue = theirs.filter((issue) => {
+    if (issue.labels.some((label) => WAITING.includes(label.name)) && !cleared.has(issue.number)) return false;
+    const review = reviewOf(issue);
+    return review !== undefined && (Date.parse(today) - Date.parse(review)) / DAY_MS > OVERDUE_DAYS;
+  });
   for (const issue of overdue) {
-    const editor = editors.get(issue.number);
-    // reviews-due leaves these out, saying why, so the routine is not late on them.
-    if (!trusted(issue.user?.login) || (editor !== undefined && !trusted(editor))) continue;
-    const review = parseDecision(issue.body ?? '').review as string;
-    if (verdictSince(await agentComments(sys, token, slug, issue.number, agents), Date.parse(review))) continue;
+    const review = reviewOf(issue) as string;
+    if (verdictSince(agentComments(await commentsOf(issue.number), agents), Date.parse(review))) continue;
     const added = await sys.http(`${API}/repos/${slug}/issues/${issue.number}/labels`, { method: 'POST', token, body: { labels: ['needs-owner'] } });
     if (added.status !== 200) throw new Error(`cannot label #${issue.number} needs-owner (HTTP ${added.status})`);
     const commented = await sys.http(`${API}/repos/${slug}/issues/${issue.number}/comments`, {

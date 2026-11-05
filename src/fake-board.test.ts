@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 
 import { FIELDS, VIEWS } from './board.ts';
 import type { FakeSys } from './fake.test.ts';
+import type { HttpResult } from './types.ts';
 
 export const OWNER_TOKEN = 'gho_owner';
 export const SLUG = 'example-org/example-app';
@@ -275,3 +276,154 @@ export function repoJson(organisation = true, branch = 'main'): Record<string, u
   };
 }
 
+
+/** An item on a fake Project as GitHub's REST API serves it to a push: its values by field name. */
+export interface RestItem {
+  issue: number;
+  /** The repository holding the issue, when not the app's. */
+  repo?: string;
+  kind?: 'Issue' | 'PullRequest' | 'DraftIssue';
+  archived?: boolean;
+  values: Record<string, string>;
+}
+
+/** A Project as GitHub's REST API serves it: its fields, each with its options when it is a single select. */
+export interface RestProject {
+  number: number;
+  title: string;
+  closed?: boolean;
+  fields: Record<string, string[] | null>;
+  items: RestItem[];
+}
+
+export const STATUS_OPTIONS = ['Todo', 'In Progress', 'Done'];
+export const STEP_OPTIONS = ['Frame', 'Specify', 'Slice', 'Build'];
+
+/** The app's board: slice #12 in Todo under work item #10 at Slice, beside work item #20 with no Step and #21 at Frame. */
+export function restProject(): RestProject {
+  return {
+    number: 3,
+    title: 'example-app work',
+    fields: { Title: null, Status: STATUS_OPTIONS, Step: STEP_OPTIONS },
+    items: [
+      { issue: 12, values: { Status: 'Todo' } },
+      { issue: 10, values: { Status: 'Todo', Step: 'Slice' } },
+      { issue: 20, values: {} },
+      { issue: 21, values: { Step: 'Frame' } },
+    ],
+  };
+}
+
+/**
+ * GitHub's REST API for Projects as an agent's push sees it, with the
+ * repository's open Work items, newest first; every other request goes to
+ * the GitHub the fake already answers. Pages are `perPage` long, each naming
+ * the next in its Link header.
+ */
+export class RestBoard {
+  projects: RestProject[] = [restProject()];
+  workItems = [21, 20, 10];
+  perPage = 100;
+  /** The writes it took: Project, item and field ids, and the option id. */
+  writes: { path: string; body: unknown }[] = [];
+  /** An answer in place of the board's, for a request a test has GitHub refuse. */
+  refuse: (method: string, path: string) => HttpResult | undefined = () => undefined;
+
+  readonly kind: 'orgs' | 'users';
+
+  constructor(sys: FakeSys, kind: 'orgs' | 'users' = 'orgs') {
+    this.kind = kind;
+    if (kind === 'users') sys.ownerType = 'User';
+    const http = sys.http.bind(sys);
+    sys.http = (url, options = {}) => {
+      if (!url.startsWith('https://api.github.com/')) return http(url, options);
+      const method = options.method ?? 'GET';
+      const path = new globalThis.URL(url).pathname;
+      const refused = this.refuse(method, path);
+      if (refused) {
+        sys.requests.push({ url, method, ...(options.token ? { token: options.token } : {}), ...(options.body ? { body: options.body } : {}) });
+        return Promise.resolve(refused);
+      }
+      const answer = this.answer(url, method, options.body);
+      if (!answer) return http(url, options);
+      sys.requests.push({ url, method, ...(options.token ? { token: options.token } : {}), ...(options.body ? { body: options.body } : {}) });
+      return Promise.resolve(answer);
+    };
+  }
+
+  /** A field's id: its place among the Project's fields, from 1. */
+  fieldId(project: RestProject, name: string): number {
+    return Object.keys(project.fields).indexOf(name) + 1;
+  }
+
+  /** An option's id. */
+  optionId(project: RestProject, field: string, option: string): string {
+    return `${this.fieldId(project, field)}_${option.replaceAll(' ', '-')}`;
+  }
+
+  private page(url: string, entries: unknown[]): HttpResult {
+    const parsed = new globalThis.URL(url);
+    const from = Number(parsed.searchParams.get('after') ?? 0);
+    const to = from + this.perPage;
+    parsed.searchParams.set('after', String(to));
+    return { status: 200, json: entries.slice(from, to), ...(to < entries.length ? { headers: { link: `<${parsed}>; rel="next"` } } : {}) };
+  }
+
+  private answer(url: string, method: string, body: unknown): HttpResult | undefined {
+    const parsed = new globalThis.URL(url);
+    const path = parsed.pathname;
+    if (method === 'GET' && path === `/repos/${SLUG}/issues` && parsed.searchParams.get('state') === 'open') {
+      assert.equal(parsed.searchParams.get('type'), 'Work item');
+      // A pull request and an issue of another type, which the list leaves out.
+      const issues = [...this.workItems.map((number) => ({ number, state: 'open', type: { name: 'Work item' } })), { number: 30, state: 'open', type: null, pull_request: {} }, { number: 31, state: 'open', type: { name: 'Slice' } }];
+      return this.page(url, issues);
+    }
+    const base = `/${this.kind}/example-org/projectsV2`;
+    if (method === 'GET' && path === base) {
+      return this.page(url, this.projects.map((project) => ({ number: project.number, title: project.title, state: project.closed ? 'closed' : 'open', closed_at: project.closed ? '2026-11-01T00:00:00Z' : null })));
+    }
+    const match = new RegExp(`^${base}/(\\d+)/(fields|items)(?:/(\\d+))?$`).exec(path);
+    if (!match) return undefined;
+    const project = this.projects.find((had) => had.number === Number(match[1]));
+    if (!project) return { status: 404, json: { message: 'Not Found' } };
+    if (method === 'GET' && match[2] === 'fields') {
+      const fields = Object.entries(project.fields).map(([name, options]) => ({
+        id: this.fieldId(project, name),
+        name,
+        data_type: name === 'Title' ? 'title' : options ? 'single_select' : 'text',
+        ...(options ? { options: options.map((option) => ({ id: this.optionId(project, name, option), name: { raw: option, html: option } })) } : {}),
+      }));
+      return this.page(url, fields);
+    }
+    if (method === 'GET' && match[2] === 'items' && !match[3]) {
+      const wanted = (parsed.searchParams.get('fields') ?? '').split(',').filter(Boolean).map(Number);
+      const items = project.items.map((item, index) => ({
+        id: 100 + index,
+        content_type: item.kind ?? 'Issue',
+        archived_at: item.archived ? '2026-11-01T00:00:00Z' : null,
+        content: item.kind === 'DraftIssue' ? { title: 'a draft' } : { number: item.issue, repository_url: `https://api.github.com/repos/${item.repo ?? SLUG}` },
+        fields: [
+          { id: this.fieldId(project, 'Title'), name: 'Title', data_type: 'title', value: { raw: 'a title' } },
+          ...Object.keys(project.fields)
+            .filter((name) => name !== 'Title' && wanted.includes(this.fieldId(project, name)))
+            .map((name) => {
+              const held = item.values[name];
+              return { id: this.fieldId(project, name), name, data_type: 'single_select', value: held === undefined ? null : { id: this.optionId(project, name, held), name: { raw: held, html: held } } };
+            }),
+        ],
+      }));
+      return this.page(url, items);
+    }
+    if (method === 'PATCH' && match[2] === 'items' && match[3]) {
+      const item = project.items[Number(match[3]) - 100];
+      assert.ok(item, `no item ${match[3]}`);
+      this.writes.push({ path, body });
+      for (const { id, value } of (body as { fields: { id: number; value: string }[] }).fields) {
+        const name = Object.keys(project.fields)[id - 1]!;
+        item.values[name] = project.fields[name]!.find((option) => this.optionId(project, name, option) === value)!;
+      }
+      return { status: 200, json: { id: Number(match[3]) } };
+    }
+    return undefined;
+  }
+}
