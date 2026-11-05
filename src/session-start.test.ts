@@ -188,6 +188,7 @@ describe('sessionStart', () => {
       };
       assert.equal((await start(unreadable)).out.length, 1);
       const outside = cloud(AGENT);
+      outside.files.set(`${ROOT}/.github/workflows/process-rules.yml`, workflow('main', '0.0.1', false));
       outside.execOverride = (call) => (call.args[0] === 'rev-parse' && call.args[1] === '--show-toplevel' ? { code: 128, stdout: '', stderr: 'not a repo' } : undefined);
       assert.equal((await start(outside)).out.length, 1);
     });

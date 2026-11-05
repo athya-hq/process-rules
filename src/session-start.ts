@@ -26,7 +26,9 @@ import type { Output, Sys } from './types.ts';
  * settings that works here (`agentHere`), that file's lines, which replace the lock with the agent's
  * identity. The file is copied only when it is exactly what `machine`
  * writes, so nothing else in it can run. Never the owner's login: any other
- * outcome leaves GitHub locked out. Prints one line for the session,
+ * outcome leaves GitHub locked out. Prints one line for the session (a
+ * cloud session may get a second, warning that its CLI is not the version
+ * the repo's workflow pins; see `cloudDrift`),
  * records the outcome for the PreToolUse guard, and always exits 0, so a
  * hook failure never stops the session from starting.
  * A Claude cloud session reaches GitHub through its proxy, as the account

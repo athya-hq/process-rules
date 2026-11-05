@@ -994,7 +994,7 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
       `The review routine: create a weekly Claude routine on ${slug} (claude.ai/code/routines, or /schedule in Claude Code), with claude.ai's GitHub connected as ${agent}, and give it the prompt below the line in ${routine}. Until it gives its verdicts, the weekly job labels needs-owner each decision over a week past its review date.`,
     );
   }
-  byHand.push(`cloud sessions: claude.ai's GitHub as ${agent}, Setup script from process-rules cloud-setup, before the repo's own`);
+  byHand.push(`cloud sessions: claude.ai's GitHub as ${agent}, Setup script from process-rules cloud-setup, first if the repo has its own`);
   later.push(`Claude cloud sessions: connect claude.ai's GitHub as ${agent}, and put what process-rules cloud-setup prints in the cloud environment's Setup script. ${SETUP_FIRST}`);
   let pullUrl: string | undefined;
   // Whether the pull request merges itself once its checks pass.
