@@ -154,7 +154,7 @@ describe('onboard', () => {
       '',
       'By hand:',
       `  review routine → https://github.com/athya-hq/process-rules/blob/v${v}/routines/review.md`,
-      "  cloud sessions: claude.ai's GitHub as ExampleBot, Setup script from process-rules cloud-setup",
+      "  cloud sessions: claude.ai's GitHub as ExampleBot, Setup script from process-rules cloud-setup, before the repo's own",
     ]);
     assert.deepEqual(sys.chosen, ['Go ahead?'], 'one question');
     assert.deepEqual(sys.opened, ['https://github.com/login/device'], 'the browser opens at the sign-in');
@@ -195,7 +195,7 @@ describe('onboard', () => {
     assert.ok(body.includes('\n- pre-push hook:\n  - wrote the pre-push git hook .git/hooks/pre-push, which checks an agent session pushes to GitHub as the agent, and the work rules\n'), body);
     assert.ok(body.includes('\n  - committer: ExampleBot; verified: true (valid)\n  - GitHub shows the test commit Verified by ExampleBot\n'), body);
     assert.ok(body.includes('\nLeft to do by hand:\n\n- The review routine: create a weekly Claude routine on example-org/example-app'), body);
-    assert.ok(body.includes("\n- Claude cloud sessions: connect claude.ai's GitHub as ExampleBot, and put what process-rules cloud-setup prints in the cloud environment's Setup script.\n"), body);
+    assert.ok(body.includes("\n- Claude cloud sessions: connect claude.ai's GitHub as ExampleBot, and put what process-rules cloud-setup prints in the cloud environment's Setup script. If the repo has its own Setup script, put this first, then the repo's own: a repo's script may end with exit, and nothing after that runs.\n"), body);
     assert.ok(!body.includes('Finish the Project'), 'a copy of the template leaves nothing to do by hand');
     assert.deepEqual(sys.calls.filter((c) => c.command === 'rm').at(-1)?.args, ['-rf', '/tmp/verify']);
     const reads = sys.requests.filter((r) => r.url === `https://api.github.com${REPO}`);
@@ -1141,7 +1141,7 @@ describe('staged adoption', () => {
     assert.deepEqual(planned(out, 'This Mac'), ['pre-push hook: new']);
     assert.ok(out.includes(`└  ${PULL_URL}  merges itself when checks pass`));
     assert.deepEqual([...sys.committed.keys()], ['.github/process-rules.json', '.claude/settings.json']);
-    assert.deepEqual(byHand(out), ["cloud sessions: claude.ai's GitHub as ExampleBot, Setup script from process-rules cloud-setup"]);
+    assert.deepEqual(byHand(out), ["cloud sessions: claude.ai's GitHub as ExampleBot, Setup script from process-rules cloud-setup, before the repo's own"]);
     assert.deepEqual(sys.chosen, ['Go ahead?']);
   });
 

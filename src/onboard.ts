@@ -29,6 +29,9 @@ import type { Output, Sys } from './types.ts';
 import { GITHUB_WEB } from './host.ts';
 import { type Item, type Paint, closing, heading, painter, planLines, runStep } from './layout.ts';
 
+/** Where `cloud-setup`'s script goes in a Setup field the repo's own setup shares. */
+export const SETUP_FIRST = "If the repo has its own Setup script, put this first, then the repo's own: a repo's script may end with exit, and nothing after that runs.";
+
 /** This product's repository: clients call its shared workflow. */
 export const PRODUCT = 'athya-hq/process-rules';
 export { HOOKS_PATH, WORKFLOW_PATH } from './onboard-pull.ts';
@@ -991,8 +994,8 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
       `The review routine: create a weekly Claude routine on ${slug} (claude.ai/code/routines, or /schedule in Claude Code), with claude.ai's GitHub connected as ${agent}, and give it the prompt below the line in ${routine}. Until it gives its verdicts, the weekly job labels needs-owner each decision over a week past its review date.`,
     );
   }
-  byHand.push(`cloud sessions: claude.ai's GitHub as ${agent}, Setup script from process-rules cloud-setup`);
-  later.push(`Claude cloud sessions: connect claude.ai's GitHub as ${agent}, and put what process-rules cloud-setup prints in the cloud environment's Setup script.`);
+  byHand.push(`cloud sessions: claude.ai's GitHub as ${agent}, Setup script from process-rules cloud-setup, before the repo's own`);
+  later.push(`Claude cloud sessions: connect claude.ai's GitHub as ${agent}, and put what process-rules cloud-setup prints in the cloud environment's Setup script. ${SETUP_FIRST}`);
   let pullUrl: string | undefined;
   // Whether the pull request merges itself once its checks pass.
   let merging = false;

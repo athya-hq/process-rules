@@ -683,6 +683,20 @@ under `/opt/process-rules` and puts
 environment needs the network to reach nodejs.org and GitHub's release
 downloads.
 
+The Setup field holds one script, so the install runs in a shell of its
+own (`bash <<'PROCESS_RULES' … PROCESS_RULES`): a failed download says so on
+standard error and the commands after it still run. If the repo has its own
+Setup script, put this first, then the repo's own: a repo's script may end
+with `exit`, and nothing after that runs.
+
+The Setup script installs the release it was printed from, and stays there
+when the repo's workflow moves on. So a cloud session's `session-start`
+compares the two: when the installed CLI is not the version
+`.github/workflows/process-rules.yml` pins in `process-rules-ref`, it says
+so in one line and names the fix, printing `process-rules cloud-setup` again
+from that version and pasting it over the process-rules part of the Setup
+script. It only warns; the session works on.
+
 claude.ai has one GitHub connection per account, so it is the agent's for
 every cloud session that account starts.
 
