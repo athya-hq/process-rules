@@ -86,9 +86,10 @@ describe('run', () => {
   }
 
   it('runs doctor', async () => {
-    const { code, err } = await capture(['doctor'], () => new FakeSys());
+    const { code, out } = await capture(['doctor'], () => new FakeSys());
     assert.equal(code, 1);
-    assert.match(err.at(-1) ?? '', /must not push as ExampleBot/);
+    assert.equal(out[0], '◆  process-rules doctor   ExampleBot');
+    assert.equal(out.at(-1), '└  5 to fix');
   });
 
   it('runs session-start, which always exits 0', async () => {
@@ -98,8 +99,20 @@ describe('run', () => {
   });
 
   it('passes the named agent on', async () => {
-    const { err } = await capture(['doctor', 'OtherBot'], () => new FakeSys());
-    assert.match(err.at(-1) ?? '', /must not push as OtherBot/);
+    const { out } = await capture(['doctor', 'OtherBot'], () => new FakeSys());
+    assert.equal(out[0], '◆  process-rules doctor   OtherBot');
+  });
+
+  it('passes machine its agent and flags, and treats a bad one as bad usage', async () => {
+    const { code, out } = await capture(['machine', 'examplebot', '--dry-run'], () => new FakeSys());
+    assert.equal(code, 0);
+    assert.equal(out[0], '◆  process-rules machine   ExampleBot');
+    assert.equal(out.at(-1), '└  Dry run: nothing changed.');
+    for (const args of [['machine', '--force'], ['machine', 'a', 'b']]) {
+      const { code: bad, err } = await capture(args);
+      assert.equal(bad, 2, args.join(' '));
+      assert.match(err[0] ?? '', /^process-rules: (unknown option --force|unexpected argument "b")$/);
+    }
   });
 
   it('runs pr-work-rules and pre-push, which takes git\'s two arguments and no third', async () => {

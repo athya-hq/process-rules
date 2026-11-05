@@ -67,7 +67,38 @@ launcher `~/.config/process-rules/bin/process-rules`, which the Claude Code
 hooks and the pre-push git hook run. The
 launcher names the node that ran `machine` by its real path (not a version
 manager's per-shell one, which the Claude app's hooks may not have), so the
-hooks need no node on their `PATH`. Each change waits for a yes. Why a classic token: [docs/decisions.md](docs/decisions.md).
+hooks need no node on their `PATH`. Why a classic token: [docs/decisions.md](docs/decisions.md).
+
+`machine` first works out what it would change, changing nothing, and shows
+one plan, in the same layout as `onboard`, listing only what changes. Then it
+asks once:
+
+```
+◆  process-rules machine   AGENT
+│
+◇  This Mac
+│    signing key   ~/.ssh/agent_signing (new)
+│    token         classic, in the keychain (new)
+│    session file  new
+│    launcher      ~/.config/process-rules/bin/process-rules
+│
+◇  GitHub — as AGENT
+│    signing key  register
+│
+◆  Go ahead?   ● Yes  ○ No
+```
+
+No changes nothing. `--yes` goes ahead without asking, and `--dry-run` shows
+the plan and stops. With no terminal and no `--yes`, `machine` refuses in one
+line. When nothing would change, it asks nothing and says
+`◇  This Mac is set up for AGENT`. After the yes, each step shows as one `◇`
+line, or `■` with why when it fails, and nothing after it changes. The token's
+step opens GitHub's page, says in a few short lines what to do there, and asks
+for the paste, hidden. A stored token GitHub refuses, or one that ends within
+14 days, shows in the plan as replaced. The run ends with a "Worth fixing"
+group of `▲` lines, each with its one-line fix, and
+`└  AGENT is ready on this Mac`. The SessionStart hook sources the session
+file, so nothing is left to do by hand.
 
 The trade-off, for adopters: the agent account holds one classic token, and
 its `repo` scope reaches every repository the agent account can access, not
@@ -129,28 +160,31 @@ github.com only, commits as the agent's no-reply address and signs with its
 key.
 
 The lock lives in the session's environment, which a session that ignores it
-could change. So `machine` ends by offering to lock the owner away, as
-optional hardening for a machine that runs agents: to sign `gh` out of every
-account other than the agent's, active or not, and to remove a git password
-for github.com saved in the macOS keychain. On a laptop you also use for your
-own work, accepting signs you out of your own GitHub tooling. The stronger
+could change. So `machine` also locks the owner away, as optional hardening
+for a machine that runs agents. Its plan lists signing `gh` out of every
+account other than the agent's, active or not, and removing a git password
+for github.com saved in the macOS keychain. The one yes covers them, and a no
+leaves them in place with everything else. On a laptop you also use for your
+own work, saying yes signs you out of your own GitHub tooling. The stronger
 alternative is a separate macOS user that runs only the agent sessions: none
 of your logins, keychain or SSH keys are in it, and nothing of yours is signed
-out. `machine` also warns about SSH keys in `~/.ssh` with no passphrase, and
-names the account SSH reaches GitHub as without asking (a key in the SSH
-agent or the keychain). The owner's SSH access is left alone, since it is the
-owner's own way to GitHub (docs/decisions.md); agent sessions send GitHub
-over HTTPS and refuse SSH, and the pre-push hook refuses their pushes over
-SSH.
+out. A sign-out that fails stops nothing; it goes under "Worth fixing". So
+does each SSH key in `~/.ssh` with no passphrase, with
+`ssh-keygen -p -f <key>` to add one. The owner's SSH access is left alone,
+since it is the owner's own way to GitHub (docs/decisions.md). Agent sessions
+send GitHub over HTTPS and refuse SSH, and the pre-push hook refuses their
+pushes over SSH. `doctor` names the account SSH reaches GitHub as without
+asking (a key in the SSH agent or the keychain), as fine.
 
-Declining leaves the `gh` logins and the git password in place and records
-which ones in `~/.config/process-rules/<agent, lowercased>/lockout-declined.json`;
-`doctor` then reports them as your choice instead of warning. An account
-signed in later is still a warning. Each `machine` run offers again, and
-accepting clears that part of the record.
+Releases before 0.5.21 asked about each lockout step on its own, and recorded
+what was declined in
+`~/.config/process-rules/<agent, lowercased>/lockout-declined.json`.
+`doctor` reports a login or password in that record as your choice instead of
+warning, and an account signed in later is still a warning. Once a `machine`
+run locks them away, the record goes.
 
-When `machine` signs an account out of `gh`, it ends with two steps only you
-can take, printed together. Restart the Claude desktop app: it keeps the `gh`
+When `machine` signs an account out of `gh`, "Worth fixing" ends with two
+steps only you can take. Restart the Claude desktop app: it keeps the `gh`
 token it read before the move until it restarts, so until then its own
 GitHub actions (Auto-fix, the PR bar) run as you, and Auto-fix refuses the
 agent's pull requests. And revoke the old token on GitHub (Settings →
@@ -193,9 +227,30 @@ first; a POST or PATCH never is. A call with a time limit keeps it for
 both tries, and one that runs out of time stops with that, not tried
 again.
 
-`process-rules doctor` re-checks the key, the token and its scopes, the key's
-registration, the session file and that the launcher runs, names the step to re-run, and warns 14
-days before the token ends.
+`process-rules doctor` only reads. It re-checks the key, the token and its
+scopes, the key's registration, the session file, that the launcher runs, and
+what of the owner's an agent session could reach. It shows them grouped as
+This Mac, GitHub and This repo, one line each: `✓` fine, `▲` worth fixing,
+`✗` broken. Each problem line ends with its fix:
+
+```
+◆  process-rules doctor   AGENT
+│
+◇  This Mac
+✓  signing key ~/.ssh/agent_signing
+✓  session file
+✗  launcher missing, so hooks need node on PATH → process-rules machine
+│
+◇  GitHub — as AGENT
+▲  token ends in 11 days → process-rules machine
+✓  signing key registered
+│
+└  2 to fix
+```
+
+It closes with `└  All good` or `└  N to fix`, and exits 1 when anything is
+`✗`. A token that ends within 14 days is `▲`, and still exits 0. It needs no
+terminal.
 
 ## Adopting
 
@@ -588,7 +643,7 @@ only ever in the command's environment, never on a command line, in output
 or in a file, and it never falls back to the owner's `gh` logins, git
 password or SSH. Use the launcher line above, as the hooks `onboard` writes do:
 the app's hooks may have no node on their `PATH`. `process-rules doctor`,
-run in the client repo, warns about each hook in `.claude/settings.json` or
+run in the client repo, warns under "This repo" about each hook in `.claude/settings.json` or
 `.claude/settings.local.json` whose command, or the repo script it runs,
 calls `gh` or git's remote commands outside `as-agent`.
 

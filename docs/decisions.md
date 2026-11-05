@@ -655,3 +655,23 @@
   it does for a pull request already clean to merge, the run ends "Merge
   <url>" and "By hand:" says why. A setting GitHub does not report is not
   taken as off, so GitHub's own refusal says why then.
+- **2026-11-05 — Record: P-02, machine and doctor in onboard's layout.**
+  The owner liked onboard's one plan and one question, then ran `machine`,
+  which still asked a y/N question per change and ended with long ✓/!
+  lines. They asked for `machine` and `doctor` to look the same ("Yes,
+  both"). State #156 builds it. `machine` now works out every change first,
+  changing nothing, shows one plan (This Mac, GitHub as the agent), and asks
+  once, with `--yes` and `--dry-run` as in onboard. With nothing to change it
+  asks nothing. The lockout's sign-outs are plan items like the rest, so the
+  one yes covers them and a no leaves everything as it was. machine no
+  longer declines them one at a time, so it no longer writes
+  `lockout-declined.json`. `doctor` still honours a record an older release
+  wrote, and `machine` removes it once it locks them away. A stored token
+  near its end is replaced on the yes rather than asked about separately.
+  The classic token's page and hidden paste stay steps after the yes, since
+  only the owner can make the token. Warnings become `▲` lines with their
+  one-line fix. `doctor` stays read-only and asks nothing. It groups its
+  checks, marks each ✓, ▲ or ✗ with a fix, and keeps its checks, exit codes
+  and the 14-day warning. It now prints them all on standard output as one
+  picture. The layout lives in `src/layout.ts`, which all three commands
+  share.

@@ -5,7 +5,7 @@ import { prDesign } from './design.ts';
 import { doctor } from './doctor.ts';
 import { guard } from './guard.ts';
 import { prIdentity } from './identity.ts';
-import { machine } from './machine.ts';
+import { machine, machineArgs } from './machine.ts';
 import { reviewsDue } from './reviews.ts';
 import { reviewThread, threadArgs } from './review-thread.ts';
 import { onboard, onboardArgs } from './onboard.ts';
@@ -21,7 +21,8 @@ export { packageVersion, versionOf } from './version.ts';
 export const USAGE = `Usage: process-rules <command>
 
 Commands:
-  machine [agent]  Set up this machine so agent sessions work as the agent account
+  machine [agent] [--yes] [--dry-run]
+                   Set up this machine so agent sessions work as the agent account
   doctor [agent]   Check agent sessions here can work as the agent account
   onboard [owner agent] [--features a,b] [--add feature] [--yes] [--dry-run]
                    Set up the client repo here, for the features it turns on
@@ -50,7 +51,7 @@ in the repo around the working directory.
 onboard suggests the owner and agent the first time (or name them); after that it reads them from that file.
 Features: identity (always on), pr-identity, board, work-rules, figma, decisions, review.
 --features lists them the first time (all when left out); --add turns one more on.
-onboard prints one plan and asks once; --yes goes ahead without asking, --dry-run stops at the plan.`;
+machine and onboard print one plan and ask once; --yes goes ahead without asking, --dry-run stops at the plan.`;
 
 /** Runs one command and returns its exit code: 0 done, 1 failed, 2 bad usage. */
 export async function run(
@@ -59,17 +60,17 @@ export async function run(
   sys: () => Sys | Promise<Sys>,
 ): Promise<number> {
   const [command, ...rest] = args;
-  const allowed = command === 'onboard' || command === 'review-thread' || command === 'as-agent' ? Infinity : command === 'pre-push' ? 2 : command === 'machine' || command === 'doctor' || command === 'propose' ? 1 : 0;
+  const allowed = command === 'onboard' || command === 'machine' || command === 'review-thread' || command === 'as-agent' ? Infinity : command === 'pre-push' ? 2 : command === 'doctor' || command === 'propose' ? 1 : 0;
   const extra = rest[allowed];
   if (extra !== undefined) {
     io.err(`process-rules: unexpected argument "${extra}"`);
     io.err(USAGE);
     return 2;
   }
-  if (command === 'onboard' || command === 'review-thread' || command === 'as-agent') {
+  if (command === 'onboard' || command === 'machine' || command === 'review-thread' || command === 'as-agent') {
     // Their options are checked here, so a bad one is bad usage (exit 2).
     try {
-      (command === 'onboard' ? onboardArgs : command === 'as-agent' ? asAgentArgs : threadArgs)(rest);
+      (command === 'onboard' ? onboardArgs : command === 'machine' ? machineArgs : command === 'as-agent' ? asAgentArgs : threadArgs)(rest);
     } catch (error) {
       io.err(`process-rules: ${error instanceof Error ? error.message : String(error)}`);
       io.err(USAGE);
@@ -140,7 +141,8 @@ export async function run(
           return await prePush(real, io, real.readStdin(), rest[1] ?? '');
         }
         if (command === 'onboard') return await onboard(await sys(), io, rest);
-        return await (command === 'machine' ? machine : doctor)(await sys(), io, rest[0]);
+        if (command === 'machine') return await machine(await sys(), io, rest);
+        return await doctor(await sys(), io, rest[0]);
       } catch (error) {
         io.err(`process-rules ${command}: ${error instanceof Error ? error.message : String(error)}`);
         return 1;
