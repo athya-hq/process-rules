@@ -8,6 +8,12 @@ updates:
     groups:
       dev-dependencies:
         dependency-type: development
+    ignore:
+      # @types/node stays on the major that package.json's engines.node names
+      # (and .nvmrc installs): newer types would let code type-check against
+      # APIs that runtime lacks. Bump the major by hand when the runtime moves.
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
   - package-ecosystem: github-actions
     directory: /
     schedule:
