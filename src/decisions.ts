@@ -128,7 +128,7 @@ export async function decisionsWeekly(sys: Sys, io: Output): Promise<number> {
       }
     }
     if (!decision.check) continue;
-    const editor = editors.get(issue.number);
+    const editor = editors.get(issue.number)?.editor;
     if (!trusted(issue.user?.login) || (editor !== undefined && !trusted(editor))) {
       io.out(`${where}: not run; only ${either([...owners, ...agents])} may write a decision's check`);
       continue;
@@ -201,22 +201,33 @@ export async function decisionsWeekly(sys: Sys, io: Output): Promise<number> {
   return 0;
 }
 
-/** Who last edited each issue's body (undefined when no one has), by issue number. */
-export async function lastEditors(sys: Sys, token: string, issues: { number: number; node_id: string }[]): Promise<Map<number, string | undefined>> {
-  const editors = new Map<number, string | undefined>();
+/** An issue's body and who last edited it (undefined when no one has), read together so the one belongs to the other. */
+export interface Edited {
+  editor: string | undefined;
+  body: string;
+}
+
+/**
+ * Who last edited each issue's body, with that body, by issue number. Only
+ * GitHub's GraphQL API names a body's last editor: its REST API has no such
+ * field, and a body edit leaves no event in an issue's timeline. So only the
+ * weekly job, whose token reads GraphQL, calls this.
+ */
+export async function lastEditors(sys: Sys, token: string, issues: { number: number; node_id: string }[]): Promise<Map<number, Edited>> {
+  const editors = new Map<number, Edited>();
   // GitHub looks up at most 100 nodes a request.
   for (let at = 0; at < issues.length; at += 100) {
     const { status, json } = await sys.http(`${API}/graphql`, {
       method: 'POST',
       token,
       body: {
-        query: 'query($ids: [ID!]!) { nodes(ids: $ids) { ... on Issue { number editor { login } } } }',
+        query: 'query($ids: [ID!]!) { nodes(ids: $ids) { ... on Issue { number body editor { login } } } }',
         variables: { ids: issues.slice(at, at + 100).map((issue) => issue.node_id) },
       },
     });
-    const nodes = (json as { data?: { nodes?: ({ number: number; editor: { login: string } | null } | null)[] } } | null)?.data?.nodes;
+    const nodes = (json as { data?: { nodes?: ({ number: number; body?: string; editor: { login: string } | null } | null)[] } } | null)?.data?.nodes;
     if (status !== 200 || !nodes) throw new Error(`cannot read who edited the decisions (HTTP ${status})`);
-    for (const node of nodes) if (node) editors.set(node.number, node.editor?.login);
+    for (const node of nodes) if (node) editors.set(node.number, { editor: node.editor?.login, body: node.body ?? '' });
   }
   return editors;
 }

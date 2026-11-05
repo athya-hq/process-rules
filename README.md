@@ -381,6 +381,17 @@ the owner has a week to reverse it. A decision touching secrets, money or
 production is held for the owner with a suggestion and `needs-owner`. The
 weekly job removes `veto` once the week has passed.
 
+`reviews-due` lists only a decision the owner or the agent wrote and last
+edited, so no one else's text reaches the routine. It reads only GitHub's REST
+API, which a cloud session's GitHub proxy allows, and REST does not say who
+last edited an issue's body, so the weekly job, whose token reads GraphQL,
+vets the text for it: on each open decision with a `Review:` date that the
+owner or the agent wrote and last edited, it keeps one comment naming the
+text's SHA-256, and updates it after their edits. `reviews-due` lists a
+decision only while its text has the hash in the workflow's latest such
+comment; a decision written or edited since the job last ran waits for its
+next run, and `reviews-due` says so.
+
 The weekly job also watches the routine: an open decision the routine reviews
 whose `Review:` date is over a week past, with no `Kept:` or `Settled:` from
 the agent since, is labeled `needs-owner` with a comment, so a routine that
@@ -529,8 +540,8 @@ the connected account's. As anyone else, GitHub stays locked out and the
 session is told to stop. The pre-push hook asks GitHub the same through
 the proxy before each push.
 
-The proxy refuses GitHub's GraphQL API, so the work rules read only its
-REST API, here and everywhere else. The cloud environment's Setup script,
+The proxy refuses GitHub's GraphQL API, so the work rules and `reviews-due`
+read only its REST API, here and everywhere else. The cloud environment's Setup script,
 which runs as root before each session, installs the CLI:
 `process-rules cloud-setup` prints one for the installed release. It
 unpacks Node, once it matches the sha256 the release pins, and the CLI
