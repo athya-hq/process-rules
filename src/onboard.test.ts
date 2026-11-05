@@ -142,7 +142,7 @@ describe('onboard', () => {
       '◇  Check',
       '│    one signed test commit by ExampleBot, deleted after',
       '│',
-      '◇  Sign in to GitHub as example-owner, for this run only',
+      '◇  Sign in to GitHub as example-owner, for this run only: repo, project, admin:org',
       '│  one-time code 1881-F156 (copied)',
       '│  approve it at https://github.com/login/device',
       '◇  Signed in as example-owner',
@@ -274,7 +274,7 @@ describe('onboard', () => {
       assert.equal(code, 0, [...out, ...err].join('\n'));
       assert.ok(out.includes('│  example-org/example-app · owner Second-Owner · agent ExampleBot'), out.join('\n'));
       assert.equal(signIns(sys), 1);
-      assert.ok(out.includes('◇  Sign in to GitHub as example-owner or Second-Owner, for this run only'), out.join('\n'));
+      assert.ok(out.includes('◇  Sign in to GitHub as example-owner or Second-Owner, for this run only: repo, project, admin:org'), out.join('\n'));
       const login = sys.calls.find((call) => call.command === 'gh' && call.args[1] === 'login')?.args ?? [];
       assert.equal(login[login.indexOf('-s') + 1], 'project,admin:org', 'the sign-in that names the owner asks for the scopes the features need');
     });
@@ -296,7 +296,7 @@ describe('onboard', () => {
       const { code, out } = await run(sys, ['EXAMPLE-OWNER', 'examplebot']);
       assert.equal(code, 0);
       assert.equal(repo(sys).get(SETTINGS), `${JSON.stringify(TEAM, null, 2)}\n`);
-      assert.ok(out.includes('◇  Sign in to GitHub as example-owner, for this run only'), out.join('\n'));
+      assert.ok(out.includes('◇  Sign in to GitHub as example-owner, for this run only: repo, project, admin:org'), out.join('\n'));
       assert.ok(out.indexOf('◇  Signed in as example-owner') > out.findIndex((line) => line.startsWith('◆')), 'after the plan');
     });
 
@@ -538,6 +538,7 @@ describe('onboard', () => {
     const { out } = await run(sys);
     assert.deepEqual(planned(out, 'This Mac'), []);
     assert.ok(byHand(out).includes('add process-rules pre-push "$@" → .git/hooks/pre-push'), out.join('\n'));
+    assert.ok(opened(sys)?.body.includes('\n- Add the line `process-rules pre-push "$@"` to the pre-push git hook .git/hooks/pre-push, which is your own.\n'), 'the pull request lists it too');
     assert.equal(sys.files.get(PRE_PUSH), '#!/bin/sh\nnpm test\n');
   });
 
@@ -660,7 +661,7 @@ describe('onboard', () => {
       sys.answers = ['', '', 'y'];
       const { code, out } = await run(sys, []);
       assert.equal(code, 0);
-      assert.equal(out[0], '◇  Sign in to GitHub as the owner, for this run only', 'no owner is known before the sign-in, which comes before the plan');
+      assert.equal(out[0], '◇  Sign in to GitHub as the owner, for this run only: repo, project, admin:org', 'no owner is known before the sign-in, which comes before the plan');
       assert.match(opened(sys)?.body ?? '', /^- onboard signed in before showing its plan, to suggest the owner by the account the browser signed in as\.$/m);
       assert.deepEqual(sys.asked.slice(0, 2), ['The owner, who approves [example-owner]: ', 'The agent, which builds [ExampleBot]: ']);
       assert.deepEqual(JSON.parse(repo(sys).get(SETTINGS) ?? '').owner, 'example-owner');
@@ -701,7 +702,7 @@ describe('onboard', () => {
       const { code, out } = await run(sys);
       assert.equal(code, 0);
       assert.deepEqual(asked(sys), [['project', 'admin:org']]);
-      const line = out.indexOf('◇  Sign in to GitHub as example-owner, for this run only');
+      const line = out.indexOf('◇  Sign in to GitHub as example-owner, for this run only: repo, project, admin:org');
       assert.ok(line >= 0, out.join('\n'));
       // gh's code and link, without its lines about the temporary folder's setup.
       assert.deepEqual(out.slice(line + 1, line + 4), ['│  one-time code 1881-F156 (copied)', '│  approve it at https://github.com/login/device', '◇  Signed in as example-owner']);
@@ -1371,6 +1372,14 @@ describe('the plan and its one question', () => {
       assert.ok(refused.out.includes(`└  Merge ${PULL_URL}`));
       assert.equal(byHand(refused.out)[0], line);
     }
+    const down = fresh();
+    const http = down.http.bind(down);
+    down.http = (url, options) =>
+      JSON.stringify(options?.body ?? '').includes('enablePullRequestAutoMerge') ? Promise.reject(new Error('POST api.github.com/graphql could not be made: ECONNRESET')) : http(url, options);
+    const cut = await run(down);
+    assert.deepEqual({ code: cut.code, err: cut.err }, { code: 0, err: [] });
+    assert.ok(cut.out.includes(`└  Merge ${PULL_URL}`));
+    assert.equal(byHand(cut.out)[0], 'auto-merge: GitHub refused (POST api.github.com/graphql could not be made: ECONNRESET); merge it yourself');
     const none = fresh();
     none.route('GET', REPO, { status: 200, json: { ...repoJson(), allow_squash_merge: false, allow_rebase_merge: false, allow_merge_commit: false } });
     assert.equal(byHand((await run(none)).out)[0], 'auto-merge: GitHub refused (example-org/example-app allows no merge method); merge it yourself');
@@ -1466,13 +1475,14 @@ describe('the plan and its one question', () => {
     });
     const { code, out } = await run(sys);
     assert.equal(code, 0);
-    assert.ok(planned(out, 'Pull request').includes('workflow: write or update'), out.join('\n'));
+    assert.ok(planned(out, 'Pull request').includes('workflow: new'), out.join('\n'));
     assert.match(repo(sys).get(WORKFLOW) ?? '', /branches: \["trunk"\]/);
-    const known = fresh();
-    known.route('GET', REPO, { status: 404, json: null });
-    known.route('GET', '/user/repository_invitations?per_page=100&page=1', { status: 200, json: [] });
-    known.execOverride = (call) => (call.args[0] === 'symbolic-ref' ? { code: 0, stdout: 'origin/main\n', stderr: '' } : undefined);
-    assert.ok(planned((await run(known, ['example-owner', AGENT, '--dry-run'])).out, 'Pull request').includes('workflow: new'));
+    // An existing workflow may change with the branch, which only GitHub can say: the plan says so.
+    const existing = fresh();
+    existing.files.set(WORKFLOW, workflow('main', packageVersion(), true));
+    existing.route('GET', REPO, { status: 404, json: null });
+    existing.route('GET', '/user/repository_invitations?per_page=100&page=1', { status: 200, json: [] });
+    assert.ok(planned((await run(existing, ['example-owner', AGENT, '--dry-run'])).out, 'Pull request').includes('workflow: write or update'));
   });
 
   it("leaves a Project made before the template as it is, naming what is left to do by hand", async () => {

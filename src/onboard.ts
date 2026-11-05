@@ -732,7 +732,8 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     (signedIn ??= (async () => {
       // The features the run ends with: the sign-in can come before --add's feature is turned on.
       scopes = ownerScopes(add ? [...features, add] : features, await byOrganisation());
-      io.out(`${paint.done('◇')}  Sign in to GitHub as ${as.length === 0 ? 'the owner' : either(as)}, for this run only`);
+      // Which access the approval grants: gh's own repo scope, and what the run's features add.
+      io.out(`${paint.done('◇')}  Sign in to GitHub as ${as.length === 0 ? 'the owner' : either(as)}, for this run only: ${['repo', ...scopes].join(', ')}`);
       const signed = await signInOnce(sys, scopes, say);
       if ('login' in signed) io.out(`${paint.done('◇')}  Signed in as ${signed.login}`);
       return signed;
@@ -826,6 +827,7 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
         });
       } else if (library !== undefined) {
         byHand.push(`FIGMA_LIBRARY secret: the design library's file key → ${GITHUB_WEB}/${slug}/settings/secrets/actions`);
+        later.push(`The "figma.library" taken out was not a Figma file key; set the FIGMA_LIBRARY Actions secret to the design library's file key under ${slug} → Settings → Secrets and variables → Actions.`);
       }
     }
     const typed = features.filter((feature) => NEEDS_ISSUE_TYPES.includes(feature));
@@ -905,10 +907,9 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     io.err(`onboard: ${reach.reason}`);
     return 1;
   }
-  // The default branch, which the workflow's pushes run on: GitHub's, once the agent can push; until then this
-  // checkout's name for it, or none, and the workflow is worked out once the agent can push.
-  const branchHere = /^origin\/(.+)$/.exec(sys.exec('git', ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], { cwd: root }).stdout.trim())?.[1];
-  const planned = reach.kind === 'push' ? reach.branch : branchHere;
+  // The default branch, which the workflow's pushes run on, is GitHub's to say once the agent can push; until then
+  // the workflow is worked out again once it can, and the plan says only what it can know without it.
+  const planned = reach.kind === 'push' ? reach.branch : undefined;
   // A public repository, or an organisation's base permission, lets the agent read without pushing.
   if (reach.kind === 'none' || reach.kind === 'read') {
     const sees = reach.kind === 'none' ? 'cannot see' : 'can read but not push to';
@@ -960,11 +961,14 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
   };
   if (workflowNeeded) {
     const update = planned === undefined ? undefined : workflowUpdate(fileAt(WORKFLOW_PATH), planned, version, on('figma'), schedule);
-    if (update === undefined) pull.push({ label: 'workflow', detail: 'write or update' });
+    if (update === undefined) pull.push({ label: 'workflow', detail: fileAt(WORKFLOW_PATH) === undefined ? 'new' : 'write or update' });
     else if (update.kind !== 'same') pull.push({ label: 'workflow', detail: workflowDetail(update, version, on('figma')) });
     const text = update && update.kind !== 'same' ? update.text : fileAt(WORKFLOW_PATH);
     const unpassed = on('figma') && text !== undefined ? jobsWithoutLibrary(text) : [];
-    if (unpassed.length > 0) byHand.push(`pass FIGMA_LIBRARY in ${unpassed.join(', ')} → ${WORKFLOW_PATH}`);
+    if (unpassed.length > 0) {
+      byHand.push(`pass FIGMA_LIBRARY in ${unpassed.join(', ')} → ${WORKFLOW_PATH}`);
+      later.push(`In ${WORKFLOW_PATH}, ${unpassed.join(', ')} pass the shared checks no FIGMA_LIBRARY secret, so the design check stays off there; add \`FIGMA_LIBRARY: \${{ secrets.FIGMA_LIBRARY }}\` under their secrets.`);
+    }
   }
 
   if (on('board')) {
@@ -979,6 +983,7 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
         // moves its items and closes it: that is left to the owner, with what the template would have set.
         const board = await setUpBoard(sys, out, (_, step) => Promise.resolve(step !== 'replace'), slug, owner, mine as string, typeof projectTitle === 'string' ? projectTitle : undefined);
         byHand.unshift(...(board?.byHand ?? []));
+        later.unshift(...(board?.byHand ?? []).map((line) => `On the board: ${line}.`));
         return board !== undefined;
       },
     });
@@ -1000,6 +1005,7 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
   } else if (hook.state === 'outside' || hook.state === 'own') {
     // A hooks folder shared by other repositories (a global core.hooksPath), or the client's own hook, is the owner's to change.
     byHand.push(`add ${hookLine} → ${hook.path}`);
+    later.push(`Add the line \`${hookLine}\` to the pre-push git hook ${hook.path}, which ${hook.state === 'own' ? 'is your own' : 'git runs from outside this repository'}.`);
   }
 
   steps.push({
@@ -1038,7 +1044,11 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
       if (opened === 1) return false;
       pullUrl = opened.url;
       // Not turning it on fails nothing: the owner merges it instead.
-      const refused = await autoMerge(sys, slug, token, opened.id);
+      // A request that gets no answer is a refusal like any other: the pull request is open either way.
+      const refused = await autoMerge(sys, slug, token, opened.id).catch((error: unknown) => ({
+        problem: error instanceof Error ? error.message : String(error),
+        notAllowed: undefined,
+      }));
       merging = refused === undefined;
       if (refused?.notAllowed) byHand.unshift(`auto-merge: turn on Allow auto-merge → ${GITHUB_WEB}/${slug}/settings, or merge it yourself`);
       else if (refused) byHand.unshift(`auto-merge: GitHub refused (${refused.problem}); merge it yourself`);

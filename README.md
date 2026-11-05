@@ -231,8 +231,10 @@ days before the token ends.
    It shows only what changes, in a few words each; the pull request's
    description holds each change in full. No changes nothing and opens no
    pull request. `--yes` goes ahead without asking, and `--dry-run` prints
-   the plan and stops, changing nothing; without a terminal and without
-   `--yes`, `onboard` refuses. After the yes it shows one line per step, a
+   the plan and stops, changing nothing and signing in to nothing, so where
+   only a sign-in could tell which of the settings' owners runs it, a dry
+   run asks you to name the owner. Without a terminal, `onboard` refuses
+   unless given `--yes` or `--dry-run`. After the yes it shows one line per step, a
    spinner while it works, and ends with the pull request and a short "By
    hand:" list of what GitHub's API cannot do.
 

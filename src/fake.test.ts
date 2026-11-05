@@ -379,7 +379,7 @@ export class FakeSys implements Sys {
   ): Promise<number> {
     const result = this.exec(command, args, { ...options, interactive: true });
     if (command === 'gh' && args[1] === 'login') for (const text of [...this.ghSignInLines, ...(result.code === 0 ? this.ghSignedInLines : [])]) line(text);
-    for (const text of `${result.stdout}${result.stderr}`.split('\n').filter(Boolean)) line(text);
+    for (const output of [result.stdout, result.stderr]) for (const text of output.split('\n').filter(Boolean)) line(text);
     return Promise.resolve(result.code);
   }
 
