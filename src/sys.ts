@@ -57,19 +57,43 @@ export function realSys(): Sys {
     tempDir: () => mkdtempSync(join(tmpdir(), 'process-rules-')),
     remove: (path) => rmSync(path, { recursive: true, force: true }),
     async http(url, options = {}) {
-      const response = await fetch(url, {
-        method: options.method ?? 'GET',
-        headers: {
-          accept: 'application/vnd.github+json',
-          'x-github-api-version': '2022-11-28',
-          ...(options.token ? { authorization: `Bearer ${options.token}` } : {}),
-          ...(options.body ? { 'content-type': 'application/json' } : {}),
-          ...options.headers,
-        },
-        ...(options.body ? { body: JSON.stringify(options.body) } : {}),
-        ...(options.timeoutMs !== undefined ? { signal: AbortSignal.timeout(options.timeoutMs) } : {}),
-      });
-      const text = await response.text();
+      const method = (options.method ?? 'GET').toUpperCase();
+      // One deadline for the call, a repeat included, so timeoutMs bounds all of it.
+      const signal = options.timeoutMs !== undefined ? AbortSignal.timeout(options.timeoutMs) : undefined;
+      const request = async (): Promise<{ response: Response; text: string }> => {
+        const response = await fetch(url, {
+          method,
+          headers: {
+            accept: 'application/vnd.github+json',
+            'x-github-api-version': '2022-11-28',
+            ...(options.token ? { authorization: `Bearer ${options.token}` } : {}),
+            ...(options.body ? { 'content-type': 'application/json' } : {}),
+            ...options.headers,
+          },
+          ...(options.body ? { body: JSON.stringify(options.body) } : {}),
+          ...(signal ? { signal } : {}),
+        });
+        return { response, text: await response.text() };
+      };
+      let got: { response: Response; text: string };
+      try {
+        got = await request();
+      } catch (error) {
+        // A timeout keeps its own error, which callers name; a request that can be repeated safely is tried once more.
+        if (isTimeout(error)) throw error;
+        if (!REPEATABLE.has(method)) throw notMade(method, url, error);
+        // The wait ends early when the deadline passes, and the repeat then stops with its TimeoutError.
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, RETRY_MS);
+          signal?.addEventListener('abort', () => (clearTimeout(timer), resolve()), { once: true });
+        });
+        try {
+          got = await request();
+        } catch (again) {
+          throw isTimeout(again) ? again : notMade(method, url, again);
+        }
+      }
+      const { response, text } = got;
       return {
         status: response.status,
         json: text ? JSON.parse(text) : null,
@@ -93,6 +117,43 @@ export function realSys(): Sys {
     now: () => new Date(),
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   };
+}
+
+/** Methods a request can be repeated with after a network failure, since repeating one changes nothing more. */
+const REPEATABLE = new Set(['GET', 'PUT', 'DELETE']);
+
+/** How long to wait before trying such a request again. */
+export const RETRY_MS = 1000;
+
+function isTimeout(error: unknown): boolean {
+  return (error as { name?: unknown } | null)?.name === 'TimeoutError';
+}
+
+/**
+ * Why a request got no answer, naming the request by method, host and path, never its query, and giving the
+ * reason that fetch's own "fetch failed" holds in its cause, such as "ECONNRESET (other side closed)".
+ */
+export function notMade(method: string, url: string, error: unknown): Error {
+  let where = 'a request';
+  try {
+    const parsed = new URL(url);
+    where = `${parsed.host}${parsed.pathname}`;
+  } catch {
+    // A URL fetch could not read is named by nothing more.
+  }
+  return new Error(`${method} ${where} could not be made: ${reason(error)}`, { cause: error });
+}
+
+/** The innermost cause's code and message, or what there is of them. */
+function reason(error: unknown): string {
+  let inner = error as { cause?: unknown; code?: unknown; message?: unknown } | null;
+  while (inner && typeof inner === 'object' && inner.cause && typeof inner.cause === 'object') {
+    inner = inner.cause as typeof inner;
+  }
+  const code = typeof inner?.code === 'string' ? inner.code : '';
+  const message = typeof inner?.message === 'string' ? inner.message : '';
+  if (code && message && !message.includes(code)) return `${code} (${message})`;
+  return message || code || String(error);
 }
 
 /** A path with its links resolved, or as given when it cannot be. */
