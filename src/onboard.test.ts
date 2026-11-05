@@ -1243,6 +1243,21 @@ describe('staged adoption', () => {
     const { out } = await run(sys);
     assert.equal(repo(sys).get(WORKFLOW), own);
     assert.ok(byHand(out).includes('pass FIGMA_LIBRARY in process-rules, process-rules-weekly, process-rules-merged → .github/workflows/process-rules.yml'), out.join('\n'));
+    assert.ok(opened(sys) === undefined || opened(sys)?.body.includes('pass the shared checks no FIGMA_LIBRARY secret'));
+    // A workflow the pull request replaces passes it: nothing to do by hand then, though the plan was made without the branch.
+    const replaced = fresh();
+    replaced.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity', 'figma'] }));
+    replaced.files.set(WORKFLOW, 'old');
+    let added = false;
+    replaced.route('GET', REPO, () => (added ? PUSH : { status: 404, json: null }));
+    replaced.route('GET', '/user/repository_invitations?per_page=100&page=1', { status: 200, json: [] });
+    replaced.route('PUT', COLLABORATOR, () => {
+      added = true;
+      return { status: 204, json: null };
+    });
+    const after = await run(replaced, []);
+    assert.equal(after.code, 0, after.err.join('\n'));
+    assert.ok(!byHand(after.out).some((line) => line.includes('FIGMA_LIBRARY')), after.out.join('\n'));
   });
 
   it('names each job that passes no FIGMA_LIBRARY, and takes `secrets: inherit` as passing it', () => {

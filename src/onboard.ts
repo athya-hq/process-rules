@@ -963,12 +963,6 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     const update = planned === undefined ? undefined : workflowUpdate(fileAt(WORKFLOW_PATH), planned, version, on('figma'), schedule);
     if (update === undefined) pull.push({ label: 'workflow', detail: fileAt(WORKFLOW_PATH) === undefined ? 'new' : 'write or update' });
     else if (update.kind !== 'same') pull.push({ label: 'workflow', detail: workflowDetail(update, version, on('figma')) });
-    const text = update && update.kind !== 'same' ? update.text : fileAt(WORKFLOW_PATH);
-    const unpassed = on('figma') && text !== undefined ? jobsWithoutLibrary(text) : [];
-    if (unpassed.length > 0) {
-      byHand.push(`pass FIGMA_LIBRARY in ${unpassed.join(', ')} → ${WORKFLOW_PATH}`);
-      later.push(`In ${WORKFLOW_PATH}, ${unpassed.join(', ')} pass the shared checks no FIGMA_LIBRARY secret, so the design check stays off there; add \`FIGMA_LIBRARY: \${{ secrets.FIGMA_LIBRARY }}\` under their secrets.`);
-    }
   }
 
   if (on('board')) {
@@ -1033,6 +1027,13 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     async run(out) {
       if (reach.kind !== 'push') return false;
       if (workflowNeeded) workflowFor(reach.branch);
+      // From the workflow the pull request leaves, worked out only now that GitHub has said the branch.
+      const text = fileAt(WORKFLOW_PATH);
+      const unpassed = workflowNeeded && on('figma') && text !== undefined ? jobsWithoutLibrary(text) : [];
+      if (unpassed.length > 0) {
+        byHand.unshift(`pass FIGMA_LIBRARY in ${unpassed.join(', ')} → ${WORKFLOW_PATH}`);
+        later.unshift(`In ${WORKFLOW_PATH}, ${unpassed.join(', ')} pass the shared checks no FIGMA_LIBRARY secret, so the design check stays off there; add \`FIGMA_LIBRARY: \${{ secrets.FIGMA_LIBRARY }}\` under their secrets.`);
+      }
       // A change that puts a file back as it was is no change.
       const changed = [...changes.values()].filter((one) => one.text !== one.before);
       if (changed.length === 0) return true;
