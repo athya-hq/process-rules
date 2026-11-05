@@ -544,3 +544,17 @@
   SessionStart hook and `CLAUDE_ENV_FILE`, so another tool's agent gets
   neither, and only PR identity catches its work after the push. #50 stays
   open.
+- **2026-11-05 — Record: agent sessions turn Auto-fix on themselves, #142
+  of P-42.** The owner saw Auto-fix off on the agent's pull requests and
+  asked for it on. #137, #139 and #141 opened with it off although the
+  desktop app's `gh` login was the agent's and the app had restarted since
+  the login moved. The app turns Auto-fix on for a session's new pull
+  request only once its renderer says the owner wants it for that session,
+  and the renderer says so only while that session is open on screen; the
+  slice sessions a coordinator starts in the background are not, and no
+  Code tab setting changes that. So session-start's line for a local agent
+  session tells it to turn Auto-fix on with `set_monitor` after each
+  `gh pr create` when `get_status` shows it off. `set_monitor` checks that
+  the session opened the pull request and that the app's `gh` login wrote
+  it, so a session can do this only for the agent's own pull requests. A
+  cloud session has no such switch, and its line is unchanged.

@@ -101,6 +101,17 @@ other outcome leaves GitHub locked out and says why, so a session never falls
 back to the owner's login. When the CLI is missing or fails, the hook still
 tells the session to stop, with what the CLI printed.
 
+The line that tells a local session it works as the agent also tells it to
+turn Auto-fix on for each pull request it opens. The Claude desktop app's
+Auto-fix wakes a session on CI failures, merge conflicts and review comments,
+and the app turns it on for a new pull request by itself only while that
+session is open on screen, so a session started in the background (as a
+coordinator starts its slice sessions) opens its pull request with Auto-fix
+off. So after `gh pr create`, when the app's `ccd_pr` tools are there and
+`get_status` shows `auto_fix` off, the session turns it on with
+`set_monitor`. The app checks that the session opened the pull request and
+that its `gh` login wrote it, which holds for the agent's own pull requests.
+
 Before each Bash command, the client's PreToolUse hook runs `process-rules
 guard`: a command running `gh` or a git command that reaches a remote (push,
 fetch, pull, clone, ls-remote, remote, submodule) is refused, with the reason,

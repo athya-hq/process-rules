@@ -186,8 +186,17 @@ function start(sys: Sys): Said {
   if (!store.read(sys, names.agent)) {
     return locked(`${store.where} has no ${names.agent} token, so GitHub refuses gh and git`, fix);
   }
-  return { line: `process-rules: this session works as ${names.agent} on GitHub.`, agent: names.agent };
+  return { line: `process-rules: this session works as ${names.agent} on GitHub. ${AUTO_FIX}`, agent: names.agent };
 }
+
+/**
+ * The Claude desktop app turns Auto-fix on for a pull request a session opens
+ * only while that session is open on screen, so the agent sessions a
+ * coordinator starts in the background open theirs with it off. Each local
+ * agent session turns it on itself, as the owner wants for every agent pull
+ * request. A cloud session has no such switch.
+ */
+export const AUTO_FIX = 'After each `gh pr create`, when the ccd_pr tools are here and get_status shows auto_fix off, turn it on with set_monitor (auto_fix and address_comments true, and the pull request\'s url): the desktop app turns it on by itself only for a session open on screen, and the owner wants it on for every agent pull request.';
 
 /** The top of the git repository the session runs in. */
 function repoRoot(sys: Sys): string {

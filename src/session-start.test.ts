@@ -9,7 +9,7 @@ import { BASE_ENV, NO_TOKEN, lockScript, pathsFor, sessionNames, sessionRecord, 
 import { AGENT, AGENT_ID, FakeSys, HOME, ROOT, capture } from './fake.test.ts';
 import { PROXY_TOKEN } from './cloud.ts';
 import { OLDER_PRE_PUSH_HOOKS, PRE_PUSH_HOOK } from './onboard.ts';
-import { sessionStart } from './session-start.ts';
+import { AUTO_FIX, sessionStart } from './session-start.ts';
 
 const OWNER_LOGIN = 'example-owner';
 
@@ -66,14 +66,19 @@ describe('sessionStart', () => {
     sys.write = () => {
       throw new Error('read-only');
     };
-    assert.deepEqual((await start(sys)).out, ['process-rules: this session works as ExampleBot on GitHub.']);
+    assert.deepEqual((await start(sys)).out, [`process-rules: this session works as ExampleBot on GitHub. ${AUTO_FIX}`]);
   });
 
   it('locks, then gives the session the agent identity', async () => {
     const { code, out, env } = await start(ready());
     assert.equal(code, 0);
-    assert.deepEqual(out, ['process-rules: this session works as ExampleBot on GitHub.']);
+    assert.deepEqual(out, [`process-rules: this session works as ExampleBot on GitHub. ${AUTO_FIX}`]);
     assert.equal(env, `\n${lockScript(HOME)}\n${SCRIPT}`);
+  });
+
+  it('tells a local agent session to turn Auto-fix on for each pull request it opens', () => {
+    assert.match(AUTO_FIX, /^After each `gh pr create`, when the ccd_pr tools are here and get_status shows auto_fix off, turn it on with set_monitor/);
+    assert.match(AUTO_FIX, /auto_fix and address_comments true/);
   });
 
   it('reads the settings from the project folder Claude Code names', async () => {
@@ -280,7 +285,7 @@ describe('sessionStart', () => {
   it('accepts settings naming the agent in another case', async () => {
     const sys = ready();
     sys.files.set(`${ROOT}/.github/process-rules.json`, JSON.stringify({ owner: 'example-owner', agent: 'examplebot' }));
-    assert.deepEqual((await start(sys)).out, ['process-rules: this session works as ExampleBot on GitHub.']);
+    assert.deepEqual((await start(sys)).out, [`process-rules: this session works as ExampleBot on GitHub. ${AUTO_FIX}`]);
   });
 
   describe('with two owners and two agents', () => {
@@ -296,7 +301,7 @@ describe('sessionStart', () => {
 
     it('works as the one agent machine set up on this Mac', async () => {
       const { out, env } = await start(team());
-      assert.deepEqual(out, ['process-rules: this session works as ExampleBot on GitHub.']);
+      assert.deepEqual(out, [`process-rules: this session works as ExampleBot on GitHub. ${AUTO_FIX}`]);
       assert.equal(env, `\n${lockScript(HOME)}\n${SCRIPT}`);
     });
 
