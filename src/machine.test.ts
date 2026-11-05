@@ -148,15 +148,24 @@ describe('machine', () => {
     assert.equal(sys.token(AGENT), TOKEN);
   });
 
-  it('refuses with no terminal and no --yes, before anything', async () => {
+  it('refuses with no terminal and no --yes when there is something to ask, changing nothing', async () => {
     const sys = fresh();
     sys.tty = false;
+    const before = new Map(sys.files);
     assert.deepEqual(await setUp(sys), {
       code: 1,
       out: [],
       err: ['machine: no terminal to ask in; pass --yes to go ahead without asking, or --dry-run to see the plan'],
     });
-    assert.deepEqual(sys.requests, []);
+    assert.deepEqual([sys.files, sys.keychain.size, sys.chosen], [before, 0, []]);
+    assert.ok(!sys.requests.some((r) => r.method === 'POST'));
+  });
+
+  it('needs no terminal when nothing changes', async () => {
+    const sys = done();
+    sys.tty = false;
+    const { code, out } = await setUp(sys);
+    assert.deepEqual({ code, last: out.at(-1) }, { code: 0, last: '└  ExampleBot is ready on this Mac' });
   });
 
   it('says in one line that nothing changes, asking nothing', async () => {

@@ -89,16 +89,18 @@ asks once:
 ```
 
 No changes nothing. `--yes` goes ahead without asking, and `--dry-run` shows
-the plan and stops. With no terminal and no `--yes`, `machine` refuses in one
-line. When nothing would change, it asks nothing and says
-`◇  This Mac is set up for AGENT`. After the yes, each step shows as one `◇`
-line, or `■` with why when it fails, and nothing after it changes. The token's
-step opens GitHub's page, says in a few short lines what to do there, and asks
-for the paste, hidden. A stored token GitHub refuses, or one that ends within
-14 days, shows in the plan as replaced. The run ends with a "Worth fixing"
-group of `▲` lines, each with its one-line fix, and
-`└  AGENT is ready on this Mac`. The SessionStart hook sources the session
-file, so nothing is left to do by hand.
+the plan and stops. When nothing would change, it asks nothing and says
+`◇  This Mac is set up for AGENT`, with or without a terminal. Otherwise,
+with no terminal it refuses in one line unless given `--yes` or `--dry-run`.
+A stored token GitHub refuses, or one that ends within 14 days, shows in the
+plan as replaced. After the yes, each step shows as one `◇` line, or `■`
+with why when it fails. The token's step opens GitHub's page, says in a few
+short lines what to do there, and asks for the paste, hidden. A failed key,
+token or key registration stops the run there, and nothing after it changes.
+A failed lockout step stops nothing and goes under "Worth fixing". A run
+that finishes ends with that group of `▲` lines, each with its one-line fix,
+and `└  AGENT is ready on this Mac`. The SessionStart hook sources the
+session file, so nothing is left to do by hand.
 
 The trade-off, for adopters: the agent account holds one classic token, and
 its `repo` scope reaches every repository the agent account can access, not
@@ -170,7 +172,8 @@ alternative is a separate macOS user that runs only the agent sessions: none
 of your logins, keychain or SSH keys are in it, and nothing of yours is signed
 out. A sign-out that fails stops nothing; it goes under "Worth fixing". So
 does each SSH key in `~/.ssh` with no passphrase, with
-`ssh-keygen -p -f <key>` to add one. The owner's SSH access is left alone,
+`ssh-keygen -p -f <key>` to add one; agents' signing keys are left out,
+since sessions sign with them and they have no passphrase on purpose. The owner's SSH access is left alone,
 since it is the owner's own way to GitHub (docs/decisions.md). Agent sessions
 send GitHub over HTTPS and refuse SSH, and the pre-push hook refuses their
 pushes over SSH. `doctor` names the account SSH reaches GitHub as without

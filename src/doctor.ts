@@ -30,8 +30,8 @@ async function remote(name: string, check: () => Promise<Finding>): Promise<Find
 
 /**
  * Checks that agent sessions on this machine can work as an agent account,
- * reading only: on this Mac the signing key, the session file, the launcher
- * and what of the owner's an agent session could reach; on GitHub the
+ * reading only: on this Mac the signing key, the session file, the launcher,
+ * and the owner's accounts and keys an agent session could reach; on GitHub the
  * classic token and the key registered; in the repository here, hooks that
  * reach GitHub outside `as-agent`. It shows them grouped, one line each, ✓
  * fine, ▲ worth fixing, ✗ broken, each problem with its fix. Exit 1 when

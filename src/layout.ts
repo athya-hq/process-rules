@@ -102,8 +102,9 @@ export async function spinning<T>(sys: Sys, label: string, work: () => Promise<T
 /**
  * Runs one step after the yes, with a spinner, and shows it as one line: ◇
  * when it worked, ■ when it failed, followed then by what it said before it
- * failed. What it says on error goes to standard error either way. With no
- * `run`, the step fails without running.
+ * failed. What it says on error goes to standard error either way, and a
+ * step that throws shows as failed before the error goes on. With no `run`,
+ * the step fails without running.
  */
 export async function runStep(
   sys: Sys,
@@ -114,9 +115,14 @@ export async function runStep(
 ): Promise<{ ok: boolean; log: string[] }> {
   const log: string[] = [];
   const errors: string[] = [];
-  const ok = run ? await spinning(sys, label, () => run({ out: (line) => log.push(line), err: (line) => errors.push(line) })) : false;
-  io.out(`${ok ? paint.done('◇') : paint.failed('■')}  ${label}`);
-  if (!ok) for (const line of log) io.out(`${paint.dim('│')}  ${line.trim()}`);
-  for (const line of errors) io.err(line);
+  let ok = false;
+  try {
+    ok = run ? await spinning(sys, label, () => run({ out: (line) => log.push(line), err: (line) => errors.push(line) })) : false;
+  } finally {
+    // A step that throws still shows as failed, with what it said first.
+    io.out(`${ok ? paint.done('◇') : paint.failed('■')}  ${label}`);
+    if (!ok) for (const line of log) io.out(`${paint.dim('│')}  ${line.trim()}`);
+    for (const line of errors) io.err(line);
+  }
   return { ok, log };
 }

@@ -669,8 +669,10 @@
   wrote, and `machine` removes it once it locks them away. A stored token
   near its end is replaced on the yes rather than asked about separately.
   The classic token's page and hidden paste stay steps after the yes, since
-  only the owner can make the token. Warnings become `▲` lines with their
-  one-line fix. `doctor` stays read-only and asks nothing. It groups its
+  only the owner can make the token. What is worth fixing after the run (a
+  key with no passphrase, a sign-out that failed, the owner's steps after a
+  `gh` move) becomes a `▲` line with its one-line fix; why a stored token is
+  replaced shows as a `!` note in the plan's head, as onboard's warnings do. `doctor` stays read-only and asks nothing. It groups its
   checks, marks each ✓, ▲ or ✗ with a fix, and keeps its checks, exit codes
   and the 14-day warning. It now prints them all on standard output as one
   picture. The layout lives in `src/layout.ts`, which all three commands

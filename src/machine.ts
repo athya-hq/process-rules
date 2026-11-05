@@ -74,10 +74,6 @@ export async function machine(sys: Sys, io: Output, args: readonly string[] = []
     io.err(`machine: ${unsupported(sys)}`);
     return 1;
   }
-  if (!sys.tty && !yes && !dryRun) {
-    io.err('machine: no terminal to ask in; pass --yes to go ahead without asking, or --dry-run to see the plan');
-    return 1;
-  }
   const { id, login: agent } = await account(sys, agentFrom(sys, named));
   const paths = pathsFor(sys.home, agent);
   const paint = painter(sys);
@@ -162,6 +158,11 @@ export async function machine(sys: Sys, io: Output, args: readonly string[] = []
     io.out(bar);
     io.out(`${paint.done('◇')}  This Mac is set up for ${agent}`);
     return end();
+  }
+  // Only a run with a question to ask needs a person at the terminal.
+  if (!sys.tty && !yes && !dryRun) {
+    io.err('machine: no terminal to ask in; pass --yes to go ahead without asking, or --dry-run to see the plan');
+    return 1;
   }
   for (const line of planLines(paint, head, [
     { title: 'This Mac', items: mac },
