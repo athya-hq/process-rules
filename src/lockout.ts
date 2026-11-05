@@ -1,5 +1,6 @@
 import { pathsFor, sameLogin } from './agent.ts';
-import type { Output, Sys } from './types.ts';
+import { type Finding, tilde } from './layout.ts';
+import type { Sys } from './types.ts';
 import { GITHUB_HOST, GITHUB_HOST_RE, GITHUB_SSH, GITHUB_WEB } from './host.ts';
 
 /**
@@ -60,30 +61,31 @@ function sshLogin(sys: Sys, agent: string): string | undefined {
 }
 
 /**
- * Why process-rules leaves the owner's SSH route to GitHub in place, and what
- * covers it in agent sessions (docs/decisions.md).
+ * What `doctor` says of what `exposure` found: each finding ▲ with its fix,
+ * and the owner's SSH route ✓, since process-rules leaves it in place on
+ * purpose: agent sessions send GitHub over HTTPS and refuse SSH, and the
+ * pre-push hook refuses their pushes over SSH (docs/decisions.md).
  */
-export function sshLine(login: string): string {
-  return (
-    `ssh reaches GitHub as ${login} with this Mac's keys; process-rules leaves your SSH access alone. ` +
-    'Agent sessions send GitHub over HTTPS and refuse SSH, and the pre-push hook refuses their pushes over SSH'
-  );
-}
-
-/** One line per exposure, for `doctor` and `machine`. */
-export function exposureLines(found: Exposure): string[] {
+export function exposureFindings(found: Exposure, home: string): Finding[] {
   return [
-    ...found.ghLogins.map((login) => `gh is signed in as ${login}; an agent session that ignores the lock could use it`),
-    ...(found.gitPassword ? [`the macOS keychain holds a saved git password for ${GITHUB_HOST}; an agent session could use it`] : []),
-    ...found.openKeys.map((key) => `${key} has no passphrase; add one with: ssh-keygen -p -f ${key}`),
-    ...(found.sshLogin ? [sshLine(found.sshLogin)] : []),
+    ...found.ghLogins.map((login): Finding => ({ mark: '▲', text: `gh is signed in as ${login}`, fix: 'process-rules machine' })),
+    ...(found.gitPassword ? [{ mark: '▲', text: `a saved git password for ${GITHUB_HOST}`, fix: 'process-rules machine' } as const] : []),
+    ...keyFindings(found, home),
+    ...(found.sshLogin ? [{ mark: '✓', text: `ssh reaches GitHub as ${found.sshLogin}; agent sessions refuse SSH` } as const] : []),
   ];
 }
 
+/** Each private key with no passphrase, ▲ with the command that adds one. */
+export function keyFindings(found: Exposure, home: string): Finding[] {
+  return found.openKeys.map((key) => ({ mark: '▲', text: `${tilde(home, key)} has no passphrase`, fix: `ssh-keygen -p -f ${tilde(home, key)}` }));
+}
+
 /**
- * What the owner declined to lock away when `machine` last offered: the `gh`
- * logins it named and the saved git password. `doctor` reports these as
- * chosen instead of warning; an account signed in later is a new finding.
+ * What the owner declined to lock away when `machine` last offered, before
+ * it asked once for its whole plan: the `gh` logins it named and the saved
+ * git password. `doctor` reports these as chosen instead of warning; an
+ * account signed in later is a new finding. `machine` removes the record
+ * once it locks them away.
  */
 export interface Declined {
   ghLogins: string[];
@@ -121,8 +123,8 @@ export function setAside(found: Exposure, declined: Declined): { left: Exposure;
   return {
     left: { ...found, ghLogins: found.ghLogins.filter((login) => !isDeclined(login)), gitPassword: found.gitPassword && !keptPassword },
     kept: [
-      ...found.ghLogins.filter(isDeclined).map((login) => `lockout declined: gh stays signed in as ${login}; process-rules machine offers again`),
-      ...(keptPassword ? [`lockout declined: the saved git password for ${GITHUB_HOST} stays; process-rules machine offers again`] : []),
+      ...found.ghLogins.filter(isDeclined).map((login) => `gh stays signed in as ${login}, as you chose`),
+      ...(keptPassword ? [`the saved git password for ${GITHUB_HOST} stays, as you chose`] : []),
     ],
   };
 }
@@ -173,81 +175,48 @@ export function desktopAppStarted(sys: Sys): Date | undefined {
  * desktop app keeps the token it read before until it restarts, and
  * `gh auth logout` deletes the token from this Mac without revoking it.
  */
-export function ownerSteps(logins: string[]): string[] {
+export function ownerFixes(logins: string[]): Finding[] {
   const as = logins.join(' or ');
   return [
-    `two steps only you can do, now that gh here works as the agent:`,
-    `  1. Restart the Claude desktop app. It keeps the gh token it read before, so its own GitHub actions (Auto-fix, the PR bar) run as ${as} until it restarts.`,
-    `  2. Revoke the old token on GitHub, signed in as ${as}: Settings → Applications → Authorized OAuth Apps → GitHub CLI → Revoke (${GITHUB_WEB}/settings/applications). gh auth logout deleted it from this Mac, but GitHub still accepts it.`,
+    { mark: '▲', text: `the Claude desktop app still holds ${as}'s gh token`, fix: 'restart the app' },
+    { mark: '▲', text: `GitHub still accepts ${as}'s old gh token`, fix: `revoke GitHub CLI at ${GITHUB_WEB}/settings/applications` },
   ];
 }
 
 /**
- * `doctor`'s lines for a move the desktop app has not caught up with: the
- * owner steps while the app runs and started before the move, else none.
+ * `doctor`'s findings for a move the desktop app has not caught up with: the
+ * owner's steps while the app runs and started before the move, else none.
  */
-export function movedLines(sys: Sys, agent: string): string[] {
+export function movedFindings(sys: Sys, agent: string): Finding[] {
   const moved = readMoved(sys, agent);
   const started = moved && desktopAppStarted(sys);
-  return moved && started && started.getTime() < Date.parse(moved.at) ? ownerSteps(moved.logins) : [];
+  return moved && started && started.getTime() < Date.parse(moved.at) ? ownerFixes(moved.logins) : [];
+}
+
+/** Signs `gh` out of the owner's `login`; what went wrong, or undefined. */
+export function signOut(sys: Sys, login: string): string | undefined {
+  const out = sys.exec('gh', ['auth', 'logout', '-h', GITHUB_HOST, '-u', login], { env: ownerEnv(sys) });
+  return out.code === 0 ? undefined : out.stderr.trim() || `exit ${out.code}`;
+}
+
+/** Removes the saved git password for GitHub from the macOS keychain; whether it is gone. */
+export function removeGitPassword(sys: Sys): boolean {
+  sys.exec('git', ['credential-osxkeychain', 'erase'], { input: `protocol=https\nhost=${GITHUB_HOST}\n\n` });
+  return sys.exec('/usr/bin/security', KEYCHAIN_QUERY).code !== 0;
 }
 
 /**
- * `machine`'s last step: offers to sign `gh` out and to remove the saved git
- * password, and warns about keys with no passphrase. What is declined stays
- * in place and is recorded, so `doctor` reports it as chosen; each run offers
- * again, and the record holds only what this run's owner declined.
+ * After `machine` signed `signedOut` out of `gh`: records the move, with the
+ * accounts of an earlier one the desktop app has not restarted since, and
+ * returns the owner's steps for them all. A record of what was declined
+ * before goes, as the owner has now said yes.
  */
-export async function lockOwnerAway(
-  sys: Sys,
-  io: Output,
-  confirm: (question: string) => Promise<boolean>,
-  agent: string,
-): Promise<void> {
-  const found = exposure(sys, agent);
-  const declined: Declined = { ghLogins: [], gitPassword: false };
-  const signedOut: string[] = [];
-  for (const login of found.ghLogins) {
-    if (await confirm(`gh is signed in as ${login}. Sign it out, so agent sessions cannot use it?`)) {
-      const out = sys.exec('gh', ['auth', 'logout', '-h', GITHUB_HOST, '-u', login], { env: ownerEnv(sys) });
-      io.out(out.code === 0 ? `✓ gh signed out of ${login}` : `! gh could not sign out of ${login}: ${out.stderr.trim()}`);
-      if (out.code === 0) signedOut.push(login);
-    } else {
-      declined.ghLogins.push(login);
-      io.out(`! gh stays signed in as ${login}`);
-    }
-  }
-  if (found.gitPassword) {
-    if (await confirm(`The macOS keychain holds a saved git password for ${GITHUB_HOST}. Remove it?`)) {
-      sys.exec('git', ['credential-osxkeychain', 'erase'], { input: `protocol=https\nhost=${GITHUB_HOST}\n\n` });
-      const left = sys.exec('/usr/bin/security', KEYCHAIN_QUERY).code === 0;
-      io.out(left ? `! the saved git password for ${GITHUB_HOST} is still in the keychain` : `✓ removed the saved git password for ${GITHUB_HOST}`);
-    } else {
-      declined.gitPassword = true;
-      io.out(`! the saved git password for ${GITHUB_HOST} stays in the keychain`);
-    }
-  }
-  const path = declinedPath(sys.home, agent);
-  if (declined.ghLogins.length > 0 || declined.gitPassword || sys.exists(path)) {
-    sys.mkdir(pathsFor(sys.home, agent).dir);
-    sys.write(path, `${JSON.stringify(declined, null, 2)}\n`, 0o600);
-  }
-  if (declined.ghLogins.length > 0 || declined.gitPassword) {
-    io.out(`  doctor reports what you declined as your choice (${path}); process-rules machine offers again`);
-  }
-  for (const key of found.openKeys) io.out(`! ${key} has no passphrase; add one with: ssh-keygen -p -f ${key}`);
-  if (found.sshLogin) io.out(`! ${sshLine(found.sshLogin)}`);
-  if (found.ghLogins.length === 0 && !found.gitPassword && found.openKeys.length === 0 && !found.sshLogin) {
-    io.out('✓ nothing of the owner here for an agent session to reach');
-  }
-  if (signedOut.length > 0) {
-    // A move the desktop app has not restarted since still holds its accounts' tokens.
-    const pending = movedLines(sys, agent).length > 0 ? (readMoved(sys, agent)?.logins ?? []) : [];
-    const logins = [...pending.filter((login) => !signedOut.some((other) => sameLogin(other, login))), ...signedOut];
-    sys.mkdir(pathsFor(sys.home, agent).dir);
-    sys.write(movedPath(sys.home, agent), `${JSON.stringify({ at: sys.now().toISOString(), logins }, null, 2)}\n`, 0o600);
-    const [first, ...rest] = ownerSteps(logins);
-    io.out(`! ${first}`);
-    for (const line of rest) io.out(line);
-  }
+export function recordMove(sys: Sys, agent: string, signedOut: string[]): Finding[] {
+  if (sys.exists(declinedPath(sys.home, agent))) sys.remove(declinedPath(sys.home, agent));
+  if (signedOut.length === 0) return [];
+  const pending = movedFindings(sys, agent).length > 0 ? (readMoved(sys, agent)?.logins ?? []) : [];
+  const logins = [...pending.filter((login) => !signedOut.some((other) => sameLogin(other, login))), ...signedOut];
+  sys.mkdir(pathsFor(sys.home, agent).dir);
+  sys.write(movedPath(sys.home, agent), `${JSON.stringify({ at: sys.now().toISOString(), logins }, null, 2)}\n`, 0o600);
+  return ownerFixes(logins);
 }

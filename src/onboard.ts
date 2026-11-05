@@ -27,6 +27,7 @@ import { setSecret } from './secrets.ts';
 import { packageVersion } from './version.ts';
 import type { Output, Sys } from './types.ts';
 import { GITHUB_WEB } from './host.ts';
+import { type Item, type Paint, closing, heading, painter, planLines, runStep } from './layout.ts';
 
 /** This product's repository: clients call its shared workflow. */
 export const PRODUCT = 'athya-hq/process-rules';
@@ -592,27 +593,11 @@ export function onboardArgs(args: readonly string[]): { named: string[]; feature
   return { named, ...(features ? { features } : {}), ...(add ? { add } : {}), ...(yes ? { yes: true as const } : {}), ...(dryRun ? { dryRun: true as const } : {}) };
 }
 
-/** One line of the plan: a short label, and what changes there. */
-interface Item {
-  label: string;
-  detail?: string;
-}
-
 /** A step the run takes after the yes, in order; `owner` when it acts as the owner, so the sign-in comes before its spinner. */
 interface Step {
   label: string;
   owner?: true;
   run(io: Output, ownerToken: string | undefined): Promise<boolean>;
-}
-
-/**
- * Colours for the terminal: only when a person is at one that has colours,
- * and never with NO_COLOR set (https://no-color.org).
- */
-export function painter(sys: Sys): { dim(text: string): string; accent(text: string): string; done(text: string): string; failed(text: string): string } {
-  const on = sys.tty && !sys.env.NO_COLOR && !!sys.env.TERM && sys.env.TERM !== 'dumb';
-  const paint = (code: number) => (text: string): string => (on ? `\u001b[${code}m${text}\u001b[0m` : text);
-  return { dim: paint(2), accent: paint(36), done: paint(32), failed: paint(31) };
 }
 
 /** What a workflow update changes, in a few words for the plan. */
@@ -648,25 +633,14 @@ function workflowWhat(update: Exclude<ReturnType<typeof workflowUpdate>, { kind:
   return `in ${WORKFLOW_PATH}, ${parts.join(' and ') || `set the version in its header comment to v${version}`}, leaving the rest as it is`;
 }
 
-/** The plan's lines: the run's head, then each group that changes something, its labels lined up. */
-export function planLines(
-  paint: ReturnType<typeof painter>,
-  head: { from?: string | undefined; version: string; slug: string; owner: string; agent: string; warnings: string[] },
-  groups: { title: string; items: Item[] }[],
-): string[] {
+/** The plan's head: the release onboard moves the repository to, then who is who, and any warnings. */
+function planHead(paint: Paint, head: { from?: string | undefined; version: string; slug: string; owner: string; agent: string; warnings: string[] }): string[] {
   const bar = paint.dim('│');
-  const lines = [
-    `${paint.accent('◆')}  process-rules onboard   ${head.from && head.from !== head.version ? `v${head.from} → ` : ''}v${head.version}`,
+  return [
+    heading(paint, 'onboard', `${head.from && head.from !== head.version ? `v${head.from} → ` : ''}v${head.version}`),
     `${bar}  ${head.slug} · owner ${head.owner} · agent ${head.agent}`,
     ...head.warnings.map((warning) => `${bar}  ! ${warning}`),
   ];
-  for (const { title, items } of groups) {
-    if (items.length === 0) continue;
-    const width = Math.max(...items.map((item) => (item.detail ? item.label.length : 0)));
-    lines.push(bar, `${paint.done('◇')}  ${title}`, ...items.map((item) => `${bar}    ${item.detail ? `${item.label.padEnd(width)}  ${item.detail}` : item.label}`));
-  }
-  lines.push(bar);
-  return lines;
 }
 
 /**
@@ -1066,41 +1040,27 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     { title: 'This Mac', items: mac },
     { title: 'Check', items: [{ label: `one signed test commit by ${agent}, deleted after` }] },
   ];
-  for (const line of planLines(paint, { from: workflowNeeded ? workflowFrom : undefined, version, slug, owner, agent, warnings }, groups)) io.out(line);
+  for (const line of planLines(paint, planHead(paint, { from: workflowNeeded ? workflowFrom : undefined, version, slug, owner, agent, warnings }), groups)) io.out(line);
   if (dryRun) {
-    io.out(`${paint.dim('└')}  Dry run: nothing changed.`);
+    io.out(closing(paint, 'Dry run: nothing changed.'));
     return 0;
   }
   if (yes) io.out(`${paint.done('◇')}  Go ahead? Yes (--yes)`);
   else if (!(await sys.choose('Go ahead?'))) {
-    io.out(`${paint.dim('└')}  Nothing changed, and no pull request was opened.`);
+    io.out(closing(paint, 'Nothing changed, and no pull request was opened.'));
     return 1;
   }
 
   for (const step of steps) {
     const mine = step.owner ? await ownerToken() : undefined;
-    const log: string[] = [];
-    const errors: string[] = [];
-    let ok = false;
-    if (!step.owner || mine) {
-      const spinner = sys.spin(step.label);
-      try {
-        ok = await step.run({ out: (line) => log.push(line), err: (line) => errors.push(line) }, mine);
-      } finally {
-        spinner.stop();
-      }
-    }
-    io.out(`${ok ? paint.done('◇') : paint.failed('■')}  ${step.label}`);
-    // What a failed step did before it failed, such as the test commit's link, is shown with why.
-    if (!ok) for (const line of log) say(line.trim());
-    for (const line of errors) io.err(line);
+    const { ok, log } = await runStep(sys, io, paint, step.label, !step.owner || mine ? (out) => step.run(out, mine) : undefined);
     if (!ok) {
       io.err(`onboard: stopped at "${step.label}"; nothing after it was changed, and no pull request was opened`);
       return 1;
     }
     if (log.length > 0) notes.push(`- ${step.label}:`, ...log.map((line) => `  - ${line.trim().replace(/^[✓-] /, '')}`));
   }
-  io.out(`${paint.dim('└')}  ${!pullUrl ? 'Done; no file changes, so no pull request.' : merging ? `${pullUrl}  merges itself when checks pass` : `Merge ${pullUrl}`}`);
+  io.out(closing(paint, `${!pullUrl ? 'Done; no file changes, so no pull request.' : merging ? `${pullUrl}  merges itself when checks pass` : `Merge ${pullUrl}`}`));
   io.out('');
   io.out('By hand:');
   for (const line of byHand) io.out(`  ${line}`);

@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { AGENT, FakeSys, HOME, NOW, capture } from './fake.test.ts';
-import { declinedPath, desktopAppStarted, exposure, exposureLines, lockOwnerAway, movedLines, movedPath, ownerSteps, readDeclined, readMoved, setAside } from './lockout.ts';
+import { AGENT, FakeSys, HOME, NOW } from './fake.test.ts';
+import { declinedPath, desktopAppStarted, exposure, exposureFindings, keyFindings, movedFindings, movedPath, ownerFixes, readDeclined, readMoved, recordMove, removeGitPassword, setAside, signOut } from './lockout.ts';
 
 const OWNER_KEY = `${HOME}/.ssh/id_ed25519`;
 
@@ -24,24 +24,23 @@ function exposed(): FakeSys {
   return sys;
 }
 
-async function lock(sys: FakeSys, answers: string[]): Promise<string[]> {
-  sys.answers = answers;
-  const { io, out } = capture();
-  await lockOwnerAway(sys, io, async (q) => /^y/.test(await sys.ask(q)), AGENT);
-  return out;
+/** What machine does after the yes: signs `logins` out of gh and records the move; the owner's steps it returns. */
+function lock(sys: FakeSys, logins: string[]) {
+  return recordMove(sys, AGENT, logins.filter((login) => signOut(sys, login) === undefined));
 }
 
 describe('exposure', () => {
   it("finds the owner's gh accounts, saved git password and open keys, not the agents'", () => {
     const found = exposure(exposed(), AGENT);
     assert.deepEqual(found, { ghLogins: ['example-owner', 'old-owner'], gitPassword: true, openKeys: [OWNER_KEY, `${HOME}/.ssh/work_signing`], sshLogin: undefined });
-    assert.deepEqual(exposureLines(found), [
-      'gh is signed in as example-owner; an agent session that ignores the lock could use it',
-      'gh is signed in as old-owner; an agent session that ignores the lock could use it',
-      'the macOS keychain holds a saved git password for github.com; an agent session could use it',
-      `${OWNER_KEY} has no passphrase; add one with: ssh-keygen -p -f ${OWNER_KEY}`,
-      `${HOME}/.ssh/work_signing has no passphrase; add one with: ssh-keygen -p -f ${HOME}/.ssh/work_signing`,
+    assert.deepEqual(exposureFindings(found, HOME), [
+      { mark: '▲', text: 'gh is signed in as example-owner', fix: 'process-rules machine' },
+      { mark: '▲', text: 'gh is signed in as old-owner', fix: 'process-rules machine' },
+      { mark: '▲', text: 'a saved git password for github.com', fix: 'process-rules machine' },
+      { mark: '▲', text: '~/.ssh/id_ed25519 has no passphrase', fix: 'ssh-keygen -p -f ~/.ssh/id_ed25519' },
+      { mark: '▲', text: '~/.ssh/work_signing has no passphrase', fix: 'ssh-keygen -p -f ~/.ssh/work_signing' },
     ]);
+    assert.deepEqual(keyFindings(found, HOME), exposureFindings(found, HOME).slice(3), "machine's: the keys alone");
   });
 
   it("reads the owner's stored gh logins, not an agent session's", () => {
@@ -60,7 +59,7 @@ describe('exposure', () => {
   });
 
   it('finds nothing on a clean Mac', () => {
-    assert.deepEqual(exposureLines(exposure(new FakeSys().ready(), AGENT)), []);
+    assert.deepEqual(exposureFindings(exposure(new FakeSys().ready(), AGENT), HOME), []);
   });
 });
 
@@ -74,13 +73,11 @@ describe("the owner's SSH route", () => {
     return sys;
   }
 
-  it('names the account SSH reaches GitHub as, and what covers it', () => {
+  it('names the account SSH reaches GitHub as, as fine: agent sessions refuse SSH', () => {
     const sys = greeted('example-owner');
     const found = exposure(sys, AGENT);
     assert.equal(found.sshLogin, 'example-owner');
-    assert.deepEqual(exposureLines(found), [
-      "ssh reaches GitHub as example-owner with this Mac's keys; process-rules leaves your SSH access alone. Agent sessions send GitHub over HTTPS and refuse SSH, and the pre-push hook refuses their pushes over SSH",
-    ]);
+    assert.deepEqual(exposureFindings(found, HOME), [{ mark: '✓', text: 'ssh reaches GitHub as example-owner; agent sessions refuse SSH' }]);
     const ssh = sys.calls.find((c) => c.command === 'ssh');
     assert.deepEqual(ssh?.args, ['-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', 'git@github.com'], 'never asks for a passphrase');
     assert.equal(ssh?.env?.GH_TOKEN, undefined);
@@ -90,71 +87,38 @@ describe("the owner's SSH route", () => {
     assert.equal(exposure(greeted('examplebot'), AGENT).sshLogin, undefined);
   });
 
-  it('is named at the end of machine, which leaves it in place', async () => {
-    const { io, out } = capture();
-    await lockOwnerAway(greeted('example-owner'), io, () => Promise.resolve(true), AGENT);
-    assert.deepEqual(out, [
-      "! ssh reaches GitHub as example-owner with this Mac's keys; process-rules leaves your SSH access alone. Agent sessions send GitHub over HTTPS and refuse SSH, and the pre-push hook refuses their pushes over SSH",
-    ]);
-  });
 });
 
-describe('lockOwnerAway', () => {
-  it('signs every owner account out of gh and removes the git password when told to', async () => {
+describe('locking the owner away', () => {
+  it('signs every owner account out of gh, and removes the git password', () => {
     const sys = exposed();
-    const out = await lock(sys, ['y', 'y', 'y']);
-    assert.deepEqual(out.slice(0, 3), ['✓ gh signed out of example-owner', '✓ gh signed out of old-owner', '✓ removed the saved git password for github.com']);
+    assert.equal(signOut(sys, 'example-owner'), undefined);
+    assert.equal(signOut(sys, 'old-owner'), undefined);
+    assert.equal(removeGitPassword(sys), true);
     assert.deepEqual(sys.ghAccounts, [AGENT]);
     assert.equal(sys.gitPassword, false);
     assert.deepEqual(sys.calls.find((c) => c.args[1] === 'logout')?.args, ['auth', 'logout', '-h', 'github.com', '-u', 'example-owner']);
+    assert.equal(sys.calls.find((c) => c.command === 'git')?.input, 'protocol=https\nhost=github.com\n\n');
   });
 
-  it('leaves them in place when declined', async () => {
-    const sys = exposed();
-    const out = await lock(sys, ['n', 'n', 'n']);
-    assert.deepEqual(out.slice(0, 3), ['! gh stays signed in as example-owner', '! gh stays signed in as old-owner', '! the saved git password for github.com stays in the keychain']);
-    assert.deepEqual(sys.ghAccounts, ['example-owner', AGENT, 'old-owner']);
-    assert.equal(sys.gitPassword, true);
-  });
-
-  it('records what was declined, beside the session file and private', async () => {
-    const sys = exposed();
-    const out = await lock(sys, ['y', 'n', 'n']);
-    const path = declinedPath(HOME, AGENT);
-    assert.equal(path, `${HOME}/.config/process-rules/examplebot/lockout-declined.json`);
-    assert.deepEqual(JSON.parse(sys.read(path)), { ghLogins: ['old-owner'], gitPassword: true });
-    assert.equal(sys.modes.get(path), 0o600);
-    assert.equal(out[3], `  doctor reports what you declined as your choice (${path}); process-rules machine offers again`);
-  });
-
-  it('offers again, and accepting clears the record', async () => {
-    const sys = exposed();
-    await lock(sys, ['n', 'n', 'n']);
-    const out = await lock(sys, ['y', 'y', 'y']);
-    assert.equal(sys.asked.length, 6, 'asks again on the second run');
-    assert.deepEqual(readDeclined(sys, AGENT), { ghLogins: [], gitPassword: false });
-    assert.ok(!out.some((line) => line.includes('doctor reports')));
-  });
-
-  it('writes no record when nothing was declined', async () => {
-    const sys = exposed();
-    await lock(sys, ['y', 'y', 'y']);
-    assert.equal(sys.exists(declinedPath(HOME, AGENT)), false);
-  });
-
-  it('says so when removing fails', async () => {
+  it('says what went wrong', () => {
     const sys = exposed();
     sys.execOverride = (call) => {
-      if (call.command === 'gh' && call.args[1] === 'logout') return { code: 1, stdout: '', stderr: 'no such account\n' };
+      if (call.command === 'gh' && call.args[1] === 'logout') return { code: 1, stdout: '', stderr: call.args[5] === 'old-owner' ? '' : 'no such account\n' };
       if (call.command === 'git' && call.args[0] === 'credential-osxkeychain') return { code: 0, stdout: '', stderr: '' };
       return undefined;
     };
-    const out = await lock(sys, ['y', 'n', 'y']);
-    assert.deepEqual(out.slice(0, 3), ['! gh could not sign out of example-owner: no such account', '! gh stays signed in as old-owner', '! the saved git password for github.com is still in the keychain']);
+    assert.equal(signOut(sys, 'example-owner'), 'no such account');
+    assert.equal(signOut(sys, 'old-owner'), 'exit 1');
+    assert.equal(removeGitPassword(sys), false, 'still in the keychain');
   });
 
-  it('says when there is nothing to lock away', async () => {
-    assert.deepEqual(await lock(new FakeSys().ready(), []), ['✓ nothing of the owner here for an agent session to reach']);
+  it('removes what was declined before, once the owner says yes', () => {
+    const sys = exposed();
+    sys.files.set(declinedPath(HOME, AGENT), JSON.stringify({ ghLogins: ['example-owner'], gitPassword: true }));
+    assert.deepEqual(recordMove(sys, AGENT, []), []);
+    assert.equal(sys.exists(declinedPath(HOME, AGENT)), false);
+    assert.equal(sys.exists(movedPath(HOME, AGENT)), false, 'nothing moved');
   });
 });
 
@@ -165,8 +129,8 @@ describe('a declined lockout', () => {
     const { left, kept } = setAside(found, { ghLogins: ['Example-Owner'], gitPassword: true });
     assert.deepEqual(left, { ghLogins: ['new-owner'], gitPassword: false, openKeys: [OWNER_KEY], sshLogin: undefined });
     assert.deepEqual(kept, [
-      'lockout declined: gh stays signed in as example-owner; process-rules machine offers again',
-      'lockout declined: the saved git password for github.com stays; process-rules machine offers again',
+      'gh stays signed in as example-owner, as you chose',
+      'the saved git password for github.com stays, as you chose',
     ]);
   });
 
@@ -193,28 +157,23 @@ function since(sys: FakeSys, started: Date): FakeSys {
 }
 
 describe('moving gh to the agent', () => {
-  const STEPS = ownerSteps(['example-owner', 'old-owner']);
+  const STEPS = ownerFixes(['example-owner', 'old-owner']);
 
-  it('ends with the two owner steps, printed together, and records the move', async () => {
+  it('gives the two owner steps, each with its fix, and records the move', () => {
     const sys = exposed();
-    const out = await lock(sys, ['y', 'y', 'y']);
-    assert.deepEqual(out.slice(-3), [`! ${STEPS[0]}`, ...STEPS.slice(1)]);
+    assert.deepEqual(lock(sys, ['example-owner', 'old-owner']), STEPS);
     assert.deepEqual(STEPS, [
-      'two steps only you can do, now that gh here works as the agent:',
-      '  1. Restart the Claude desktop app. It keeps the gh token it read before, so its own GitHub actions (Auto-fix, the PR bar) run as example-owner or old-owner until it restarts.',
-      '  2. Revoke the old token on GitHub, signed in as example-owner or old-owner: Settings → Applications → Authorized OAuth Apps → GitHub CLI → Revoke (https://github.com/settings/applications). gh auth logout deleted it from this Mac, but GitHub still accepts it.',
+      { mark: '▲', text: "the Claude desktop app still holds example-owner or old-owner's gh token", fix: 'restart the app' },
+      { mark: '▲', text: "GitHub still accepts example-owner or old-owner's old gh token", fix: 'revoke GitHub CLI at https://github.com/settings/applications' },
     ]);
     assert.deepEqual(readMoved(sys, AGENT), { at: NOW.toISOString(), logins: ['example-owner', 'old-owner'] });
     assert.equal(sys.modes.get(movedPath(HOME, AGENT)), 0o600);
   });
 
-  it('names only the accounts it signed out, and nothing when none', async () => {
-    const sys = exposed();
-    const out = await lock(sys, ['n', 'y', 'n']);
-    assert.ok(out.at(-2)?.includes('run as old-owner until'));
+  it('names only the accounts it signed out, and nothing when none', () => {
+    assert.deepEqual(lock(exposed(), ['old-owner']), ownerFixes(['old-owner']));
     const none = exposed();
-    const kept = await lock(none, ['n', 'n', 'n']);
-    assert.ok(!kept.some((line) => line.includes('two steps')));
+    assert.deepEqual(lock(none, []), []);
     assert.equal(none.exists(movedPath(HOME, AGENT)), false);
   });
 
@@ -222,19 +181,19 @@ describe('moving gh to the agent', () => {
     const sys = exposed();
     sys.files.set(movedPath(HOME, AGENT), JSON.stringify({ at: new Date(NOW.getTime() - 60_000).toISOString(), logins: ['first-owner', 'Old-Owner'] }));
     sys.appStarted = new Date(NOW.getTime() - 120_000);
-    await lock(sys, ['y', 'y', 'n']);
+    lock(sys, ['example-owner', 'old-owner']);
     assert.deepEqual(readMoved(sys, AGENT)?.logins, ['first-owner', 'example-owner', 'old-owner']);
     sys.files.set(movedPath(HOME, AGENT), JSON.stringify({ at: new Date(NOW.getTime() - 60_000).toISOString(), logins: ['first-owner'] }));
     sys.appStarted = new Date(NOW.getTime() - 30_000);
     sys.ghAccounts = ['example-owner'];
-    await lock(sys, ['y']);
+    lock(sys, ['example-owner']);
     assert.deepEqual(readMoved(sys, AGENT)?.logins, ['example-owner'], 'restarted since: the earlier move is done');
   });
 
-  it('prints no steps when gh could not sign out', async () => {
+  it('gives no steps when gh could not sign out', () => {
     const sys = exposed();
     sys.execOverride = (call) => (call.command === 'gh' && call.args[1] === 'logout' ? { code: 1, stdout: '', stderr: 'no\n' } : undefined);
-    assert.ok(!(await lock(sys, ['y', 'y', 'n'])).some((line) => line.includes('two steps')));
+    assert.deepEqual(lock(sys, ['example-owner', 'old-owner']), []);
   });
 
   it("reads the desktop app's start time, not its helpers'", () => {
@@ -243,14 +202,14 @@ describe('moving gh to the agent', () => {
     assert.equal(desktopAppStarted(new FakeSys().ready()), undefined, 'not running, or ps cannot say');
   });
 
-  it('gives doctor the steps only while the app started before the move', async () => {
+  it('gives doctor the steps only while the app started before the move', () => {
     const sys = exposed();
-    await lock(sys, ['y', 'y', 'y']);
-    assert.deepEqual(movedLines(since(sys, new Date(NOW.getTime() - 60_000)), AGENT), STEPS);
-    assert.deepEqual(movedLines(since(exposed(), new Date(NOW.getTime() - 60_000)), AGENT), [], 'no move recorded');
-    assert.deepEqual(movedLines(since(sys, new Date(NOW.getTime() + 60_000)), AGENT), [], 'restarted since');
+    lock(sys, ['example-owner', 'old-owner']);
+    assert.deepEqual(movedFindings(since(sys, new Date(NOW.getTime() - 60_000)), AGENT), STEPS);
+    assert.deepEqual(movedFindings(since(exposed(), new Date(NOW.getTime() - 60_000)), AGENT), [], 'no move recorded');
+    assert.deepEqual(movedFindings(since(sys, new Date(NOW.getTime() + 60_000)), AGENT), [], 'restarted since');
     sys.appStarted = undefined;
-    assert.deepEqual(movedLines(sys, AGENT), [], 'not running');
+    assert.deepEqual(movedFindings(sys, AGENT), [], 'not running');
   });
 
   it('reads no record, or a broken one, as no move', () => {
