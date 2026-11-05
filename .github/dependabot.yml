@@ -18,6 +18,11 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # Dependabot waits 3 days after a release by default. Our own checks
+    # workflow is proposed at its newest release; other actions keep the wait.
+    cooldown:
+      default-days: 3
+      exclude: ['athya-hq/process-rules*']
     groups:
       actions:
         patterns: ['*']
