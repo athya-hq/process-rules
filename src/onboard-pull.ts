@@ -23,6 +23,12 @@ export interface Change {
   what: string;
 }
 
+/** The pull request onboard opened or updated: its link, and GitHub's id for it, which auto-merge needs. */
+export interface Pull {
+  url: string;
+  id: string | undefined;
+}
+
 export interface PullTarget {
   agent: string;
   id: number;
@@ -44,7 +50,7 @@ export interface PullTarget {
  * happens. `notes`, lines of Markdown, follow the list of files in the
  * description. Returns the pull request's link, or 1 having said why not.
  */
-export async function openPull(sys: Sys, io: Output, target: PullTarget, changes: readonly Change[], notes: readonly string[] = []): Promise<string | 1> {
+export async function openPull(sys: Sys, io: Output, target: PullTarget, changes: readonly Change[], notes: readonly string[] = []): Promise<Pull | 1> {
   const { agent, id, token, slug, branch, version } = target;
   const dir = sys.tempDir();
   const env = sessionEnv(sys.env, agent, id, token, pathsFor(sys.home, agent));
@@ -97,10 +103,13 @@ export async function openPull(sys: Sys, io: Output, target: PullTarget, changes
     ].join('\n');
     const pulls = `${API}/repos/${slug}/pulls`;
     const opened = await sys.http(pulls, { method: 'POST', token, body: { title, head: ONBOARD_BRANCH, base: branch, body } });
-    if (opened.status === 201) return (opened.json as { html_url: string }).html_url;
+    if (opened.status === 201) {
+      const made = opened.json as { html_url: string; node_id?: unknown };
+      return { url: made.html_url, id: typeof made.node_id === 'string' ? made.node_id : undefined };
+    }
     // 422: the branch has a pull request open already, which the push has just updated.
     const open = opened.status === 422 ? await sys.http(`${pulls}?state=open&head=${slug.split('/')[0]}:${ONBOARD_BRANCH}`, { token }) : undefined;
-    const pull = Array.isArray(open?.json) ? (open.json[0] as { number: number; html_url: string } | undefined) : undefined;
+    const pull = Array.isArray(open?.json) ? (open.json[0] as { number: number; html_url: string; node_id?: unknown } | undefined) : undefined;
     if (!pull) {
       const why = (opened.json as { message?: unknown } | null)?.message;
       io.err(`onboard: GitHub did not open the pull request (HTTP ${opened.status}${typeof why === 'string' ? `: ${why}` : ''}); the changes are on ${ONBOARD_BRANCH}`);
@@ -108,8 +117,46 @@ export async function openPull(sys: Sys, io: Output, target: PullTarget, changes
     }
     const edited = await sys.http(`${pulls}/${pull.number}`, { method: 'PATCH', token, body: { title, body } });
     if (edited.status !== 200) io.err(`onboard: could not update the description of ${pull.html_url} (HTTP ${edited.status})`);
-    return pull.html_url;
+    return { url: pull.html_url, id: typeof pull.node_id === 'string' ? pull.node_id : undefined };
   } finally {
     sys.remove(dir);
   }
+}
+
+/** The merge methods auto-merge may use, in the order onboard prefers them, by the repository setting that allows each. */
+const MERGE_METHODS = [
+  ['allow_squash_merge', 'SQUASH'],
+  ['allow_rebase_merge', 'REBASE'],
+  ['allow_merge_commit', 'MERGE'],
+] as const;
+
+/**
+ * Turns on GitHub's auto-merge for onboard's pull request, as the agent,
+ * which can push: it then merges itself once its checks pass. REST has no
+ * call for it, so GraphQL's enablePullRequestAutoMerge, with the first
+ * merge method the repository allows of squash, rebase and merge. Returns
+ * why not, without failing: the repository does not allow auto-merge
+ * (`notAllowed`), or GitHub refused, as it does for a pull request already
+ * clean to merge.
+ */
+export async function autoMerge(sys: Sys, slug: string, token: string, id: string | undefined): Promise<{ problem: string; notAllowed?: true } | undefined> {
+  const repo = await sys.http(`${API}/repos/${slug}`, { token });
+  const settings = (repo.json ?? {}) as Record<string, unknown>;
+  // A setting GitHub does not report is not taken as off: GitHub refuses the request itself then, saying why.
+  if (settings.allow_auto_merge === false) return { problem: `${slug} does not allow auto-merge`, notAllowed: true };
+  const method = MERGE_METHODS.find(([setting]) => settings[setting] !== false)?.[1];
+  if (!method) return { problem: `${slug} allows no merge method` };
+  if (!id) return { problem: 'GitHub gave no id for the pull request' };
+  const { status, json } = await sys.http(`${API}/graphql`, {
+    method: 'POST',
+    token,
+    body: {
+      query: 'mutation($id: ID!, $method: PullRequestMergeMethod!) { enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: $method }) { pullRequest { id } } }',
+      variables: { id, method },
+    },
+  });
+  const reply = json as { data?: unknown; errors?: { message?: string }[] } | null;
+  if (status === 200 && !reply?.errors?.length && reply?.data) return undefined;
+  const why = reply?.errors?.map((error) => error.message).join('; ') || `HTTP ${status}`;
+  return /not allowed|not enabled/i.test(why) ? { problem: why, notAllowed: true } : { problem: why };
 }

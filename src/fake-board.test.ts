@@ -120,6 +120,10 @@ export class Board {
     return found;
   }
 
+  /** The auto-merge asked for on a pull request, and why GitHub refuses it, if it does. */
+  autoMerge: { id: unknown; method: unknown } | undefined;
+  autoMergeRefusal: string | undefined;
+
   graphql({ query, variables }: { query: string; variables: Record<string, unknown> }): { status: number; json: unknown } {
     const operation =
       [
@@ -140,6 +144,7 @@ export class Board {
         'options {',
         'views(first',
         'fields(first',
+        'enablePullRequestAutoMerge',
       ].find((name) => query.includes(name)) ?? 'unknown';
     this.operations.push(operation);
     const data = (json: unknown) => ({ status: 200, json: { data: json } });
@@ -259,6 +264,9 @@ export class Board {
         if (ids) view.visible = ids.map((id) => id.replace(/^F_/, ''));
         return data({ updateProjectV2View: { projectV2View: { id: view.id } } });
       }
+      case 'enablePullRequestAutoMerge':
+        this.autoMerge = { id: variables.id, method: variables.method };
+        return this.autoMergeRefusal ? { status: 200, json: { errors: [{ message: this.autoMergeRefusal }] } } : data({ enablePullRequestAutoMerge: { pullRequest: { id: variables.id } } });
       default:
         return { status: 200, json: { errors: [{ message: 'unknown query' }] } };
     }

@@ -126,10 +126,11 @@ describe('onboard', () => {
       `◆  process-rules onboard   v${v}`,
       '│  example-org/example-app · owner example-owner · agent ExampleBot',
       '│',
-      '◇  Pull request — you merge it',
+      '◇  Pull request',
       `│    process-rules.json  new, ${FEATURES.length} features on`,
       '│    settings.json       new',
       '│    workflow            new',
+      '│    auto-merge          when checks pass',
       '│',
       '◇  GitHub — one sign-in as example-owner',
       '│    board        set up or check',
@@ -149,7 +150,7 @@ describe('onboard', () => {
       '◇  pre-push hook',
       '◇  test commit Verified as ExampleBot',
       '◇  pull request',
-      `└  Merge ${PULL_URL}`,
+      `└  ${PULL_URL}  merges itself when checks pass`,
       '',
       'By hand:',
       `  review routine → https://github.com/athya-hq/process-rules/blob/v${v}/routines/review.md`,
@@ -1131,11 +1132,13 @@ describe('staged adoption', () => {
     assert.ok(repo(sys).has(HOOKS));
     assert.ok(!repo(sys).has(WORKFLOW));
     assert.equal(sys.files.get(PRE_PUSH), PRE_PUSH_HOOK, 'the identity guard, for every adopter');
-    assert.ok(!sys.requests.some((r) => r.url.endsWith('/graphql') || r.url.includes('/labels') || r.url.includes('/issue-types')), 'no board');
-    assert.deepEqual(planned(out, 'Pull request'), ['process-rules.json: new, 1 feature on', 'settings.json: new']);
+    const boardRequest = (r: { url: string; body?: unknown }): boolean =>
+      (r.url.endsWith('/graphql') && !JSON.stringify(r.body).includes('enablePullRequestAutoMerge')) || r.url.includes('/labels') || r.url.includes('/issue-types');
+    assert.ok(!sys.requests.some(boardRequest), 'no board');
+    assert.deepEqual(planned(out, 'Pull request'), ['process-rules.json: new, 1 feature on', 'settings.json: new', 'auto-merge: when checks pass']);
     assert.deepEqual(planned(out, 'GitHub'), [], 'no board, and the agent can push');
     assert.deepEqual(planned(out, 'This Mac'), ['pre-push hook: new']);
-    assert.ok(out.includes(`└  Merge ${PULL_URL}`));
+    assert.ok(out.includes(`└  ${PULL_URL}  merges itself when checks pass`));
     assert.deepEqual([...sys.committed.keys()], ['.github/process-rules.json', '.claude/settings.json']);
     assert.deepEqual(byHand(out), ["cloud sessions: claude.ai's GitHub as ExampleBot, Setup script from process-rules cloud-setup"]);
     assert.deepEqual(sys.chosen, ['Go ahead?']);
@@ -1156,7 +1159,7 @@ describe('staged adoption', () => {
       project: 'Example work',
       note: 'kept',
     });
-    assert.deepEqual(planned(out, 'Pull request'), ['process-rules.json: turn board on']);
+    assert.deepEqual(planned(out, 'Pull request'), ['process-rules.json: turn board on', 'auto-merge: when checks pass']);
     assert.ok(planned(out, 'GitHub — one sign-in as example-owner').includes('board: set up or check'));
     assert.ok(!repo(sys).has(WORKFLOW), 'board alone needs no workflow');
   });
@@ -1169,7 +1172,7 @@ describe('staged adoption', () => {
     const pair = await actionsKey(sys);
     const { code, out, err } = await run(sys);
     assert.deepEqual([code, err], [0, []]);
-    assert.deepEqual(planned(out, 'Pull request'), ['process-rules.json: design → figma, figma key out', 'workflow: new']);
+    assert.deepEqual(planned(out, 'Pull request'), ['process-rules.json: design → figma, figma key out', 'workflow: new', 'auto-merge: when checks pass']);
     assert.deepEqual(planned(out, 'GitHub — one sign-in as example-owner'), ['FIGMA_LIBRARY secret']);
     assert.match(
       opened(sys)?.body ?? '',
@@ -1326,8 +1329,51 @@ describe('the plan and its one question', () => {
     assert.deepEqual(sys.chosen, [], 'no question');
     assert.ok(out.includes('◇  Go ahead? Yes (--yes)'));
     assert.ok(out.indexOf('◇  Go ahead? Yes (--yes)') > out.indexOf('◇  Check'), 'after the plan');
-    assert.ok(out.includes(`└  Merge ${PULL_URL}`));
+    assert.ok(out.includes(`└  ${PULL_URL}  merges itself when checks pass`));
     assert.equal(sys.files.get(PRE_PUSH), PRE_PUSH_HOOK);
+  });
+
+  it("turns auto-merge on for its pull request as the agent, squashing, so it merges itself", async () => {
+    const sys = fresh();
+    const board = new Board(sys);
+    sys.route('GET', REPO, { status: 200, json: { ...repoJson(), allow_auto_merge: true, allow_squash_merge: false, allow_rebase_merge: true } });
+    const { code, out } = await run(sys);
+    assert.equal(code, 0);
+    assert.ok(planned(out, 'Pull request').includes('auto-merge: when checks pass'));
+    assert.deepEqual(board.autoMerge, { id: 'PR_7', method: 'REBASE' }, 'the first method the repository allows');
+    const asked = sys.requests.find((r) => JSON.stringify(r.body ?? '').includes('enablePullRequestAutoMerge'));
+    assert.equal(asked?.token, TOKEN, 'as the agent');
+    assert.ok(out.includes(`└  ${PULL_URL}  merges itself when checks pass`));
+    assert.ok(!byHand(out).some((line) => line.startsWith('auto-merge')));
+    const squash = fresh();
+    const squashing = new Board(squash);
+    await run(squash);
+    assert.deepEqual(squashing.autoMerge, { id: 'PR_7', method: 'SQUASH' }, 'squash when GitHub does not say otherwise');
+  });
+
+  it('asks the owner to merge it when the repository does not allow auto-merge, or GitHub refuses it', async () => {
+    const off = fresh();
+    const board = new Board(off);
+    off.route('GET', REPO, { status: 200, json: { ...repoJson(), allow_auto_merge: false } });
+    const { code, out, err } = await run(off);
+    assert.deepEqual({ code, err }, { code: 0, err: [] });
+    assert.equal(board.autoMerge, undefined, 'not asked for');
+    assert.ok(out.includes(`└  Merge ${PULL_URL}`));
+    assert.equal(byHand(out)[0], 'auto-merge: turn on Allow auto-merge → https://github.com/example-org/example-app/settings, or merge it yourself');
+    for (const [refusal, line] of [
+      ['Pull request is in clean status', 'auto-merge: GitHub refused (Pull request is in clean status); merge it yourself'],
+      ['Pull request Auto merge is not allowed for this repository', 'auto-merge: turn on Allow auto-merge → https://github.com/example-org/example-app/settings, or merge it yourself'],
+    ]) {
+      const sys = fresh();
+      new Board(sys).autoMergeRefusal = refusal;
+      const refused = await run(sys);
+      assert.equal(refused.code, 0);
+      assert.ok(refused.out.includes(`└  Merge ${PULL_URL}`));
+      assert.equal(byHand(refused.out)[0], line);
+    }
+    const none = fresh();
+    none.route('GET', REPO, { status: 200, json: { ...repoJson(), allow_squash_merge: false, allow_rebase_merge: false, allow_merge_commit: false } });
+    assert.equal(byHand((await run(none)).out)[0], 'auto-merge: GitHub refused (example-org/example-app allows no merge method); merge it yourself');
   });
 
   it('prints the plan and changes nothing with --dry-run, with no terminal too', async () => {
@@ -1338,7 +1384,7 @@ describe('the plan and its one question', () => {
     assert.deepEqual({ code, err }, { code: 0, err: [] });
     assert.deepEqual(sys.chosen, []);
     assert.equal(out[0], `◆  process-rules onboard   v${packageVersion()}`);
-    assert.deepEqual(planned(out, 'Pull request'), [`process-rules.json: new, ${FEATURES.length} features on`, 'settings.json: new', 'workflow: new']);
+    assert.deepEqual(planned(out, 'Pull request'), [`process-rules.json: new, ${FEATURES.length} features on`, 'settings.json: new', 'workflow: new', 'auto-merge: when checks pass']);
     assert.equal(out.at(-1), '└  Dry run: nothing changed.');
     assert.ok(changedNothing(sys), 'nothing written, pushed or signed in to');
     assert.deepEqual(sys.committed.size, 0);
@@ -1492,7 +1538,8 @@ describe("onboard's pull request", () => {
     assert.equal(patched?.token, TOKEN);
     assert.match((patched?.body as { body: string }).body, /Running onboard again updates this pull request\.$/);
     assert.equal((patched?.body as { title: string }).title, `chore(process-rules): onboard at v${packageVersion()}`, 'an older title is made conventional');
-    assert.ok(out.includes('└  Merge https://github.com/example-org/example-app/pull/5'));
+    assert.ok(out.includes('└  Merge https://github.com/example-org/example-app/pull/5'), 'no id from the open list: the owner merges it');
+    assert.ok(byHand(out).includes('auto-merge: GitHub refused (GitHub gave no id for the pull request); merge it yourself'), out.join('\n'));
   });
 
   it('says so when the description of the open pull request cannot be updated, and goes on', async () => {
@@ -1642,7 +1689,7 @@ describe('workflowUpdate', () => {
     sys.files.set(PRE_PUSH, PRE_PUSH_HOOK);
     sys.files.set(WORKFLOW, workflow('main', packageVersion(), true));
     const off = await run(sys);
-    assert.deepEqual(planned(off.out, 'Pull request'), ['workflow: no Figma secrets']);
+    assert.deepEqual(planned(off.out, 'Pull request'), ['workflow: no Figma secrets', 'auto-merge: when checks pass']);
     assert.ok(opened(sys)?.body.includes(`\n- \`${WORKFLOW_PATH}\`: in ${WORKFLOW_PATH}, stop passing Figma secrets, with figma off, leaving the rest as it is\n`));
     assert.equal(repo(sys).get(WORKFLOW), workflow('main', packageVersion(), false));
     merge(sys);
@@ -1650,7 +1697,7 @@ describe('workflowUpdate', () => {
     sys.requests.length = 0;
     sys.answers = ['y'];
     const on = await run(sys);
-    assert.deepEqual(planned(on.out, 'Pull request'), ['workflow: Figma secrets']);
+    assert.deepEqual(planned(on.out, 'Pull request'), ['workflow: Figma secrets', 'auto-merge: when checks pass']);
     assert.ok(opened(sys)?.body.includes(`\n- \`${WORKFLOW_PATH}\`: in ${WORKFLOW_PATH}, pass the FIGMA_TOKEN and FIGMA_LIBRARY secrets, leaving the rest as it is\n`));
   });
 
@@ -1689,7 +1736,7 @@ describe('workflowUpdate', () => {
     sys.files.set(WORKFLOW, own);
     const { code, out } = await run(sys, []);
     assert.equal(code, 0);
-    assert.deepEqual(planned(out, 'Pull request'), ['workflow: schedule → 30 5 * * 2']);
+    assert.deepEqual(planned(out, 'Pull request'), ['workflow: schedule → 30 5 * * 2', 'auto-merge: when checks pass']);
     assert.ok(opened(sys)?.body.includes(`\n- \`${WORKFLOW_PATH}\`: in ${WORKFLOW_PATH}, run the weekly decisions job on the schedule .github/process-rules.json sets, cron 30 5 * * 2 UTC, leaving the rest as it is\n`));
     assert.equal(repo(sys).get(WORKFLOW), workflow('main', packageVersion(), true, '30 5 * * 2').replace('name: process-rules\n', 'name: process-rules\n# Our own note.\n'));
   });
@@ -1791,7 +1838,7 @@ describe('workflowUpdate', () => {
     sys.files.set(PRE_PUSH, PRE_PUSH_HOOK);
     sys.files.set(WORKFLOW, twoJobs('0.5.6', false));
     const { out } = await run(sys);
-    assert.deepEqual(planned(out, 'Pull request'), [`workflow: pins → v${packageVersion()}, merged job`]);
+    assert.deepEqual(planned(out, 'Pull request'), [`workflow: pins → v${packageVersion()}, merged job`, 'auto-merge: when checks pass']);
     assert.equal(out[0], `◆  process-rules onboard   v0.5.6 → v${packageVersion()}`);
     assert.ok(opened(sys)?.body.includes(`\n- \`${WORKFLOW_PATH}\`: in ${WORKFLOW_PATH}, move the version pins from v0.5.6 to v${packageVersion()} and add a job that closes the slice a merged pull request names, the one pull request run that writes to issues, leaving the rest as it is\n`));
     assert.equal(repo(sys).get(WORKFLOW), workflow('main', packageVersion(), false));

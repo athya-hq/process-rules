@@ -211,8 +211,9 @@ days before the token ends.
    ◆  process-rules onboard   v0.5.17 → v0.5.20
    │  owner/repo · owner OWNER · agent AGENT
    │
-   ◇  Pull request — you merge it
-   │    workflow  pins → v0.5.20
+   ◇  Pull request
+   │    workflow    pins → v0.5.20
+   │    auto-merge  when checks pass
    │
    ◇  GitHub — one sign-in as OWNER
    │    board        set up or check
@@ -232,8 +233,8 @@ days before the token ends.
    pull request. `--yes` goes ahead without asking, and `--dry-run` prints
    the plan and stops, changing nothing; without a terminal and without
    `--yes`, `onboard` refuses. After the yes it shows one line per step, a
-   spinner while it works, and ends with the pull request to merge and a
-   short "By hand:" list of what GitHub's API cannot do.
+   spinner while it works, and ends with the pull request and a short "By
+   hand:" list of what GitHub's API cannot do.
 
    It writes `.github/process-rules.json`, adds to `.claude/settings.json`
    the lock in `env`, a SessionStart hook running `process-rules
@@ -283,7 +284,13 @@ days before the token ends.
    temporary repository it deletes afterwards, pushes it as the agent and
    opens the agent's pull request (or updates the one an earlier run opened),
    titled `chore(process-rules): onboard at v<version>`, as Conventional
-   Commits reads it, and its commit the same; merge it to finish. A run
+   Commits reads it, and its commit the same. It then turns on GitHub's
+   auto-merge for that pull request as the agent, squashing where the repo
+   allows it (else rebasing, else merging), so it merges itself once its
+   checks pass, and any review the repo's rules require is given. Where the
+   repo does not allow auto-merge, or GitHub refuses it (as it does for a
+   pull request already clean to merge), the run still succeeds: it ends
+   "Merge <url>", and "By hand:" says why. A run
    that changes no file, or that stops, opens none. A file the default branch has otherwise than your
    checkout is refused, so bring the checkout up to date first. The pre-push
    git hook, which git does not track, is written in place. The work rules

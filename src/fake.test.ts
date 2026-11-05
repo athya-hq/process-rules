@@ -90,7 +90,7 @@ export class FakeSys implements Sys {
     this.route('GET', '/user', { status: 401, json: null });
     this.route('GET', '/users/ExampleBot/ssh_signing_keys', { status: 200, json: [] });
     this.route('GET', '/user/ssh_signing_keys', { status: 200, json: [] });
-    this.route('POST', '/repos/example-org/example-app/pulls', { status: 201, json: { number: 7, html_url: PULL_URL } });
+    this.route('POST', '/repos/example-org/example-app/pulls', { status: 201, json: { number: 7, html_url: PULL_URL, node_id: 'PR_7' } });
   }
 
   route(method: string, path: string, result: HttpResult | (() => HttpResult)): this {

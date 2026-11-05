@@ -643,4 +643,15 @@
   checks run the CLI from source with no packages installed; colour shows
   only on a terminal that has it, never with `NO_COLOR`. The title and the
   commit read `chore(process-rules): onboard at v<version>`, which
-  Conventional Commits accepts.
+  Conventional Commits accepts. The owner, in chat, also chose that the pull
+  request merge itself: "I prefer this for onboard step." So the agent,
+  which can push, turns on GitHub's auto-merge for it through GraphQL's
+  `enablePullRequestAutoMerge` (REST has no call for it), squashing where
+  the repository allows it, else rebasing, else merging; onboard runs in
+  the owner's terminal, where GraphQL is reachable. The plan names it in the
+  pull request's group, "auto-merge when checks pass", and the run ends
+  "<url> merges itself when checks pass". Not turning it on fails nothing:
+  where the repository does not allow auto-merge, or GitHub refuses it, as
+  it does for a pull request already clean to merge, the run ends "Merge
+  <url>" and "By hand:" says why. A setting GitHub does not report is not
+  taken as off, so GitHub's own refusal says why then.
