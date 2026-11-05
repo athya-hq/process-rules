@@ -527,7 +527,16 @@ has none), lifts the lock and records the session for the guard; `gh` gets
 the proxy's placeholder token (`proxy-injected`), which the proxy swaps for
 the connected account's. As anyone else, GitHub stays locked out and the
 session is told to stop. The pre-push hook asks GitHub the same through
-the proxy before each push.
+the proxy before each push. `session-start` runs only as the SessionStart
+hook: Claude Code sets `CLAUDE_ENV_FILE` only then, so run by hand from the
+session's shell it always says STOP, which says nothing about the session.
+The hook's own line at session start is what counts.
+
+A cloud session's git commits are authored and committed as Claude's own
+account, `Claude <noreply@anthropic.com>`, and signed by it (Verified),
+while the push is the agent's. PR identity checks only commits that claim
+an agent, so these pass, and GitHub records the agent as having pushed
+them.
 
 The proxy refuses GitHub's GraphQL API, so the work rules read only its
 REST API, here and everywhere else. The cloud environment's Setup script,

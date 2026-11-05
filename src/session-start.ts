@@ -39,6 +39,13 @@ export async function sessionStart(sys: Sys, io: Output): Promise<number> {
   return 0;
 }
 
+/**
+ * Claude Code sets CLAUDE_ENV_FILE only while it runs the SessionStart hook,
+ * so session-start run by hand from a session's shell always finds it unset.
+ * The STOP stands, as the hook itself may lack it, but says so.
+ */
+const HOOK_ONLY = 'session-start runs only as the SessionStart hook, so a run by hand says nothing about this session: the hook\'s own line at session start is what counts.';
+
 /** What session-start tells the session, and the agent it works as when it does. */
 interface Said {
   line: string;
@@ -94,7 +101,7 @@ async function cloudStart(sys: Sys): Promise<Said> {
   // Any owner can set up the agent: the first is the one to tell.
   const stop = `Do not push, fetch, or run gh in this session; tell ${owners[0]}.`;
   const envFile = sys.env.CLAUDE_ENV_FILE;
-  if (!envFile) return { line: `process-rules: STOP. CLAUDE_ENV_FILE is unset, so this cloud session cannot be given the agent identity. ${stop}` };
+  if (!envFile) return { line: `process-rules: STOP. CLAUDE_ENV_FILE is unset, so this cloud session cannot be given the agent identity. ${stop} ${HOOK_ONLY}` };
   const asked = await cloudLogin(sys);
   if ('problem' in asked) return { line: `process-rules: STOP. ${asked.problem}, so it cannot be checked as ${agent}. ${stop}` };
   if (!anyLogin(agents, asked.login)) {
@@ -140,7 +147,7 @@ function start(sys: Sys): Said {
 
   const envFile = sys.env.CLAUDE_ENV_FILE;
   if (!envFile) {
-    return { line: `process-rules: STOP. CLAUDE_ENV_FILE is unset, so this session cannot be given the agent identity and gh and git would act as the owner. ${stop}` };
+    return { line: `process-rules: STOP. CLAUDE_ENV_FILE is unset, so this session cannot be given the agent identity and gh and git would act as the owner. ${stop} ${HOOK_ONLY}` };
   }
   try {
     sys.append(envFile, `\n${lockScript(sys.home)}`);
