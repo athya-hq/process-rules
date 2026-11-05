@@ -49,7 +49,11 @@ export interface Sys {
   tempDir(): string;
   /** Deletes a file or folder and all in it; nothing there is fine. */
   remove(path: string): void;
-  /** With timeoutMs, rejects with an error named TimeoutError once that long has passed. */
+  /**
+   * With timeoutMs, rejects with an error named TimeoutError once that long has passed. A request that gets no
+   * answer rejects with an error naming its method, host and path and why; GET, PUT and DELETE are tried once
+   * more first.
+   */
   http(
     url: string,
     options?: { method?: string; token?: string; body?: unknown; headers?: Record<string, string>; timeoutMs?: number },

@@ -101,6 +101,89 @@ describe('realSys', () => {
     }
   });
 
+  /** A local server that cuts the connection for the first `drops` requests, then answers; and how many it saw. */
+  async function flaky(drops: number, hang = false): Promise<{ base: string; seen: () => number; close: () => void }> {
+    let count = 0;
+    const server = createServer((req, res) => {
+      count++;
+      if (hang) return;
+      if (count <= drops) {
+        req.socket.destroy();
+        return;
+      }
+      res.end('{"ok":true}');
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    return {
+      base,
+      seen: () => count,
+      close: () => {
+        server.closeAllConnections();
+        server.close();
+      },
+    };
+  }
+
+  it('tries a GET, PUT or DELETE once more after a network failure', async () => {
+    for (const method of ['GET', 'PUT', 'DELETE']) {
+      const server = await flaky(1);
+      try {
+        const got = await sys.http(`${server.base}/x`, { method, ...(method === 'PUT' ? { body: { a: 1 } } : {}) });
+        assert.deepEqual([got.status, got.json, server.seen()], [200, { ok: true }, 2], method);
+      } finally {
+        server.close();
+      }
+    }
+  });
+
+  it('says which request got no answer and why, never just "fetch failed" and never its query', async () => {
+    const server = await flaky(2);
+    try {
+      await assert.rejects(sys.http(`${server.base}/repos/x/y/actions/secrets/public-key?token=hidden`, { token: 't' }), (error: Error) => {
+        assert.match(error.message, /^GET 127\.0\.0\.1:\d+\/repos\/x\/y\/actions\/secrets\/public-key could not be made: \S/);
+        assert.ok(!error.message.includes('hidden') && !error.message.includes('fetch failed'), error.message);
+        return true;
+      });
+      assert.equal(server.seen(), 2);
+    } finally {
+      server.close();
+    }
+  });
+
+  it('never repeats a POST or PATCH', async () => {
+    for (const method of ['POST', 'PATCH']) {
+      const server = await flaky(1);
+      try {
+        await assert.rejects(sys.http(`${server.base}/x`, { method, body: { a: 1 } }), new RegExp(`^Error: ${method} 127\\.0\\.0\\.1:\\d+/x could not be made: `));
+        assert.equal(server.seen(), 1, method);
+      } finally {
+        server.close();
+      }
+    }
+  });
+
+  it('names a refused connection by its code', async () => {
+    const server = await flaky(0);
+    const { base } = server;
+    server.close();
+    await assert.rejects(sys.http(`${base}/x`, { method: 'POST' }), /^Error: POST 127\.0\.0\.1:\d+\/x could not be made: .*ECONNREFUSED/);
+  });
+
+  it('names a URL it cannot read by nothing more', async () => {
+    await assert.rejects(sys.http('not a url?token=hidden', { method: 'POST' }), /^Error: POST a request could not be made: (?!.*hidden)/);
+  });
+
+  it('keeps a timeout as a TimeoutError, tried once', async () => {
+    const server = await flaky(0, true);
+    try {
+      await assert.rejects(sys.http(`${server.base}/x`, { timeoutMs: 50 }), { name: 'TimeoutError' });
+      assert.equal(server.seen(), 1);
+    } finally {
+      server.close();
+    }
+  });
+
   it('refuses a hidden prompt without a terminal', async () => {
     if (process.stdin.isTTY) return;
     await assert.rejects(sys.askSecret('token: '), /needs a terminal/);

@@ -622,15 +622,18 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
   // The owner's sign-in for this run: one browser approval at the first step that needs it, never stored.
   let scopes: string[] = [];
   let signedIn: Promise<OwnerToken | { problem: string }> | undefined;
-  const signIn = (): Promise<OwnerToken | { problem: string }> =>
+  // `as` is who may sign in: the owner, the settings' owners while the run has not chosen one, or none yet known.
+  const signIn = (as: readonly string[] = []): Promise<OwnerToken | { problem: string }> =>
     (signedIn ??= (async () => {
       // The features the run ends with: the sign-in can come before --add's feature is turned on.
       scopes = ownerScopes(add ? [...features, add] : features, await byOrganisation());
-      io.out(`Sign in to GitHub as the owner in the browser, for this run only (${['repo', ...scopes].join(', ')}); nothing is kept.`);
+      const who = as.length === 0 ? 'the owner' : as.length === 1 ? `${as[0] as string}, the owner,` : `one of ${either(as)}, the owners,`;
+      io.out(`Sign in to GitHub in the browser as ${who} for this run only (${['repo', ...scopes].join(', ')}); nothing is kept.`);
+      io.out("gh's own lines below about saving credentials refer to a temporary folder, which is deleted before onboard goes on.");
       return signInOnce(sys, scopes);
     })());
   const ownerToken = async (): Promise<string | undefined> => {
-    const token = asOwner(await signIn(), owner, scopes);
+    const token = asOwner(await signIn([owner]), owner, scopes);
     if (typeof token === 'string') return token;
     io.err(`onboard: ${token.problem}`);
     return undefined;
@@ -667,7 +670,7 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     // features are read, which the sign-in's scopes depend on.
     let chosenOwner = namedOwner ?? (settings.owners.length === 1 ? settings.owners[0] : undefined);
     if (!chosenOwner) {
-      const signed = await signIn();
+      const signed = await signIn(settings.owners);
       if ('problem' in signed) {
         io.err(`onboard: ${signed.problem}; name the owner: process-rules onboard <owner>`);
         return 1;

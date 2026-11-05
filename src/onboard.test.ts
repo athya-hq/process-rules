@@ -213,6 +213,10 @@ describe('onboard', () => {
       assert.equal(code, 0, [...out, ...err].join('\n'));
       assert.ok(out.includes('✓ .github/process-rules.json: owner Second-Owner, agent ExampleBot; on: ' + FEATURES.join(', ')), out.join('\n'));
       assert.equal(signIns(sys), 1);
+      assert.ok(
+        out.includes('Sign in to GitHub in the browser as one of example-owner or Second-Owner, the owners, for this run only (repo, project, admin:org); nothing is kept.'),
+        out.join('\n'),
+      );
       const login = sys.calls.find((call) => call.command === 'gh' && call.args[1] === 'login')?.args ?? [];
       assert.equal(login[login.indexOf('-s') + 1], 'project,admin:org', 'the sign-in that names the owner asks for the scopes the features need');
     });
@@ -231,8 +235,10 @@ describe('onboard', () => {
     it('takes the owner and agent named, when the lists hold them', async () => {
       const sys = team();
       sys.route('GET', '/users/examplebot', { status: 200, json: { id: AGENT_ID, login: AGENT } });
-      assert.equal((await run(sys, ['EXAMPLE-OWNER', 'examplebot'])).code, 0);
+      const { code, out } = await run(sys, ['EXAMPLE-OWNER', 'examplebot']);
+      assert.equal(code, 0);
       assert.equal(repo(sys).get(SETTINGS), `${JSON.stringify(TEAM, null, 2)}\n`);
+      assert.ok(out.includes('Sign in to GitHub in the browser as example-owner, the owner, for this run only (repo, project, admin:org); nothing is kept.'), out.join('\n'));
     });
 
     it('refuses accounts the lists do not hold, and an agent it cannot tell', async () => {
@@ -595,8 +601,9 @@ describe('onboard', () => {
     it("takes the one-run sign-in's login as owner and the one agent set up here, with Enter", async () => {
       const sys = setUp([AGENT]);
       sys.answers = ['', '', ...Array<string>(12).fill('y')];
-      const { code } = await run(sys, []);
+      const { code, out } = await run(sys, []);
       assert.equal(code, 0);
+      assert.ok(out.includes('Sign in to GitHub in the browser as the owner for this run only (repo, project, admin:org); nothing is kept.'), 'no owner is known before the sign-in');
       assert.deepEqual(sys.asked.slice(0, 2), ['The owner, who approves [example-owner]: ', 'The agent, which builds [ExampleBot]: ']);
       assert.deepEqual(JSON.parse(repo(sys).get(SETTINGS) ?? '').owner, 'example-owner');
       assert.equal(signIns(sys), 1, 'the sign-in that suggested the owner serves the board too');
@@ -636,7 +643,9 @@ describe('onboard', () => {
       const { code, out } = await run(sys);
       assert.equal(code, 0);
       assert.deepEqual(asked(sys), [['project', 'admin:org']]);
-      assert.ok(out.includes('Sign in to GitHub as the owner in the browser, for this run only (repo, project, admin:org); nothing is kept.'));
+      const line = out.indexOf('Sign in to GitHub in the browser as example-owner, the owner, for this run only (repo, project, admin:org); nothing is kept.');
+      assert.ok(line >= 0, out.join('\n'));
+      assert.equal(out[line + 1], "gh's own lines below about saving credentials refer to a temporary folder, which is deleted before onboard goes on.");
       assert.deepEqual(sys.removed, sys.temps);
       const gh = sys.calls.filter((c) => c.command === 'gh');
       assert.ok(gh.length > 0 && gh.every((c) => c.env?.GH_CONFIG_DIR === sys.temps[0]), "gh never runs on the owner's own folder");

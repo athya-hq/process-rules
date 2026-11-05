@@ -171,10 +171,19 @@ fresh temporary `gh` folder, asking for gh's own scopes (`repo`,
 `read:org`, `gist`) plus only those the run's features add (`project` for
 the board, and `admin:org` in an organisation), reads the token from
 there, refuses it unless it is the owner's, and deletes the folder
-whatever happens. The
+whatever happens. Its line names the account to sign in as (each owner the
+settings list, while the run has not chosen one) and says that `gh`'s own
+lines about saving credentials mean that temporary folder. The
 token lives in the command's memory for that run; the owner's own `gh`
 config and keychain are never read or written, so there is nothing to sign
 out of afterwards.
+
+A request to GitHub or Figma that gets no answer at all stops the command
+with which request it was and why, such as `GET
+api.github.com/repos/…/actions/secrets/public-key could not be made:
+ECONNRESET (other side closed)`, never its query or token. A GET, PUT or
+DELETE, which can be repeated safely, is tried once more a second later
+first; a POST or PATCH never is.
 
 `process-rules doctor` re-checks the key, the token and its scopes, the key's
 registration, the session file and that the launcher runs, names the step to re-run, and warns 14

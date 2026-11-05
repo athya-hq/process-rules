@@ -586,3 +586,19 @@
   the session opened the pull request and that the app's `gh` login wrote
   it, so a session can do this only for the agent's own pull requests. A
   cloud session has no such switch, and its line is unchanged.
+- **2026-11-05 — Record: P-35, onboard names the owner to sign in as and
+  why a request failed.** In the sandbox's onboard the sign-in line said
+  only "as the owner", and the run then ended with "process-rules onboard:
+  fetch failed": Node's message for a request that got no answer, whose
+  reason fetch keeps in `cause`, which the CLI dropped. Minutes later the
+  same requests answered, so it was most likely a passing network failure,
+  but nothing told it apart from a blocked host. Fixed as State #145. The
+  sign-in line names the owner, or each owner the settings list while the
+  run has not chosen one, and says that `gh`'s lines about saving
+  credentials mean the temporary folder deleted before onboard goes on.
+  `http` names a request that got no answer by method, host and path, never
+  its query, with the cause's code and message. GET, PUT and DELETE are
+  tried once more a second later, since repeating one changes nothing more;
+  POST and PATCH are not, since a request that reached GitHub before the
+  connection broke could then be made twice. A timeout keeps its own error
+  and is not repeated, so a caller's time budget holds.
