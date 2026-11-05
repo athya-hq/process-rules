@@ -194,7 +194,8 @@ export async function watchReviews(sys: Sys, io: Output, slug: string, token: st
     if (!labeled || labeled.actor?.login !== WORKFLOW_BOT) continue;
     if (!verdictSince(agentComments(await commentsOf(issue.number), agents), Date.parse(labeled.created_at))) continue;
     const removed = await sys.http(`${API}/repos/${slug}/issues/${issue.number}/labels/needs-owner`, { method: 'DELETE', token });
-    if (removed.status !== 200) throw new Error(`cannot remove needs-owner from #${issue.number} (HTTP ${removed.status})`);
+    // 404: already off, as when a repeated DELETE follows one whose answer was lost.
+    if (removed.status !== 200 && removed.status !== 404) throw new Error(`cannot remove needs-owner from #${issue.number} (HTTP ${removed.status})`);
     cleared.add(issue.number);
     io.out(`#${issue.number}: the review routine gave its verdict; removed needs-owner`);
   }
@@ -269,7 +270,8 @@ export async function expireVetoes(sys: Sys, io: Output, slug: string, token: st
     const labeled = await lastLabeled(sys, token, slug, issue.number, 'veto');
     if (!labeled || sys.now().getTime() - Date.parse(labeled.created_at) < VETO_DAYS * DAY_MS) continue;
     const removed = await sys.http(`${API}/repos/${slug}/issues/${issue.number}/labels/veto`, { method: 'DELETE', token });
-    if (removed.status !== 200) throw new Error(`cannot remove veto from #${issue.number} (HTTP ${removed.status})`);
+    // 404: already off, as when a repeated DELETE follows one whose answer was lost.
+    if (removed.status !== 200 && removed.status !== 404) throw new Error(`cannot remove veto from #${issue.number} (HTTP ${removed.status})`);
     io.out(`#${issue.number}: the week to veto has passed; removed veto`);
   }
 }

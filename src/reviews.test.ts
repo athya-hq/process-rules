@@ -233,6 +233,14 @@ describe('expireVetoes', () => {
     assert.deepEqual(out, ['#5: the week to veto has passed; removed veto']);
   });
 
+  it('counts veto as removed when GitHub says it is already off', async () => {
+    const sys = github();
+    sys.route('DELETE', `/repos/${SLUG}/issues/5/labels/veto`, { status: 404, json: null });
+    const { io, out } = capture();
+    await expireVetoes(sys, io, SLUG, 'ghs_run');
+    assert.deepEqual(out, ['#5: the week to veto has passed; removed veto']);
+  });
+
   for (const [name, change, message] of [
     ['listing', (sys: FakeSys) => sys.route('GET', VETOED, { status: 500, json: null }), /cannot list vetoable decisions \(HTTP 500\)/],
     ['reading events', (sys: FakeSys) => sys.route('GET', `/repos/${SLUG}/issues/5/events?per_page=100&page=1`, { status: 404, json: null }), /cannot read #5's events \(HTTP 404\)/],
@@ -466,4 +474,17 @@ describe('watchReviews', () => {
       await assert.rejects(watchReviews(sys, capture().io, SLUG, 'ghs_run', SETTINGS), message);
     });
   }
+
+  it('counts needs-owner as removed when GitHub says it is already off', async () => {
+    const sys = github(
+      [],
+      [issue(20, '', ['needs-owner'])],
+      { 20: [comment(AGENT, 'Settled: done', '2026-10-25T00:00:00Z')] },
+      { 20: labeled('github-actions[bot]', '2026-10-09T00:00:00Z') },
+    );
+    sys.route('DELETE', `/repos/${SLUG}/issues/20/labels/needs-owner`, { status: 404, json: null });
+    const { io, out } = capture();
+    await watchReviews(sys, io, SLUG, 'ghs_run', SETTINGS);
+    assert.deepEqual(out, ['#20: the review routine gave its verdict; removed needs-owner']);
+  });
 });

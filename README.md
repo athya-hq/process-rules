@@ -183,7 +183,9 @@ with which request it was and why, such as `GET
 api.github.com/repos/…/actions/secrets/public-key could not be made:
 ECONNRESET (other side closed)`, never its query or token. A GET, PUT or
 DELETE, which can be repeated safely, is tried once more a second later
-first; a POST or PATCH never is.
+first; a POST or PATCH never is. A call with a time limit keeps it for
+both tries, and one that runs out of time stops with that, not tried
+again.
 
 `process-rules doctor` re-checks the key, the token and its scopes, the key's
 registration, the session file and that the launcher runs, names the step to re-run, and warns 14

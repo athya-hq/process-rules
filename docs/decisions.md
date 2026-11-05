@@ -600,5 +600,7 @@
   its query, with the cause's code and message. GET, PUT and DELETE are
   tried once more a second later, since repeating one changes nothing more;
   POST and PATCH are not, since a request that reached GitHub before the
-  connection broke could then be made twice. A timeout keeps its own error
-  and is not repeated, so a caller's time budget holds.
+  connection broke could then be made twice. One deadline covers both
+  tries, and a timeout keeps its own error and is not repeated, so a
+  caller's time budget holds. A label's removal counts a 404 as done, since
+  a repeated DELETE after one whose answer was lost finds it already off.

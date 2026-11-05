@@ -58,6 +58,8 @@ export function realSys(): Sys {
     remove: (path) => rmSync(path, { recursive: true, force: true }),
     async http(url, options = {}) {
       const method = (options.method ?? 'GET').toUpperCase();
+      // One deadline for the call, a repeat included, so timeoutMs bounds all of it.
+      const signal = options.timeoutMs !== undefined ? AbortSignal.timeout(options.timeoutMs) : undefined;
       const request = async (): Promise<{ response: Response; text: string }> => {
         const response = await fetch(url, {
           method,
@@ -69,7 +71,7 @@ export function realSys(): Sys {
             ...options.headers,
           },
           ...(options.body ? { body: JSON.stringify(options.body) } : {}),
-          ...(options.timeoutMs !== undefined ? { signal: AbortSignal.timeout(options.timeoutMs) } : {}),
+          ...(signal ? { signal } : {}),
         });
         return { response, text: await response.text() };
       };
@@ -80,7 +82,11 @@ export function realSys(): Sys {
         // A timeout keeps its own error, which callers name; a request that can be repeated safely is tried once more.
         if (isTimeout(error)) throw error;
         if (!REPEATABLE.has(method)) throw notMade(method, url, error);
-        await new Promise((resolve) => setTimeout(resolve, RETRY_MS));
+        // The wait ends early when the deadline passes, and the repeat then stops with its TimeoutError.
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, RETRY_MS);
+          signal?.addEventListener('abort', () => (clearTimeout(timer), resolve()), { once: true });
+        });
         try {
           got = await request();
         } catch (again) {

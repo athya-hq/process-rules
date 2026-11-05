@@ -174,6 +174,18 @@ describe('realSys', () => {
     await assert.rejects(sys.http('not a url?token=hidden', { method: 'POST' }), /^Error: POST a request could not be made: (?!.*hidden)/);
   });
 
+  it('keeps one deadline for both tries', async () => {
+    const server = await flaky(1);
+    try {
+      const started = Date.now();
+      await assert.rejects(sys.http(`${server.base}/x`, { timeoutMs: 200 }), { name: 'TimeoutError' });
+      assert.ok(Date.now() - started < 900, 'the repeat waits no longer than what is left of the deadline');
+      assert.equal(server.seen(), 1);
+    } finally {
+      server.close();
+    }
+  });
+
   it('keeps a timeout as a TimeoutError, tried once', async () => {
     const server = await flaky(0, true);
     try {
