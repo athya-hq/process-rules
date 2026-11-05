@@ -66,6 +66,25 @@ describe('realSys', () => {
     assert.deepEqual(sys.exec('sh', ['-c', 'exit 0'], { interactive: true }), { code: 0, stdout: '', stderr: '' });
   });
 
+  it("hands a conversing command's lines from both streams to the caller, with its exit code", async () => {
+    const lines: string[] = [];
+    const code = await sys.converse('sh', ['-c', 'test "$SEEN" = x || exit 4; echo one; echo two >&2; printf three; exit 3'], { env: { PATH: '/usr/bin:/bin', SEEN: 'x' } }, (line) => lines.push(line));
+    assert.equal(code, 3);
+    assert.deepEqual([...lines].sort(), ['one', 'three', 'two']);
+    assert.equal(await sys.converse('/no/such/command', [], {}, () => {}), 127);
+    assert.equal(await sys.converse('sh', ['-c', 'kill -TERM $$'], {}, () => {}), 128 + 15);
+  });
+
+  it('shows no spinner without a terminal', () => {
+    const module = new URL('./sys.ts', import.meta.url).href;
+    const shown = spawnSync(
+      process.execPath,
+      ['--input-type=module', '-e', `const { realSys } = await import(${JSON.stringify(module)}); const one = realSys().spin('working'); await new Promise((r) => setTimeout(r, 300)); one.stop(); one.stop();`],
+      { encoding: 'utf8' },
+    );
+    assert.deepEqual([shown.status, shown.stdout], [0, '']);
+  });
+
   it('knows home, cwd, env and the time', () => {
     assert.equal(sys.cwd, process.cwd());
     assert.ok(sys.home.length > 0);

@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import {
   appendFileSync,
   chmodSync,
@@ -14,7 +14,8 @@ import {
 import * as http from 'node:http';
 import { constants, homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createInterface } from 'node:readline/promises';
+import { createInterface as askFrom } from 'node:readline/promises';
+import { createInterface } from 'node:readline';
 import { isatty } from 'node:tty';
 
 import type { Sys } from './types.ts';
@@ -103,7 +104,7 @@ export function realSys(): Sys {
     // isatty(0), not process.stdin, which would open the stream and could make the read fail.
     readStdin: () => (isatty(0) ? '' : readFileSync(0, 'utf8')),
     async ask(question) {
-      const rl = createInterface({ input: process.stdin, output: process.stdout });
+      const rl = askFrom({ input: process.stdin, output: process.stdout });
       try {
         return await rl.question(question);
       } finally {
@@ -111,6 +112,37 @@ export function realSys(): Sys {
       }
     },
     askSecret: (question) => readHidden(question),
+    tty: isatty(0) && isatty(1),
+    async choose(question) {
+      // Loaded here alone: the shared checks run the CLI from its source with no packages installed.
+      const { confirm } = await import('@clack/prompts');
+      return (await confirm({ message: question, active: 'Yes', inactive: 'No', initialValue: true })) === true;
+    },
+    spin(label) {
+      if (!isatty(1)) return { stop() {} };
+      let stopped = false;
+      let shown: { clear(): void } | undefined;
+      void import('@clack/prompts').then(({ spinner }) => {
+        if (stopped) return;
+        const one = spinner({ indicator: 'dots' });
+        one.start(label);
+        shown = one;
+      });
+      return {
+        stop() {
+          stopped = true;
+          shown?.clear();
+        },
+      };
+    },
+    converse(command, args, options, line) {
+      return new Promise((resolve) => {
+        const child = spawn(command, args, { cwd: options.cwd, env: options.env ?? process.env, stdio: ['inherit', 'pipe', 'pipe'] });
+        for (const stream of [child.stdout, child.stderr]) createInterface({ input: stream }).on('line', line);
+        child.on('error', (error: NodeJS.ErrnoException) => resolve(error.code === 'ENOENT' ? 127 : 126));
+        child.on('close', (code, signal) => resolve(code ?? 128 + (signal ? (constants.signals[signal] ?? 0) : 0)));
+      });
+    },
     open(url) {
       spawnSync('open', [url]);
     },

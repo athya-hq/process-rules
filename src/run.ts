@@ -23,7 +23,7 @@ export const USAGE = `Usage: process-rules <command>
 Commands:
   machine [agent]  Set up this machine so agent sessions work as the agent account
   doctor [agent]   Check agent sessions here can work as the agent account
-  onboard [owner agent] [--features a,b] [--add feature]
+  onboard [owner agent] [--features a,b] [--add feature] [--yes] [--dry-run]
                    Set up the client repo here, for the features it turns on
   cloud-setup      Print the setup script for a Claude cloud environment's agent sessions
   session-start    Run by a client's SessionStart hook: the agent identity, or GitHub locked out
@@ -49,7 +49,8 @@ Without [agent], machine and doctor use the agent account .github/process-rules.
 in the repo around the working directory.
 onboard suggests the owner and agent the first time (or name them); after that it reads them from that file.
 Features: identity (always on), pr-identity, board, work-rules, figma, decisions, review.
---features lists them the first time (all when left out); --add turns one more on.`;
+--features lists them the first time (all when left out); --add turns one more on.
+onboard prints one plan and asks once; --yes goes ahead without asking, --dry-run stops at the plan.`;
 
 /** Runs one command and returns its exit code: 0 done, 1 failed, 2 bad usage. */
 export async function run(

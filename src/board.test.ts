@@ -6,11 +6,12 @@ import { BUILT_IN, Board, COPY_URL, OWNER_TOKEN, RestBoard, SLUG, STATUS_OPTIONS
 import type { FakeItem } from './fake-board.test.ts';
 import { FakeSys, capture } from './fake.test.ts';
 
-async function setUp(sys: FakeSys, answers = ['y', 'y', 'y', 'y', 'y']): Promise<{ url: string | undefined; out: string[]; err: string[] }> {
+async function setUp(sys: FakeSys, answers = ['y', 'y', 'y', 'y', 'y']): Promise<{ url: string | undefined; byHand: string[] | undefined; out: string[]; err: string[] }> {
   sys.answers = [...answers];
   const { io, out, err } = capture();
   const confirm = async (question: string) => /^y/.test(await sys.ask(question));
-  return { url: await setUpBoard(sys, io, confirm, SLUG, 'example-owner', OWNER_TOKEN), out, err };
+  const board = await setUpBoard(sys, io, confirm, SLUG, 'example-owner', OWNER_TOKEN);
+  return { url: board?.url, byHand: board?.byHand, out, err };
 }
 
 describe('setUpBoard', () => {
@@ -106,9 +107,10 @@ describe('setUpBoard', () => {
     const sys = new FakeSys();
     const board = new Board(sys);
     board.copyPending = 2;
-    const { url, out, err } = await setUp(sys, ['y', 'y', 'y']);
+    const { url, out, err, byHand } = await setUp(sys, ['y', 'y', 'y']);
     assert.deepEqual(err, []);
     assert.equal(url, COPY_URL);
+    assert.deepEqual(byHand, []);
     assert.deepEqual(board.titles, ['example-app work']);
     assert.ok(board.project?.linked);
     assert.deepEqual(sys.slept, [3000, 3000], 'waits for the fields GitHub adds after the copy');
@@ -126,8 +128,9 @@ describe('setUpBoard', () => {
     const sys = new FakeSys();
     const board = new Board(sys);
     board.copyOff = ['Item added to project', 'Pull request merged'];
-    const { out } = await setUp(sys, ['y', 'y', 'y']);
+    const { out, byHand } = await setUp(sys, ['y', 'y', 'y']);
     assert.equal(out.at(-1), `Turn on the workflows Item added to project, Pull request merged in ${COPY_URL} → Workflows (GitHub's API cannot)`);
+    assert.deepEqual(byHand, [`turn on 2 project workflows → ${COPY_URL}/workflows`]);
     assert.ok(!out.some((line) => line.startsWith('Finish the Project')));
   });
 
@@ -215,8 +218,9 @@ describe('setUpBoard', () => {
     const sys = new FakeSys();
     const board = new Board(sys);
     older(board, [{ content: 'ISSUE_a', values: {} }]);
-    const { url, out } = await setUp(sys, ['n']);
+    const { url, out, byHand } = await setUp(sys, ['n']);
     assert.equal(url, URL);
+    assert.deepEqual(byHand, [`group 2 views, auto-archive → ${URL}`]);
     assert.ok(!board.operations.includes('copyProjectV2'));
     assert.equal(board.project?.closed, undefined);
     assert.deepEqual(out.slice(-4), viewsChecklist(URL));

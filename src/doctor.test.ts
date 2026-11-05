@@ -59,15 +59,11 @@ describe('doctor', () => {
     assert.deepEqual((await check(sys)).err, [], 'restarted since');
   });
 
-  it("warns when the repo's CODEOWNERS names the owner, and still passes", async () => {
+  it("says nothing about a CODEOWNERS naming the owner: the owner keeps reviewing agent pull requests", async () => {
     const sys = healthy();
     sys.files.set('/repo/.github/CODEOWNERS', '* @example-owner\n');
     const { code, err } = await check(sys);
-    assert.equal(code, 0);
-    assert.deepEqual(err, [
-      '! .github/CODEOWNERS names example-owner in a rule (line 1): GitHub will ask example-owner to review every pull request ExampleBot opens that changes a file it matches, ' +
-        "because ExampleBot authors them and GitHub never asks a pull request's author; run process-rules onboard to remove example-owner from them",
-    ]);
+    assert.deepEqual({ code, err }, { code: 0, err: [] });
   });
 
   it('refuses a machine never set up, naming every step', async () => {

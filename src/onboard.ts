@@ -20,10 +20,9 @@ import {
 } from './agent.ts';
 import { setUpBoard } from './board.ts';
 import { type OwnerToken, asOwner, isOrganisation, ownerScopes, signInOnce } from './owner-login.ts';
-import { ownerRules, ownerRulesProblem } from './codeowners.ts';
 import { appendToArray, replaceValues, setMember } from './jsonedit.ts';
 import { DEFAULT_SCHEDULE, type Feature, FEATURES, FIGMA_FILE_KEY, NEEDS_ISSUE_TYPES, featuresIn, parseFeatures, renamedLines, scheduleIn } from './features.ts';
-import { type Change, HOOKS_PATH, WORKFLOW_PATH, openPull } from './onboard-pull.ts';
+import { type Change, HOOKS_PATH, WORKFLOW_PATH, autoMerge, openPull } from './onboard-pull.ts';
 import { setSecret } from './secrets.ts';
 import { packageVersion } from './version.ts';
 import type { Output, Sys } from './types.ts';
@@ -493,9 +492,12 @@ function hooksOf(settings: object, event: string): { command?: unknown }[] {
  * the lock's variables set in `env`, and REVIEW_THREAD_RULE allowed. Every edit is made in the text, so
  * the rest of the file keeps its layout. Says what changed, for the question.
  */
-export function claudeSettings(before: string | undefined): { text: string; changes: string[] } {
+export function claudeSettings(before: string | undefined): { text: string; changes: string[]; labels: string[] } {
   let text = before ?? '{}\n';
   const changes: string[] = [];
+  // The same, in a word or two each, for the plan.
+  let hooksChanged: 'added' | 'updated' | undefined;
+  const labels: string[] = [];
   const parsed = (): object => JSON.parse(text) as object;
   const first: unknown = parsed();
   if (typeof first !== 'object' || first === null || Array.isArray(first)) throw new Error(`${HOOKS_PATH} is not a JSON object`);
@@ -511,9 +513,11 @@ export function claudeSettings(before: string | undefined): { text: string; chan
       if (swapped.replaced > 0) {
         text = swapped.text;
         changes.push(`replace the older ${name.replace(/^the /, '')} with this release's`);
+        hooksChanged = 'updated';
       } else if (!hooksOf(parsed(), event).some((hook) => hook.command === command)) {
         text = appendToArray(text, ['hooks'], event, { ...extra, hooks: [{ type: 'command', command }] });
         changes.push(`add ${name}`);
+        hooksChanged ??= 'added';
       }
     }
     const env = (parsed() as { env?: unknown }).env;
@@ -522,16 +526,21 @@ export function claudeSettings(before: string | undefined): { text: string; chan
     for (const [name, value] of missing) text = setMember(text, ['env'], name, value);
     const names = missing.map(([name]) => name);
     const named = names.length <= 3 ? names.join(', ') : `${names.slice(0, 2).join(', ')} and ${names.length - 2} more`;
-    if (missing.length > 0) changes.push(`set ${named} in env, so GitHub is locked out until session-start gives the agent identity`);
+    if (hooksChanged) labels.push(`hooks ${hooksChanged}`);
+    if (missing.length > 0) {
+      changes.push(`set ${named} in env, so GitHub is locked out until session-start gives the agent identity`);
+      labels.push('lock');
+    }
     const allow = (parsed() as { permissions?: { allow?: unknown } }).permissions?.allow;
     if (!Array.isArray(allow) || !allow.includes(REVIEW_THREAD_RULE)) {
       text = appendToArray(text, ['permissions'], 'allow', REVIEW_THREAD_RULE);
       changes.push('allow process-rules review-thread without a prompt, so agent sessions answer review threads on their own pull requests');
+      labels.push('review rule');
     }
   } catch (error) {
     throw new Error(`${HOOKS_PATH}: ${(error as Error).message}`);
   }
-  return { text, changes };
+  return { text, changes, labels };
 }
 
 /** Who the run's sign-in is, the owner's likely login; undefined when it failed. */
@@ -551,25 +560,19 @@ async function choose(sys: Sys, io: Output, role: string, suggestions: (string |
   return typed || offered[0];
 }
 
-/**
- * Sets up the client repository the working directory is in, run by its
- * owner on a Mac `machine` has set up for the agent: the settings file, the
- * SessionStart hook entry and the workflow, opened as the agent's pull
- * request, so the owner's checkout is never modified;
- * the agent's push access, offering to invite it and accept the invitation;
- * the work board (issue types, labels, Project, fields and views); and one signed
- * test commit GitHub must show as Verified by the agent.
- * Every change waits for a yes.
- */
-/** onboard's arguments: up to two logins, then `--features a,b` (first time) or `--add <feature>`. */
-export function onboardArgs(args: readonly string[]): { named: string[]; features?: Feature[]; add?: Feature } {
+/** onboard's arguments: up to two logins, then `--features a,b` (first time) or `--add <feature>`, `--yes` and `--dry-run`. */
+export function onboardArgs(args: readonly string[]): { named: string[]; features?: Feature[]; add?: Feature; yes?: true; dryRun?: true } {
   const named: string[] = [];
   let features: Feature[] | undefined;
   let add: Feature | undefined;
+  let yes = false;
+  let dryRun = false;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i] as string;
     const value = args[i + 1];
-    if (arg === '--features' || arg === '--add') {
+    if (arg === '--yes') yes = true;
+    else if (arg === '--dry-run') dryRun = true;
+    else if (arg === '--features' || arg === '--add') {
       if (value === undefined) throw new Error(`${arg} needs a value`);
       if (arg === '--features') features = parseFeatures(value);
       else {
@@ -586,22 +589,114 @@ export function onboardArgs(args: readonly string[]): { named: string[]; feature
       throw new Error(`unexpected argument "${arg}"`);
     }
   }
-  return { named, ...(features ? { features } : {}), ...(add ? { add } : {}) };
+  return { named, ...(features ? { features } : {}), ...(add ? { add } : {}), ...(yes ? { yes: true as const } : {}), ...(dryRun ? { dryRun: true as const } : {}) };
 }
 
+/** One line of the plan: a short label, and what changes there. */
+interface Item {
+  label: string;
+  detail?: string;
+}
+
+/** A step the run takes after the yes, in order; `owner` when it acts as the owner, so the sign-in comes before its spinner. */
+interface Step {
+  label: string;
+  owner?: true;
+  run(io: Output, ownerToken: string | undefined): Promise<boolean>;
+}
+
+/**
+ * Colours for the terminal: only when a person is at one that has colours,
+ * and never with NO_COLOR set (https://no-color.org).
+ */
+export function painter(sys: Sys): { dim(text: string): string; accent(text: string): string; done(text: string): string; failed(text: string): string } {
+  const on = sys.tty && !sys.env.NO_COLOR && !!sys.env.TERM && sys.env.TERM !== 'dumb';
+  const paint = (code: number) => (text: string): string => (on ? `\u001b[${code}m${text}\u001b[0m` : text);
+  return { dim: paint(2), accent: paint(36), done: paint(32), failed: paint(31) };
+}
+
+/** What a workflow update changes, in a few words for the plan. */
+function workflowDetail(update: Exclude<ReturnType<typeof workflowUpdate>, { kind: 'same' }>, version: string, figma: boolean): string {
+  if (update.kind !== 'repin') return { write: 'new', 'replace-older': 'older template replaced', replace: 'replaced' }[update.kind];
+  return (
+    [
+      ...(update.from ? [`pins → v${version}`] : []),
+      ...(update.branch ? [`branch → ${update.branch}`] : []),
+      ...(update.schedule ? [`schedule → ${update.schedule}`] : []),
+      ...(update.secrets ? [figma ? 'Figma secrets' : 'no Figma secrets'] : []),
+      ...(update.merged ? ['merged job'] : []),
+    ].join(', ') || `header → v${version}`
+  );
+}
+
+/** What a workflow update changes, in full for the pull request's description. */
+function workflowWhat(update: Exclude<ReturnType<typeof workflowUpdate>, { kind: 'same' }>, version: string, figma: boolean, schedulePath: string): string {
+  if (update.kind !== 'repin') {
+    return {
+      write: `write ${WORKFLOW_PATH}, which runs the shared process-rules checks`,
+      'replace-older': `replace the older ${WORKFLOW_PATH}, which lets every run write to issues, with this release's, which lets the weekly run alone`,
+      replace: `replace ${WORKFLOW_PATH}, which runs the shared process-rules checks`,
+    }[update.kind];
+  }
+  const parts = [
+    ...(update.from ? [`move the version pins from v${update.from} to v${version}`] : []),
+    ...(update.branch ? [`run pushes on the default branch, ${update.branch}`] : []),
+    ...(update.schedule ? [`run the weekly decisions job on the schedule ${schedulePath} sets, cron ${update.schedule} UTC`] : []),
+    ...(update.secrets ? [figma ? 'pass the FIGMA_TOKEN and FIGMA_LIBRARY secrets' : 'stop passing Figma secrets, with figma off'] : []),
+    ...(update.merged ? ['add a job that closes the slice a merged pull request names, the one pull request run that writes to issues'] : []),
+  ];
+  return `in ${WORKFLOW_PATH}, ${parts.join(' and ') || `set the version in its header comment to v${version}`}, leaving the rest as it is`;
+}
+
+/** The plan's lines: the run's head, then each group that changes something, its labels lined up. */
+export function planLines(
+  paint: ReturnType<typeof painter>,
+  head: { from?: string | undefined; version: string; slug: string; owner: string; agent: string; warnings: string[] },
+  groups: { title: string; items: Item[] }[],
+): string[] {
+  const bar = paint.dim('│');
+  const lines = [
+    `${paint.accent('◆')}  process-rules onboard   ${head.from && head.from !== head.version ? `v${head.from} → ` : ''}v${head.version}`,
+    `${bar}  ${head.slug} · owner ${head.owner} · agent ${head.agent}`,
+    ...head.warnings.map((warning) => `${bar}  ! ${warning}`),
+  ];
+  for (const { title, items } of groups) {
+    if (items.length === 0) continue;
+    const width = Math.max(...items.map((item) => (item.detail ? item.label.length : 0)));
+    lines.push(bar, `${paint.done('◇')}  ${title}`, ...items.map((item) => `${bar}    ${item.detail ? `${item.label.padEnd(width)}  ${item.detail}` : item.label}`));
+  }
+  lines.push(bar);
+  return lines;
+}
+
+/**
+ * Sets up the client repository the working directory is in, run by its
+ * owner on a Mac `machine` has set up for the agent. It first works out
+ * everything it would change, changing nothing: the settings file, the
+ * Claude Code settings and the workflow, opened as the agent's pull request
+ * so the owner's checkout is never modified; the agent's push access; the
+ * work board (issue types, labels, Project, fields and views); the pre-push
+ * hook; and one signed test commit GitHub must show as Verified by the
+ * agent. It prints that as one plan and asks once (`--yes` skips the
+ * question, `--dry-run` stops at the plan); a no changes nothing. After the
+ * yes, one browser sign-in as the owner serves every step that acts as the
+ * owner, and each step shows as one line.
+ */
 export async function onboard(sys: Sys, io: Output, args: readonly string[] = []): Promise<number> {
-  const { named, features: chosen, add } = onboardArgs(args);
+  const { named, features: chosen, add, yes, dryRun } = onboardArgs(args);
   if (sys.env.PROCESS_RULES_AGENT) {
     io.err('onboard: run it in your own terminal, not in an agent session');
     return 1;
   }
-  const { root, slug } = repoAt(sys);
-  const confirm = async (question: string): Promise<boolean> =>
-    /^y(es)?$/i.test((await sys.ask(`${question} [y/N] `)).trim());
-  const stop = (step: string): number => {
-    io.err(`onboard: stopped at "${step}"; nothing after it was changed, and no pull request was opened`);
+  if (!sys.tty && !yes && !dryRun) {
+    io.err('onboard: no terminal to ask in; pass --yes to go ahead without asking, or --dry-run to see the plan');
     return 1;
-  };
+  }
+  const { root, slug } = repoAt(sys);
+  const paint = painter(sys);
+  const bar = paint.dim('│');
+  const say = (line: string): void => io.out(`${bar}  ${line}`);
+  const version = packageVersion();
   // Whether an organisation owns the repository, asked of GitHub once in this run.
   let organisation: Promise<boolean> | undefined;
   const byOrganisation = (): Promise<boolean> => (organisation ??= isOrganisation(sys, slug.split('/')[0] as string));
@@ -619,6 +714,16 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     const before = held ? held.before : fileAt(path);
     changes.set(path, { path, before, text, what: held ? `${held.what}; ${what}` : what });
   };
+  // The plan, by group, and the steps that carry it out after the yes.
+  const pull: Item[] = [];
+  const github: Item[] = [];
+  const mac: Item[] = [];
+  const steps: Step[] = [];
+  const warnings: string[] = [];
+  const byHand: string[] = [];
+  // For the pull request's description: what was done outside it, and why, and in full what is left to do by hand.
+  const notes: string[] = [];
+  const later: string[] = [];
   // The owner's sign-in for this run: one browser approval at the first step that needs it, never stored.
   let scopes: string[] = [];
   let signedIn: Promise<OwnerToken | { problem: string }> | undefined;
@@ -627,10 +732,11 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     (signedIn ??= (async () => {
       // The features the run ends with: the sign-in can come before --add's feature is turned on.
       scopes = ownerScopes(add ? [...features, add] : features, await byOrganisation());
-      const who = as.length === 0 ? 'the owner' : as.length === 1 ? `${as[0] as string}, the owner,` : `one of ${either(as)}, the owners,`;
-      io.out(`Sign in to GitHub in the browser as ${who} for this run only (${['repo', ...scopes].join(', ')}); nothing is kept.`);
-      io.out("gh's own lines below about saving credentials refer to a temporary folder, which is deleted before onboard goes on.");
-      return signInOnce(sys, scopes);
+      // Which access the approval grants: gh's own repo scope, and what the run's features add.
+      io.out(`${paint.done('◇')}  Sign in to GitHub as ${as.length === 0 ? 'the owner' : either(as)}, for this run only: ${['repo', ...scopes].join(', ')}`);
+      const signed = await signInOnce(sys, scopes, say);
+      if ('login' in signed) io.out(`${paint.done('◇')}  Signed in as ${signed.login}`);
+      return signed;
     })());
   const ownerToken = async (): Promise<string | undefined> => {
     const token = asOwner(await signIn([owner]), owner, scopes);
@@ -641,10 +747,7 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
 
   let owner: string;
   let agent: string;
-  // Every owner the settings name: GitHub asks each a CODEOWNERS rule names to review the agent's pull requests.
-  let owners: string[];
   let features: Feature[];
-  let pendingSettings: string | undefined;
   let schedule = DEFAULT_SCHEDULE;
   if (fileAt(SETTINGS_PATH) !== undefined) {
     const settings = loadSettings(sys, root);
@@ -667,9 +770,13 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     features = featuresIn(raw);
     schedule = scheduleIn(raw);
     // With several owners, the one named, else the one the run's sign-in is, which must be listed: after the
-    // features are read, which the sign-in's scopes depend on.
+    // features are read, which the sign-in's scopes depend on. Only the sign-in can tell, so it comes before the plan.
     let chosenOwner = namedOwner ?? (settings.owners.length === 1 ? settings.owners[0] : undefined);
     if (!chosenOwner) {
+      if (dryRun) {
+        io.err(`onboard: ${SETTINGS_PATH} names the owners ${either(settings.owners)}; name yours for a dry run, which signs in to nothing: process-rules onboard <owner> --dry-run`);
+        return 1;
+      }
       const signed = await signIn(settings.owners);
       if ('problem' in signed) {
         io.err(`onboard: ${signed.problem}; name the owner: process-rules onboard <owner>`);
@@ -680,8 +787,8 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
         return 1;
       }
       chosenOwner = signed.login;
+      notes.push(`- onboard signed in before showing its plan: ${SETTINGS_PATH} names several owners, and only the sign-in tells which one ran it.`);
     }
-    owners = settings.owners;
     // GitHub's spelling, which the keychain, the session file and commits use.
     owner = (await account(sys, chosenOwner)).login;
     agent = (await account(sys, here.agent)).login;
@@ -702,34 +809,36 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
           ? []
           : [fileKey ? 'take out "figma" and set its library key as the FIGMA_LIBRARY Actions secret' : 'take out "figma", since the library key belongs in the FIGMA_LIBRARY Actions secret']),
       ];
-      if (!(await confirm(`Update ${SETTINGS_PATH}: ${updates.join(' and ')}?`))) return stop('settings file');
+      pull.push({ label: 'process-rules.json', detail: [...(renamed ? ['design → figma'] : []), ...(raw.figma === undefined ? [] : ['figma key out'])].join(', ') });
       const { figma: _figma, ...rest } = raw;
       raw = { ...rest, ...(rest.features === undefined ? {} : { features }) };
       change(SETTINGS_PATH, `${JSON.stringify(raw, null, 2)}\n`, updates.join(' and '));
       if (fileKey) {
-        const mine = await ownerToken();
-        if (!mine) return 1;
-        const problem = await setSecret(sys, slug, mine, 'FIGMA_LIBRARY', fileKey);
-        if (problem) {
-          io.err(`onboard: ${problem}`);
-          return 1;
-        }
-        io.out('✓ FIGMA_LIBRARY Actions secret: the library key taken out');
+        github.push({ label: 'FIGMA_LIBRARY secret' });
+        steps.push({
+          label: 'FIGMA_LIBRARY secret',
+          owner: true,
+          async run(out, mine) {
+            const problem = await setSecret(sys, slug, mine as string, 'FIGMA_LIBRARY', fileKey);
+            if (problem) out.err(`onboard: ${problem}`);
+            else out.out('set the FIGMA_LIBRARY Actions secret to the library key taken out of the settings');
+            return !problem;
+          },
+        });
       } else if (library !== undefined) {
-        io.out(
-          `! the "figma.library" taken out was not a Figma file key; set the FIGMA_LIBRARY Actions secret to the design library's file key under ${slug} → Settings → Secrets and variables → Actions`,
-        );
+        byHand.push(`FIGMA_LIBRARY secret: the design library's file key → ${GITHUB_WEB}/${slug}/settings/secrets/actions`);
+        later.push(`The "figma.library" taken out was not a Figma file key; set the FIGMA_LIBRARY Actions secret to the design library's file key under ${slug} → Settings → Secrets and variables → Actions.`);
       }
     }
     const typed = features.filter((feature) => NEEDS_ISSUE_TYPES.includes(feature));
     if (typed.length > 0 && !(await byOrganisation())) {
-      io.out(`! ${personal}, so ${typed.join(', ')} cannot run here; their checks pass, saying so. Take them out of ${SETTINGS_PATH}'s features`);
+      warnings.push(`${typed.join(', ')}: organisations only; take ${typed.length === 1 ? 'it' : 'them'} out of features`);
     }
     if (add && !features.includes(add)) {
-      if (!(await confirm(`Turn ${add} on in ${SETTINGS_PATH}, once its setup below is done?`))) return stop('settings file');
       features = FEATURES.filter((feature) => features.includes(feature) || feature === add);
-      // Written only once the feature's setup has finished, so settings never claim a half-set-up feature.
-      pendingSettings = `${JSON.stringify({ ...raw, features }, null, 2)}\n`;
+      pull.push({ label: 'process-rules.json', detail: `turn ${add} on` });
+      // The pull request opens only once every step has finished, so settings never claim a half-set-up feature.
+      change(SETTINGS_PATH, `${JSON.stringify({ ...raw, features }, null, 2)}\n`, `turn ${add} on`);
     }
   } else {
     if (add) {
@@ -737,7 +846,14 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
       return 1;
     }
     features = chosen ?? [...FEATURES];
-    const namedOwner = named[0] ?? (await choose(sys, io, 'owner, who approves', [await signedInLogin(signIn)]));
+    if ((!named[0] || !named[1]) && !sys.tty) {
+      io.err('onboard: name the owner and the agent account: process-rules onboard <owner> <agent>');
+      return 1;
+    }
+    // The sign-in suggests the owner, so it comes before the plan; a dry run signs in to nothing.
+    const suggested = named[0] || dryRun ? undefined : await signedInLogin(signIn);
+    if (suggested) notes.push('- onboard signed in before showing its plan, to suggest the owner by the account the browser signed in as.');
+    const namedOwner = named[0] ?? (await choose(sys, io, 'owner, who approves', [suggested]));
     const namedAgent = named[1] ?? (await choose(sys, io, 'agent, which builds', agentsSetUp(sys)));
     if (!namedOwner || !namedAgent) {
       io.err('onboard: name the owner and the agent account: process-rules onboard <owner> <agent>');
@@ -748,7 +864,6 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     }
     owner = (await account(sys, namedOwner)).login;
     agent = (await account(sys, namedAgent)).login;
-    owners = [owner];
     if (sameLogin(owner, agent)) {
       io.err('onboard: the owner and the agent must be different accounts');
       return 1;
@@ -760,28 +875,22 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
         io.err(`onboard: ${personal}, so ${typed.join(', ')} cannot run here; leave ${typed.length === 1 ? 'it' : 'them'} out of --features`);
         return 1;
       }
-      io.out(`! ${personal}, so onboard leaves ${typed.join(', ')} off`);
+      warnings.push(`personal account: ${typed.join(', ')} left off`);
+      features = features.filter((feature) => !typed.includes(feature));
     }
-    if (refused) features = features.filter((feature) => !typed.includes(feature));
-    if (!(await confirm(`Write ${SETTINGS_PATH}: owner ${owner} approves, agent ${agent} builds, with ${features.join(', ')} on?`))) {
-      return stop('settings file');
-    }
+    pull.push({ label: 'process-rules.json', detail: `new, ${features.length} feature${features.length === 1 ? '' : 's'} on` });
     change(SETTINGS_PATH, `${JSON.stringify({ owner, agent, features }, null, 2)}\n`, `owner ${owner} approves, agent ${agent} builds, with ${features.join(', ')} on`);
   }
-  io.out(`✓ ${SETTINGS_PATH}: owner ${owner}, agent ${agent}; on: ${features.join(', ')}`);
   const on = (feature: Feature): boolean => features.includes(feature);
   const workflowNeeded = on('pr-identity') || on('work-rules') || on('figma') || on('decisions') || on('review');
 
   const existing = fileAt(HOOKS_PATH);
-  // Worked out before asking, so a file onboard cannot edit is refused before any question.
+  // Worked out before the plan, so a file onboard cannot edit is refused before any question.
   const claude = claudeSettings(existing);
   if (claude.changes.length > 0) {
-    if (!(await confirm(`${existing === undefined ? 'Write' : 'Update'} ${HOOKS_PATH}: ${claude.changes.join('; ')}?`))) {
-      return stop('hook entry');
-    }
+    pull.push({ label: 'settings.json', detail: existing === undefined ? 'new' : claude.labels.join(', ') });
     change(HOOKS_PATH, claude.text, claude.changes.join('; '));
   }
-  io.out(`✓ ${HOOKS_PATH}: GitHub locked out until session-start gives the agent identity, and the guard on gh and git`);
 
   const paths = pathsFor(sys.home, agent);
   const token = readToken(sys, agent);
@@ -791,147 +900,210 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     io.err(`onboard: this Mac is not set up for ${agent}; run process-rules machine ${agent}, then onboard again`);
     return 1;
   }
+  const { id } = await account(sys, agent);
 
   let reach = await access(sys, slug, token);
-  // A public repository, or an organisation's base permission, lets the agent read without pushing.
-  if (reach.kind === 'none' || reach.kind === 'read') {
-    let invite = await invitation(sys, slug, token);
-    if (invite === undefined) {
-      const sees = reach.kind === 'none' ? 'cannot see' : 'can read but not push to';
-      if (!(await confirm(`${agent} ${sees} ${slug}. Give it write access, as you?`))) {
-        return stop('agent access');
-      }
-      const mine = await ownerToken();
-      if (!mine) return 1;
-      const added = await sys.http(`${API}/repos/${slug}/collaborators/${agent}`, { method: 'PUT', token: mine, body: { permission: 'push' } });
-      if (added.status !== 201 && added.status !== 204) {
-        const why = (added.json as { message?: unknown } | null)?.message;
-        io.err(`onboard: GitHub did not add ${agent} (HTTP ${added.status}${typeof why === 'string' ? `: ${why}` : ''})`);
-        io.err(`  Add it yourself: ${slug} → Settings → Collaborators → Add people → ${agent}, role Write.`);
-        return 1;
-      }
-      // An organisation member gets access at once; anyone else gets an invitation.
-      reach = await access(sys, slug, token);
-      invite = reach.kind === 'push' ? undefined : await invitation(sys, slug, token);
-    }
-    if (invite !== undefined) {
-      if (!(await confirm(`Accept ${agent}'s invitation to ${slug}, as ${agent}?`))) return stop('agent access');
-      const accepted = await sys.http(`${API}/user/repository_invitations/${invite}`, { method: 'PATCH', token });
-      if (accepted.status !== 204) {
-        io.err(`onboard: GitHub did not accept the invitation (HTTP ${accepted.status})`);
-        return 1;
-      }
-      reach = await access(sys, slug, token);
-    }
-  }
-  if (reach.kind !== 'push') {
-    const why = {
-      none: `${agent} still cannot see ${slug}; check the invitation reached ${agent}`,
-      read: `${agent} can read ${slug} but still not push; check the invitation reached ${agent}, or give it the Write role`,
-    };
-    io.err(`onboard: ${reach.kind === 'refused' ? reach.reason : why[reach.kind]}`);
+  if (reach.kind === 'refused') {
+    io.err(`onboard: ${reach.reason}`);
     return 1;
   }
-  io.out(`✓ ${agent} can push to ${slug}`);
+  // The default branch, which the workflow's pushes run on, is GitHub's to say once the agent can push; until then
+  // the workflow is worked out again once it can, and the plan says only what it can know without it.
+  const planned = reach.kind === 'push' ? reach.branch : undefined;
+  // A public repository, or an organisation's base permission, lets the agent read without pushing.
+  if (reach.kind === 'none' || reach.kind === 'read') {
+    const sees = reach.kind === 'none' ? 'cannot see' : 'can read but not push to';
+    let invite = await invitation(sys, slug, token);
+    github.push({ label: invite === undefined ? `${agent} write access` : `${agent} accepts its invitation` });
+    steps.push({
+      label: `${agent} can push`,
+      ...(invite === undefined ? { owner: true as const } : {}),
+      async run(out, mine) {
+        if (invite === undefined) {
+          const added = await sys.http(`${API}/repos/${slug}/collaborators/${agent}`, { method: 'PUT', token: mine as string, body: { permission: 'push' } });
+          if (added.status !== 201 && added.status !== 204) {
+            const why = (added.json as { message?: unknown } | null)?.message;
+            out.err(`onboard: GitHub did not add ${agent} (HTTP ${added.status}${typeof why === 'string' ? `: ${why}` : ''})`);
+            out.err(`  Add it yourself: ${slug} → Settings → Collaborators → Add people → ${agent}, role Write.`);
+            return false;
+          }
+          out.out(`gave ${agent}, which ${sees} ${slug}, write access, as ${owner}`);
+          // An organisation member gets access at once; anyone else gets an invitation.
+          reach = await access(sys, slug, token);
+          invite = reach.kind === 'push' ? undefined : await invitation(sys, slug, token);
+        }
+        if (invite !== undefined) {
+          const accepted = await sys.http(`${API}/user/repository_invitations/${invite}`, { method: 'PATCH', token });
+          if (accepted.status !== 204) {
+            out.err(`onboard: GitHub did not accept the invitation (HTTP ${accepted.status})`);
+            return false;
+          }
+          out.out(`accepted ${agent}'s invitation to ${slug}, as ${agent}`);
+          reach = await access(sys, slug, token);
+        }
+        if (reach.kind === 'push') return true;
+        const why = {
+          none: `${agent} still cannot see ${slug}; check the invitation reached ${agent}`,
+          read: `${agent} can read ${slug} but still not push; check the invitation reached ${agent}, or give it the Write role`,
+          refused: reach.kind === 'refused' ? reach.reason : '',
+        };
+        out.err(`onboard: ${why[reach.kind]}`);
+        return false;
+      },
+    });
+  }
 
   // The shared checks run only for features that need them.
+  const workflowFrom = workflowPins(fileAt(WORKFLOW_PATH) ?? '')[0];
+  const workflowFor = (branch: string): void => {
+    const update = workflowUpdate(fileAt(WORKFLOW_PATH), branch, version, on('figma'), schedule);
+    if (update.kind !== 'same') change(WORKFLOW_PATH, update.text, workflowWhat(update, version, on('figma'), SETTINGS_PATH));
+  };
   if (workflowNeeded) {
-    const version = packageVersion();
-    const update = workflowUpdate(fileAt(WORKFLOW_PATH), reach.branch, version, on('figma'), schedule);
-    if (update.kind !== 'same') {
-      const what = {
-        write: `Write ${WORKFLOW_PATH}, which runs the shared process-rules checks`,
-        'replace-older': `Replace the older ${WORKFLOW_PATH}, which lets every run write to issues, with this release's, which lets the weekly run alone`,
-        replace: `Replace ${WORKFLOW_PATH}, which runs the shared process-rules checks`,
-        repin: `In ${WORKFLOW_PATH}, ${[
-          ...(update.kind === 'repin' && update.from ? [`move the version pins from v${update.from} to v${version}`] : []),
-          ...(update.kind === 'repin' && update.branch ? [`run pushes on the default branch, ${update.branch}`] : []),
-          ...(update.kind === 'repin' && update.schedule ? [`run the weekly decisions job on the schedule ${SETTINGS_PATH} sets, cron ${update.schedule} UTC`] : []),
-          ...(update.kind === 'repin' && update.secrets ? [on('figma') ? 'pass the FIGMA_TOKEN and FIGMA_LIBRARY secrets' : 'stop passing Figma secrets, with figma off'] : []),
-          ...(update.kind === 'repin' && update.merged ? ['add a job that closes the slice a merged pull request names, the one pull request run that writes to issues'] : []),
-        ].join(' and ') || `set the version in its header comment to v${version}`}, leaving the rest as it is`,
-      }[update.kind];
-      if (!(await confirm(`${what}?`))) {
-        return stop('workflow');
-      }
-      change(WORKFLOW_PATH, update.text, what.replace(/^\w/, (first) => first.toLowerCase()));
-    }
-    io.out(`✓ ${WORKFLOW_PATH}`);
-    const unpassed = on('figma') ? jobsWithoutLibrary(fileAt(WORKFLOW_PATH) as string) : [];
-    if (unpassed.length > 0) {
-      const jobs = unpassed.length === 1 ? unpassed[0] : `${unpassed.slice(0, -1).join(', ')} and ${unpassed.at(-1)}`;
-      io.out(`! In ${WORKFLOW_PATH}, ${jobs} pass${unpassed.length === 1 ? 'es' : ''} the shared checks no FIGMA_LIBRARY secret, so the design check stays off there; add FIGMA_LIBRARY: \${{ secrets.FIGMA_LIBRARY }} under ${unpassed.length === 1 ? 'its' : 'their'} secrets`);
-    }
+    const update = planned === undefined ? undefined : workflowUpdate(fileAt(WORKFLOW_PATH), planned, version, on('figma'), schedule);
+    if (update === undefined) pull.push({ label: 'workflow', detail: fileAt(WORKFLOW_PATH) === undefined ? 'new' : 'write or update' });
+    else if (update.kind !== 'same') pull.push({ label: 'workflow', detail: workflowDetail(update, version, on('figma')) });
+  }
+
+  if (on('board')) {
+    github.push({ label: 'board', detail: 'set up or check' });
+    if (await byOrganisation()) github.push({ label: 'issue types', detail: 'org-wide, if missing' });
+    const projectTitle = (JSON.parse(fileAt(SETTINGS_PATH) as string) as { project?: unknown }).project;
+    steps.push({
+      label: 'board',
+      owner: true,
+      async run(out, mine) {
+        // The plan's one yes covers each step of the board but replacing a Project made before the template, which
+        // moves its items and closes it: that is left to the owner, with what the template would have set.
+        const board = await setUpBoard(sys, out, (_, step) => Promise.resolve(step !== 'replace'), slug, owner, mine as string, typeof projectTitle === 'string' ? projectTitle : undefined);
+        byHand.unshift(...(board?.byHand ?? []));
+        later.unshift(...(board?.byHand ?? []).map((line) => `On the board: ${line}.`));
+        return board !== undefined;
+      },
+    });
   }
 
   // Every adopter: the identity guard holds where the Claude Code hooks did not run.
-  {
-    const hook = prePushHook(sys, root);
-    const line = 'process-rules pre-push "$@"';
-    const what = 'which checks an agent session pushes to GitHub as the agent, and the work rules';
-    if (hook.state === 'outside') {
-      // A hooks folder shared by other repositories (a global core.hooksPath) is the owner's to change.
-      io.out(`! git runs hooks from ${hook.path}, outside this repository; add this line to its pre-push hook: ${line}`);
-    } else if (hook.state === 'missing' || hook.state === 'older') {
-      const verb = hook.state === 'older' ? 'Replace the older process-rules pre-push git hook' : 'Write the pre-push git hook';
-      if (!(await confirm(`${verb} ${hook.path}, ${what}?`))) {
-        return stop('pre-push hook');
-      }
-      sys.write(hook.file, PRE_PUSH_HOOK, 0o755);
-      io.out(`✓ pre-push hook ${hook.path}`);
-    } else if (hook.state === 'ours') {
-      io.out(`✓ pre-push hook ${hook.path}`);
-    } else {
-      io.out(`! ${hook.path} is your own; add this line to it: ${line}`);
-    }
+  const hook = prePushHook(sys, root);
+  const hookLine = 'process-rules pre-push "$@"';
+  if (hook.state === 'missing' || hook.state === 'older') {
+    mac.push({ label: 'pre-push hook', detail: hook.state === 'older' ? 'older one replaced' : 'new' });
+    steps.push({
+      label: 'pre-push hook',
+      async run(out) {
+        sys.write(hook.file, PRE_PUSH_HOOK, 0o755);
+        out.out(`${hook.state === 'older' ? 'replaced the older' : 'wrote the'} pre-push git hook ${hook.path}, which checks an agent session pushes to GitHub as the agent, and the work rules`);
+        return true;
+      },
+    });
+  } else if (hook.state === 'outside' || hook.state === 'own') {
+    // A hooks folder shared by other repositories (a global core.hooksPath), or the client's own hook, is the owner's to change.
+    byHand.push(`add ${hookLine} → ${hook.path}`);
+    later.push(`Add the line \`${hookLine}\` to the pre-push git hook ${hook.path}, which ${hook.state === 'own' ? 'is your own' : 'git runs from outside this repository'}.`);
   }
 
-  const projectTitle = (JSON.parse(fileAt(SETTINGS_PATH) as string) as { project?: unknown }).project;
-  if (on('board')) {
-    const mine = await ownerToken();
-    if (!mine || !(await setUpBoard(sys, io, confirm, slug, owner, mine, typeof projectTitle === 'string' ? projectTitle : undefined))) return 1;
-  }
-  if (pendingSettings) {
-    change(SETTINGS_PATH, pendingSettings, `turn ${add} on`);
-    io.out(`✓ ${add} on in ${SETTINGS_PATH}`);
-  }
-
-  if (!(await confirm(`Push one signed test commit to a throwaway branch of ${slug} as ${agent}, check it is Verified, then delete the branch?`))) {
-    return stop('test commit');
-  }
-  const { id } = await account(sys, agent);
-  const verified = await testCommit(sys, io, { agent, id, token, slug });
-  if (verified !== 0) return verified;
-  // Optional, and last of the questions, so a run stopped earlier and run again still asks it.
-  const rules = ownerRules(sys, root, owners);
-  if (rules) {
-    const named = rules.owners.join(' and ');
-    io.out(`! ${ownerRulesProblem(rules, agent)}`);
-    const drop = rules.dropped > 0 ? `, and drop ${rules.dropped === 1 ? 'the rule' : `the ${rules.dropped} rules`} left with no owners, so ${rules.dropped === 1 ? 'its' : 'their'} paths fall to the rules before` : '';
-    if (await confirm(`Remove ${named} from ${rules.lines.length === 1 ? 'that rule' : 'those rules'} in ${rules.path}${drop}?`)) {
-      change(rules.path, rules.text, `remove ${named}, whom GitHub would otherwise ask to review every pull request ${agent} opens`);
-      io.out(`✓ ${rules.path}: ${named} removed`);
-    } else {
-      io.out(`! ${rules.path} left as it is`);
-    }
-  }
-  // A change that puts a file back as it was is no change.
-  const changed = [...changes.values()].filter((one) => one.text !== one.before);
-  if (changed.length === 0) {
-    io.out(`onboard: done; the repository's files need no change, so there is no pull request. Agent sessions work as ${agent}.`);
-  } else {
-    const pull = await openPull(sys, io, { agent, id, token, slug, branch: reach.branch, version: packageVersion() }, changed);
-    if (pull === 1) return 1;
-    io.out(`✓ ${agent}'s pull request with ${changed.map((one) => one.path).join(', ')}: ${pull}`);
-    io.out(`onboard: done; nothing in this checkout was changed. Merge ${pull}; agent sessions then work as ${agent}.`);
-  }
-  io.out(`For Claude cloud sessions: connect claude.ai's GitHub as ${agent}, and put what process-rules cloud-setup prints in the cloud environment's Setup script.`);
-  // Claude's routines API answers only a Claude Code session's own sign-in, and a routine works as claude.ai's GitHub connection, so onboard cannot create one or check it.
+  steps.push({
+    label: `test commit Verified as ${agent}`,
+    async run(out) {
+      return (await testCommit(sys, out, { agent, id, token, slug })) === 0;
+    },
+  });
+  // Claude's routines API answers only a Claude Code session's own sign-in, and a routine works as claude.ai's GitHub
+  // connection, so onboard cannot create one or check it.
   if (on('review')) {
-    io.out(
-      `For the review routine: create a weekly Claude routine on ${slug} (claude.ai/code/routines, or /schedule in Claude Code), with claude.ai's GitHub connected as ${agent}, and give it the prompt below the line in ${GITHUB_WEB}/${PRODUCT}/blob/v${packageVersion()}/routines/review.md. Until it gives its verdicts, the weekly job labels needs-owner each decision over a week past its review date.`,
+    const routine = `${GITHUB_WEB}/${PRODUCT}/blob/v${version}/routines/review.md`;
+    byHand.push(`review routine → ${routine}`);
+    later.push(
+      `The review routine: create a weekly Claude routine on ${slug} (claude.ai/code/routines, or /schedule in Claude Code), with claude.ai's GitHub connected as ${agent}, and give it the prompt below the line in ${routine}. Until it gives its verdicts, the weekly job labels needs-owner each decision over a week past its review date.`,
     );
   }
+  byHand.push(`cloud sessions: claude.ai's GitHub as ${agent}, Setup script from process-rules cloud-setup`);
+  later.push(`Claude cloud sessions: connect claude.ai's GitHub as ${agent}, and put what process-rules cloud-setup prints in the cloud environment's Setup script.`);
+  let pullUrl: string | undefined;
+  // Whether the pull request merges itself once its checks pass.
+  let merging = false;
+  steps.push({
+    label: 'pull request',
+    async run(out) {
+      if (reach.kind !== 'push') return false;
+      if (workflowNeeded) workflowFor(reach.branch);
+      // From the workflow the pull request leaves, worked out only now that GitHub has said the branch.
+      const text = fileAt(WORKFLOW_PATH);
+      const unpassed = workflowNeeded && on('figma') && text !== undefined ? jobsWithoutLibrary(text) : [];
+      if (unpassed.length > 0) {
+        byHand.unshift(`pass FIGMA_LIBRARY in ${unpassed.join(', ')} → ${WORKFLOW_PATH}`);
+        later.unshift(`In ${WORKFLOW_PATH}, ${unpassed.join(', ')} pass the shared checks no FIGMA_LIBRARY secret, so the design check stays off there; add \`FIGMA_LIBRARY: \${{ secrets.FIGMA_LIBRARY }}\` under their secrets.`);
+      }
+      // A change that puts a file back as it was is no change.
+      const changed = [...changes.values()].filter((one) => one.text !== one.before);
+      if (changed.length === 0) return true;
+      const described = [
+        ...(notes.length > 0 ? ['Done at the terminal, outside this pull request:', '', ...notes, ''] : []),
+        ...(later.length > 0 ? ['Left to do by hand:', '', ...later.map((line) => `- ${line}`)] : []),
+      ];
+      const opened = await openPull(sys, out, { agent, id, token, slug, branch: reach.branch, version }, changed, described);
+      if (opened === 1) return false;
+      pullUrl = opened.url;
+      // Not turning it on fails nothing: the owner merges it instead.
+      // A request that gets no answer is a refusal like any other: the pull request is open either way.
+      const refused = await autoMerge(sys, slug, token, opened.id).catch((error: unknown) => ({
+        problem: error instanceof Error ? error.message : String(error),
+        notAllowed: undefined,
+      }));
+      merging = refused === undefined;
+      if (refused?.notAllowed) byHand.unshift(`auto-merge: turn on Allow auto-merge → ${GITHUB_WEB}/${slug}/settings, or merge it yourself`);
+      else if (refused) byHand.unshift(`auto-merge: GitHub refused (${refused.problem}); merge it yourself`);
+      return true;
+    },
+  });
+
+  const signedAs = signedIn && (await signedIn);
+  const asOwnerItems = steps.some((step) => step.owner);
+  const groups = [
+    // It merges itself, as the agent turns auto-merge on, unless the repository does not allow it.
+    { title: 'Pull request', items: pull.length > 0 ? [...pull, { label: 'auto-merge', detail: 'when checks pass' }] : [] },
+    { title: asOwnerItems ? (signedAs && 'login' in signedAs ? `GitHub — signed in as ${signedAs.login}` : `GitHub — one sign-in as ${owner}`) : 'GitHub', items: github },
+    { title: 'This Mac', items: mac },
+    { title: 'Check', items: [{ label: `one signed test commit by ${agent}, deleted after` }] },
+  ];
+  for (const line of planLines(paint, { from: workflowNeeded ? workflowFrom : undefined, version, slug, owner, agent, warnings }, groups)) io.out(line);
+  if (dryRun) {
+    io.out(`${paint.dim('└')}  Dry run: nothing changed.`);
+    return 0;
+  }
+  if (yes) io.out(`${paint.done('◇')}  Go ahead? Yes (--yes)`);
+  else if (!(await sys.choose('Go ahead?'))) {
+    io.out(`${paint.dim('└')}  Nothing changed, and no pull request was opened.`);
+    return 1;
+  }
+
+  for (const step of steps) {
+    const mine = step.owner ? await ownerToken() : undefined;
+    const log: string[] = [];
+    const errors: string[] = [];
+    let ok = false;
+    if (!step.owner || mine) {
+      const spinner = sys.spin(step.label);
+      try {
+        ok = await step.run({ out: (line) => log.push(line), err: (line) => errors.push(line) }, mine);
+      } finally {
+        spinner.stop();
+      }
+    }
+    io.out(`${ok ? paint.done('◇') : paint.failed('■')}  ${step.label}`);
+    // What a failed step did before it failed, such as the test commit's link, is shown with why.
+    if (!ok) for (const line of log) say(line.trim());
+    for (const line of errors) io.err(line);
+    if (!ok) {
+      io.err(`onboard: stopped at "${step.label}"; nothing after it was changed, and no pull request was opened`);
+      return 1;
+    }
+    if (log.length > 0) notes.push(`- ${step.label}:`, ...log.map((line) => `  - ${line.trim().replace(/^[✓-] /, '')}`));
+  }
+  io.out(`${paint.dim('└')}  ${!pullUrl ? 'Done; no file changes, so no pull request.' : merging ? `${pullUrl}  merges itself when checks pass` : `Merge ${pullUrl}`}`);
+  io.out('');
+  io.out('By hand:');
+  for (const line of byHand) io.out(`  ${line}`);
   return 0;
 }
 

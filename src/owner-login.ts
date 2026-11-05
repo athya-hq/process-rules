@@ -29,6 +29,11 @@ export async function isOrganisation(sys: Sys, login: string): Promise<boolean> 
   return type === 'Organization';
 }
 
+/** gh's lines from a sign-in that tell the owner nothing they need: its sign-in tips and the setup it did in the temporary folder. */
+const GH_CHATTER = [/Authentication complete/i, /git_protocol/, /Configured git protocol/i, /plain text/i, /Logged in as/i, /^Did you know/i, /^Tip\b/i];
+/** A device flow's one-time code, as gh prints it: "XXXX-XXXX". */
+const ONE_TIME_CODE = /\b[A-Z0-9]{4}-[A-Z0-9]{4}\b/;
+
 /**
  * Signs the owner in to GitHub for this run alone: one browser approval
  * through `gh auth login --web`, into a fresh temporary gh folder with no
@@ -36,8 +41,14 @@ export async function isOrganisation(sys: Sys, login: string): Promise<boolean> 
  * The folder is deleted before this returns, whatever happens, so the
  * owner's own gh config and keychain are never read or written, and
  * nothing is left signed in. Returns why it failed instead of a token.
+ *
+ * gh's output is read rather than shown: with it not a terminal, gh prints
+ * the one-time code and the link instead of asking for Enter, so `show` gets
+ * the code, and the link, which this opens in the browser; gh's tips and
+ * notes about its own setup are dropped, and any other line, its errors
+ * included, is shown as gh wrote it.
  */
-export async function signInOnce(sys: Sys, scopes: readonly string[]): Promise<OwnerToken | { problem: string }> {
+export async function signInOnce(sys: Sys, scopes: readonly string[], show: (line: string) => void = () => {}): Promise<OwnerToken | { problem: string }> {
   const dir = sys.tempDir();
   try {
     const env = {
@@ -53,8 +64,17 @@ export async function signInOnce(sys: Sys, scopes: readonly string[]): Promise<O
     };
     // SSH as the protocol, with no key, keeps gh from asking to set up git's credentials.
     const args = ['auth', 'login', '--web', '-h', GITHUB_HOST, '-p', 'ssh', '--skip-ssh-key', '--insecure-storage'];
-    const signed = sys.exec('gh', [...args, ...(scopes.length > 0 ? ['-s', scopes.join(',')] : [])], { env, interactive: true });
-    if (signed.code !== 0) return { problem: 'the GitHub sign-in in the browser did not finish' };
+    const code = await sys.converse('gh', [...args, ...(scopes.length > 0 ? ['-s', scopes.join(',')] : [])], { env }, (raw) => {
+      const line = raw.trim();
+      const oneTime = ONE_TIME_CODE.exec(line)?.[0];
+      const url = /https:\/\/\S+/.exec(line)?.[0];
+      if (oneTime) show(`one-time code ${oneTime}${/clipboard/i.test(line) ? ' (copied)' : ''}`);
+      else if (url && /browser/i.test(line)) {
+        show(`approve it at ${url}`);
+        sys.open(url);
+      } else if (line && !GH_CHATTER.some((chatter) => chatter.test(line))) show(line);
+    });
+    if (code !== 0) return { problem: 'the GitHub sign-in in the browser did not finish' };
     const read = sys.exec('gh', ['auth', 'token', '-h', GITHUB_HOST], { env });
     const token = read.stdout.trim();
     if (read.code !== 0 || !token) return { problem: 'gh did not hand over the token from the sign-in' };
