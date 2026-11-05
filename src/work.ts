@@ -524,9 +524,9 @@ export async function prePush(sys: Sys, io: Output, refLines: string, url: strin
 
 /**
  * Moves the board on for slice `slice`, which a push is starting to build,
- * with the board feature on; a board it cannot read, such as from a Claude
- * cloud session whose GitHub proxy refuses GraphQL, or a move GitHub
- * refuses, is said and does not stop the push.
+ * with the board feature on, through GitHub's REST API, which a Claude
+ * cloud session's proxy lets through; a board it cannot read, or a move
+ * GitHub refuses, is said and does not stop the push.
  */
 async function moveBoard(sys: Sys, io: Output, token: string, slug: string, slice: number): Promise<void> {
   try {

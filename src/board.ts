@@ -518,69 +518,139 @@ function settled(view: View, spec: (typeof VIEWS)[number], fieldIds: Map<string 
   return view.name === spec.name && view.layout === spec.layout && (view.filter ?? '') === spec.filter && hidden(view, spec, fieldIds).length === 0;
 }
 
-/** A Project item; a field that is not a single select reads as an empty object. */
-type BoardItem = {
-  id: string;
-  project: { id: string; title: string; field: { id?: string; options?: { id: string; name: string }[] } | null };
-  value: { name?: string } | null;
-};
-
-/** An issue's items on Projects, each with the Project's single-select field `field` and the item's value of it. */
-function boardItems(field: string): string {
-  return `projectItems(first: 20, includeArchived: false) { nodes { id project { id title field(name: "${field}") { ... on ProjectV2SingleSelectField { id options { id name } } } } value: fieldValueByName(name: "${field}") { ... on ProjectV2ItemFieldSingleSelectValue { name } } } }`;
+/**
+ * GitHub's REST answer at `url`, and the next page's URL its Link header
+ * names. The board moves a push makes use REST alone: a Claude cloud
+ * session's GitHub proxy refuses GraphQL.
+ */
+async function rest(sys: Sys, token: string, url: string, options: { method?: string; body?: unknown } = {}): Promise<{ json: unknown; next: string | undefined }> {
+  const { status, json, headers } = await sys.http(url, { token, ...options });
+  if (status < 200 || status >= 300) {
+    const message = (json as { message?: unknown } | null)?.message;
+    throw new Error(`GitHub's REST API refused ${options.method ?? 'GET'} ${url.replace(API, '')}: HTTP ${status}${typeof message === 'string' ? ` ${message}` : ''}`);
+  }
+  return { json, next: /<([^>]+)>;\s*rel="next"/.exec(headers?.link ?? '')?.[1] };
 }
+
+/** Every entry of a REST list at `url`, following its pages. */
+async function all<T>(sys: Sys, token: string, url: string): Promise<T[]> {
+  const entries: T[] = [];
+  for (let next: string | undefined = url; next; ) {
+    const page = await rest(sys, token, next);
+    if (!Array.isArray(page.json)) throw new Error(`GitHub's REST API did not answer a list (${next.replace(API, '')})`);
+    entries.push(...(page.json as T[]));
+    next = page.next;
+  }
+  return entries;
+}
+
+/** A name as GitHub's REST API gives a Project's option: `{ raw, html }`, or a plain string. */
+type Named = { raw?: string } | string | undefined;
+const named = (name: Named): string | undefined => (typeof name === 'string' ? name : name?.raw);
+
+/** A Project's field, as GitHub's REST API lists it. */
+interface ProjectField {
+  id: number;
+  name: string;
+  data_type: string;
+  options?: { id: string; name: Named }[];
+}
+
+/** An issue as GitHub's REST API gives it. */
+interface RestIssue {
+  number: number;
+  state: string;
+  url?: string;
+  type?: { name?: string } | null;
+  pull_request?: unknown;
+}
+
+/** An item of a Project, holding an issue, with its single-select field `field` and the item's value of it. */
+type BoardItem = { url: string; project: string; number: number; field: ProjectField; value: string | undefined };
 
 /**
  * Sets `item`'s field to the option named `option`, in any case, unless the
- * Project lacks the field or the option, or the item has it already. Returns
- * the Project's title when it moved the item.
+ * field lacks the option or the item has it already. Returns the Project's
+ * title when it moved the item.
  */
 async function moveTo(sys: Sys, token: string, item: BoardItem, option: string): Promise<string | undefined> {
-  const field = item.project.field;
-  const chosen = field?.options?.find((had) => had.name.toLowerCase() === option.toLowerCase());
-  if (!field?.id || !chosen || item.value?.name?.toLowerCase() === option.toLowerCase()) return undefined;
-  await graphql(
-    sys,
-    token,
-    'mutation($project: ID!, $item: ID!, $field: ID!, $option: String!) { updateProjectV2ItemFieldValue(input: { projectId: $project, itemId: $item, fieldId: $field, value: { singleSelectOptionId: $option } }) { projectV2Item { id } } }',
-    { project: item.project.id, item: item.id, field: field.id, option: chosen.id },
-  );
-  return item.project.title;
+  const chosen = item.field.options?.find((had) => named(had.name)?.toLowerCase() === option.toLowerCase());
+  if (!chosen || item.value?.toLowerCase() === option.toLowerCase()) return undefined;
+  await rest(sys, token, item.url, { method: 'PATCH', body: { fields: [{ id: item.field.id, value: chosen.id }] } });
+  return item.project;
+}
+
+/** The items of `slug`'s issues on its owner's open Projects that have a single-select Status or Step, each with its value. */
+async function projectItems(sys: Sys, token: string, slug: string): Promise<{ status: BoardItem[]; step: BoardItem[] }> {
+  const repo = (await rest(sys, token, `${API}/repos/${slug}`)).json as { owner?: { login?: string; type?: string } } | null;
+  const owner = repo?.owner?.login ?? slug.split('/')[0];
+  const base = `${API}/${repo?.owner?.type === 'User' ? 'users' : 'orgs'}/${owner}/projectsV2`;
+  const projects = await all<{ number: number; title: string; state?: string; closed_at?: string | null }>(sys, token, `${base}?per_page=100`);
+  const found = { status: [] as BoardItem[], step: [] as BoardItem[] };
+  const repoUrl = `/repos/${slug}`.toLowerCase();
+  // A closed Project is no longer anyone's board.
+  for (const project of projects.filter((had) => had.state !== 'closed' && !had.closed_at)) {
+    const url = `${base}/${project.number}`;
+    const fields = await all<ProjectField>(sys, token, `${url}/fields?per_page=100`);
+    const single = (name: string) => fields.find((field) => field.name === name && field.data_type === 'single_select');
+    const status = single('Status');
+    const step = single('Step');
+    if (!status && !step) continue;
+    const wanted = [status, step].flatMap((field) => (field ? [field.id] : [])).join(',');
+    const items = await all<{
+      id: number;
+      content_type?: string;
+      archived_at?: string | null;
+      content?: { number?: number; repository_url?: string } | null;
+      fields?: { id?: number; value?: { name?: Named } | null }[];
+    }>(sys, token, `${url}/items?per_page=100&fields=${wanted}`);
+    for (const item of items) {
+      const number = item.content?.number;
+      if (item.archived_at || item.content_type !== 'Issue' || !number || !item.content?.repository_url?.toLowerCase().endsWith(repoUrl)) continue;
+      const of = (field: ProjectField): BoardItem => ({
+        url: `${url}/items/${item.id}`,
+        project: project.title,
+        number,
+        field,
+        value: named(item.fields?.find((held) => held.id === field.id)?.value?.name),
+      });
+      if (status) found.status.push(of(status));
+      if (step) found.step.push(of(step));
+    }
+  }
+  return found;
 }
 
 /**
  * Moves the work board on as an agent starts building slice `slice` of
- * `slug`, with the agent's token, on every Project that holds the issues:
- * the open slice's Status to In Progress; its Work item's Step to Build, as
- * its first slice has started; and an open Work item with no Step to Frame,
- * where every new one starts. A workflow's GITHUB_TOKEN cannot write a
- * Project, so the agent's push does this. Returns what moved, as lines.
+ * `slug`, with the agent's token, on every open Project of the repository's
+ * owner that holds the issues: the open slice's Status to In Progress; its
+ * Work item's Step to Build, as its first slice has started; and an open
+ * Work item with no Step to Frame, where every new one starts. A workflow's
+ * GITHUB_TOKEN cannot write a Project, so the agent's push does this,
+ * through GitHub's REST API alone, as a cloud session's proxy refuses
+ * GraphQL. Returns what moved, as lines.
  */
 export async function boardStarted(sys: Sys, token: string, slug: string, slice: number): Promise<string[]> {
-  const [owner, name] = slug.split('/') as [string, string];
-  const read = (await graphql(
-    sys,
-    token,
-    `query($owner: String!, $name: String!, $number: Int!, $workItems: String!) { repository(owner: $owner, name: $name) { issue(number: $number) { state ${boardItems('Status')} parent { number issueType { name } ${boardItems('Step')} } } } search(type: ISSUE, query: $workItems, first: 100) { nodes { ... on Issue { number ${boardItems('Step')} } } } }`,
-    // The newest first, so a new work item is among the hundred read.
-    { owner, name, number: slice, workItems: `repo:${slug} is:issue is:open type:"Work item" sort:created-desc` },
-  )) as {
-    repository: {
-      issue: { state: string; projectItems: { nodes: BoardItem[] }; parent: { number: number; issueType: { name: string } | null; projectItems: { nodes: BoardItem[] } } | null } | null;
-    } | null;
-    search: { nodes: ({ number?: number; projectItems?: { nodes: BoardItem[] } } | null)[] };
-  };
-  const issue = read.repository?.issue;
+  const issue = (await rest(sys, token, `${API}/repos/${slug}/issues/${slice}`)).json as RestIssue;
   // A closed slice is built already: a fix to it starts nothing on the board.
-  if (issue?.state !== 'OPEN') return [];
-  const parent = issue.parent?.issueType?.name === 'Work item' ? issue.parent : undefined;
+  if (issue.state !== 'open') return [];
+  const { status, json } = await sys.http(`${issue.url ?? `${API}/repos/${slug}/issues/${slice}`}/parent`, { token });
+  // An issue with no parent reads as 404.
+  if (status !== 200 && status !== 404) throw new Error(`GitHub's REST API refused GET /repos/${slug}/issues/${slice}/parent: HTTP ${status}`);
+  const parent = status === 200 && (json as RestIssue | null)?.type?.name === 'Work item' ? (json as RestIssue).number : undefined;
+  // Newest first, as the moves are said.
+  const workItems = (await all<RestIssue>(sys, token, `${API}/repos/${slug}/issues?state=open&type=${encodeURIComponent('Work item')}&sort=created&direction=desc&per_page=100`))
+    .filter((one) => !one.pull_request && one.type?.name === 'Work item')
+    .map((one) => one.number);
+  const items = await projectItems(sys, token, slug);
   const moves = [
-    ...issue.projectItems.nodes.map((item) => ({ item, option: 'In Progress', name: `slice #${slice}`, what: `slice #${slice} is In Progress` })),
-    ...(parent?.projectItems.nodes ?? []).map((item) => ({ item, option: 'Build', name: `work item #${parent?.number}`, what: `work item #${parent?.number} is at Step Build` })),
-    ...read.search.nodes.flatMap((node) =>
-      !node?.number || node.number === parent?.number
+    ...items.status.filter((item) => item.number === slice).map((item) => ({ item, option: 'In Progress', name: `slice #${slice}`, what: `slice #${slice} is In Progress` })),
+    ...items.step.filter((item) => item.number === parent).map((item) => ({ item, option: 'Build', name: `work item #${parent}`, what: `work item #${parent} is at Step Build` })),
+    ...workItems.flatMap((number) =>
+      number === parent
         ? []
-        : (node.projectItems?.nodes ?? []).filter((item) => !item.value?.name).map((item) => ({ item, option: 'Frame', name: `work item #${node.number}`, what: `work item #${node.number} had no Step; it is at Frame` })),
+        : items.step.filter((item) => item.number === number && !item.value).map((item) => ({ item, option: 'Frame', name: `work item #${number}`, what: `work item #${number} had no Step; it is at Frame` })),
     ),
   ];
   // Each move stands alone, so one GitHub refuses leaves the others made.
@@ -590,7 +660,7 @@ export async function boardStarted(sys: Sys, token: string, slug: string, slice:
       const project = await moveTo(sys, token, item, option);
       if (project) moved.push(`✓ board: ${what} in "${project}"`);
     } catch (error) {
-      moved.push(`! board: ${name} was not moved to ${option} in "${item.project.title}" (${(error as Error).message})`);
+      moved.push(`! board: ${name} was not moved to ${option} in "${item.project}" (${(error as Error).message})`);
     }
   }
   return moved;

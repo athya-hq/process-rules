@@ -277,15 +277,15 @@ slice may be built:
 
 **The board follows the work.** When an agent session's push names a slice
 the work rules let it build, pre-push moves the board on, as the agent, on
-every Project that holds the issues: the slice's Status to In Progress; its
-work item's Step to Build, since its first slice has started; and any open
-Work item with no Step to Frame, where a new one starts. A workflow's
-`GITHUB_TOKEN` cannot write to a Project, so the agent's push does this, with
-the agent token's `project` scope, with `board` on. It reads the newest
-hundred open Work items, so a new one is always among them. A board it cannot
-read, such as from a Claude cloud session whose GitHub proxy refuses GraphQL,
-or a move GitHub refuses, is said and does not stop the push; a push for a
-closed slice, such as a fix, moves nothing. When a pull request naming a slice merges into the default branch,
+every open Project of the repository's owner that holds the issues: the
+slice's Status to In Progress; its work item's Step to Build, since its first
+slice has started; and any open Work item with no Step to Frame, where a new
+one starts. A workflow's `GITHUB_TOKEN` cannot write to a Project, so the
+agent's push does this, with the agent token's `project` scope, with `board`
+on. It uses GitHub's REST API for Projects alone, as the work rules do, so it
+works through a Claude cloud session's GitHub proxy, which refuses GraphQL.
+A board it cannot read, or a move GitHub refuses, is said and does not stop
+the push; a push for a closed slice, such as a fix, moves nothing. When a pull request naming a slice merges into the default branch,
 the shared workflow comments on the slice, linking the pull request, and
 closes it, and the Project's Item closed workflow moves it to Done: a
 `Slice: #N` line is not one of GitHub's closing keywords, so GitHub does not
