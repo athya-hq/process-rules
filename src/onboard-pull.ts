@@ -11,9 +11,76 @@ export const CLOUD_SETUP_PATH = '.github/process-rules/cloud-setup.sh';
 /** Every file onboard's pull request may change. */
 export const ONBOARD_FILES = [SETTINGS_PATH, HOOKS_PATH, WORKFLOW_PATH, CLOUD_SETUP_PATH];
 
-/** onboard's commit header and pull request title: Conventional Commits, scoped to the product. */
-export function pullTitle(version: string): string {
-  return `chore(process-rules): onboard at v${version}`;
+/** A subject's leading emoji, or gitmoji shortcode, and the rest of it. */
+const LEADING_EMOJI = /^(\p{Regional_Indicator}{2}|\p{Extended_Pictographic}\p{Emoji_Modifier}?️?(?:‍\p{Extended_Pictographic}\p{Emoji_Modifier}?️?)*|:[a-z0-9_+-]+:)\s+(.*)$/u;
+
+/**
+ * onboard's commit header and pull request title: Conventional Commits,
+ * scoped to the product, in the style of `recent`, the default branch's
+ * latest commit subjects. When most of them lead with an emoji (gitmoji),
+ * so does the title: the one an earlier onboard commit had, else the one the
+ * repository puts most on chores, else gitmoji's for configuration. Merge
+ * commits are git's own words, so they count for neither style.
+ */
+export function pullTitle(version: string, recent: readonly string[] = []): string {
+  const title = `chore(process-rules): onboard at v${version}`;
+  const subjects = recent.filter((subject) => !subject.startsWith('Merge '));
+  const led = subjects.flatMap((subject) => {
+    const match = LEADING_EMOJI.exec(subject);
+    return match ? [{ emoji: match[1] as string, rest: match[2] as string }] : [];
+  });
+  if (led.length * 2 <= subjects.length) return title;
+  const before = led.find((one) => one.rest.startsWith('chore(process-rules)'))?.emoji;
+  const counts = new Map<string, number>();
+  for (const { emoji, rest } of led) if (/^chore\b/.test(rest)) counts.set(emoji, (counts.get(emoji) ?? 0) + 1);
+  const most = [...counts].sort((a, b) => b[1] - a[1])[0]?.[0];
+  const shortcodes = led.filter((one) => one.emoji.startsWith(':')).length * 2 > led.length;
+  return `${before ?? most ?? (shortcodes ? ':wrench:' : '🔧')} ${title}`;
+}
+
+/** Where Mergify reads its configuration from, in the order it looks: it uses the first the branch has. */
+export const MERGIFY_PATHS = ['.mergify.yml', '.mergify/config.yml', '.github/mergify.yml'];
+
+/** A pull request rule's top-level conditions that a pull request meets only once someone labels it. */
+function asksForLabel(conditions: unknown): boolean {
+  return Array.isArray(conditions) && conditions.some((condition) => typeof condition === 'string' && /^label\s*[=~]/.test(condition.trim()));
+}
+
+/**
+ * The path of the default branch's Mergify configuration when its merge
+ * queue takes pull requests by itself, so it merges onboard's and GitHub's
+ * auto-merge is not needed; undefined otherwise, or when GitHub does not say.
+ * Mergify reads the first of MERGIFY_PATHS the branch has. It queues by
+ * itself where the configuration has a queue rule and either merge
+ * protections' `auto_merge_conditions` (`true`, or conditions that ask for
+ * no label), or a pull request rule whose actions hold `queue` and whose
+ * conditions ask for no label. Mergify replaced the queue rules' own
+ * `autoqueue` with `auto_merge_conditions`, so it does not count. Read as the agent, from GitHub,
+ * since a checkout may be behind the default branch.
+ */
+export async function mergeQueue(sys: Sys, slug: string, branch: string, token: string): Promise<string | undefined> {
+  for (const path of MERGIFY_PATHS) {
+    const { status, json } = await sys.http(`${API}/repos/${slug}/contents/${path}?ref=${encodeURIComponent(branch)}`, { token }).catch(() => ({ status: 0, json: undefined }));
+    if (status === 404) continue;
+    const content = (json as { content?: unknown } | null)?.content;
+    if (status !== 200 || typeof content !== 'string') return undefined;
+    const { parse } = await import('yaml');
+    let config: { queue_rules?: unknown; pull_request_rules?: unknown; merge_protections_settings?: unknown; merge_protection_settings?: unknown } | null;
+    try {
+      config = parse(Buffer.from(content, 'base64').toString('utf8')) as typeof config;
+    } catch {
+      return undefined;
+    }
+    const queues = Array.isArray(config?.queue_rules) ? config.queue_rules : [];
+    const rules = Array.isArray(config?.pull_request_rules) ? (config.pull_request_rules as ({ conditions?: unknown; actions?: unknown } | null)[]) : [];
+    const queuing = rules.some((rule) => typeof rule?.actions === 'object' && rule.actions !== null && 'queue' in rule.actions && !asksForLabel(rule.conditions));
+    // Mergify's docs spell the key both ways.
+    const protections = (config?.merge_protections_settings ?? config?.merge_protection_settings) as { auto_merge_conditions?: unknown } | null | undefined;
+    const conditions = protections?.auto_merge_conditions;
+    const auto = conditions === true || (Array.isArray(conditions) && !asksForLabel(conditions));
+    return queues.length > 0 && (queuing || auto) ? path : undefined;
+  }
+  return undefined;
 }
 
 /** A file onboard changes: what this checkout has (undefined when none), and what onboard writes. */
@@ -87,7 +154,7 @@ export async function openPull(sys: Sys, io: Output, target: PullTarget, changes
     // --missing-ok: the files onboard leaves alone have no contents here.
     const tree = git(['write-tree', '--missing-ok']);
     if (tree.code !== 0) return failed('git write-tree', tree.stderr);
-    const title = pullTitle(version);
+    const title = pullTitle(version, await recentSubjects(sys, slug, branch, token));
     const made = git(['commit-tree', '-S', tree.stdout.trim(), '-p', 'FETCH_HEAD', '-m', title]);
     const sha = made.stdout.trim();
     if (made.code !== 0 || !sha) return failed('signing the commit', made.stderr);
@@ -123,6 +190,13 @@ export async function openPull(sys: Sys, io: Output, target: PullTarget, changes
   } finally {
     sys.remove(dir);
   }
+}
+
+/** The default branch's latest commit subjects, newest first; none when GitHub does not say. */
+async function recentSubjects(sys: Sys, slug: string, branch: string, token: string): Promise<string[]> {
+  const { status, json } = await sys.http(`${API}/repos/${slug}/commits?sha=${encodeURIComponent(branch)}&per_page=20`, { token }).catch(() => ({ status: 0, json: undefined }));
+  if (status !== 200 || !Array.isArray(json)) return [];
+  return json.flatMap((one: { commit?: { message?: unknown } }) => (typeof one?.commit?.message === 'string' ? [one.commit.message.split('\n')[0] as string] : []));
 }
 
 /** The merge methods auto-merge may use, in the order onboard prefers them, by the repository setting that allows each. */

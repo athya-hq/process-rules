@@ -945,6 +945,24 @@ describe('onboard', () => {
       assert.equal(signIns(sys), 1, 'one sign-in for the access and the board');
     });
 
+    it('plans either merge until the agent can push, then asks the default branch for a merge queue', async () => {
+      const sys = fresh();
+      let added = false;
+      sys.route('GET', REPO, () => (added ? { status: 200, json: { ...repoJson(), allow_auto_merge: false } } : { status: 404, json: null }));
+      sys.route('GET', '/user/repository_invitations?per_page=100&page=1', { status: 200, json: [] });
+      sys.route('PUT', COLLABORATOR, () => {
+        added = true;
+        return { status: 204, json: null };
+      });
+      const config = 'queue_rules:\n  - name: default\nmerge_protections_settings:\n  auto_merge_conditions: true\n';
+      sys.route('GET', `${REPO}/contents/.mergify.yml?ref=main`, () => (added ? { status: 200, json: { content: Buffer.from(config).toString('base64') } } : { status: 404, json: null }));
+      const { code, out } = await run(sys);
+      assert.equal(code, 0);
+      assert.ok(planned(out, 'Pull request').includes('auto-merge or merge queue: when checks pass'), out.join('\n'));
+      assert.ok(out.includes(`└  ${PULL_URL}  the merge queue merges it when checks pass`), out.join('\n'));
+      assert.ok(!byHand(out).some((line) => line.startsWith('auto-merge')));
+    });
+
     it('invites, then accepts the invitation as the agent', async () => {
       const sys = fresh();
       let accepted = false;
@@ -1434,6 +1452,35 @@ describe('the plan and its one question', () => {
     const squashing = new Board(squash);
     await run(squash);
     assert.deepEqual(squashing.autoMerge, { id: 'PR_7', method: 'SQUASH' }, 'squash when GitHub does not say otherwise');
+  });
+
+  it("titles the pull request and its commit in the default branch's style: an emoji first when its subjects have one", async () => {
+    const sys = fresh();
+    const subjects = ['✨ feat(app): a (#9)', '🔥 chore(tooling): b (#8)', '🔧 chore(process-rules): onboard at v0.5.1 (#7)', 'Merge pull request #6 from example-org/x'];
+    sys.route('GET', `${REPO}/commits?sha=main&per_page=20`, { status: 200, json: subjects.map((message) => ({ commit: { message: `${message}\n\nbody` } })) });
+    const { code, err } = await run(sys);
+    assert.deepEqual({ code, err }, { code: 0, err: [] });
+    const title = `🔧 chore(process-rules): onboard at v${packageVersion()}`;
+    assert.equal(opened(sys)?.title, title);
+    const commit = sys.calls.find((c) => c.command === 'git' && c.args[0] === 'commit-tree' && c.cwd === '/tmp/process-rules-2');
+    assert.deepEqual(commit?.args.slice(-2), ['-m', title], 'the commit header is the title');
+    assert.equal(sys.requests.find((r) => r.url.includes('/commits?'))?.token, TOKEN, 'asked as the agent');
+  });
+
+  it('lets a Mergify merge queue merge it, without asking the owner to turn auto-merge on', async () => {
+    const sys = fresh();
+    const board = new Board(sys);
+    sys.route('GET', REPO, { status: 200, json: { ...repoJson(), allow_auto_merge: false } });
+    const config = 'queue_rules:\n  - name: default\npull_request_rules:\n  - name: queue when green\n    conditions: [check-success=CI]\n    actions:\n      queue:\n';
+    sys.route('GET', `${REPO}/contents/.mergify.yml?ref=main`, { status: 200, json: { content: Buffer.from(config).toString('base64') } });
+    const { code, out, err } = await run(sys);
+    assert.deepEqual({ code, err }, { code: 0, err: [] });
+    assert.ok(planned(out, 'Pull request').includes('merge queue: Mergify, when checks pass'), out.join('\n'));
+    assert.ok(!planned(out, 'Pull request').some((item) => item.startsWith('auto-merge')));
+    assert.equal(board.autoMerge, undefined, "GitHub's auto-merge is left to the queue");
+    assert.ok(!sys.requests.some((r) => JSON.stringify(r.body ?? '').includes('enablePullRequestAutoMerge')));
+    assert.ok(out.includes(`└  ${PULL_URL}  the merge queue merges it when checks pass`), out.join('\n'));
+    assert.ok(!byHand(out).some((line) => line.startsWith('auto-merge')), byHand(out).join('\n'));
   });
 
   it('asks the owner to merge it when the repository does not allow auto-merge, or GitHub refuses it', async () => {

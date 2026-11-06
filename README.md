@@ -355,7 +355,18 @@ terminal.
    temporary repository it deletes afterwards, pushes it as the agent and
    opens the agent's pull request (or updates the one an earlier run opened),
    titled `chore(process-rules): onboard at v<version>`, as Conventional
-   Commits reads it, and its commit the same. It then turns on GitHub's
+   Commits reads it, and its commit the same. Where most of the default
+   branch's latest 20 commit subjects, merge commits aside, lead with an
+   emoji or a gitmoji shortcode, so does the title: the one an earlier
+   onboard commit had, else the one the repo puts most on chores, else `🔧`
+   (`:wrench:` where shortcodes are the style). Where the default branch's
+   Mergify configuration (the first of `.mergify.yml`, `.mergify/config.yml`
+   and `.github/mergify.yml`) has a queue rule and queues pull requests by
+   itself, through a rule whose actions hold `queue` and whose conditions
+   ask for no label, or merge protections' `auto_merge_conditions` set to
+   `true` or to conditions that ask for no label, the merge queue merges the pull
+   request, and the run ends "<url> the merge queue merges it when checks
+   pass". Otherwise it turns on GitHub's
    auto-merge for that pull request as the agent, squashing where the repo
    allows it (else rebasing, else merging), so it merges itself once its
    checks pass, and any review the repo's rules require is given. Where the
