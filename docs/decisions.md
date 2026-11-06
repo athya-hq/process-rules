@@ -699,14 +699,15 @@
   and a missing or unreadable workflow, or one pinning no single version,
   says nothing, as `onboard` and `doctor` own the workflow itself.
 - **2026-11-06 — Record: Figma frames are for Experience work only.** A
-  client's design check refused a Process slice because one of its States,
-  a step of process work with nothing to draw, linked no Figma frame. The
+  client's design check refused a Process slice because one of its States, a
+  step of process work with nothing to draw, linked no Figma frame. The
   client's Work items name their kind in a `**Kind:** <Kind>.` line
   (Experience, Process and others). The design check now reads the slice's
   parent Work item with its States, in the same GraphQL query, and a kind
   other than Experience passes the slice with one `✓` line and no Figma
-  call. Experience work, a Work item that names no kind, and a slice with no
-  parent are checked as before, so the check fails closed where the kind is
-  unknown. The line is read bold or plain and case-blind; the Decision
-  parser in `src/decisions.ts` reads only the plain `Kind:` form and the
-  whole line, so the design check keeps its own reader.
+  call. Experience work, a Work item that names no kind, a slice with no
+  parent and one whose parent is not a Work item are checked as before, so
+  the check fails closed where no kind is named. The line is read bold or
+  plain and case-blind; the Decision parser in `src/decisions.ts` reads only
+  the plain `Kind:` form and the whole line, so the design check keeps its
+  own reader.

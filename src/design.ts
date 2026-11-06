@@ -124,8 +124,8 @@ const DESIGNED_KIND = 'Experience';
  * The design check on an agent pull request, run by the shared workflow when
  * the figma feature is on and the FIGMA_LIBRARY secret names a Figma design
  * library: each State of the slice it builds, other than one closed as not
- * planned, links a frame built from that library. A slice whose work item
- * names a kind other than Experience passes without a Figma call. Off without
+ * planned, links a frame built from that library. A slice whose parent Work
+ * item names a kind other than Experience passes without a Figma call. Off without
  * FIGMA_TOKEN, and says so.
  */
 export async function prDesign(sys: Sys, io: Output): Promise<number> {
@@ -175,16 +175,16 @@ export async function prDesign(sys: Sys, io: Output): Promise<number> {
       method: 'POST',
       token,
       body: {
-        query: 'query($owner: String!, $name: String!, $number: Int!, $after: String) { repository(owner: $owner, name: $name) { issue(number: $number) { parent { number body } subIssues(first: 100, after: $after) { nodes { number issueType { name } stateReason body } pageInfo { hasNextPage endCursor } } } } }',
+        query: 'query($owner: String!, $name: String!, $number: Int!, $after: String) { repository(owner: $owner, name: $name) { issue(number: $number) { parent { number body issueType { name } } subIssues(first: 100, after: $after) { nodes { number issueType { name } stateReason body } pageInfo { hasNextPage endCursor } } } } }',
         variables: { owner, name, number: slice, after },
       },
     });
-    const issue = (json as { data?: { repository?: { issue?: { parent?: { number: number; body: string | null } | null; subIssues: { nodes: State[]; pageInfo?: { hasNextPage: boolean; endCursor: string | null } } } | null } } } | null)?.data?.repository?.issue;
+    const issue = (json as { data?: { repository?: { issue?: { parent?: { number: number; body: string | null; issueType?: { name: string } | null } | null; subIssues: { nodes: State[]; pageInfo?: { hasNextPage: boolean; endCursor: string | null } } } | null } } } | null)?.data?.repository?.issue;
     const page = issue?.subIssues;
     if (status !== 200 || !page) throw new Error(`cannot read the states of #${slice} (HTTP ${status})`);
     // The work item's kind, read with the first page: only Experience work is designed in Figma.
     const parent = issue.parent;
-    if (after === null && parent) {
+    if (after === null && parent?.issueType?.name === 'Work item') {
       const kind = workItemKind(parent.body);
       if (kind && kind.toLowerCase() !== DESIGNED_KIND.toLowerCase()) {
         io.out(`✓ pr-design: #${slice} builds ${kind} work item #${parent.number}; frames are for ${DESIGNED_KIND} work`);
