@@ -767,11 +767,19 @@
   gitmoji shortcode, the title and the commit do too: the one an earlier
   onboard commit had, else the one the repo puts most on `chore`, else
   `🔧` (`:wrench:` where shortcodes are the style). The rest of the title
-  stays Conventional Commits. Where `.mergify.yml`, `.mergify/config.yml`
-  or `.github/mergify.yml` has a `queue_rules` with a rule, the plan says
+  stays Conventional Commits. Where the default branch's Mergify
+  configuration, read as the agent from GitHub (a checkout may be behind)
+  and the first of `.mergify.yml`, `.mergify/config.yml` and
+  `.github/mergify.yml` it has, as Mergify reads only that one, has a
+  queue rule and queues pull requests by itself (a pull request rule whose
+  actions hold `queue` and whose conditions ask for no label, or a queue
+  rule with `autoqueue: true`), the plan says
   "merge queue Mergify, when checks pass", GitHub's auto-merge is neither
   turned on nor asked for (it could merge around the queue), and the run
   ends "<url> the merge queue merges it when checks pass". Rejected: a
   setting in `process-rules.json` for the title's emoji (the repo's history
   already says it, and a setting is one more thing to keep in step), and
-  reading the repo's title-check workflow (each repo writes its own).
+  reading the repo's title-check workflow (each repo writes its own). The
+  configuration is parsed with the `yaml` package, which onboard alone
+  loads, as it does `@clack/prompts`; a line scan missed YAML's other
+  forms.

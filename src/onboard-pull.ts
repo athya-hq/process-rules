@@ -12,7 +12,7 @@ export const CLOUD_SETUP_PATH = '.github/process-rules/cloud-setup.sh';
 export const ONBOARD_FILES = [SETTINGS_PATH, HOOKS_PATH, WORKFLOW_PATH, CLOUD_SETUP_PATH];
 
 /** A subject's leading emoji, or gitmoji shortcode, and the rest of it. */
-const LEADING_EMOJI = /^((?:\p{Extended_Pictographic}|\p{Regional_Indicator})(?:️|‍\p{Extended_Pictographic})*️?|:[a-z0-9_+-]+:)\s+(.*)$/u;
+const LEADING_EMOJI = /^(\p{Regional_Indicator}{2}|\p{Extended_Pictographic}\p{Emoji_Modifier}?️?(?:‍\p{Extended_Pictographic}\p{Emoji_Modifier}?️?)*|:[a-z0-9_+-]+:)\s+(.*)$/u;
 
 /**
  * onboard's commit header and pull request title: Conventional Commits,
@@ -38,27 +38,43 @@ export function pullTitle(version: string, recent: readonly string[] = []): stri
   return `${before ?? most ?? (shortcodes ? ':wrench:' : '🔧')} ${title}`;
 }
 
-/** Where Mergify reads its configuration from, in the order it looks. */
+/** Where Mergify reads its configuration from, in the order it looks: it uses the first the branch has. */
 export const MERGIFY_PATHS = ['.mergify.yml', '.mergify/config.yml', '.github/mergify.yml'];
 
+/** A pull request rule's top-level conditions that a pull request meets only once someone labels it. */
+function asksForLabel(conditions: unknown): boolean {
+  return Array.isArray(conditions) && conditions.some((condition) => typeof condition === 'string' && /^label\s*[=~]/.test(condition.trim()));
+}
+
 /**
- * The Mergify configuration, by its path, that has a merge queue rule: the
- * queue then merges onboard's pull request, so GitHub's auto-merge is not
- * needed. Undefined when the repository has none. A top-level
- * `queue_rules` holding at least one rule, block or flow style, is enough.
+ * The path of the default branch's Mergify configuration when its merge
+ * queue takes pull requests by itself, so it merges onboard's and GitHub's
+ * auto-merge is not needed; undefined otherwise, or when GitHub does not say.
+ * Mergify reads the first of MERGIFY_PATHS the branch has. It queues by
+ * itself where the configuration has a queue rule and either a queue rule
+ * with `autoqueue: true`, or a pull request rule whose actions hold `queue`
+ * and whose conditions ask for no label. Read as the agent, from GitHub,
+ * since a checkout may be behind the default branch.
  */
-export function mergeQueue(read: (path: string) => string | undefined): string | undefined {
-  return MERGIFY_PATHS.find((path) => {
-    const text = read(path);
-    if (text === undefined) return false;
-    const lines = text.split('\n').map((line) => line.replace(/(^|\s)#.*$/, '').trimEnd());
-    const at = lines.findIndex((line) => /^queue_rules:/.test(line));
-    if (at === -1) return false;
-    const value = (lines[at] as string).slice('queue_rules:'.length).trim();
-    if (value) return /^\[\s*\S/.test(value) && !/^\[\s*\]$/.test(value);
-    const next = lines.slice(at + 1).find((line) => line.trim() !== '');
-    return next !== undefined && /^\s+-(\s|$)/.test(next);
-  });
+export async function mergeQueue(sys: Sys, slug: string, branch: string, token: string): Promise<string | undefined> {
+  for (const path of MERGIFY_PATHS) {
+    const { status, json } = await sys.http(`${API}/repos/${slug}/contents/${path}?ref=${encodeURIComponent(branch)}`, { token }).catch(() => ({ status: 0, json: undefined }));
+    if (status === 404) continue;
+    const content = (json as { content?: unknown } | null)?.content;
+    if (status !== 200 || typeof content !== 'string') return undefined;
+    const { parse } = await import('yaml');
+    let config: { queue_rules?: unknown; pull_request_rules?: unknown } | null;
+    try {
+      config = parse(Buffer.from(content, 'base64').toString('utf8')) as typeof config;
+    } catch {
+      return undefined;
+    }
+    const queues = Array.isArray(config?.queue_rules) ? (config.queue_rules as ({ autoqueue?: unknown } | null)[]) : [];
+    const rules = Array.isArray(config?.pull_request_rules) ? (config.pull_request_rules as ({ conditions?: unknown; actions?: unknown } | null)[]) : [];
+    const queuing = rules.some((rule) => typeof rule?.actions === 'object' && rule.actions !== null && 'queue' in rule.actions && !asksForLabel(rule.conditions));
+    return queues.length > 0 && (queuing || queues.some((queue) => queue?.autoqueue === true)) ? path : undefined;
+  }
+  return undefined;
 }
 
 /** A file onboard changes: what this checkout has (undefined when none), and what onboard writes. */

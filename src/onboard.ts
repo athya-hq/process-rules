@@ -1022,8 +1022,9 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
   let pullUrl: string | undefined;
   // Whether the pull request merges itself once its checks pass.
   let merging = false;
-  // A Mergify merge queue merges it, so GitHub's auto-merge is neither turned on nor asked for.
-  const queue = mergeQueue(fileAt);
+  // A Mergify merge queue that takes pull requests by itself merges it, so GitHub's auto-merge is neither turned on
+  // nor asked for. Read from the default branch; where the agent cannot push yet, worked out again once it can.
+  let queue = planned === undefined ? undefined : await mergeQueue(sys, slug, planned, token);
   steps.push({
     label: 'pull request',
     async run(out) {
@@ -1046,6 +1047,7 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
       const opened = await openPull(sys, out, { agent, id, token, slug, branch: reach.branch, version }, changed, described);
       if (opened === 1) return false;
       pullUrl = opened.url;
+      if (planned === undefined) queue = await mergeQueue(sys, slug, reach.branch, token);
       if (queue !== undefined) {
         merging = true;
         return true;

@@ -1453,7 +1453,8 @@ describe('the plan and its one question', () => {
     const sys = fresh();
     const board = new Board(sys);
     sys.route('GET', REPO, { status: 200, json: { ...repoJson(), allow_auto_merge: false } });
-    sys.files.set(`${ROOT}/.mergify.yml`, 'queue_rules:\n  - name: default\n    merge_method: squash\n');
+    const config = 'queue_rules:\n  - name: default\npull_request_rules:\n  - name: queue when green\n    conditions: [check-success=CI]\n    actions:\n      queue:\n';
+    sys.route('GET', `${REPO}/contents/.mergify.yml?ref=main`, { status: 200, json: { content: Buffer.from(config).toString('base64') } });
     const { code, out, err } = await run(sys);
     assert.deepEqual({ code, err }, { code: 0, err: [] });
     assert.ok(planned(out, 'Pull request').includes('merge queue: Mergify, when checks pass'), out.join('\n'));
