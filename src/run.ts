@@ -26,7 +26,7 @@ Commands:
   doctor [agent]   Check agent sessions here can work as the agent account
   onboard [owner agent] [--features a,b] [--add feature] [--yes] [--dry-run]
                    Set up the client repo here, for the features it turns on
-  cloud-setup      Print the setup script for a Claude cloud environment's agent sessions
+  cloud-setup      Print the Setup snippet for a Claude cloud environment, pasted once
   session-start    Run by a client's SessionStart hook: the agent identity, or GitHub locked out
   guard            Run by a client's PreToolUse hook: gh and git's remote commands only as the agent
   as-agent --session <session_id> -- <command> [args...]

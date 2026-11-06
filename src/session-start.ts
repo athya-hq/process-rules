@@ -12,8 +12,8 @@ import {
   sessionScript,
   type Settings,
 } from './agent.ts';
-import { cloudLogin, cloudToken } from './cloud.ts';
-import { WORKFLOW_PATH } from './onboard-pull.ts';
+import { FROM_SETUP, cloudLogin, cloudScriptVersion, cloudToken } from './cloud.ts';
+import { CLOUD_SETUP_PATH, WORKFLOW_PATH } from './onboard-pull.ts';
 import { PRE_PUSH_HOOK, prePushHook, workflowPins } from './onboard.ts';
 import { packageVersion } from './version.ts';
 import { tokenStore, unsupported } from './token-store.ts';
@@ -27,8 +27,8 @@ import type { Output, Sys } from './types.ts';
  * identity. The file is copied only when it is exactly what `machine`
  * writes, so nothing else in it can run. Never the owner's login: any other
  * outcome leaves GitHub locked out. Prints one line for the session (a
- * cloud session may get a second, warning that its CLI is not the version
- * the repo's workflow pins; see `cloudDrift`),
+ * cloud session may get a second, when its CLI is not the release the
+ * repo pins: it installs that release, or names the fix; see `cloudDrift`),
  * records the outcome for the PreToolUse guard, and always exits 0, so a
  * hook failure never stops the session from starting.
  * A Claude cloud session reaches GitHub through its proxy, as the account
@@ -46,24 +46,57 @@ export async function sessionStart(sys: Sys, io: Output): Promise<number> {
   return 0;
 }
 
+/** How long session-start lets the repo's cloud setup file run: it fetches the CLI, and Node when that changed too. */
+export const CLOUD_INSTALL_MS = 180_000;
+
 /**
- * A cloud environment's Setup script installs the release it was printed
- * from, which stays put when the repo's workflow moves to another, so a
- * cloud session says when the two differ. A warning only: the session works
- * on, and says nothing when the workflow is missing, unreadable, or pins no
- * one version.
+ * A cloud environment's snapshot keeps the release its Setup script last
+ * installed, and the platform builds it again only when the Setup script
+ * changes or about a week has passed (Claude Code's cloud environments
+ * docs, "Environment caching"). The Setup snippet names no version, so a
+ * cloud session whose CLI differs from the one the repo's cloud setup file
+ * installs runs that file itself, and says so. When the file is missing, or
+ * installs another release than the workflow pins, the fix is to run
+ * onboard again, which writes it. A Setup script that installs a release of
+ * its own, an older paste, is named too: one paste of the snippet ends it.
+ * A warning only: the session works on, and nothing is said when every
+ * version agrees, or the workflow is missing, unreadable, or pins no one
+ * version and the repo has no cloud setup file.
  */
 function cloudDrift(sys: Sys): string | undefined {
-  let pins: Set<string>;
+  let root: string;
   try {
-    pins = new Set(workflowPins(sys.read(`${repoRoot(sys)}/${WORKFLOW_PATH}`)));
+    root = repoRoot(sys);
   } catch {
     return undefined;
   }
-  const [pinned] = pins;
+  let pinned: string | undefined;
+  try {
+    const pins = new Set(workflowPins(sys.read(`${root}/${WORKFLOW_PATH}`)));
+    if (pins.size === 1) [pinned] = pins;
+  } catch {
+    pinned = undefined;
+  }
   const installed = packageVersion();
-  if (pins.size !== 1 || !pinned || pinned === installed) return undefined;
-  return `process-rules: this cloud session runs process-rules ${installed}, but ${WORKFLOW_PATH} pins v${pinned}. Print the Setup script again with process-rules cloud-setup from ${pinned}, and paste it over the process-rules part of the cloud environment's Setup script.`;
+  const file = `${root}/${CLOUD_SETUP_PATH}`;
+  const scripted = sys.exists(file) ? cloudScriptVersion(sys.read(file)) : undefined;
+  if (scripted === undefined) {
+    if (!pinned || pinned === installed) return undefined;
+    return `process-rules: this cloud session runs process-rules ${installed}, but ${WORKFLOW_PATH} pins v${pinned}, and the repo has no ${CLOUD_SETUP_PATH} to install it from. Run process-rules onboard again, which writes it; then paste what process-rules cloud-setup prints over the process-rules part of the cloud environment's Setup script, once.`;
+  }
+  if (pinned && pinned !== scripted) {
+    return `process-rules: ${CLOUD_SETUP_PATH} installs process-rules ${scripted}, but ${WORKFLOW_PATH} pins v${pinned}. Run process-rules onboard again, which writes the file at the pin.`;
+  }
+  if (scripted === installed) return undefined;
+  const ran = sys.exec('bash', [file], { input: '', timeoutMs: CLOUD_INSTALL_MS });
+  const paste = sys.exists(FROM_SETUP)
+    ? ''
+    : ` The cloud environment's Setup script installs a release of its own: paste what process-rules cloud-setup prints over its process-rules part, once, and new releases then need no paste.`;
+  if (ran.code !== 0) {
+    const why = ran.stderr.trim().split('\n').at(-1) || `exit ${ran.code}`;
+    return `process-rules: this cloud session runs process-rules ${installed}, but ${CLOUD_SETUP_PATH} installs ${scripted}, and running it failed (${why}); the session works on with ${installed}.${paste}`;
+  }
+  return `process-rules: this cloud session's environment held process-rules ${installed}; installed ${scripted} from ${CLOUD_SETUP_PATH}, as the repo pins, for this session. The environment catches up when Claude builds it again.${paste}`;
 }
 
 /**

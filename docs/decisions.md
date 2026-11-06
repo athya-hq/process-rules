@@ -698,3 +698,46 @@
   agent check, the record for the guard and the exit code are unchanged,
   and a missing or unreadable workflow, or one pinning no single version,
   says nothing, as `onboard` and `doctor` own the workflow itself.
+- **2026-11-06 — Record: onboard sets up cloud sessions, with one paste
+  (State #165 of P-22).** The owner asked whether `onboard` should set up
+  cloud sessions too: every release meant pasting `cloud-setup`'s output
+  again, as it named a version, and a client's Setup field had stayed at
+  0.5.19 while its workflow pinned 0.5.20. Claude Code has no API, CLI or
+  repo file for a cloud environment's Setup script (its cloud environments
+  docs: it is edited in claude.ai's environment dialog alone), so `onboard`
+  cannot write the field. Instead the version moves into a file the repo
+  owns: `onboard` writes `.github/process-rules/cloud-setup.sh` at the
+  version the workflow pins, on every run, with the CLI's download checked
+  against the sha256 GitHub records for the release archive, as Node's
+  already is; and `cloud-setup` prints a snippet naming no version, which
+  runs that file from the clone, so the field is pasted once. A client's
+  own cloud work found the Setup script runs as root once the repo is
+  cloned, from the VM's home, with the clone one folder down; the snippet
+  looks there, in the clone and in each home. The docs say Claude keeps a
+  snapshot of the environment and builds it again only when the Setup
+  script changes or after about a week, so a stable paste alone would
+  leave sessions on the old CLI after a pin bump: a cloud session's
+  `session-start` runs the repo's file itself when its CLI is another
+  release, and says so. Each release unpacks into a folder of its own, so
+  the CLI that runs the install is not deleted under it. The snippet marks
+  its run in `/opt/process-rules/from-setup`; without the mark, the field
+  still holds an older paste, and the line asks for the one paste. Its
+  warnings now say to run `onboard` again, not to paste again. The onboard
+  pull request's work-rules pass, for the files onboard writes, covers the
+  new file. Rejected: a SessionStart hook alone (the docs keep tool
+  installs in the Setup script, which the snapshot caches), and a stamp
+  that asks for a re-paste (what a client built for itself, which still
+  needs the owner after each release).
+- **2026-11-06 — Record: onboard keeps refusing a Mac `machine` has not
+  set up.** Asked whether `onboard` should offer the `machine` step in its
+  own plan instead. It should not: `machine` asks for the agent's classic
+  token, pasted hidden, from a token page the owner opens signed in as the
+  agent, then makes the agent's signing key and registers it, and asks its
+  own questions about the owner's `gh` logins and git password; `onboard
+  --yes`, or a run with no terminal, can answer none of these, and its one
+  plan holds one yes. `machine` works once per Mac and agent account and
+  needs no client repo (2026-10-30), while `onboard` is per repo. Both stay
+  the owner's: `onboard` refuses in an agent session, and only the owner
+  holds the token and the key. So `onboard` refuses as before, and now
+  names what is missing (no token stored, the token's problem, or the
+  key's), then the `machine` command to run.

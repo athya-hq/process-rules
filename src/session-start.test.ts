@@ -7,10 +7,11 @@ import { after, describe, it } from 'node:test';
 
 import { BASE_ENV, NO_TOKEN, lockScript, pathsFor, sessionNames, sessionRecord, sessionScript } from './agent.ts';
 import { AGENT, AGENT_ID, FakeSys, HOME, ROOT, capture } from './fake.test.ts';
-import { PROXY_TOKEN } from './cloud.ts';
+import { FROM_SETUP, PROXY_TOKEN, cloudRepoScript } from './cloud.ts';
+import { CLOUD_SETUP_PATH } from './onboard-pull.ts';
 import { OLDER_PRE_PUSH_HOOKS, PRE_PUSH_HOOK, workflow } from './onboard.ts';
 import { packageVersion } from './version.ts';
-import { AUTO_FIX, sessionStart } from './session-start.ts';
+import { AUTO_FIX, CLOUD_INSTALL_MS, sessionStart } from './session-start.ts';
 
 const OWNER_LOGIN = 'example-owner';
 
@@ -154,22 +155,87 @@ describe('sessionStart', () => {
       assert.equal(sys.files.get(ENV), undefined, 'the lock stays');
     });
 
-    it("says, warning only, when the installed CLI is not the version the repo's workflow pins", async () => {
-      const pinned = (version: string, login: string | null = AGENT): FakeSys => {
+    describe("when the installed CLI is not the release the repo pins", () => {
+      const WORKS = 'process-rules: this cloud session works as ExampleBot on GitHub.';
+      const CLOUD_FILE = `${ROOT}/${CLOUD_SETUP_PATH}`;
+      const v = packageVersion();
+      /** A cloud session in a repo whose workflow pins `pin` and whose cloud setup file, when given, installs `file`. */
+      const repoAt = (pin: string, file?: string, login: string | null = AGENT): FakeSys => {
         const sys = cloud(login);
-        sys.files.set(`${ROOT}/.github/workflows/process-rules.yml`, workflow('main', version, false));
+        sys.files.set(`${ROOT}/.github/workflows/process-rules.yml`, workflow('main', pin, false));
+        if (file) sys.files.set(CLOUD_FILE, cloudRepoScript(file, 'ab'.repeat(32)));
+        sys.execOverride = installed;
         return sys;
       };
-      const same = pinned(packageVersion());
-      assert.deepEqual((await start(same)).out, ['process-rules: this cloud session works as ExampleBot on GitHub.']);
-      const drift = `process-rules: this cloud session runs process-rules ${packageVersion()}, but .github/workflows/process-rules.yml pins v0.0.1. Print the Setup script again with process-rules cloud-setup from 0.0.1, and paste it over the process-rules part of the cloud environment's Setup script.`;
-      const older = pinned('0.0.1');
-      assert.deepEqual((await start(older)).out, ['process-rules: this cloud session works as ExampleBot on GitHub.', drift]);
-      assert.equal(older.files.get(RECORD), '{"agent":"ExampleBot"}\n', 'it never blocks');
-      const stopped = pinned('0.0.1', OWNER_LOGIN);
-      const { out } = await start(stopped);
-      assert.deepEqual(out.slice(1), [drift]);
-      assert.deepEqual(JSON.parse(stopped.files.get(RECORD) ?? ''), { problem: out[0] }, 'the STOP alone is the problem');
+      const installs = (sys: FakeSys) => sys.calls.filter((call) => call.command === 'bash');
+      /** The cloud setup file, run, installs its release. */
+      const installed = (call: { command: string }) => (call.command === 'bash' ? { code: 0, stdout: '0.0.1\n', stderr: '' } : undefined);
+
+      it('says nothing when every version agrees', async () => {
+        const same = repoAt(v, v);
+        assert.deepEqual((await start(same)).out, [WORKS]);
+        assert.deepEqual(installs(same), []);
+        assert.deepEqual((await start(repoAt(v))).out, [WORKS], 'no file, and nothing to install');
+      });
+
+      it("installs the repo's release from its cloud setup file, for this session, and says so", async () => {
+        const sys = repoAt('0.0.1', '0.0.1');
+        sys.files.set(FROM_SETUP, '');
+        const { out } = await start(sys);
+        assert.deepEqual(out, [
+          WORKS,
+          `process-rules: this cloud session's environment held process-rules ${v}; installed 0.0.1 from ${CLOUD_SETUP_PATH}, as the repo pins, for this session. The environment catches up when Claude builds it again.`,
+        ]);
+        assert.deepEqual(installs(sys).map((call) => [call.args, call.timeoutMs]), [[[CLOUD_FILE], CLOUD_INSTALL_MS]]);
+        assert.equal(sys.files.get(RECORD), '{"agent":"ExampleBot"}\n', 'it never blocks');
+      });
+
+      it('names the one paste when the Setup script installs a release of its own', async () => {
+        const sys = repoAt('0.0.1', '0.0.1');
+        assert.deepEqual((await start(sys)).out.slice(1), [
+          `process-rules: this cloud session's environment held process-rules ${v}; installed 0.0.1 from ${CLOUD_SETUP_PATH}, as the repo pins, for this session. The environment catches up when Claude builds it again. The cloud environment's Setup script installs a release of its own: paste what process-rules cloud-setup prints over its process-rules part, once, and new releases then need no paste.`,
+        ]);
+      });
+
+      it('says so when the install fails, and works on', async () => {
+        const sys = repoAt('0.0.1', '0.0.1');
+        sys.files.set(FROM_SETUP, '');
+        sys.execOverride = (call) => (call.command === 'bash' ? { code: 22, stdout: '', stderr: 'downloading\ncurl: (22) The requested URL returned error: 404\n' } : undefined);
+        assert.deepEqual((await start(sys)).out.slice(1), [
+          `process-rules: this cloud session runs process-rules ${v}, but ${CLOUD_SETUP_PATH} installs 0.0.1, and running it failed (curl: (22) The requested URL returned error: 404); the session works on with ${v}.`,
+        ]);
+        const silent = repoAt('0.0.1', '0.0.1');
+        silent.files.set(FROM_SETUP, '');
+        silent.execOverride = (call) => (call.command === 'bash' ? { code: 1, stdout: '', stderr: '' } : undefined);
+        assert.match((await start(silent)).out[1] ?? '', /running it failed \(exit 1\)/);
+      });
+
+      it('says to run onboard again, not to paste, when the cloud setup file is missing or not at the pin', async () => {
+        const missing = repoAt('0.0.1');
+        assert.deepEqual((await start(missing)).out.slice(1), [
+          `process-rules: this cloud session runs process-rules ${v}, but .github/workflows/process-rules.yml pins v0.0.1, and the repo has no ${CLOUD_SETUP_PATH} to install it from. Run process-rules onboard again, which writes it; then paste what process-rules cloud-setup prints over the process-rules part of the cloud environment's Setup script, once.`,
+        ]);
+        const behind = repoAt('0.0.2', '0.0.1');
+        assert.deepEqual((await start(behind)).out.slice(1), [
+          `process-rules: ${CLOUD_SETUP_PATH} installs process-rules 0.0.1, but .github/workflows/process-rules.yml pins v0.0.2. Run process-rules onboard again, which writes the file at the pin.`,
+        ]);
+        assert.deepEqual([...installs(missing), ...installs(behind)], [], 'nothing installed from a file that is not at the pin');
+        const stopped = repoAt('0.0.1', undefined, OWNER_LOGIN);
+        const { out } = await start(stopped);
+        assert.equal(out.length, 2);
+        assert.deepEqual(JSON.parse(stopped.files.get(RECORD) ?? ''), { problem: out[0] }, 'the STOP alone is the problem');
+      });
+
+      it("installs from the file when the workflow pins none, and reads a file that is not onboard's as none", async () => {
+        const unpinned = cloud(AGENT);
+        unpinned.files.set(CLOUD_FILE, cloudRepoScript('0.0.1', 'ab'.repeat(32)));
+        unpinned.execOverride = installed;
+        assert.equal((await start(unpinned)).out.length, 2);
+        assert.equal(installs(unpinned).length, 1);
+        const own = repoAt(v);
+        own.files.set(CLOUD_FILE, '#!/bin/bash\necho ours\n');
+        assert.deepEqual((await start(own)).out, [WORKS]);
+      });
     });
 
     it("says nothing of versions without the repo's workflow, or when it pins none or several", async () => {

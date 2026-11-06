@@ -7,7 +7,9 @@ import { after, describe, it } from 'node:test';
 
 import { BUILT_IN, Board, COPY_URL, OWNER_TOKEN, URL, repoJson, settledViews } from './fake-board.test.ts';
 import { FIELDS, ISSUE_TYPES, LABELS } from './board.ts';
-import { AGENT, AGENT_ID, FakeSys, HOME, PULL_URL, ROOT, TOKEN, capture } from './fake.test.ts';
+import { AGENT, AGENT_ID, FakeSys, HOME, PULL_URL, RELEASE_SHA256, ROOT, TOKEN, capture } from './fake.test.ts';
+import { cloudRepoScript } from './cloud.ts';
+import { CLOUD_SETUP_PATH } from './onboard-pull.ts';
 import type { HttpResult } from './types.ts';
 import { pathsFor, sessionScript } from './agent.ts';
 import { FEATURES } from './features.ts';
@@ -78,6 +80,10 @@ async function run(sys: FakeSys, named: string[] = ['example-owner', AGENT]): Pr
 }
 
 /** The plan's items under the group whose title starts with `title`: "label: detail", or the label alone. */
+/** The repo's cloud setup file, as this release writes it. */
+const CLOUD = `${ROOT}/${CLOUD_SETUP_PATH}`;
+const CLOUD_FILE = cloudRepoScript(packageVersion(), RELEASE_SHA256);
+
 function planned(out: string[], title: string): string[] {
   const start = out.findIndex((line) => line.startsWith(`◇  ${title}`));
   if (start === -1) return [];
@@ -130,6 +136,7 @@ describe('onboard', () => {
       `│    process-rules.json  new, ${FEATURES.length} features on`,
       '│    settings.json       new',
       '│    workflow            new',
+      `│    cloud-setup.sh      new, installs v${packageVersion()}`,
       '│    auto-merge          when checks pass',
       '│',
       '◇  GitHub — one sign-in as example-owner',
@@ -138,6 +145,10 @@ describe('onboard', () => {
       '│',
       '◇  This Mac',
       '│    pre-push hook  new',
+      '│',
+      '◇  Claude cloud — by hand, once',
+      '│    Setup script        process-rules cloud-setup, first',
+      "│    claude.ai's GitHub  as ExampleBot",
       '│',
       '◇  Check',
       '│    one signed test commit by ExampleBot, deleted after',
@@ -154,7 +165,7 @@ describe('onboard', () => {
       '',
       'By hand:',
       `  review routine → https://github.com/athya-hq/process-rules/blob/v${v}/routines/review.md`,
-      "  cloud sessions: claude.ai's GitHub as ExampleBot, Setup script from process-rules cloud-setup, first if the repo has its own",
+      "  cloud sessions, once: claude.ai's GitHub as ExampleBot, Setup script from process-rules cloud-setup, first",
     ]);
     assert.deepEqual(sys.chosen, ['Go ahead?'], 'one question');
     assert.deepEqual(sys.opened, ['https://github.com/login/device'], 'the browser opens at the sign-in');
@@ -172,7 +183,7 @@ describe('onboard', () => {
       'init -q',
       'fetch -q',
       'read-tree FETCH_HEAD',
-      ...['settings', 'hooks', 'workflow'].flatMap(() => ['rev-parse --verify', 'hash-object -w', 'update-index --add']),
+      ...['settings', 'hooks', 'cloud setup', 'workflow'].flatMap(() => ['rev-parse --verify', 'hash-object -w', 'update-index --add']),
       'write-tree --missing-ok',
       'commit-tree -S',
       'push -q',
@@ -181,7 +192,8 @@ describe('onboard', () => {
     assert.ok(git.slice(6).every((c) => c.cwd === '/tmp/process-rules-2'), 'the pull request is made in a temporary repository');
     assert.deepEqual(git.at(-1)?.args, ['push', '-q', 'https://github.com/example-org/example-app.git', '+abc123:refs/heads/process-rules/onboard']);
     assert.ok(sys.removed.includes('/tmp/process-rules-2'), 'the temporary repository is deleted');
-    assert.deepEqual([...sys.committed.keys()], ['.github/process-rules.json', '.claude/settings.json', '.github/workflows/process-rules.yml']);
+    assert.deepEqual([...sys.committed.keys()], ['.github/process-rules.json', '.claude/settings.json', CLOUD_SETUP_PATH, '.github/workflows/process-rules.yml']);
+    assert.equal(sys.committed.get(CLOUD_SETUP_PATH), cloudRepoScript(v, RELEASE_SHA256), 'the cloud setup file, at the pin, checked against the release');
     const pull = sys.requests.find((r) => r.method === 'POST' && r.url.endsWith(`${REPO}/pulls`));
     assert.equal(pull?.token, TOKEN, 'the agent opens the pull request');
     const { title, head, base, body } = pull?.body as { title: string; head: string; base: string; body: string };
@@ -195,7 +207,13 @@ describe('onboard', () => {
     assert.ok(body.includes('\n- pre-push hook:\n  - wrote the pre-push git hook .git/hooks/pre-push, which checks an agent session pushes to GitHub as the agent, and the work rules\n'), body);
     assert.ok(body.includes('\n  - committer: ExampleBot; verified: true (valid)\n  - GitHub shows the test commit Verified by ExampleBot\n'), body);
     assert.ok(body.includes('\nLeft to do by hand:\n\n- The review routine: create a weekly Claude routine on example-org/example-app'), body);
-    assert.ok(body.includes(`\n- Claude cloud sessions: connect claude.ai's GitHub as ExampleBot, and put what process-rules cloud-setup prints in the cloud environment's Setup script. ${SETUP_FIRST}\n`), body);
+    assert.ok(
+      body.includes(
+        `\n- Claude cloud sessions, once: connect claude.ai's GitHub as ExampleBot, and paste what process-rules cloud-setup prints into the cloud environment's Setup script, over any older process-rules part. It runs ${CLOUD_SETUP_PATH}, which onboard keeps at the pin, so a new release needs no new paste. ${SETUP_FIRST}\n`,
+      ),
+      body,
+    );
+    assert.ok(body.includes(`\n- \`${CLOUD_SETUP_PATH}\`: installs process-rules ${packageVersion()} in Claude cloud sessions, its download checked against its sha256\n`), body);
     assert.ok(!body.includes('Finish the Project'), 'a copy of the template leaves nothing to do by hand');
     assert.deepEqual(sys.calls.filter((c) => c.command === 'rm').at(-1)?.args, ['-rf', '/tmp/verify']);
     const reads = sys.requests.filter((r) => r.url === `https://api.github.com${REPO}`);
@@ -215,6 +233,7 @@ describe('onboard', () => {
     sys.files.set(HOOKS, JSON.stringify(CLAUDE));
     sys.files.set(WORKFLOW, workflow('main', packageVersion(), true));
     sys.files.set(PRE_PUSH, PRE_PUSH_HOOK);
+    sys.files.set(CLOUD, CLOUD_FILE);
     const board = new Board(sys);
     board.issueTypes = ISSUE_TYPES.map((t) => t.name);
     board.labels = LABELS.map((l) => l.name);
@@ -224,10 +243,58 @@ describe('onboard', () => {
     assert.deepEqual(sys.chosen, ['Go ahead?']);
     assert.deepEqual(planned(out, 'Pull request'), [], 'no file to change');
     assert.deepEqual(planned(out, 'This Mac'), [], 'the pre-push hook is there');
+    assert.deepEqual(planned(out, 'Claude cloud — by hand, once'), [], 'the cloud setup file is there, so the Setup script was pasted');
     assert.deepEqual(planned(out, 'GitHub'), ['board: set up or check', 'issue types: org-wide, if missing']);
     assert.ok(!sys.requests.some((r) => r.url.endsWith('/pulls')), 'nothing to change, no pull request');
     assert.ok(!sys.calls.some((c) => c.args[0] === 'read-tree'));
     assert.ok(out.includes('└  Done; no file changes, so no pull request.'), out.join('\n'));
+  });
+
+  it('keeps the cloud setup file at the pin, asking for the Setup script paste only the first time', async () => {
+    const settled = (sys: FakeSys): void => {
+      sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity'] }));
+      sys.files.set(HOOKS, JSON.stringify(CLAUDE));
+      sys.files.set(PRE_PUSH, PRE_PUSH_HOOK);
+    };
+    const older = fresh();
+    settled(older);
+    older.files.set(CLOUD, cloudRepoScript('0.5.2', 'cd'.repeat(32)));
+    const upgraded = await run(older, []);
+    assert.equal(upgraded.code, 0);
+    assert.deepEqual(planned(upgraded.out, 'Pull request'), [`cloud-setup.sh: v0.5.2 → v${packageVersion()}`, 'auto-merge: when checks pass']);
+    assert.deepEqual(planned(upgraded.out, 'Claude cloud — by hand, once'), [], 'pasted before: the snippet runs the file');
+    assert.deepEqual(byHand(upgraded.out), []);
+    assert.equal(older.committed.get(CLOUD_SETUP_PATH), CLOUD_FILE);
+
+    const edited = fresh();
+    settled(edited);
+    edited.files.set(CLOUD, `${CLOUD_FILE}echo ours\n`);
+    assert.deepEqual(planned((await run(edited, [])).out, 'Pull request'), ['cloud-setup.sh: written again', 'auto-merge: when checks pass']);
+    assert.equal(edited.committed.get(CLOUD_SETUP_PATH), CLOUD_FILE);
+
+    const unreleased = fresh();
+    settled(unreleased);
+    unreleased.route('GET', `/repos/athya-hq/process-rules/releases/tags/v${packageVersion()}`, { status: 404, json: { message: 'Not Found' } });
+    const left = await run(unreleased, []);
+    assert.equal(left.code, 0);
+    assert.ok(left.out.includes(`│  ! ${CLOUD_SETUP_PATH} left as it is: GitHub answered HTTP 404 for the v${packageVersion()} release`), left.out.join('\n'));
+    assert.deepEqual(planned(left.out, 'Pull request'), []);
+    assert.deepEqual(planned(left.out, 'Claude cloud — by hand, once'), [], 'no file for the snippet to run, so no paste');
+
+    const undigested = fresh();
+    settled(undigested);
+    undigested.route('GET', `/repos/athya-hq/process-rules/releases/tags/v${packageVersion()}`, { status: 200, json: { assets: [{ name: `athya-hq-process-rules-${packageVersion()}.tgz`, digest: null }] } });
+    assert.ok((await run(undigested, ['--dry-run'])).out.includes(`│  ! ${CLOUD_SETUP_PATH} left as it is: the v${packageVersion()} release names no sha256 for athya-hq-process-rules-${packageVersion()}.tgz`));
+
+    const down = fresh();
+    settled(down);
+    const http = down.http.bind(down);
+    down.http = (url, options) => (url.includes('/releases/tags/') ? Promise.reject(new Error('GET api.github.com/repos could not be made: ECONNRESET')) : http(url, options));
+    assert.ok(
+      (await run(down, ['--dry-run'])).out.includes(
+        `│  ! ${CLOUD_SETUP_PATH} left as it is: GitHub could not be asked for the v${packageVersion()} release (GET api.github.com/repos could not be made: ECONNRESET)`,
+      ),
+    );
   });
 
   it('leaves CODEOWNERS as it is, naming the owner or not, and asks nothing about it', async () => {
@@ -633,7 +700,7 @@ describe('onboard', () => {
       'a Mac not set up for the agent',
       ['example-owner', AGENT],
       (sys: FakeSys) => sys.keychain.clear(),
-      'onboard: this Mac is not set up for ExampleBot; run process-rules machine ExampleBot, then onboard again',
+      'onboard: this Mac is not set up for ExampleBot (no token stored for ExampleBot); run process-rules machine ExampleBot, then onboard again',
     ],
   ] as const) {
     it(`refuses ${name}`, async () => {
@@ -1132,16 +1199,17 @@ describe('staged adoption', () => {
     assert.deepEqual(JSON.parse(repo(sys).get(SETTINGS) ?? '').features, ['identity']);
     assert.ok(repo(sys).has(HOOKS));
     assert.ok(!repo(sys).has(WORKFLOW));
+    assert.ok(repo(sys).has(CLOUD), 'cloud sessions, for every adopter');
     assert.equal(sys.files.get(PRE_PUSH), PRE_PUSH_HOOK, 'the identity guard, for every adopter');
     const boardRequest = (r: { url: string; body?: unknown }): boolean =>
       (r.url.endsWith('/graphql') && !JSON.stringify(r.body).includes('enablePullRequestAutoMerge')) || r.url.includes('/labels') || r.url.includes('/issue-types');
     assert.ok(!sys.requests.some(boardRequest), 'no board');
-    assert.deepEqual(planned(out, 'Pull request'), ['process-rules.json: new, 1 feature on', 'settings.json: new', 'auto-merge: when checks pass']);
+    assert.deepEqual(planned(out, 'Pull request'), ['process-rules.json: new, 1 feature on', 'settings.json: new', `cloud-setup.sh: new, installs v${packageVersion()}`, 'auto-merge: when checks pass']);
     assert.deepEqual(planned(out, 'GitHub'), [], 'no board, and the agent can push');
     assert.deepEqual(planned(out, 'This Mac'), ['pre-push hook: new']);
     assert.ok(out.includes(`└  ${PULL_URL}  merges itself when checks pass`));
-    assert.deepEqual([...sys.committed.keys()], ['.github/process-rules.json', '.claude/settings.json']);
-    assert.deepEqual(byHand(out), ["cloud sessions: claude.ai's GitHub as ExampleBot, Setup script from process-rules cloud-setup, first if the repo has its own"]);
+    assert.deepEqual([...sys.committed.keys()], ['.github/process-rules.json', '.claude/settings.json', CLOUD_SETUP_PATH]);
+    assert.deepEqual(byHand(out), ["cloud sessions, once: claude.ai's GitHub as ExampleBot, Setup script from process-rules cloud-setup, first"]);
     assert.deepEqual(sys.chosen, ['Go ahead?']);
   });
 
@@ -1160,7 +1228,7 @@ describe('staged adoption', () => {
       project: 'Example work',
       note: 'kept',
     });
-    assert.deepEqual(planned(out, 'Pull request'), ['process-rules.json: turn board on', 'auto-merge: when checks pass']);
+    assert.deepEqual(planned(out, 'Pull request'), ['process-rules.json: turn board on', `cloud-setup.sh: new, installs v${packageVersion()}`, 'auto-merge: when checks pass']);
     assert.ok(planned(out, 'GitHub — one sign-in as example-owner').includes('board: set up or check'));
     assert.ok(!repo(sys).has(WORKFLOW), 'board alone needs no workflow');
   });
@@ -1173,7 +1241,7 @@ describe('staged adoption', () => {
     const pair = await actionsKey(sys);
     const { code, out, err } = await run(sys);
     assert.deepEqual([code, err], [0, []]);
-    assert.deepEqual(planned(out, 'Pull request'), ['process-rules.json: design → figma, figma key out', 'workflow: new', 'auto-merge: when checks pass']);
+    assert.deepEqual(planned(out, 'Pull request'), ['process-rules.json: design → figma, figma key out', 'workflow: new', `cloud-setup.sh: new, installs v${packageVersion()}`, 'auto-merge: when checks pass']);
     assert.deepEqual(planned(out, 'GitHub — one sign-in as example-owner'), ['FIGMA_LIBRARY secret']);
     assert.match(
       opened(sys)?.body ?? '',
@@ -1294,6 +1362,7 @@ describe('staged adoption', () => {
     sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity', 'pr-identity'] }));
     sys.files.set(WORKFLOW, workflow('main', packageVersion(), false));
     sys.files.set(PRE_PUSH, PRE_PUSH_HOOK);
+    sys.files.set(CLOUD, CLOUD_FILE);
     const before = repo(sys).get(SETTINGS);
     const { out } = await run(sys, ['--add', 'pr-identity']);
     assert.deepEqual(planned(out, 'Pull request'), []);
@@ -1408,7 +1477,14 @@ describe('the plan and its one question', () => {
     assert.deepEqual({ code, err }, { code: 0, err: [] });
     assert.deepEqual(sys.chosen, []);
     assert.equal(out[0], `◆  process-rules onboard   v${packageVersion()}`);
-    assert.deepEqual(planned(out, 'Pull request'), [`process-rules.json: new, ${FEATURES.length} features on`, 'settings.json: new', 'workflow: new', 'auto-merge: when checks pass']);
+    assert.deepEqual(planned(out, 'Pull request'), [
+      `process-rules.json: new, ${FEATURES.length} features on`,
+      'settings.json: new',
+      'workflow: new',
+      `cloud-setup.sh: new, installs v${packageVersion()}`,
+      'auto-merge: when checks pass',
+    ]);
+    assert.deepEqual(planned(out, 'Claude cloud — by hand, once'), ['Setup script: process-rules cloud-setup, first', `claude.ai's GitHub: as ${AGENT}`]);
     assert.equal(out.at(-1), '└  Dry run: nothing changed.');
     assert.ok(changedNothing(sys), 'nothing written, pushed or signed in to');
     assert.deepEqual(sys.committed.size, 0);
@@ -1592,6 +1668,7 @@ describe("onboard's pull request", () => {
     sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity'], figma: { library: 'abc' } }));
     sys.files.set(HOOKS, JSON.stringify(CLAUDE));
     sys.files.set(PRE_PUSH, PRE_PUSH_HOOK);
+    sys.files.set(CLOUD, CLOUD_FILE);
     new Board(sys);
     await actionsKey(sys);
     const { code } = await run(sys, ['--add', 'board']);
@@ -1712,6 +1789,7 @@ describe('workflowUpdate', () => {
     sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity', 'work-rules'] }));
     sys.files.set(HOOKS, JSON.stringify(CLAUDE));
     sys.files.set(PRE_PUSH, PRE_PUSH_HOOK);
+    sys.files.set(CLOUD, CLOUD_FILE);
     sys.files.set(WORKFLOW, workflow('main', packageVersion(), true));
     const off = await run(sys);
     assert.deepEqual(planned(off.out, 'Pull request'), ['workflow: no Figma secrets', 'auto-merge: when checks pass']);
@@ -1757,6 +1835,7 @@ describe('workflowUpdate', () => {
     sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, schedule: '30 5 * * 2' }));
     sys.files.set(HOOKS, JSON.stringify(CLAUDE));
     sys.files.set(PRE_PUSH, PRE_PUSH_HOOK);
+    sys.files.set(CLOUD, CLOUD_FILE);
     const own = workflow('main', packageVersion(), true).replace('name: process-rules\n', 'name: process-rules\n# Our own note.\n');
     sys.files.set(WORKFLOW, own);
     const { code, out } = await run(sys, []);
@@ -1861,6 +1940,7 @@ describe('workflowUpdate', () => {
     sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity', 'work-rules'] }));
     sys.files.set(HOOKS, JSON.stringify(CLAUDE));
     sys.files.set(PRE_PUSH, PRE_PUSH_HOOK);
+    sys.files.set(CLOUD, CLOUD_FILE);
     sys.files.set(WORKFLOW, twoJobs('0.5.6', false));
     const { out } = await run(sys);
     assert.deepEqual(planned(out, 'Pull request'), [`workflow: pins → v${packageVersion()}, merged job`, 'auto-merge: when checks pass']);

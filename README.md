@@ -258,6 +258,8 @@ terminal.
 ## Adopting
 
 1. On each Mac that runs agent sessions: `process-rules machine <agent>`.
+   Only you can run it: it asks for the agent's token and makes its signing
+   key. `onboard` refuses on a Mac it has not set up, naming what is missing.
 2. In the client repository, as its owner: `process-rules onboard`. It
    suggests the owner from the run's browser sign-in (below) and the agent from the accounts
    `machine` set up on this Mac, for you to confirm (or name them:
@@ -270,8 +272,9 @@ terminal.
    │  owner/repo · owner OWNER · agent AGENT
    │
    ◇  Pull request
-   │    workflow    pins → v0.5.20
-   │    auto-merge  when checks pass
+   │    workflow        pins → v0.5.20
+   │    cloud-setup.sh  new, installs v0.5.20
+   │    auto-merge      when checks pass
    │
    ◇  GitHub — one sign-in as OWNER
    │    board        set up or check
@@ -279,6 +282,10 @@ terminal.
    │
    ◇  This Mac
    │    pre-push hook  new
+   │
+   ◇  Claude cloud — by hand, once
+   │    Setup script        process-rules cloud-setup, first
+   │    claude.ai's GitHub  as AGENT
    │
    ◇  Check
    │    one signed test commit by AGENT, deleted after
@@ -303,7 +310,11 @@ terminal.
    writes `.github/workflows/process-rules.yml`, which calls this repository's
    shared checks (`.github/workflows/checks.yml`) from two jobs: `process-rules`
    on pull requests and pushes, read-only, and `process-rules-weekly` on the
-   weekly run, the only one that writes to issues. It checks the agent can
+   weekly run, the only one that writes to issues. It writes
+   `.github/process-rules/cloud-setup.sh`, which installs the CLI in Claude
+   cloud sessions at the version the workflow pins, and writes it again on
+   every run (see Claude cloud sessions below); the first time, the plan
+   lists the one paste into the cloud environment's Setup script. It checks the agent can
    push. With no access, or read access only (a public repo, or an
    organisation's base permission), the plan gives it write access as you
    and accepts the invitation as the agent; and `onboard` names
@@ -674,28 +685,42 @@ an agent, so these pass, and GitHub records the agent as having pushed
 them.
 
 The proxy refuses GitHub's GraphQL API, so the work rules and `reviews-due`
-read only its REST API, here and everywhere else. The cloud environment's Setup script,
-which runs as root before each session, installs the CLI:
-`process-rules cloud-setup` prints one for the installed release. It
-unpacks Node, once it matches the sha256 the release pins, and the CLI
-under `/opt/process-rules` and puts
-`process-rules` on `PATH`, leaving the image's own Node alone. The
+read only its REST API, here and everywhere else.
+
+The cloud environment's Setup script, which runs as root once the repo is
+cloned and before Claude Code starts, installs the CLI. Claude Code has no
+API or CLI for that field, so you paste it once, by hand, and it names no
+version: `process-rules cloud-setup` prints a short snippet that finds the
+clone and runs its `.github/process-rules/cloud-setup.sh`. `onboard` writes
+that file in its pull request at the version
+`.github/workflows/process-rules.yml` pins, and writes it again on every
+run, so the pin bump that upgrades the checks upgrades cloud sessions too,
+with no new paste. The Setup script runs from the folder that holds the
+clone (the VM's home, the clone one folder down), so the snippet looks there
+and in each home. The file unpacks Node and the CLI under
+`/opt/process-rules`, each once it matches the sha256 the file pins (Node's
+from this release, the CLI's from GitHub's record of the release archive),
+and puts `process-rules` on `PATH`, leaving the image's own Node alone. The
 environment needs the network to reach nodejs.org and GitHub's release
 downloads.
 
-The Setup field holds one script, so the install runs in a shell of its
-own (`bash <<'PROCESS_RULES' … PROCESS_RULES`): a failed download says so on
-standard error and the commands after it still run. If the repo has its own
-Setup script, put this first, then the repo's own: a repo's script may end
-with `exit`, and nothing after that runs.
+The Setup field holds one script, so the snippet runs in a shell of its
+own (`bash <<'PROCESS_RULES' … PROCESS_RULES`): a failed download, or a
+clone with no such file, says so on standard error and the commands after
+it still run. If the repo has its own Setup script, put this first, then
+the repo's own: a repo's script may end with `exit`, and nothing after that
+runs.
 
-The Setup script installs the release it was printed from, and stays there
-when the repo's workflow moves on. So a cloud session's `session-start`
-compares the two: when the installed CLI is not the version
-`.github/workflows/process-rules.yml` pins in `process-rules-ref`, it says
-so in one line and names the fix, printing `process-rules cloud-setup` again
-from that version and pasting it over the process-rules part of the Setup
-script. It only warns; the session works on.
+Claude keeps a snapshot of the environment once its Setup script has run,
+and builds it again only when the Setup script changes or after about a
+week. So after a pin bump, a cloud session's `session-start` finds its CLI
+is not the release `cloud-setup.sh` installs, runs that file itself, and
+says so in one line; the session goes on with the new CLI, and the snapshot
+catches up on its next build. When the repo has no `cloud-setup.sh` while
+the workflow pins another release, or the file is not at the workflow's
+pin, the line says to run `onboard` again. When the Setup script still
+installs a release of its own (an older paste), the line also says to paste
+the snippet over it, once. It only warns: the session works on.
 
 claude.ai has one GitHub connection per account, so it is the agent's for
 every cloud session that account starts.
