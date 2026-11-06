@@ -22,7 +22,7 @@ import { setUpBoard } from './board.ts';
 import { type OwnerToken, asOwner, isOrganisation, ownerScopes, signInOnce } from './owner-login.ts';
 import { appendToArray, replaceValues, setMember } from './jsonedit.ts';
 import { DEFAULT_SCHEDULE, type Feature, FEATURES, FIGMA_FILE_KEY, NEEDS_ISSUE_TYPES, featuresIn, parseFeatures, renamedLines, scheduleIn } from './features.ts';
-import { type Change, CLOUD_SETUP_PATH, HOOKS_PATH, WORKFLOW_PATH, autoMerge, openPull } from './onboard-pull.ts';
+import { type Change, CLOUD_SETUP_PATH, HOOKS_PATH, WORKFLOW_PATH, autoMerge, mergeQueue, openPull } from './onboard-pull.ts';
 import { cloudRepoScript, cloudScriptVersion, releaseSha256 } from './cloud.ts';
 import { setSecret } from './secrets.ts';
 import { packageVersion } from './version.ts';
@@ -1022,6 +1022,8 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
   let pullUrl: string | undefined;
   // Whether the pull request merges itself once its checks pass.
   let merging = false;
+  // A Mergify merge queue merges it, so GitHub's auto-merge is neither turned on nor asked for.
+  const queue = mergeQueue(fileAt);
   steps.push({
     label: 'pull request',
     async run(out) {
@@ -1044,6 +1046,10 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
       const opened = await openPull(sys, out, { agent, id, token, slug, branch: reach.branch, version }, changed, described);
       if (opened === 1) return false;
       pullUrl = opened.url;
+      if (queue !== undefined) {
+        merging = true;
+        return true;
+      }
       // Not turning it on fails nothing: the owner merges it instead.
       // A request that gets no answer is a refusal like any other: the pull request is open either way.
       const refused = await autoMerge(sys, slug, token, opened.id).catch((error: unknown) => ({
@@ -1060,8 +1066,11 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
   const signedAs = signedIn && (await signedIn);
   const asOwnerItems = steps.some((step) => step.owner);
   const groups = [
-    // It merges itself, as the agent turns auto-merge on, unless the repository does not allow it.
-    { title: 'Pull request', items: pull.length > 0 ? [...pull, { label: 'auto-merge', detail: 'when checks pass' }] : [] },
+    // It merges itself, through the repository's merge queue, or as the agent turns auto-merge on, unless the repository does not allow it.
+    {
+      title: 'Pull request',
+      items: pull.length > 0 ? [...pull, queue !== undefined ? { label: 'merge queue', detail: 'Mergify, when checks pass' } : { label: 'auto-merge', detail: 'when checks pass' }] : [],
+    },
     { title: asOwnerItems ? (signedAs && 'login' in signedAs ? `GitHub — signed in as ${signedAs.login}` : `GitHub — one sign-in as ${owner}`) : 'GitHub', items: github },
     { title: 'This Mac', items: mac },
     { title: 'Claude cloud — by hand, once', items: cloud },
@@ -1087,7 +1096,7 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     }
     if (log.length > 0) notes.push(`- ${step.label}:`, ...log.map((line) => `  - ${line.trim().replace(/^[✓-] /, '')}`));
   }
-  io.out(closing(paint, `${!pullUrl ? 'Done; no file changes, so no pull request.' : merging ? `${pullUrl}  merges itself when checks pass` : `Merge ${pullUrl}`}`));
+  io.out(closing(paint, `${!pullUrl ? 'Done; no file changes, so no pull request.' : merging ? `${pullUrl}  ${queue !== undefined ? 'the merge queue merges it' : 'merges itself'} when checks pass` : `Merge ${pullUrl}`}`));
   io.out('');
   io.out('By hand:');
   for (const line of byHand) io.out(`  ${line}`);

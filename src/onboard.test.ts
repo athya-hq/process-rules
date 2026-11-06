@@ -1436,6 +1436,34 @@ describe('the plan and its one question', () => {
     assert.deepEqual(squashing.autoMerge, { id: 'PR_7', method: 'SQUASH' }, 'squash when GitHub does not say otherwise');
   });
 
+  it("titles the pull request and its commit in the default branch's style: an emoji first when its subjects have one", async () => {
+    const sys = fresh();
+    const subjects = ['✨ feat(app): a (#9)', '🔥 chore(tooling): b (#8)', '🔧 chore(process-rules): onboard at v0.5.1 (#7)', 'Merge pull request #6 from example-org/x'];
+    sys.route('GET', `${REPO}/commits?sha=main&per_page=20`, { status: 200, json: subjects.map((message) => ({ commit: { message: `${message}\n\nbody` } })) });
+    const { code, err } = await run(sys);
+    assert.deepEqual({ code, err }, { code: 0, err: [] });
+    const title = `🔧 chore(process-rules): onboard at v${packageVersion()}`;
+    assert.equal(opened(sys)?.title, title);
+    const commit = sys.calls.find((c) => c.command === 'git' && c.args[0] === 'commit-tree' && c.cwd === '/tmp/process-rules-2');
+    assert.deepEqual(commit?.args.slice(-2), ['-m', title], 'the commit header is the title');
+    assert.equal(sys.requests.find((r) => r.url.includes('/commits?'))?.token, TOKEN, 'asked as the agent');
+  });
+
+  it('lets a Mergify merge queue merge it, without asking the owner to turn auto-merge on', async () => {
+    const sys = fresh();
+    const board = new Board(sys);
+    sys.route('GET', REPO, { status: 200, json: { ...repoJson(), allow_auto_merge: false } });
+    sys.files.set(`${ROOT}/.mergify.yml`, 'queue_rules:\n  - name: default\n    merge_method: squash\n');
+    const { code, out, err } = await run(sys);
+    assert.deepEqual({ code, err }, { code: 0, err: [] });
+    assert.ok(planned(out, 'Pull request').includes('merge queue: Mergify, when checks pass'), out.join('\n'));
+    assert.ok(!planned(out, 'Pull request').some((item) => item.startsWith('auto-merge')));
+    assert.equal(board.autoMerge, undefined, "GitHub's auto-merge is left to the queue");
+    assert.ok(!sys.requests.some((r) => JSON.stringify(r.body ?? '').includes('enablePullRequestAutoMerge')));
+    assert.ok(out.includes(`└  ${PULL_URL}  the merge queue merges it when checks pass`), out.join('\n'));
+    assert.ok(!byHand(out).some((line) => line.startsWith('auto-merge')), byHand(out).join('\n'));
+  });
+
   it('asks the owner to merge it when the repository does not allow auto-merge, or GitHub refuses it', async () => {
     const off = fresh();
     const board = new Board(off);

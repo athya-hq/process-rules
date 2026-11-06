@@ -11,9 +11,54 @@ export const CLOUD_SETUP_PATH = '.github/process-rules/cloud-setup.sh';
 /** Every file onboard's pull request may change. */
 export const ONBOARD_FILES = [SETTINGS_PATH, HOOKS_PATH, WORKFLOW_PATH, CLOUD_SETUP_PATH];
 
-/** onboard's commit header and pull request title: Conventional Commits, scoped to the product. */
-export function pullTitle(version: string): string {
-  return `chore(process-rules): onboard at v${version}`;
+/** A subject's leading emoji, or gitmoji shortcode, and the rest of it. */
+const LEADING_EMOJI = /^((?:\p{Extended_Pictographic}|\p{Regional_Indicator})(?:️|‍\p{Extended_Pictographic})*️?|:[a-z0-9_+-]+:)\s+(.*)$/u;
+
+/**
+ * onboard's commit header and pull request title: Conventional Commits,
+ * scoped to the product, in the style of `recent`, the default branch's
+ * latest commit subjects. When most of them lead with an emoji (gitmoji),
+ * so does the title: the one an earlier onboard commit had, else the one the
+ * repository puts most on chores, else gitmoji's for configuration. Merge
+ * commits are git's own words, so they count for neither style.
+ */
+export function pullTitle(version: string, recent: readonly string[] = []): string {
+  const title = `chore(process-rules): onboard at v${version}`;
+  const subjects = recent.filter((subject) => !subject.startsWith('Merge '));
+  const led = subjects.flatMap((subject) => {
+    const match = LEADING_EMOJI.exec(subject);
+    return match ? [{ emoji: match[1] as string, rest: match[2] as string }] : [];
+  });
+  if (led.length * 2 <= subjects.length) return title;
+  const before = led.find((one) => one.rest.startsWith('chore(process-rules)'))?.emoji;
+  const counts = new Map<string, number>();
+  for (const { emoji, rest } of led) if (/^chore\b/.test(rest)) counts.set(emoji, (counts.get(emoji) ?? 0) + 1);
+  const most = [...counts].sort((a, b) => b[1] - a[1])[0]?.[0];
+  const shortcodes = led.filter((one) => one.emoji.startsWith(':')).length * 2 > led.length;
+  return `${before ?? most ?? (shortcodes ? ':wrench:' : '🔧')} ${title}`;
+}
+
+/** Where Mergify reads its configuration from, in the order it looks. */
+export const MERGIFY_PATHS = ['.mergify.yml', '.mergify/config.yml', '.github/mergify.yml'];
+
+/**
+ * The Mergify configuration, by its path, that has a merge queue rule: the
+ * queue then merges onboard's pull request, so GitHub's auto-merge is not
+ * needed. Undefined when the repository has none. A top-level
+ * `queue_rules` holding at least one rule, block or flow style, is enough.
+ */
+export function mergeQueue(read: (path: string) => string | undefined): string | undefined {
+  return MERGIFY_PATHS.find((path) => {
+    const text = read(path);
+    if (text === undefined) return false;
+    const lines = text.split('\n').map((line) => line.replace(/(^|\s)#.*$/, '').trimEnd());
+    const at = lines.findIndex((line) => /^queue_rules:/.test(line));
+    if (at === -1) return false;
+    const value = (lines[at] as string).slice('queue_rules:'.length).trim();
+    if (value) return /^\[\s*\S/.test(value) && !/^\[\s*\]$/.test(value);
+    const next = lines.slice(at + 1).find((line) => line.trim() !== '');
+    return next !== undefined && /^\s+-(\s|$)/.test(next);
+  });
 }
 
 /** A file onboard changes: what this checkout has (undefined when none), and what onboard writes. */
@@ -87,7 +132,7 @@ export async function openPull(sys: Sys, io: Output, target: PullTarget, changes
     // --missing-ok: the files onboard leaves alone have no contents here.
     const tree = git(['write-tree', '--missing-ok']);
     if (tree.code !== 0) return failed('git write-tree', tree.stderr);
-    const title = pullTitle(version);
+    const title = pullTitle(version, await recentSubjects(sys, slug, branch, token));
     const made = git(['commit-tree', '-S', tree.stdout.trim(), '-p', 'FETCH_HEAD', '-m', title]);
     const sha = made.stdout.trim();
     if (made.code !== 0 || !sha) return failed('signing the commit', made.stderr);
@@ -123,6 +168,13 @@ export async function openPull(sys: Sys, io: Output, target: PullTarget, changes
   } finally {
     sys.remove(dir);
   }
+}
+
+/** The default branch's latest commit subjects, newest first; none when GitHub does not say. */
+async function recentSubjects(sys: Sys, slug: string, branch: string, token: string): Promise<string[]> {
+  const { status, json } = await sys.http(`${API}/repos/${slug}/commits?sha=${encodeURIComponent(branch)}&per_page=20`, { token }).catch(() => ({ status: 0, json: undefined }));
+  if (status !== 200 || !Array.isArray(json)) return [];
+  return json.flatMap((one: { commit?: { message?: unknown } }) => (typeof one?.commit?.message === 'string' ? [one.commit.message.split('\n')[0] as string] : []));
 }
 
 /** The merge methods auto-merge may use, in the order onboard prefers them, by the repository setting that allows each. */

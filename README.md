@@ -355,7 +355,13 @@ terminal.
    temporary repository it deletes afterwards, pushes it as the agent and
    opens the agent's pull request (or updates the one an earlier run opened),
    titled `chore(process-rules): onboard at v<version>`, as Conventional
-   Commits reads it, and its commit the same. It then turns on GitHub's
+   Commits reads it, and its commit the same. Where most of the default
+   branch's latest commit subjects lead with an emoji (gitmoji), so does the
+   title: the one an earlier onboard commit had, else the one the repo puts
+   most on chores, else `🔧`. Where the repo has a Mergify configuration
+   with a queue rule, the merge queue merges the pull request, and the run
+   ends "<url> the merge queue merges it when checks pass". Otherwise it
+   turns on GitHub's
    auto-merge for that pull request as the agent, squashing where the repo
    allows it (else rebasing, else merging), so it merges itself once its
    checks pass, and any review the repo's rules require is given. Where the
