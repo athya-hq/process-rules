@@ -155,16 +155,33 @@ export function hooksHittingLock(sys: Sys): string[] {
 }
 
 /**
- * The text without its comments: a `#` at a line's start or after a space, to
- * the line's end, and Python's triple-quoted docstrings, which a hook that
- * runs Python from a heredoc carries.
+ * The text without its comments and docstrings, so prose that names gh or
+ * git push is not taken for a call. A comment is a `#` outside quotes, at a
+ * line's start or after a space or one of `;&|()`, to the line's end. A
+ * docstring is a triple-quoted string that starts its line, as in the Python a
+ * hook runs from a heredoc; one passed or assigned has code before it, so stays.
  */
 function withoutComments(text: string): string {
   return text
-    .replaceAll(/"""[\s\S]*?"""|'''[\s\S]*?'''/g, '')
+    .replaceAll(/^[ \t]*("""|''')[\s\S]*?\1/gm, '')
     .split('\n')
-    .map((line) => line.replace(/(?:^|\s)#.*$/, ''))
+    .map(withoutComment)
     .join('\n');
+}
+
+/** One line up to its comment, if it has one. Quotes are tracked within the line. */
+function withoutComment(line: string): string {
+  let quote: string | undefined;
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    if (quote) {
+      if (char === '\\' && quote === '"') i++;
+      else if (char === quote) quote = undefined;
+    } else if (char === '\\') i++;
+    else if (char === '"' || char === "'") quote = char;
+    else if (char === '#' && (i === 0 || /[\s;&|()]/.test(line[i - 1] ?? ''))) return line.slice(0, i);
+  }
+  return line;
 }
 
 /** The text with each command that runs `as-agent` taken out, the rest of its line kept. */

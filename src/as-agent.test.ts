@@ -235,6 +235,23 @@ describe('hooksHittingLock', () => {
     assert.deepEqual(hooksHittingLock(sys), ['.claude/settings.json PreToolUse hook .claude/hooks/after.sh']);
   });
 
+  it('still names a call after a quoted #, a comment after an operator, or a triple-quoted string passed to code', () => {
+    const sys = withHooks(
+      { PreToolUse: ['.claude/hooks/quoted.sh', '.claude/hooks/operator.sh', '.claude/hooks/passed.sh', ".claude/hooks/escaped.sh"] },
+      {
+        '.claude/hooks/quoted.sh': '#!/bin/sh\ngit commit -m "Refs #42" && git push origin HEAD\n',
+        '.claude/hooks/operator.sh': '#!/bin/sh\necho ok;# gh pr view\n',
+        '.claude/hooks/passed.sh': "#!/bin/sh\npython3 - <<'PY'\nimport subprocess\nsubprocess.run(\"\"\"gh pr view\"\"\", shell=True)\nPY\n",
+        '.claude/hooks/escaped.sh': '#!/bin/sh\necho "a \\" #" \\# && gh pr view\n',
+      },
+    );
+    assert.deepEqual(hooksHittingLock(sys), [
+      '.claude/settings.json PreToolUse hook .claude/hooks/quoted.sh',
+      '.claude/settings.json PreToolUse hook .claude/hooks/passed.sh',
+      '.claude/settings.json PreToolUse hook .claude/hooks/escaped.sh',
+    ]);
+  });
+
   it('names none outside a repository, or with no settings', () => {
     const sys = withHooks({ Stop: ['gh pr view'] });
     sys.inRepo = false;
