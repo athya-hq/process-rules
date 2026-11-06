@@ -57,10 +57,11 @@ describe('run', () => {
     });
   }
 
-  it('prints the cloud setup script for cloud-setup', async () => {
+  it('prints the Setup snippet for cloud-setup, which names no version', async () => {
     const { code, out } = await capture(['cloud-setup']);
     assert.equal(code, 0);
-    assert.match(out[0] ?? '', new RegExp(`^#!/bin/bash\n# process-rules ${expectedVersion} for Claude cloud sessions`));
+    assert.match(out[0] ?? '', /^#!\/bin\/bash\n# process-rules for Claude cloud sessions: runs the clone's \.github\/process-rules\/cloud-setup\.sh/);
+    assert.ok(!(out[0] ?? '').includes(String(expectedVersion)));
   });
 
   it('refuses an unknown command with usage on stderr', async () => {

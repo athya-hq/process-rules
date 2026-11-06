@@ -6,8 +6,10 @@ import { GITHUB_WEB } from './host.ts';
 export const ONBOARD_BRANCH = 'process-rules/onboard';
 export const HOOKS_PATH = '.claude/settings.json';
 export const WORKFLOW_PATH = '.github/workflows/process-rules.yml';
+/** The repo's cloud setup file, which installs the pinned CLI in Claude cloud sessions. */
+export const CLOUD_SETUP_PATH = '.github/process-rules/cloud-setup.sh';
 /** Every file onboard's pull request may change. */
-export const ONBOARD_FILES = [SETTINGS_PATH, HOOKS_PATH, WORKFLOW_PATH];
+export const ONBOARD_FILES = [SETTINGS_PATH, HOOKS_PATH, WORKFLOW_PATH, CLOUD_SETUP_PATH];
 
 /** onboard's commit header and pull request title: Conventional Commits, scoped to the product. */
 export function pullTitle(version: string): string {

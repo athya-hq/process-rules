@@ -22,7 +22,8 @@ import { setUpBoard } from './board.ts';
 import { type OwnerToken, asOwner, isOrganisation, ownerScopes, signInOnce } from './owner-login.ts';
 import { appendToArray, replaceValues, setMember } from './jsonedit.ts';
 import { DEFAULT_SCHEDULE, type Feature, FEATURES, FIGMA_FILE_KEY, NEEDS_ISSUE_TYPES, featuresIn, parseFeatures, renamedLines, scheduleIn } from './features.ts';
-import { type Change, HOOKS_PATH, WORKFLOW_PATH, autoMerge, openPull } from './onboard-pull.ts';
+import { type Change, CLOUD_SETUP_PATH, HOOKS_PATH, WORKFLOW_PATH, autoMerge, openPull } from './onboard-pull.ts';
+import { cloudRepoScript, cloudScriptVersion, releaseSha256 } from './cloud.ts';
 import { setSecret } from './secrets.ts';
 import { packageVersion } from './version.ts';
 import type { Output, Sys } from './types.ts';
@@ -650,7 +651,7 @@ function planHead(paint: Paint, head: { from?: string | undefined; version: stri
  * Sets up the client repository the working directory is in, run by its
  * owner on a Mac `machine` has set up for the agent. It first works out
  * everything it would change, changing nothing: the settings file, the
- * Claude Code settings and the workflow, opened as the agent's pull request
+ * Claude Code settings, the workflow and the cloud setup file, opened as the agent's pull request
  * so the owner's checkout is never modified; the agent's push access; the
  * work board (issue types, labels, Project, fields and views); the pre-push
  * hook; and one signed test commit GitHub must show as Verified by the
@@ -695,6 +696,7 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
   const pull: Item[] = [];
   const github: Item[] = [];
   const mac: Item[] = [];
+  const cloud: Item[] = [];
   const steps: Step[] = [];
   const warnings: string[] = [];
   const byHand: string[] = [];
@@ -874,7 +876,10 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
   const ready = token && checkToken(token, await tokenInfo(sys, token), agent, sys.now());
   const keyProblem = keyPairProblem(sys, paths.key);
   if (!token || !ready || ready.problem !== undefined || keyProblem) {
-    io.err(`onboard: this Mac is not set up for ${agent}; run process-rules machine ${agent}, then onboard again`);
+    // machine is the owner's to run, apart from onboard: it asks for the agent's token, hidden, and makes and
+    // registers the agent's signing key, and a --yes or a run with no terminal can do neither (docs/decisions.md).
+    const why = !token || !ready ? `no token stored for ${agent}` : (ready.problem ?? keyProblem);
+    io.err(`onboard: this Mac is not set up for ${agent} (${why}); run process-rules machine ${agent}, then onboard again`);
     return 1;
   }
   const { id } = await account(sys, agent);
@@ -994,8 +999,26 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
       `The review routine: create a weekly Claude routine on ${slug} (claude.ai/code/routines, or /schedule in Claude Code), with claude.ai's GitHub connected as ${agent}, and give it the prompt below the line in ${routine}. Until it gives its verdicts, the weekly job labels needs-owner each decision over a week past its review date.`,
     );
   }
-  byHand.push(`cloud sessions: claude.ai's GitHub as ${agent}, Setup script from process-rules cloud-setup, first if the repo has its own`);
-  later.push(`Claude cloud sessions: connect claude.ai's GitHub as ${agent}, and put what process-rules cloud-setup prints in the cloud environment's Setup script. ${SETUP_FIRST}`);
+  // Claude cloud sessions. Claude Code has no API for a cloud environment's Setup script, so the version lives in a
+  // file the repo owns, written at the pin on every run, and the Setup script runs it: one paste, the first time.
+  const cloudBefore = fileAt(CLOUD_SETUP_PATH);
+  const released = await releaseSha256(sys, version, token);
+  if ('problem' in released) warnings.push(`${CLOUD_SETUP_PATH} left as it is: ${released.problem}`);
+  else {
+    const text = cloudRepoScript(version, released.sha256);
+    if (text !== cloudBefore) {
+      const from = cloudBefore === undefined ? undefined : cloudScriptVersion(cloudBefore);
+      pull.push({ label: 'cloud-setup.sh', detail: cloudBefore === undefined ? `new, installs v${version}` : from && from !== version ? `v${from} → v${version}` : 'written again' });
+      change(CLOUD_SETUP_PATH, text, `installs process-rules ${version} in Claude cloud sessions, its download checked against its sha256`);
+    }
+    if (cloudBefore === undefined) {
+      cloud.push({ label: 'Setup script', detail: 'process-rules cloud-setup, first' }, { label: "claude.ai's GitHub", detail: `as ${agent}` });
+      byHand.push(`cloud sessions, once: claude.ai's GitHub as ${agent}, Setup script from process-rules cloud-setup, first`);
+      later.push(
+        `Claude cloud sessions, once: connect claude.ai's GitHub as ${agent}, and paste what process-rules cloud-setup prints into the cloud environment's Setup script, over any older process-rules part. It runs ${CLOUD_SETUP_PATH}, which onboard keeps at the pin, so a new release needs no new paste. ${SETUP_FIRST}`,
+      );
+    }
+  }
   let pullUrl: string | undefined;
   // Whether the pull request merges itself once its checks pass.
   let merging = false;
@@ -1041,6 +1064,7 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     { title: 'Pull request', items: pull.length > 0 ? [...pull, { label: 'auto-merge', detail: 'when checks pass' }] : [] },
     { title: asOwnerItems ? (signedAs && 'login' in signedAs ? `GitHub — signed in as ${signedAs.login}` : `GitHub — one sign-in as ${owner}`) : 'GitHub', items: github },
     { title: 'This Mac', items: mac },
+    { title: 'Claude cloud — by hand, once', items: cloud },
     { title: 'Check', items: [{ label: `one signed test commit by ${agent}, deleted after` }] },
   ];
   for (const line of planLines(paint, planHead(paint, { from: workflowNeeded ? workflowFrom : undefined, version, slug, owner, agent, warnings }), groups)) io.out(line);

@@ -22,6 +22,8 @@ export const NOW = new Date('2026-10-30T12:00:00Z');
 /** The node and CLI script the fake runs with. */
 export const NODE = '/opt/node/bin/node';
 export const CLI = '/opt/process-rules/dist/cli.js';
+/** The sha256 every release's archive has, unless a test routes its release. */
+export const RELEASE_SHA256 = 'ab'.repeat(32);
 export const SETTINGS = JSON.stringify({ owner: 'example-owner', agent: AGENT });
 /** The pull request GitHub opens for onboard's changes. */
 export const PULL_URL = 'https://github.com/example-org/example-app/pull/7';
@@ -313,6 +315,8 @@ export class FakeSys implements Sys {
   /** The repository's owner's account type, which a check reads when no test routes the repository. */
   ownerType: 'Organization' | 'User' = 'Organization';
   private unrouted(url: string): HttpResult {
+    const release = /^https:\/\/api\.github\.com\/repos\/athya-hq\/process-rules\/releases\/tags\/v(.+)$/.exec(url);
+    if (release) return { status: 200, json: { assets: [{ name: `athya-hq-process-rules-${release[1]}.tgz`, digest: `sha256:${RELEASE_SHA256}` }] } };
     if (url === 'https://api.github.com/repos/example-org/example-app') return { status: 200, json: { owner: { login: 'example-org', type: this.ownerType } } };
     if (url === 'https://api.github.com/users/example-org') return { status: 200, json: { login: 'example-org', type: this.ownerType } };
     return { status: 404, json: { message: 'Not Found' } };
