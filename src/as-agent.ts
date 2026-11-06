@@ -123,7 +123,8 @@ const OWN_COMMANDS = new Set([HOOK_COMMAND, GUARD_COMMAND, ...OLDER_HOOK_COMMAND
  * The client's hooks, in the repo around the working directory, that reach
  * GitHub outside `as-agent`, so get the lock's placeholder token: by the
  * hook's command, or by a script in the repo it names. Like the guard, it
- * reads text, so a script that runs another script is missed.
+ * reads text, so a script that runs another script is missed. Comments and
+ * docstrings are left out, so prose that names gh or git push is not a call.
  */
 export function hooksHittingLock(sys: Sys): string[] {
   const top = sys.exec('git', ['rev-parse', '--show-toplevel'], { cwd: sys.cwd });
@@ -145,12 +146,42 @@ export function hooksHittingLock(sys: Sys): string[] {
           if (typeof command !== 'string' || OWN_COMMANDS.has(command)) continue;
           const script = scriptOf(sys, root, command);
           const text = script ? `${command}\n${script.text}` : command;
-          if (reachesGitHub(withoutAsAgent(text))) found.push(`${file} ${event} hook ${script ? script.path : JSON.stringify(command)}`);
+          if (reachesGitHub(withoutAsAgent(withoutComments(text)))) found.push(`${file} ${event} hook ${script ? script.path : JSON.stringify(command)}`);
         }
       }
     }
   }
   return found;
+}
+
+/**
+ * The text without its comments and docstrings, so prose that names gh or
+ * git push is not taken for a call. A comment is a `#` outside quotes, at a
+ * line's start or after a space or one of `;&|()`, to the line's end. A
+ * docstring is a triple-quoted string that starts its line, as in the Python a
+ * hook runs from a heredoc; one passed or assigned has code before it, so stays.
+ */
+function withoutComments(text: string): string {
+  return text
+    .replaceAll(/^[ \t]*("""|''')[\s\S]*?\1/gm, '')
+    .split('\n')
+    .map(withoutComment)
+    .join('\n');
+}
+
+/** One line up to its comment, if it has one. Quotes are tracked within the line. */
+function withoutComment(line: string): string {
+  let quote: string | undefined;
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    if (quote) {
+      if (char === '\\' && quote === '"') i++;
+      else if (char === quote) quote = undefined;
+    } else if (char === '\\') i++;
+    else if (char === '"' || char === "'") quote = char;
+    else if (char === '#' && (i === 0 || /[\s;&|()]/.test(line[i - 1] ?? ''))) return line.slice(0, i);
+  }
+  return line;
 }
 
 /** The text with each command that runs `as-agent` taken out, the rest of its line kept. */

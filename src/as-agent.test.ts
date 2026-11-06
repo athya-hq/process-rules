@@ -223,6 +223,35 @@ describe('hooksHittingLock', () => {
     ]);
   });
 
+  it('leaves out comments and docstrings, which only name gh or git push', () => {
+    const sys = withHooks(
+      { PreToolUse: ['.claude/hooks/commented.sh', '.claude/hooks/heredoc.sh', '.claude/hooks/after.sh'] },
+      {
+        '.claude/hooks/commented.sh': '#!/bin/sh\n# It asks GitHub with curl; gh is not used because\necho ok  # not gh pr view\n',
+        '.claude/hooks/heredoc.sh': "#!/bin/sh\npython3 - <<'PY'\ndef f():\n    \"\"\"Refuses what\n    runs `git push --force`.\"\"\"\n    '''or gh pr merge'''\nPY\n",
+        '.claude/hooks/after.sh': '#!/bin/sh\n# a comment first\nurl=https://x/#gh\ngh pr view\n',
+      },
+    );
+    assert.deepEqual(hooksHittingLock(sys), ['.claude/settings.json PreToolUse hook .claude/hooks/after.sh']);
+  });
+
+  it('still names a call after a quoted #, a comment after an operator, or a triple-quoted string passed to code', () => {
+    const sys = withHooks(
+      { PreToolUse: ['.claude/hooks/quoted.sh', '.claude/hooks/operator.sh', '.claude/hooks/passed.sh', ".claude/hooks/escaped.sh"] },
+      {
+        '.claude/hooks/quoted.sh': '#!/bin/sh\ngit commit -m "Refs #42" && git push origin HEAD\n',
+        '.claude/hooks/operator.sh': '#!/bin/sh\necho ok;# gh pr view\n',
+        '.claude/hooks/passed.sh': "#!/bin/sh\npython3 - <<'PY'\nimport subprocess\nsubprocess.run(\"\"\"gh pr view\"\"\", shell=True)\nPY\n",
+        '.claude/hooks/escaped.sh': '#!/bin/sh\necho "a \\" #" \\# && gh pr view\n',
+      },
+    );
+    assert.deepEqual(hooksHittingLock(sys), [
+      '.claude/settings.json PreToolUse hook .claude/hooks/quoted.sh',
+      '.claude/settings.json PreToolUse hook .claude/hooks/passed.sh',
+      '.claude/settings.json PreToolUse hook .claude/hooks/escaped.sh',
+    ]);
+  });
+
   it('names none outside a repository, or with no settings', () => {
     const sys = withHooks({ Stop: ['gh pr view'] });
     sys.inRepo = false;
