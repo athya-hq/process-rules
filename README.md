@@ -465,7 +465,10 @@ that design in Figma: with it on and two Actions secrets, `FIGMA_LIBRARY`
 an agent pull request builds, other than one closed as not planned, must link
 a Figma frame (`figma.com/design/...?node-id=...`) that holds at least one
 component published by that library and is not a captured image (an image
-covering half the frame or more). Without `FIGMA_TOKEN`, or without a
+covering half the frame or more). Frames are for Experience work: a slice
+whose Work item names another kind in a `Kind:` line (`**Kind:** Process.`,
+or plain `Kind: Process`) passes without a Figma call, and one whose Work item
+names no kind is checked. Without `FIGMA_TOKEN`, or without a
 library (from `FIGMA_LIBRARY`, or an older committed key, below), the job says
 the check is off and passes. The library key is a secret, not a committed setting,
 so a public repository does not publish its design file, and the workflow
