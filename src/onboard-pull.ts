@@ -51,9 +51,11 @@ function asksForLabel(conditions: unknown): boolean {
  * queue takes pull requests by itself, so it merges onboard's and GitHub's
  * auto-merge is not needed; undefined otherwise, or when GitHub does not say.
  * Mergify reads the first of MERGIFY_PATHS the branch has. It queues by
- * itself where the configuration has a queue rule and either a queue rule
- * with `autoqueue: true`, or a pull request rule whose actions hold `queue`
- * and whose conditions ask for no label. Read as the agent, from GitHub,
+ * itself where the configuration has a queue rule and either merge
+ * protections' `auto_merge_conditions` (`true`, or conditions that ask for
+ * no label), or a pull request rule whose actions hold `queue` and whose
+ * conditions ask for no label. Mergify replaced the queue rules' own
+ * `autoqueue` with `auto_merge_conditions`, so it does not count. Read as the agent, from GitHub,
  * since a checkout may be behind the default branch.
  */
 export async function mergeQueue(sys: Sys, slug: string, branch: string, token: string): Promise<string | undefined> {
@@ -63,16 +65,20 @@ export async function mergeQueue(sys: Sys, slug: string, branch: string, token: 
     const content = (json as { content?: unknown } | null)?.content;
     if (status !== 200 || typeof content !== 'string') return undefined;
     const { parse } = await import('yaml');
-    let config: { queue_rules?: unknown; pull_request_rules?: unknown } | null;
+    let config: { queue_rules?: unknown; pull_request_rules?: unknown; merge_protections_settings?: unknown; merge_protection_settings?: unknown } | null;
     try {
       config = parse(Buffer.from(content, 'base64').toString('utf8')) as typeof config;
     } catch {
       return undefined;
     }
-    const queues = Array.isArray(config?.queue_rules) ? (config.queue_rules as ({ autoqueue?: unknown } | null)[]) : [];
+    const queues = Array.isArray(config?.queue_rules) ? config.queue_rules : [];
     const rules = Array.isArray(config?.pull_request_rules) ? (config.pull_request_rules as ({ conditions?: unknown; actions?: unknown } | null)[]) : [];
     const queuing = rules.some((rule) => typeof rule?.actions === 'object' && rule.actions !== null && 'queue' in rule.actions && !asksForLabel(rule.conditions));
-    return queues.length > 0 && (queuing || queues.some((queue) => queue?.autoqueue === true)) ? path : undefined;
+    // Mergify's docs spell the key both ways.
+    const protections = (config?.merge_protections_settings ?? config?.merge_protection_settings) as { auto_merge_conditions?: unknown } | null | undefined;
+    const conditions = protections?.auto_merge_conditions;
+    const auto = conditions === true || (Array.isArray(conditions) && !asksForLabel(conditions));
+    return queues.length > 0 && (queuing || auto) ? path : undefined;
   }
   return undefined;
 }

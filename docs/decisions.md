@@ -772,8 +772,9 @@
   and the first of `.mergify.yml`, `.mergify/config.yml` and
   `.github/mergify.yml` it has, as Mergify reads only that one, has a
   queue rule and queues pull requests by itself (a pull request rule whose
-  actions hold `queue` and whose conditions ask for no label, or a queue
-  rule with `autoqueue: true`), the plan says
+  actions hold `queue`, or merge protections' `auto_merge_conditions`,
+  either asking for no label; the queue rules' `autoqueue`, which Mergify
+  replaced with `auto_merge_conditions`, does not count), the plan says
   "merge queue Mergify, when checks pass", GitHub's auto-merge is neither
   turned on nor asked for (it could merge around the queue), and the run
   ends "<url> the merge queue merges it when checks pass". Rejected: a

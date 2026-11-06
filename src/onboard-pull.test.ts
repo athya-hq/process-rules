@@ -50,8 +50,9 @@ describe('mergeQueue', () => {
 
   it('finds a queue that takes pull requests by itself, in the first config Mergify reads, as the agent', async () => {
     for (const path of ['.mergify.yml', '.mergify/config.yml', '.github/mergify.yml']) assert.equal(await find(on({ [path]: queueRule + autoQueue })), path);
-    const sys = on({ '.mergify.yml': `queue_rules: [\n  { name: default,\n    autoqueue: true },\n]\n` });
-    assert.equal(await find(sys), '.mergify.yml', 'flow style over several lines, and autoqueue');
+    const sys = on({ '.mergify.yml': `queue_rules: [\n  { name: default,\n    merge_method: squash },\n]\nmerge_protections_settings:\n  auto_merge_conditions: true\n` });
+    assert.equal(await find(sys), '.mergify.yml', "flow style over several lines, and merge protections' auto-merge");
+    assert.equal(await find(on({ '.mergify.yml': `${queueRule}merge_protection_settings:\n  auto_merge_conditions:\n    - base=main\n` })), '.mergify.yml', 'auto-merge for some pull requests, the other spelling');
     assert.ok(sys.requests.every((r) => r.token === TOKEN));
   });
 
@@ -62,6 +63,9 @@ describe('mergeQueue', () => {
     assert.equal(await find(on({ '.mergify.yml': 'queue_rules: []\n' + autoQueue })), undefined, 'an empty list');
     assert.equal(await find(on({ '.mergify.yml': `${queueRule}pull_request_rules:\n  - conditions: [label=queue]\n    actions: { queue: {} }\n` })), undefined, 'queued once labelled');
     assert.equal(await find(on({ '.mergify.yml': `# ${queueRule}` })), undefined, 'commented out');
+    assert.equal(await find(on({ '.mergify.yml': 'queue_rules:\n  - name: default\n    autoqueue: true\n' })), undefined, "autoqueue, which Mergify replaced");
+    assert.equal(await find(on({ '.mergify.yml': `${queueRule}merge_protections_settings:\n  auto_merge_conditions: [label=automerge]\n` })), undefined, 'auto-merge once labelled');
+    assert.equal(await find(on({ '.mergify.yml': `${queueRule}merge_protections_settings:\n  auto_merge_conditions: null\n` })), undefined, 'auto-merge off');
     assert.equal(await find(on({ '.mergify.yml': 'pull_request_rules: []\n', '.github/mergify.yml': queueRule + autoQueue })), undefined, 'Mergify reads the first config only');
   });
 

@@ -1071,7 +1071,16 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     // It merges itself, through the repository's merge queue, or as the agent turns auto-merge on, unless the repository does not allow it.
     {
       title: 'Pull request',
-      items: pull.length > 0 ? [...pull, queue !== undefined ? { label: 'merge queue', detail: 'Mergify, when checks pass' } : { label: 'auto-merge', detail: 'when checks pass' }] : [],
+      items:
+        pull.length > 0
+          ? [
+              ...pull,
+              queue !== undefined
+                ? { label: 'merge queue', detail: 'Mergify, when checks pass' }
+                : // Until the agent can push, whether a merge queue takes it is not known.
+                  { label: planned === undefined ? 'auto-merge or merge queue' : 'auto-merge', detail: 'when checks pass' },
+            ]
+          : [],
     },
     { title: asOwnerItems ? (signedAs && 'login' in signedAs ? `GitHub — signed in as ${signedAs.login}` : `GitHub — one sign-in as ${owner}`) : 'GitHub', items: github },
     { title: 'This Mac', items: mac },

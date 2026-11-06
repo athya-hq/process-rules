@@ -362,8 +362,8 @@ terminal.
    (`:wrench:` where shortcodes are the style). Where the default branch's
    Mergify configuration (the first of `.mergify.yml`, `.mergify/config.yml`
    and `.github/mergify.yml`) has a queue rule and queues pull requests by
-   itself, through a rule whose actions hold `queue` and whose conditions
-   ask for no label, or `autoqueue: true`, the merge queue merges the pull
+   itself, through a rule whose actions hold `queue`, or merge protections'
+   `auto_merge_conditions`, either asking for no label, the merge queue merges the pull
    request, and the run ends "<url> the merge queue merges it when checks
    pass". Otherwise it turns on GitHub's
    auto-merge for that pull request as the agent, squashing where the repo

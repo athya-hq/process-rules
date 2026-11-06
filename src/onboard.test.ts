@@ -945,6 +945,24 @@ describe('onboard', () => {
       assert.equal(signIns(sys), 1, 'one sign-in for the access and the board');
     });
 
+    it('plans either merge until the agent can push, then asks the default branch for a merge queue', async () => {
+      const sys = fresh();
+      let added = false;
+      sys.route('GET', REPO, () => (added ? { status: 200, json: { ...repoJson(), allow_auto_merge: false } } : { status: 404, json: null }));
+      sys.route('GET', '/user/repository_invitations?per_page=100&page=1', { status: 200, json: [] });
+      sys.route('PUT', COLLABORATOR, () => {
+        added = true;
+        return { status: 204, json: null };
+      });
+      const config = 'queue_rules:\n  - name: default\nmerge_protections_settings:\n  auto_merge_conditions: true\n';
+      sys.route('GET', `${REPO}/contents/.mergify.yml?ref=main`, () => (added ? { status: 200, json: { content: Buffer.from(config).toString('base64') } } : { status: 404, json: null }));
+      const { code, out } = await run(sys);
+      assert.equal(code, 0);
+      assert.ok(planned(out, 'Pull request').includes('auto-merge or merge queue: when checks pass'), out.join('\n'));
+      assert.ok(out.includes(`└  ${PULL_URL}  the merge queue merges it when checks pass`), out.join('\n'));
+      assert.ok(!byHand(out).some((line) => line.startsWith('auto-merge')));
+    });
+
     it('invites, then accepts the invitation as the agent', async () => {
       const sys = fresh();
       let accepted = false;
