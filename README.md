@@ -476,7 +476,10 @@ that design in Figma: with it on and two Actions secrets, `FIGMA_LIBRARY`
 an agent pull request builds, other than one closed as not planned, must link
 a Figma frame (`figma.com/design/...?node-id=...`) that holds at least one
 component published by that library and is not a captured image (an image
-covering half the frame or more). Without `FIGMA_TOKEN`, or without a
+covering half the frame or more). Frames are for Experience work: a slice
+whose parent Work item names any other kind in a `Kind:` line (`**Kind:** Process.`,
+or plain `Kind: Process`) passes without a Figma call; one whose Work item
+names no kind, or whose parent is not a Work item, is checked. Without `FIGMA_TOKEN`, or without a
 library (from `FIGMA_LIBRARY`, or an older committed key, below), the job says
 the check is off and passes. The library key is a secret, not a committed setting,
 so a public repository does not publish its design file, and the workflow
@@ -733,7 +736,7 @@ release, attaching the CLI package it built and tested. Install that package on
 each machine with pnpm; nothing is built on install:
 
 ```bash
-pnpm add -g https://github.com/athya-hq/process-rules/releases/download/v0.5.22/athya-hq-process-rules-0.5.22.tgz
+pnpm add -g https://github.com/athya-hq/process-rules/releases/download/v0.5.23/athya-hq-process-rules-0.5.23.tgz
 ```
 
 `onboard` pins the client's workflow to one version, the release of the CLI

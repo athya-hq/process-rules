@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { designLibrary, frameProblem, prDesign } from './design.ts';
+import { designLibrary, frameProblem, prDesign, workItemKind } from './design.ts';
 import { AGENT, FakeSys, ROOT, capture } from './fake.test.ts';
 
 const FIGMA = 'https://api.figma.com/v1';
@@ -117,6 +117,22 @@ describe('frameProblem', () => {
   });
 });
 
+describe('workItemKind', () => {
+  for (const [body, kind] of [
+    ['**Kind:** Process.', 'Process'],
+    ['Goal: x\n**Kind:** Experience.\nMore', 'Experience'],
+    ['Kind: Process (spec is a published page).', 'Process'],
+    ['  kind:   experience', 'experience'],
+    ['The Kind: line comes later', undefined],
+    ['', undefined],
+    [null, undefined],
+  ] as const) {
+    it(`reads ${JSON.stringify(body)} as ${kind ?? 'no kind'}`, () => {
+      assert.equal(workItemKind(body), kind);
+    });
+  }
+});
+
 describe('designLibrary', () => {
   it('reads the library from the FIGMA_LIBRARY secret, or none', () => {
     const sys = new FakeSys();
@@ -149,12 +165,12 @@ describe('prDesign', () => {
   const SETTINGS = JSON.stringify({ owner: 'example-owner', agent: AGENT });
   const state = (number: number, body: string, extra: Record<string, unknown> = {}) => ({ number, issueType: { name: 'State' }, stateReason: null, body, ...extra });
 
-  function actions(states: unknown[] | null, user = AGENT, body: string | null = 'Slice: #12'): FakeSys {
+  function actions(states: unknown[] | null, user = AGENT, body: string | null = 'Slice: #12', parent: { number: number; body: string | null; issueType?: { name: string } } | null = null): FakeSys {
     const sys = new FakeSys();
     sys.env = { GITHUB_EVENT_PATH: EVENT, GITHUB_REPOSITORY: 'example-org/example-app', GH_TOKEN: 'ghs_run', FIGMA_TOKEN: 'figd_tok', FIGMA_LIBRARY: 'LIB1' };
     sys.files.set(`${ROOT}/.github/process-rules.json`, SETTINGS);
     sys.files.set(EVENT, JSON.stringify({ pull_request: { number: 40, body, user: { login: user } } }));
-    sys.route('POST', '/graphql', { status: 200, json: { data: { repository: { issue: states ? { subIssues: { nodes: states } } : null } } } });
+    sys.route('POST', '/graphql', { status: 200, json: { data: { repository: { issue: states ? { parent, subIssues: { nodes: states } } : null } } } });
     sys.route('GET', `${FIGMA}/files/LIB1/components`, { status: 200, json: { meta: { components: [{ key: 'lib-button' }, {}] } } });
     figma(sys, frameReply([button]));
     return sys;
@@ -195,6 +211,46 @@ describe('prDesign', () => {
       out: [],
       err: ['✗ state #34 links no Figma frame (a figma.com/design link with node-id)', 'pr-design: refused by the design check'],
     });
+  });
+
+  const workItem = (body: string | null, type = 'Work item') => ({ number: 7, body, issueType: { name: type } });
+  const figmaCalls = (sys: FakeSys) => sys.requests.filter((request) => request.url.startsWith(FIGMA)).length;
+
+  it('passes a slice of a Process work item without asking Figma: frames are for Experience work', async () => {
+    const sys = actions([state(30, 'no link yet')], AGENT, 'Slice: #12', workItem('Goal: tidy the rules.\n\n**Kind:** Process.\n'));
+    assert.deepEqual(await check(sys), { code: 0, out: ['✓ pr-design: #12 builds Process work item #7; frames are for Experience work'], err: [] });
+    assert.equal(figmaCalls(sys), 0);
+    assert.match((sys.requests.find((request) => request.url.endsWith('/graphql'))?.body as { query: string }).query, /issue\(number: \$number\) \{ parent \{ number body issueType \{ name \} \} subIssues/);
+  });
+
+  it('still refuses a state with no frame in an Experience work item', async () => {
+    const sys = actions([state(30, LINK), state(34, 'no link yet')], AGENT, 'Slice: #12', workItem('**Kind:** Experience.'));
+    assert.deepEqual(await check(sys), {
+      code: 1,
+      out: [],
+      err: ['✗ state #34 links no Figma frame (a figma.com/design link with node-id)', 'pr-design: refused by the design check'],
+    });
+  });
+
+  for (const [name, body] of [
+    ['names no kind', 'Goal: a new screen.'],
+    ['has no body', null],
+  ] as const) {
+    it(`still checks a slice whose work item ${name}`, async () => {
+      const sys = actions([state(34, 'no link yet')], AGENT, 'Slice: #12', workItem(body));
+      assert.equal((await check(sys)).err[0], '✗ state #34 links no Figma frame (a figma.com/design link with node-id)');
+    });
+  }
+
+  it('still checks a slice whose parent names a kind but is not a Work item', async () => {
+    const sys = actions([state(34, 'no link yet')], AGENT, 'Slice: #12', workItem('**Kind:** Process.', 'Slice'));
+    assert.equal((await check(sys)).err[0], '✗ state #34 links no Figma frame (a figma.com/design link with node-id)');
+  });
+
+  it('reads the plain Kind: line as well as the bold one', async () => {
+    const sys = actions([state(34, 'no link yet')], AGENT, 'Slice: #12', workItem('Kind: Process (spec is a published page).'));
+    assert.deepEqual((await check(sys)).out, ['✓ pr-design: #12 builds Process work item #7; frames are for Experience work']);
+    assert.equal(figmaCalls(sys), 0);
   });
 
   it('is off, and says so, without a FIGMA_LIBRARY secret', async () => {

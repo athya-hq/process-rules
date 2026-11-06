@@ -109,12 +109,24 @@ interface State {
   body: string;
 }
 
+/** A work item's kind, from its `Kind:` line, bold or plain: `**Kind:** Process.` is Process. */
+const KIND_LINE = /^\s*(?:\*\*)?Kind:(?:\*\*)?\s*([A-Za-z]+)/mi;
+
+/** The kind a work item's body names, or undefined when it has no `Kind:` line. */
+export function workItemKind(body: string | null | undefined): string | undefined {
+  return KIND_LINE.exec(body ?? '')?.[1];
+}
+
+/** Figma frames are for this kind of work item only; a work item that names no kind is checked too. */
+const DESIGNED_KIND = 'Experience';
+
 /**
  * The design check on an agent pull request, run by the shared workflow when
  * the figma feature is on and the FIGMA_LIBRARY secret names a Figma design
  * library: each State of the slice it builds, other than one closed as not
- * planned, links a frame built from that library. Off without FIGMA_TOKEN,
- * and says so.
+ * planned, links a frame built from that library. A slice whose parent Work
+ * item names a kind other than Experience passes without a Figma call. Off without
+ * FIGMA_TOKEN, and says so.
  */
 export async function prDesign(sys: Sys, io: Output): Promise<number> {
   const { GITHUB_EVENT_PATH: eventPath, GITHUB_REPOSITORY: slug, GH_TOKEN: token, FIGMA_TOKEN: figmaToken } = sys.env;
@@ -163,12 +175,22 @@ export async function prDesign(sys: Sys, io: Output): Promise<number> {
       method: 'POST',
       token,
       body: {
-        query: 'query($owner: String!, $name: String!, $number: Int!, $after: String) { repository(owner: $owner, name: $name) { issue(number: $number) { subIssues(first: 100, after: $after) { nodes { number issueType { name } stateReason body } pageInfo { hasNextPage endCursor } } } } }',
+        query: 'query($owner: String!, $name: String!, $number: Int!, $after: String) { repository(owner: $owner, name: $name) { issue(number: $number) { parent { number body issueType { name } } subIssues(first: 100, after: $after) { nodes { number issueType { name } stateReason body } pageInfo { hasNextPage endCursor } } } } }',
         variables: { owner, name, number: slice, after },
       },
     });
-    const page = (json as { data?: { repository?: { issue?: { subIssues: { nodes: State[]; pageInfo?: { hasNextPage: boolean; endCursor: string | null } } } | null } } } | null)?.data?.repository?.issue?.subIssues;
+    const issue = (json as { data?: { repository?: { issue?: { parent?: { number: number; body: string | null; issueType?: { name: string } | null } | null; subIssues: { nodes: State[]; pageInfo?: { hasNextPage: boolean; endCursor: string | null } } } | null } } } | null)?.data?.repository?.issue;
+    const page = issue?.subIssues;
     if (status !== 200 || !page) throw new Error(`cannot read the states of #${slice} (HTTP ${status})`);
+    // The work item's kind, read with the first page: only Experience work is designed in Figma.
+    const parent = issue.parent;
+    if (after === null && parent?.issueType?.name === 'Work item') {
+      const kind = workItemKind(parent.body);
+      if (kind && kind.toLowerCase() !== DESIGNED_KIND.toLowerCase()) {
+        io.out(`✓ pr-design: #${slice} builds ${kind} work item #${parent.number}; frames are for ${DESIGNED_KIND} work`);
+        return 0;
+      }
+    }
     states.push(...page.nodes);
     if (!page.pageInfo?.hasNextPage) break;
     after = page.pageInfo.endCursor;
