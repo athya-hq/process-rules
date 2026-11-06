@@ -123,7 +123,8 @@ const OWN_COMMANDS = new Set([HOOK_COMMAND, GUARD_COMMAND, ...OLDER_HOOK_COMMAND
  * The client's hooks, in the repo around the working directory, that reach
  * GitHub outside `as-agent`, so get the lock's placeholder token: by the
  * hook's command, or by a script in the repo it names. Like the guard, it
- * reads text, so a script that runs another script is missed.
+ * reads text, so a script that runs another script is missed. Comments and
+ * docstrings are left out, so prose that names gh or git push is not a call.
  */
 export function hooksHittingLock(sys: Sys): string[] {
   const top = sys.exec('git', ['rev-parse', '--show-toplevel'], { cwd: sys.cwd });
@@ -145,12 +146,25 @@ export function hooksHittingLock(sys: Sys): string[] {
           if (typeof command !== 'string' || OWN_COMMANDS.has(command)) continue;
           const script = scriptOf(sys, root, command);
           const text = script ? `${command}\n${script.text}` : command;
-          if (reachesGitHub(withoutAsAgent(text))) found.push(`${file} ${event} hook ${script ? script.path : JSON.stringify(command)}`);
+          if (reachesGitHub(withoutAsAgent(withoutComments(text)))) found.push(`${file} ${event} hook ${script ? script.path : JSON.stringify(command)}`);
         }
       }
     }
   }
   return found;
+}
+
+/**
+ * The text without its comments: a `#` at a line's start or after a space, to
+ * the line's end, and Python's triple-quoted docstrings, which a hook that
+ * runs Python from a heredoc carries.
+ */
+function withoutComments(text: string): string {
+  return text
+    .replaceAll(/"""[\s\S]*?"""|'''[\s\S]*?'''/g, '')
+    .split('\n')
+    .map((line) => line.replace(/(?:^|\s)#.*$/, ''))
+    .join('\n');
 }
 
 /** The text with each command that runs `as-agent` taken out, the rest of its line kept. */

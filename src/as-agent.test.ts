@@ -223,6 +223,18 @@ describe('hooksHittingLock', () => {
     ]);
   });
 
+  it('leaves out comments and docstrings, which only name gh or git push', () => {
+    const sys = withHooks(
+      { PreToolUse: ['.claude/hooks/commented.sh', '.claude/hooks/heredoc.sh', '.claude/hooks/after.sh'] },
+      {
+        '.claude/hooks/commented.sh': '#!/bin/sh\n# It asks GitHub with curl; gh is not used because\necho ok  # not gh pr view\n',
+        '.claude/hooks/heredoc.sh': "#!/bin/sh\npython3 - <<'PY'\ndef f():\n    \"\"\"Refuses what\n    runs `git push --force`.\"\"\"\n    '''or gh pr merge'''\nPY\n",
+        '.claude/hooks/after.sh': '#!/bin/sh\n# a comment first\nurl=https://x/#gh\ngh pr view\n',
+      },
+    );
+    assert.deepEqual(hooksHittingLock(sys), ['.claude/settings.json PreToolUse hook .claude/hooks/after.sh']);
+  });
+
   it('names none outside a repository, or with no settings', () => {
     const sys = withHooks({ Stop: ['gh pr view'] });
     sys.inRepo = false;
