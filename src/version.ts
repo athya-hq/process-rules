@@ -19,3 +19,12 @@ export function versionOf(raw: unknown): string {
   }
   throw new Error('package.json has no string "version"');
 }
+
+/** Whether release `a` comes after release `b`, each major.minor.patch; false when either is not one. */
+export function isNewer(a: string, b: string): boolean {
+  const parse = (v: string) => (/^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : undefined);
+  const [x, y] = [parse(a), parse(b)];
+  if (!x || !y) return false;
+  const at = x.findIndex((part, i) => part !== y[i]);
+  return at !== -1 && (x[at] as number) > (y[at] as number);
+}

@@ -47,6 +47,19 @@ function asksForLabel(conditions: unknown): boolean {
 }
 
 /**
+ * A file's text on `ref` in the repository on GitHub, read as the agent: the
+ * text, none when GitHub says the file or ref is not there, or the problem
+ * when GitHub could not be asked or would not say.
+ */
+export async function remoteFile(sys: Sys, slug: string, path: string, ref: string, token: string): Promise<{ text?: string } | { problem: string }> {
+  const { status, json } = await sys.http(`${API}/repos/${slug}/contents/${path}?ref=${encodeURIComponent(ref)}`, { token }).catch(() => ({ status: 0, json: undefined }));
+  if (status === 404) return {};
+  const content = (json as { content?: unknown } | null | undefined)?.content;
+  if (status === 200 && typeof content === 'string') return { text: Buffer.from(content, 'base64').toString('utf8') };
+  return { problem: `GitHub did not give ${path} on ${ref} (${status === 0 ? 'no answer' : `HTTP ${status}`})` };
+}
+
+/**
  * The path of the default branch's Mergify configuration when its merge
  * queue takes pull requests by itself, so it merges onboard's and GitHub's
  * auto-merge is not needed; undefined otherwise, or when GitHub does not say.

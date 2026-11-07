@@ -93,6 +93,8 @@ export class FakeSys implements Sys {
     this.route('GET', '/users/ExampleBot/ssh_signing_keys', { status: 200, json: [] });
     this.route('GET', '/user/ssh_signing_keys', { status: 200, json: [] });
     this.route('POST', '/repos/example-org/example-app/pulls', { status: 201, json: { number: 7, html_url: PULL_URL, node_id: 'PR_7' } });
+    // No onboard pull request is open yet.
+    this.route('GET', '/repos/example-org/example-app/pulls?state=open&head=example-org:process-rules/onboard', { status: 200, json: [] });
   }
 
   route(method: string, path: string, result: HttpResult | (() => HttpResult)): this {
