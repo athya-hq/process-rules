@@ -79,7 +79,7 @@ describe("the owner's SSH route", () => {
     assert.equal(found.sshLogin, 'example-owner');
     assert.deepEqual(exposureFindings(found, HOME), [{ mark: '✓', text: 'ssh reaches GitHub as example-owner; agent sessions refuse SSH' }]);
     const ssh = sys.calls.find((c) => c.command === 'ssh');
-    assert.deepEqual(ssh?.args, ['-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', 'git@github.com'], 'never asks for a passphrase');
+    assert.deepEqual(ssh?.args, ['-T', '-o', 'BatchMode=yes', '-o', 'UpdateHostKeys=no', '-o', 'ConnectTimeout=5', 'git@github.com'], 'never asks for a passphrase, and never rewrites known_hosts');
     assert.equal(ssh?.env?.GH_TOKEN, undefined);
   });
 
