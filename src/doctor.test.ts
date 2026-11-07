@@ -1,10 +1,14 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { launcherPath, pathsFor, sessionScript } from './agent.ts';
+import { NO_TOKEN, launcherPath, pathsFor, sessionScript } from './agent.ts';
+import { FROM_SETUP, PROXY_TOKEN, cloudRepoScript } from './cloud.ts';
 import { doctor } from './doctor.ts';
 import { declinedPath, movedPath, ownerFixes } from './lockout.ts';
-import { AGENT, AGENT_ID, CLASSIC, FakeSys, HOME, KEY, NOW, TOKEN, capture } from './fake.test.ts';
+import { CLOUD_SETUP_PATH, WORKFLOW_PATH } from './onboard-pull.ts';
+import { workflow } from './onboard.ts';
+import { AGENT, AGENT_ID, CLASSIC, FakeSys, HOME, KEY, NOW, ROOT, TOKEN, capture } from './fake.test.ts';
+import { packageVersion } from './version.ts';
 
 const SESSION = `${HOME}/.config/process-rules/examplebot/session.sh`;
 const LAUNCHER = launcherPath(HOME);
@@ -32,6 +36,18 @@ describe('doctor', () => {
       out: [],
       err: ["doctor: process-rules supports macOS only, where the keychain holds the agent's token; this machine runs win32"],
     });
+  });
+
+  it('refuses Linux that is not a Claude cloud session', async () => {
+    for (const remote of [undefined, 'false', '1']) {
+      const sys = Object.assign(healthy(), { platform: 'linux' });
+      sys.env = { ...sys.env, CLAUDE_CODE_REMOTE: remote };
+      assert.deepEqual(await check(sys), {
+        code: 1,
+        out: [],
+        err: ["doctor: process-rules supports macOS only, where the keychain holds the agent's token; this machine runs linux"],
+      });
+    }
   });
 
   it('passes when the machine is set up, its checks grouped', async () => {
@@ -257,5 +273,212 @@ describe('doctor', () => {
     const sys = healthy();
     sys.files.set(SESSION, 'old');
     assert.deepEqual(marked((await check(sys)).out, '✗'), ['✗  session file out of date → process-rules machine']);
+  });
+});
+
+describe('doctor in a Claude cloud session', () => {
+  const v = packageVersion();
+  const WORKFLOW = `${ROOT}/${WORKFLOW_PATH}`;
+  const CLOUD_FILE = `${ROOT}/${CLOUD_SETUP_PATH}`;
+  const PASTE = "paste what process-rules cloud-setup prints into the cloud environment's Setup script, once";
+
+  /**
+   * A cloud session session-start gave the agent's identity, in a clone whose
+   * workflow pins this CLI and whose cloud setup file installs it, set up by
+   * the Setup snippet: no keychain, GitHub reached through the proxy as `login`.
+   */
+  function cloud(login: string | null = AGENT): FakeSys {
+    const sys = new FakeSys();
+    sys.platform = 'linux';
+    sys.env = { CLAUDE_CODE_REMOTE: 'true', GH_TOKEN: PROXY_TOKEN, PROCESS_RULES_AGENT: AGENT };
+    sys.files.set(WORKFLOW, workflow('main', v, false));
+    sys.files.set(CLOUD_FILE, cloudRepoScript(v, 'ab'.repeat(32)));
+    sys.files.set(FROM_SETUP, '');
+    if (login) sys.acceptToken(PROXY_TOKEN, login);
+    return sys;
+  }
+
+  it('passes when the environment is set up, its checks grouped as on a Mac', async () => {
+    const sys = cloud();
+    assert.deepEqual(await check(sys), {
+      code: 0,
+      out: [
+        '◆  process-rules doctor   ExampleBot',
+        '│',
+        '◇  This cloud session',
+        `✓  ${CLOUD_SETUP_PATH} installs ${v}, as ${WORKFLOW_PATH} pins`,
+        `✓  process-rules ${v} runs here`,
+        `✓  the Setup script runs ${CLOUD_SETUP_PATH}`,
+        '│',
+        '◇  GitHub — as ExampleBot',
+        "✓  the proxy acts as ExampleBot, an agent the repo's settings name",
+        "✓  session-start gave this session ExampleBot's identity",
+        '│',
+        '└  All good',
+      ],
+      err: [],
+    });
+    assert.equal(sys.requests.at(-1)?.token, PROXY_TOKEN, 'asks through the proxy');
+    assert.ok(!sys.calls.some((call) => call.command.endsWith('security')), 'no keychain');
+  });
+
+  it('says to run onboard again when the cloud setup file and the pin disagree', async () => {
+    const sys = cloud();
+    sys.files.set(WORKFLOW, workflow('main', '0.0.1', false));
+    const { code, out } = await check(sys);
+    assert.equal(code, 1);
+    assert.deepEqual(marked(out, '✗'), [`✗  ${CLOUD_SETUP_PATH} installs ${v}, but ${WORKFLOW_PATH} pins v0.0.1 → process-rules onboard again`]);
+  });
+
+  it('says to run onboard again when the repo has no cloud setup file, or one onboard did not write', async () => {
+    for (const file of [undefined, '#!/bin/bash\necho mine\n']) {
+      const sys = cloud();
+      if (file === undefined) sys.files.delete(CLOUD_FILE);
+      else sys.files.set(CLOUD_FILE, file);
+      const { code, out } = await check(sys);
+      assert.equal(code, 1);
+      assert.deepEqual(marked(out, '✗'), [
+        `✗  ${CLOUD_SETUP_PATH} missing, or not the file onboard writes, so the Setup script installs no process-rules → process-rules onboard again`,
+      ]);
+      assert.ok(out.includes(`✓  process-rules ${v} runs here`), 'still checked against the pin');
+    }
+  });
+
+  it('warns when the workflow pins no one version, and still passes', async () => {
+    for (const pins of [undefined, workflow('main', v, false).replace(`process-rules-ref: v${v}`, 'process-rules-ref: v0.0.2')]) {
+      const sys = cloud();
+      if (pins === undefined) sys.files.delete(WORKFLOW);
+      else sys.files.set(WORKFLOW, pins);
+      const { code, out } = await check(sys);
+      assert.equal(code, 0);
+      assert.deepEqual(marked(out, '▲'), [
+        `▲  ${WORKFLOW_PATH} is missing or pins no one version, so ${CLOUD_SETUP_PATH} is not checked against it → process-rules onboard again`,
+      ]);
+    }
+  });
+
+  it('warns when this session runs another release than the repo installs, and still passes', async () => {
+    const sys = cloud();
+    sys.files.set(WORKFLOW, workflow('main', '0.0.1', false));
+    sys.files.set(CLOUD_FILE, cloudRepoScript('0.0.1', 'ab'.repeat(32)));
+    const { code, out } = await check(sys);
+    assert.equal(code, 0);
+    assert.deepEqual(marked(out, '▲'), [`▲  this session runs process-rules ${v}, not the 0.0.1 ${CLOUD_SETUP_PATH} installs → bash ${CLOUD_SETUP_PATH}, or a new session`]);
+    assert.ok(!sys.calls.some((call) => call.command === 'bash'), 'only reads: installs nothing');
+  });
+
+  it('warns about a release the workflow pins that no cloud setup file installs', async () => {
+    const sys = cloud();
+    sys.files.delete(CLOUD_FILE);
+    sys.files.set(WORKFLOW, workflow('main', '0.0.1', false));
+    assert.deepEqual(marked((await check(sys)).out, '▲'), [
+      `▲  this session runs process-rules ${v}, not the v0.0.1 ${WORKFLOW_PATH} pins → process-rules onboard again, then a new session`,
+    ]);
+  });
+
+  it('asks for the one paste when the Setup script did not run the repo file, and still passes', async () => {
+    const sys = cloud();
+    sys.files.delete(FROM_SETUP);
+    const { code, out } = await check(sys);
+    assert.equal(code, 0);
+    assert.deepEqual(marked(out, '▲'), [`▲  ${FROM_SETUP} missing, so the cloud environment's Setup script does not run ${CLOUD_SETUP_PATH} → ${PASTE}`]);
+    assert.equal((await check(sys)).out.at(-1), '└  1 to fix');
+  });
+
+  it('refuses a proxy that acts as an account not among the agents', async () => {
+    const sys = cloud('example-owner');
+    sys.env.PROCESS_RULES_AGENT = undefined;
+    const { code, out } = await check(sys);
+    assert.equal(code, 1);
+    assert.equal(out[0], '◆  process-rules doctor   example-owner');
+    assert.ok(out.includes('◇  GitHub — as example-owner'));
+    assert.deepEqual(marked(out, '✗'), [
+      "✗  the proxy acts as example-owner, not ExampleBot → connect claude.ai's GitHub as ExampleBot",
+      '✗  session-start did not give this session the agent identity, so gh and git stay locked out → a new session; its first process-rules line says why',
+    ]);
+  });
+
+  it('accepts a login that differs only in case, and the agent named', async () => {
+    const sys = cloud('examplebot');
+    assert.equal((await check(sys)).code, 0);
+    assert.equal((await check(cloud(), 'OtherBot')).code, 1, 'checked against the agent named');
+  });
+
+  it('names a proxy GitHub could not answer, and still runs the rest', async () => {
+    const down = cloud(null);
+    const { code, out } = await check(down);
+    assert.equal(code, 1);
+    assert.equal(out[0], '◆  process-rules doctor   ExampleBot');
+    assert.deepEqual(marked(out, '✗'), ['✗  GitHub answered HTTP 401 when asked who this session is → process-rules doctor again']);
+    const thrown = cloud();
+    thrown.http = () => Promise.reject(new Error('ECONNRESET'));
+    assert.deepEqual(marked((await check(thrown)).out, '✗'), ['✗  GitHub could not be asked who this session is (ECONNRESET) → process-rules doctor again']);
+  });
+
+  it('refuses a session session-start left locked out, or gave an account the settings do not name', async () => {
+    const locked = cloud();
+    locked.env = { CLAUDE_CODE_REMOTE: 'true', GH_TOKEN: NO_TOKEN };
+    locked.acceptToken(PROXY_TOKEN, AGENT);
+    const { code, out } = await check(locked);
+    assert.equal(code, 1);
+    assert.ok(out.includes("✓  the proxy acts as ExampleBot, an agent the repo's settings name"), 'asks with the proxy placeholder, never the lock');
+    assert.deepEqual(marked(out, '✗'), [
+      '✗  session-start did not give this session the agent identity, so gh and git stay locked out → a new session; its first process-rules line says why',
+    ]);
+    const other = cloud();
+    other.env.PROCESS_RULES_AGENT = 'OtherBot';
+    assert.deepEqual(marked((await check(other)).out, '✗'), [
+      '✗  session-start did not give this session the agent identity, so gh and git stay locked out → a new session; its first process-rules line says why',
+    ]);
+  });
+
+  it("refuses outside the repo's clone, and still checks the Setup script", async () => {
+    const sys = cloud();
+    sys.inRepo = false;
+    const { code, out } = await check(sys);
+    assert.equal(code, 1);
+    assert.deepEqual(marked(out, '✗'), [`✗  ${ROOT} is not inside a git repository → process-rules doctor in the repo's clone`]);
+    assert.ok(out.includes(`✓  the Setup script runs ${CLOUD_SETUP_PATH}`));
+    assert.ok(!out.some((line) => line.includes('proxy acts as')), 'no agents to check the account against');
+  });
+
+  it('reads a cloud setup file it cannot read as missing', async () => {
+    const sys = cloud();
+    const read = sys.read.bind(sys);
+    sys.read = (path) => {
+      if (path === CLOUD_FILE) throw new Error('EACCES');
+      return read(path);
+    };
+    assert.ok((await check(sys)).out.some((line) => line.startsWith(`✗  ${CLOUD_SETUP_PATH} missing`)));
+  });
+
+  it('names the session when neither GitHub nor the settings name an account', async () => {
+    const sys = cloud(null);
+    sys.inRepo = false;
+    const { out } = await check(sys);
+    assert.equal(out[0], '◆  process-rules doctor   this cloud session');
+    assert.ok(out.includes('◇  GitHub — as this cloud session'));
+  });
+
+  it("refuses a clone with no settings", async () => {
+    const sys = cloud();
+    sys.files.delete(`${ROOT}/.github/process-rules.json`);
+    assert.deepEqual(marked((await check(sys)).out, '✗'), [
+      `✗  .github/process-rules.json not found in ${ROOT}, so the agents are not known → process-rules onboard again`,
+    ]);
+  });
+
+  it('groups client hooks that reach GitHub outside as-agent under This repo, as on a Mac', async () => {
+    const sys = cloud();
+    sys.files.set(`${ROOT}/.claude/settings.json`, JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: 'gh pr view' }] }] } }));
+    const { code, out } = await check(sys);
+    assert.equal(code, 0);
+    assert.deepEqual(out.slice(-5), [
+      '│',
+      '◇  This repo',
+      '▲  .claude/settings.json Stop hook "gh pr view" reaches GitHub outside as-agent, so gets 401 → run its gh or git via process-rules as-agent --session <session_id> -- (exit 77 when not the agent)',
+      '│',
+      '└  1 to fix',
+    ]);
   });
 });

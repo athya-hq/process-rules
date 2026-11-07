@@ -1,5 +1,5 @@
 import { API, NO_TOKEN } from './agent.ts';
-import { PRODUCT, SETUP_FIRST } from './onboard.ts';
+import { PRODUCT, SETUP_FIRST, workflowPins } from './onboard.ts';
 import type { Output, Sys } from './types.ts';
 import { CLOUD_SETUP_PATH, WORKFLOW_PATH } from './onboard-pull.ts';
 import { GITHUB_WEB } from './host.ts';
@@ -51,6 +51,30 @@ export const FROM_SETUP = `${CLOUD_DIR}/from-setup`;
 /** The release `cloudRepoScript` installs, from its first comment; undefined when `text` is not one. */
 export function cloudScriptVersion(text: string): string | undefined {
   return /^# process-rules (\d+\.\d+\.\d+) for Claude cloud sessions/m.exec(text)?.[1];
+}
+
+/**
+ * The releases a clone at `root` says a cloud session should run: the one
+ * version its workflow pins, and the one its cloud setup file installs; each
+ * undefined when the file is missing or unreadable, the workflow pins none or
+ * several, or the setup file is not one onboard writes.
+ */
+export function repoReleases(sys: Sys, root: string): { pinned: string | undefined; scripted: string | undefined } {
+  let pinned: string | undefined;
+  try {
+    const pins = new Set(workflowPins(sys.read(`${root}/${WORKFLOW_PATH}`)));
+    if (pins.size === 1) [pinned] = pins;
+  } catch {
+    pinned = undefined;
+  }
+  const file = `${root}/${CLOUD_SETUP_PATH}`;
+  let scripted: string | undefined;
+  try {
+    scripted = sys.exists(file) ? cloudScriptVersion(sys.read(file)) : undefined;
+  } catch {
+    scripted = undefined;
+  }
+  return { pinned, scripted };
 }
 
 /** The release archive of `version`, as GitHub serves it. */
