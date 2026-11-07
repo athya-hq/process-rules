@@ -1,5 +1,6 @@
 import { LOCKED, asAgent, asAgentArgs } from './as-agent.ts';
 import { cloudSetup } from './cloud.ts';
+import { needsOwner } from './asks.ts';
 import { decisionsWeekly } from './decisions.ts';
 import { prDesign } from './design.ts';
 import { doctor } from './doctor.ts';
@@ -36,6 +37,7 @@ Commands:
   pr-merged        Run by the shared workflow: a merged pull request closes the slice it names
   pr-design        Run by the shared workflow: each state of the slice links a frame from the design library
   decisions-weekly Run by the shared workflow weekly: decision checks, undo issues, expiring labels
+  needs-owner      Run by the shared workflow: an ask labels its issue needs-owner; the owner's answer takes it off
   reviews-due      For the review routine: open decisions whose review date has come, as JSON lines
   pre-push         Run by the pre-push git hook: the same rules before an agent session pushes
   propose <issue>  As the agent: ask the owner to approve, with a 👍, a slice added late or a dropped state
@@ -123,6 +125,7 @@ export async function run(
     case 'pr-merged':
     case 'pr-design':
     case 'decisions-weekly':
+    case 'needs-owner':
     case 'reviews-due':
     case 'pre-push':
     case 'propose':
@@ -132,6 +135,7 @@ export async function run(
         if (command === 'propose') return await propose(await sys(), io, Number((rest[0] as string).replace('#', '')));
         if (command === 'reviews-due') return await reviewsDue(await sys(), io);
         if (command === 'decisions-weekly') return await decisionsWeekly(await sys(), io);
+        if (command === 'needs-owner') return await needsOwner(await sys(), io);
         if (command === 'pr-design') return await prDesign(await sys(), io);
         if (command === 'pr-identity') return await prIdentity(await sys(), io);
         if (command === 'pr-work-rules') return await prWorkRules(await sys(), io);

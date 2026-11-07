@@ -1,4 +1,5 @@
 import { sessionRecord } from './agent.ts';
+import { askRefusal, commentProblem } from './asks.ts';
 import type { Output, Sys } from './types.ts';
 
 /** Where a command word starts, and an optional folder before it, as in /usr/bin/gh. */
@@ -23,9 +24,16 @@ export function reachesGitHub(command: string): boolean {
  * it reads what session-start recorded for this session id: a session whose
  * hook never ran, failed, or locked GitHub out has no record saying it works
  * as the agent, a Claude cloud session's included.
+ *
+ * In an agent session, a comment the command posts through gh (`gh issue
+ * comment`, `gh pr comment`, or `gh api` on a comments endpoint) that asks
+ * the owner, opening with `Needs you:` or `Proposal:` or naming the owner,
+ * must link a published page and fit 500 characters; otherwise it is refused
+ * with the rule and the fix. `propose` posts its own text through the API,
+ * not through gh, so this check leaves it alone.
  */
 export function guard(sys: Sys, io: Output, stdin: string): number {
-  let input: { session_id?: unknown; tool_input?: { command?: unknown } };
+  let input: { session_id?: unknown; cwd?: unknown; tool_input?: { command?: unknown } };
   try {
     input = JSON.parse(stdin) as typeof input;
   } catch {
@@ -36,7 +44,12 @@ export function guard(sys: Sys, io: Output, stdin: string): number {
   if (!reachesGitHub(command)) return 0;
 
   const recorded = recordedAgent(sys, input.session_id);
-  return 'agent' in recorded ? 0 : refuse(io, recorded.problem);
+  if (!('agent' in recorded)) return refuse(io, recorded.problem);
+  // A comment that asks the owner links a published page and stays short; the command runs where the hook says.
+  const problem = commentProblem(sys, command, typeof input.cwd === 'string' && input.cwd.startsWith('/') ? input.cwd : sys.cwd);
+  if (!problem) return 0;
+  io.err(askRefusal(problem));
+  return 2;
 }
 
 /**

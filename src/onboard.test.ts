@@ -1328,7 +1328,7 @@ describe('staged adoption', () => {
     sys.files.set(WORKFLOW, own);
     const { out } = await run(sys);
     assert.equal(repo(sys).get(WORKFLOW), own);
-    assert.ok(byHand(out).includes('pass FIGMA_LIBRARY in process-rules, process-rules-weekly, process-rules-merged → .github/workflows/process-rules.yml'), out.join('\n'));
+    assert.ok(byHand(out).includes('pass FIGMA_LIBRARY in process-rules, process-rules-weekly, process-rules-merged, process-rules-asks → .github/workflows/process-rules.yml'), out.join('\n'));
     assert.ok(opened(sys) === undefined || opened(sys)?.body.includes('pass the shared checks no FIGMA_LIBRARY secret'));
     // A workflow the pull request replaces passes it: nothing to do by hand then, though the plan was made without the branch.
     const replaced = fresh();
@@ -1353,7 +1353,7 @@ describe('staged adoption', () => {
     const prOnly = `${head.replace('      FIGMA_LIBRARY: ${{ secrets.FIGMA_LIBRARY }}\n', '      OTHER: ${{ secrets.OTHER }}\n')}  process-rules-weekly:${weekly}`;
     assert.deepEqual(jobsWithoutLibrary(prOnly), ['process-rules']);
     assert.deepEqual(jobsWithoutLibrary(prOnly.replace(/ {4}secrets:\n(?: {6}.*\n)+/, '    secrets: inherit\n')), []);
-    assert.deepEqual(jobsWithoutLibrary(workflow('main', '0.5.5', false)), ['process-rules', 'process-rules-weekly', 'process-rules-merged']);
+    assert.deepEqual(jobsWithoutLibrary(workflow('main', '0.5.5', false)), ['process-rules', 'process-rules-weekly', 'process-rules-merged', 'process-rules-asks']);
   });
 
   it('prints no command for an older library value that is not a file key', async () => {
@@ -1756,18 +1756,26 @@ describe('workflow', () => {
     assert.match(text, /uses: athya-hq\/process-rules\/\.github\/workflows\/checks\.yml@v0\.1\.0\n {4}with:\n {6}process-rules-ref: v0\.1\.0\n/);
     assert.match(text, /branches: \["main"\]/);
     assert.match(text, /^# To upgrade, change the version on every line that names it \(two per job\)\.$/m);
-    assert.deepEqual(workflowPins(text), ['0.1.0', '0.1.0', '0.1.0', '0.1.0', '0.1.0', '0.1.0']);
+    assert.deepEqual(workflowPins(text), Array(8).fill('0.1.0'));
   });
 
   it('keeps pull request and push runs read-only, and writes to issues on the weekly run and a merged pull request alone', () => {
     const text = workflow('main', '0.1.0', true);
     assert.match(text, /^permissions:\n {2}contents: read\n {2}issues: read\n {2}pull-requests: read$/m);
     assert.match(text, /^ {4}types: \[opened, synchronize, reopened, edited, closed\]$/m);
-    const [, prJob = '', weeklyJob = '', mergedJob = ''] = text.split(/^ {2}(?:process-rules|process-rules-weekly|process-rules-merged):$/m);
+    const [, prJob = '', weeklyJob = '', mergedJob = '', asksJob = ''] = text.split(/^ {2}(?:process-rules|process-rules-weekly|process-rules-merged|process-rules-asks):$/m);
     assert.match(prJob, /^ {4}if: \(github\.event_name == 'pull_request' && github\.event\.action != 'closed'\) \|\| github\.event_name == 'push'$/m);
     assert.doesNotMatch(prJob, /permissions:|: write/);
-    assert.match(weeklyJob, /^ {4}if: github\.event_name == 'schedule' \|\| github\.event_name == 'workflow_dispatch'$/m);
+    assert.match(weeklyJob, /^ {4}if: \(github\.event_name == 'schedule' && github\.event\.schedule != '41 \* \* \* \*'\) \|\| github\.event_name == 'workflow_dispatch'$/m);
     assert.match(weeklyJob, /^ {4}permissions:\n {6}contents: read\n {6}issues: write\n {6}pull-requests: read$/m);
+    assert.ok(
+      asksJob.includes(
+        "    if: >-\n      ((github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment') &&\n      (contains(github.event.comment.body, 'Needs you:') || contains(github.event.comment.body, 'Proposal:') ||\n      contains(github.event.comment.body, 'Decision:'))) ||\n      (github.event_name == 'issues' && github.event.label.name == 'approved') ||\n      (github.event_name == 'schedule' && github.event.schedule == '41 * * * *')\n",
+      ),
+      'only comments that may ask or decide, the approved label and the hourly sweep',
+    );
+    assert.match(asksJob, /^ {4}permissions:\n {6}contents: read\n {6}issues: write\n {6}pull-requests: write$/m);
+    assert.ok(text.includes("  issue_comment:\n    types: [created]\n  pull_request_review_comment:\n    types: [created]\n  issues:\n    types: [labeled]\n  # The weekly decisions job: Mondays, 06:17 UTC.\n  schedule:\n    - cron: '17 6 * * 1'\n    # Hourly: the owner's 👍 on an ask takes its needs-owner label off.\n    - cron: '41 * * * *'\n  workflow_dispatch:\n"));
     assert.ok(
       mergedJob.includes(
         "    if: >-\n      github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged &&\n      github.event.pull_request.base.ref == github.event.repository.default_branch &&\n      github.event.pull_request.head.repo.full_name == github.repository\n",
@@ -1775,13 +1783,25 @@ describe('workflow', () => {
       'only a merge into the default branch from the repository itself',
     );
     assert.match(mergedJob, /^ {4}permissions:\n {6}contents: read\n {6}issues: write\n {6}pull-requests: read$/m);
-    assert.equal(text.match(/issues: write/g)?.length, 2);
+    assert.equal(text.match(/issues: write/g)?.length, 3);
   });
 });
 
+const ASKS_WHAT = "add a job that labels an issue needs-owner where the agent asks the owner, and takes it off at the owner's approved label, Decision: comment or (hourly) 👍";
+
+/** The three-job workflow releases before the needs-owner job wrote, from this release's. */
+function threeJobs(version: string, figma: boolean, schedule?: string): string {
+  return workflow('main', version, figma, schedule)
+    .replace(/\n {2}# An ask labels its issue[\s\S]*$/, '\n')
+    .replace('# The weekly, merged and needs-owner jobs are split out', '# The weekly and merged jobs are split out')
+    .replace(/ {2}# A comment that asks the owner[^\n]*\n {2}issue_comment:\n {4}types: \[created\]\n {2}pull_request_review_comment:\n {4}types: \[created\]\n {2}issues:\n {4}types: \[labeled\]\n/, '')
+    .replace(/ {4}# Hourly:[^\n]*\n {4}- cron: '41 \* \* \* \*'\n/, '')
+    .replace("(github.event_name == 'schedule' && github.event.schedule != '41 * * * *') || github.event_name == 'workflow_dispatch'", "github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'");
+}
+
 /** The two-job workflow releases before the merged job wrote, from this release's. */
 function twoJobs(version: string, figma: boolean): string {
-  return workflow('main', version, figma)
+  return threeJobs(version, figma)
     .replace(/\n {2}# A merged pull request[\s\S]*$/, '')
     .replace('# The weekly and merged jobs are split out', '# The weekly job is split out')
     .replace('    # edited: a changed "Slice: #N" line is checked again; closed: a merged pull request closes its slice.\n    types: [opened, synchronize, reopened, edited, closed]', '    # edited: a changed "Slice: #N" line is checked again.\n    types: [opened, synchronize, reopened, edited]')
@@ -1813,7 +1833,7 @@ describe('workflowUpdate', () => {
     assert.equal(update.from, '0.5.2');
     assert.equal(update.text, before.replaceAll('0.5.2', '0.5.3').replace('split by hand at v0.5.3', 'split by hand at v0.5.2'));
     assert.match(update.text, /^# Our own note: split by hand at v0\.5\.2\.$/m);
-    assert.deepEqual(workflowPins(update.text), ['0.5.3', '0.5.3', '0.5.3', '0.5.3', '0.5.3', '0.5.3']);
+    assert.deepEqual(workflowPins(update.text), Array(8).fill('0.5.3'));
   });
 
   it("sets each job's Figma secrets to what figma needs, leaving secrets of the client's own", () => {
@@ -1964,7 +1984,7 @@ describe('workflowUpdate', () => {
   it('replaces a workflow it does not recognise, a split one with a pin missing included', () => {
     assert.deepEqual(workflowUpdate('old', 'main', '0.5.3', true), { kind: 'replace', text: workflow('main', '0.5.3', true) });
     const halfPinned = workflow('main', '0.5.2', true).replace(/\n {4}with:\n {6}process-rules-ref: v0\.5\.2\n {4}secrets:/, '\n    secrets:');
-    assert.equal(workflowPins(halfPinned).length, 5);
+    assert.equal(workflowPins(halfPinned).length, 7);
     assert.equal(workflowUpdate(halfPinned, 'main', '0.5.3', true).kind, 'replace');
     const changed = twoJobs('0.5.2', true).replace("github.event_name == 'pull_request' || github.event_name == 'push'", "github.event_name == 'push'");
     assert.equal(workflowUpdate(changed, 'main', '0.5.3', true).kind, 'replace');
@@ -1972,14 +1992,14 @@ describe('workflowUpdate', () => {
 
   it('adds the merged job to a two-job workflow, moving its pins and keeping what the client changed', () => {
     for (const figma of [true, false]) {
-      assert.deepEqual(workflowUpdate(twoJobs('0.5.6', figma), 'main', '0.5.16', figma), { kind: 'repin', text: workflow('main', '0.5.16', figma), from: '0.5.6', merged: true });
+      assert.deepEqual(workflowUpdate(twoJobs('0.5.6', figma), 'main', '0.5.16', figma), { kind: 'repin', text: workflow('main', '0.5.16', figma), from: '0.5.6', merged: true, asks: true });
     }
     const own = twoJobs('0.5.6', true)
       .replace('# The weekly job is split out so pull request and push runs stay read-only.\n', '')
       .replace('name: process-rules\n', 'name: process-rules\n# Our own note.\n');
     const update = workflowUpdate(`${own}\n\n`, 'main', '0.5.16', true);
     assert.ok(update.kind === 'repin' && update.merged);
-    assert.equal(update.text, `${workflow('main', '0.5.16', true).replace(/^# The weekly and merged jobs[^\n]*\n/m, '').replace('name: process-rules\n', 'name: process-rules\n# Our own note.\n')}`);
+    assert.equal(update.text, `${workflow('main', '0.5.16', true).replace(/^# The weekly, merged and needs-owner jobs[^\n]*\n/m, '').replace('name: process-rules\n', 'name: process-rules\n# Our own note.\n')}`);
   });
 
   it('asks to add the merged job', async () => {
@@ -1990,9 +2010,42 @@ describe('workflowUpdate', () => {
     sys.files.set(CLOUD, CLOUD_FILE);
     sys.files.set(WORKFLOW, twoJobs('0.5.6', false));
     const { out } = await run(sys);
-    assert.deepEqual(planned(out, 'Pull request'), [`workflow: pins → v${packageVersion()}, merged job`, 'auto-merge: when checks pass']);
+    assert.deepEqual(planned(out, 'Pull request'), [`workflow: pins → v${packageVersion()}, merged job, needs-owner job`, 'auto-merge: when checks pass']);
     assert.equal(out[0], `◆  process-rules onboard   v0.5.6 → v${packageVersion()}`);
-    assert.ok(opened(sys)?.body.includes(`\n- \`${WORKFLOW_PATH}\`: in ${WORKFLOW_PATH}, move the version pins from v0.5.6 to v${packageVersion()} and add a job that closes the slice a merged pull request names, the one pull request run that writes to issues, leaving the rest as it is\n`));
+    assert.ok(opened(sys)?.body.includes(`\n- \`${WORKFLOW_PATH}\`: in ${WORKFLOW_PATH}, move the version pins from v0.5.6 to v${packageVersion()} and add a job that closes the slice a merged pull request names, the one pull request run that writes to issues and ${ASKS_WHAT}, leaving the rest as it is\n`));
+    assert.equal(repo(sys).get(WORKFLOW), workflow('main', packageVersion(), false));
+  });
+
+  it('adds the needs-owner job to a three-job workflow, moving its pins and keeping what the client changed', () => {
+    for (const figma of [true, false]) {
+      assert.deepEqual(workflowUpdate(threeJobs('0.5.26', figma), 'main', '0.5.27', figma), { kind: 'repin', text: workflow('main', '0.5.27', figma), from: '0.5.26', asks: true });
+    }
+    assert.deepEqual(workflowUpdate(threeJobs('0.5.27', true), 'main', '0.5.27', true), { kind: 'repin', text: workflow('main', '0.5.27', true), asks: true });
+    assert.deepEqual(workflowUpdate(threeJobs('0.5.26', true, '0 9 * * 1-5'), 'main', '0.5.27', true, '0 9 * * 1-5'), { kind: 'repin', text: workflow('main', '0.5.27', true, '0 9 * * 1-5'), from: '0.5.26', asks: true });
+    const own = threeJobs('0.5.26', true).replace(/^# The weekly and merged jobs[^\n]*\n/m, '').replace('name: process-rules\n', 'name: process-rules\n# Our own note.\n');
+    const update = workflowUpdate(own, 'main', '0.5.27', true);
+    assert.ok(update.kind === 'repin' && update.asks);
+    assert.equal(update.text, workflow('main', '0.5.27', true).replace(/^# The weekly, merged and needs-owner jobs[^\n]*\n/m, '').replace('name: process-rules\n', 'name: process-rules\n# Our own note.\n'));
+    assert.deepEqual(workflowPins(update.text), Array(8).fill('0.5.27'));
+  });
+
+  it('replaces a three-job workflow whose weekly job or schedule is its own', () => {
+    const weekly = threeJobs('0.5.26', true).replace("github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'", "github.event_name == 'schedule'");
+    assert.equal(workflowUpdate(weekly, 'main', '0.5.27', true).kind, 'replace');
+    const crons = threeJobs('0.5.26', true).replace("    - cron: '17 6 * * 1'\n", "    - cron: '17 6 * * 1'\n    - cron: '0 12 * * 5'\n");
+    assert.equal(workflowUpdate(crons, 'main', '0.5.27', true).kind, 'replace');
+  });
+
+  it('asks to add the needs-owner job', async () => {
+    const sys = fresh();
+    sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity', 'work-rules'] }));
+    sys.files.set(HOOKS, JSON.stringify(CLAUDE));
+    sys.files.set(PRE_PUSH, PRE_PUSH_HOOK);
+    sys.files.set(CLOUD, CLOUD_FILE);
+    sys.files.set(WORKFLOW, threeJobs(packageVersion(), false));
+    const { out } = await run(sys);
+    assert.deepEqual(planned(out, 'Pull request'), ['workflow: needs-owner job', 'auto-merge: when checks pass']);
+    assert.ok(opened(sys)?.body.includes(`\n- \`${WORKFLOW_PATH}\`: in ${WORKFLOW_PATH}, ${ASKS_WHAT}, leaving the rest as it is\n`));
     assert.equal(repo(sys).get(WORKFLOW), workflow('main', packageVersion(), false));
   });
 

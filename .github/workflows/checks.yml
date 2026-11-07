@@ -173,7 +173,8 @@ jobs:
 
   decisions:
     name: Decisions, weekly
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    # Not on the hourly needs-owner sweep's cron, which the client's process-rules-asks job calls these checks on.
+    if: (github.event_name == 'schedule' && github.event.schedule != '41 * * * *') || github.event_name == 'workflow_dispatch'
     # One run at a time, so two cannot both open an undo issue for one decision.
     concurrency:
       group: process-rules-decisions-${{ github.repository }}
@@ -197,5 +198,33 @@ jobs:
           node-version: 24
       # Each open Decision issue's check; undo issues and labels on GitHub.
       - run: node .process-rules/src/cli.ts decisions-weekly
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  needs-owner:
+    name: Needs you
+    # An agent's ask labels its issue needs-owner; the owner's approved label or Decision: comment takes it off at once,
+    # and the hourly sweep, or a run by hand, takes it off where the owner 👍'd the latest ask.
+    if: >-
+      github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment' || github.event_name == 'issues' || github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'schedule' && github.event.schedule == '41 * * * *')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # The caller's permissions: the client's process-rules-asks job grants issues and pull-requests write, its weekly job issues write.
+    steps:
+      # The settings come from the default branch: a comment cannot rename the owner it is judged against.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: athya-hq/process-rules
+          ref: ${{ inputs.process-rules-ref }}
+          path: .process-rules
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - run: node .process-rules/src/cli.ts needs-owner
         env:
           GH_TOKEN: ${{ github.token }}

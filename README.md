@@ -156,6 +156,22 @@ records how it left each session in
 A command not naming `gh` or `git` as a word goes ahead without starting the CLI;
 when the CLI cannot run, every command naming either is refused.
 
+The guard also reads each comment an agent session posts or edits through
+`gh`: `gh issue comment`, `gh pr comment`, and `gh api` on a comments
+endpoint or in a GraphQL comment mutation, its body inline, in a heredoc, in
+`$(cat file)`, or from `--body-file`, `-F body=@file` or `--input`. A
+comment that asks the owner (it opens with `Needs you:` or `Proposal:`, past
+any Markdown emphasis, or names an owner login, with or without `@`) must
+link a published page (`https://claude.ai/artifact/…` or
+`https://claude.ai/code/artifact/…`) and fit 500 characters; otherwise it is
+refused, naming the rule and the fix: publish the page, then post the
+question, the link and how to answer. A body the guard cannot read in full
+(a variable, a command substitution other than `cat`) is judged by what it
+spells out; where that asks the owner, or the body opens with the unknown
+part, it is refused with how to write it so the guard can read it; so is a comment with no body in the command, which gh would take from an editor, a prompt or the browser. Commands inside `$(…)`, backquotes and `sh -c` are read too. `propose`
+posts its own text through GitHub's API, not through `gh`, so this check
+does not see it.
+
 The session file holds no secret: `GH_TOKEN` is read from the keychain on each
 use, and is a value GitHub refuses when the keychain has none. Git gets a
 credential helper that drops every earlier one and hands the agent's token to
@@ -470,6 +486,18 @@ once the owner has approved everything it takes `needs-owner` off. A
 reaction does not re-run a pull request's checks: the agent proposes before
 it starts, and pre-push or a re-run of Work rules sees the 👍.
 
+**The Needs you list keeps itself.** With `board` on, the client workflow's
+`process-rules-asks` job runs `process-rules needs-owner`. An agent's comment
+opening with `Needs you:` or `Proposal:`, on an issue, a pull request or a review thread, labels its issue or pull request
+`needs-owner`, so it shows in the owner's Needs you view. The owner's
+`approved` label or `Decision:` comment takes the label off at once. Hourly
+(cron `41 * * * *`), and on a run by hand, a sweep takes it off each open
+issue whose latest agent ask the owner has answered: a 👍 on it after its last
+edit, or a `Decision:` comment after it. An issue labelled with no agent ask
+on it, such as the weekly job's undo issues, is left as it is. Only comments
+that may ask or decide, the `approved` label and the hourly cron start the
+job, so other comments run nothing.
+
 **Answering review threads.** In an agent session, `process-rules
 review-thread <thread-id> --reply <text> --resolve` replies on a review
 thread (`PRRT_…`), resolves it, or both, as the agent. It refuses unless the
@@ -592,6 +620,9 @@ the workflow. An older release's workflow, one job that let every run write
 to issues, is replaced; a workflow split into `process-rules` and
 `process-rules-weekly` alone gets the `process-rules-merged` job, which
 closes a merged pull request's slice, and runs on closed pull requests; a
+workflow with those three jobs alone gets the `process-rules-asks` job, with
+the comment and label triggers and the hourly cron it runs on, and the weekly
+job leaves that cron alone; a
 workflow already split into its jobs keeps everything but its version pins, which move to the
 new release, the one branch pushes run on, which follows a changed default
 branch, and the one cron the weekly job runs on, which follows a changed
@@ -621,7 +652,7 @@ the weekly job, `reviews-due` and the pre-push hook each pass, saying so, when
 their feature is off; `onboard` writes the workflow only once a check needs it. `project` names the board's
 Project (by default `<repo> work`). `schedule` sets when the weekly job runs,
 as a five-field cron in UTC (by default `"17 6 * * 1"`, Mondays at 06:17);
-`onboard` refuses one that is not a cron and writes it into the workflow, so
+`onboard` refuses one that is not a cron, or that is `41 * * * *`, the hourly needs-owner sweep's, and writes it into the workflow, so
 run `onboard` again after changing it.
 
 GitHub has issue types for organisations only, so on a repository a personal

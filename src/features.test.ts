@@ -45,6 +45,7 @@ describe('features', () => {
     assert.equal(scheduleIn(null), DEFAULT_SCHEDULE);
     assert.equal(scheduleIn({ schedule: '  30 7 * * 3 ' }), '30 7 * * 3');
     assert.equal(scheduleIn({ schedule: '0  9\t*  *  1-5' }), '0 9 * * 1-5');
+    assert.throws(() => scheduleIn({ schedule: '41  * * * *' }), /"schedule" may not be 41 \* \* \* \*, the hourly needs-owner sweep's cron/);
     for (const cron of ['*/15 * * * *', '0,30 8-18/2 1 jan-jun MON', '59 23 31 12 6', '0 0 1-15/3 DEC sun-sat', '5 4 * * 0']) {
       assert.equal(scheduleIn({ schedule: cron }), cron);
     }
