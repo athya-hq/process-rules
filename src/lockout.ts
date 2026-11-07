@@ -53,12 +53,13 @@ export function exposure(sys: Sys, agent: string): Exposure {
  * Who GitHub greets over SSH with this Mac's keys, asking for nothing: a key
  * in the SSH agent or the macOS keychain, or one with no passphrase. Undefined
  * when that is nobody, the agent, or GitHub cannot be reached. It writes
- * nothing: BatchMode refuses a host not yet known instead of adding it, and
+ * nothing: StrictHostKeyChecking=yes refuses a host not yet known instead of
+ * adding it, even where the owner's SSH config says accept-new or no, and
  * UpdateHostKeys=no stops OpenSSH's default rewrite of ~/.ssh/known_hosts with
  * the host keys GitHub offers after a key signs in, so doctor only reads.
  */
 function sshLogin(sys: Sys, agent: string): string | undefined {
-  const tried = sys.exec('ssh', ['-T', '-o', 'BatchMode=yes', '-o', 'UpdateHostKeys=no', '-o', 'ConnectTimeout=5', GITHUB_SSH], { env: ownerEnv(sys), timeoutMs: 15_000 });
+  const tried = sys.exec('ssh', ['-T', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'UpdateHostKeys=no', '-o', 'ConnectTimeout=5', GITHUB_SSH], { env: ownerEnv(sys), timeoutMs: 15_000 });
   const login = /^Hi ([A-Za-z0-9-]+)!/m.exec(`${tried.stdout}\n${tried.stderr}`)?.[1];
   return login && !sameLogin(login, agent) ? login : undefined;
 }
