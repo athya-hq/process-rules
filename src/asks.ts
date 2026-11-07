@@ -179,7 +179,9 @@ function apiBody(args: Text[], simple: Simple, read: ReadFile): Text | undefined
   const query = fields.get('query');
   const comment = endpoint === 'graphql' ? Boolean(query && COMMENT_MUTATION.test(query.text)) : endpoint !== undefined && COMMENT_ENDPOINT.test(endpoint);
   if (!comment) return undefined;
-  const body = fields.get('body');
+  // A mutation names its body's variable as `body: $name`; gh passes each variable as a field of that name.
+  const variable = endpoint === 'graphql' && query ? /\bbody\s*:\s*\$(\w+)/.exec(query.text)?.[1] : undefined;
+  const body = fields.get(variable ?? 'body');
   if (body) return body;
   if (input) {
     if (!input.known) return input;

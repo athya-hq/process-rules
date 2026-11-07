@@ -113,7 +113,9 @@ describe('commentBodies', () => {
   });
 
   it('reads a GraphQL comment mutation: its body variable, its input, or else its query', () => {
-    assert.deepEqual(texts('gh api graphql -f query="mutation(\\$b: String!) { addComment(input: {subjectId: \\"I\\", body: \\$b}) { clientMutationId } }" -f body="Needs you: v"'), ['Needs you: v']);
+    assert.deepEqual(texts('gh api graphql -f query="mutation(\\$b: String!) { addComment(input: {subjectId: \\"I\\", body: \\$b}) { clientMutationId } }" -f b="Needs you: v"'), ['Needs you: v']);
+    assert.deepEqual(texts('gh api graphql -F query=@q.graphql -f body="Proposal: w"'), []);
+    assert.deepEqual(texts('gh api graphql -f query="mutation(\\$body: String!) { addComment(input: {body: \\$body}) { x } }" -f body="Proposal: w"'), ['Proposal: w']);
     assert.deepEqual(texts('gh api graphql -f query=\'mutation { addComment(input: {subjectId: "I", body: "Proposal: inline\\nline two"}) { clientMutationId } }\''), ['Proposal: inline\nline two']);
     assert.deepEqual(texts('gh api graphql -f query=\'mutation { addComment(input: {subjectId: "I", body: "bad \\q"}) { x } }\''), ['?']);
     assert.deepEqual(texts('gh api graphql -f query="mutation { addComment(input: {body: \\"$B\\"}) { x } }"'), ['?']);
