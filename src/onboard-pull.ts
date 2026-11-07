@@ -46,6 +46,13 @@ function asksForLabel(conditions: unknown): boolean {
   return Array.isArray(conditions) && conditions.some((condition) => typeof condition === 'string' && /^label\s*[=~]/.test(condition.trim()));
 }
 
+/** A file's text on `ref` in the repository on GitHub, read as the agent; undefined when it is missing or cannot be read. */
+export async function remoteFile(sys: Sys, slug: string, path: string, ref: string, token: string): Promise<string | undefined> {
+  const { status, json } = await sys.http(`${API}/repos/${slug}/contents/${path}?ref=${encodeURIComponent(ref)}`, { token }).catch(() => ({ status: 0, json: undefined }));
+  const content = (json as { content?: unknown } | null | undefined)?.content;
+  return status === 200 && typeof content === 'string' ? Buffer.from(content, 'base64').toString('utf8') : undefined;
+}
+
 /**
  * The path of the default branch's Mergify configuration when its merge
  * queue takes pull requests by itself, so it merges onboard's and GitHub's

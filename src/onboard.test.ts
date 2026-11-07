@@ -2004,3 +2004,54 @@ describe('workflowUpdate', () => {
     });
   });
 });
+
+describe('onboard never moves the pin backwards', () => {
+  const newer = '99.0.0';
+  const encoded = (text: string) => ({ status: 200, json: { content: Buffer.from(text).toString('base64') } });
+
+  it('refuses when the checkout already pins a newer release', async () => {
+    const sys = fresh();
+    sys.files.set(WORKFLOW, workflow('main', newer, false));
+    const { code, err } = await run(sys);
+    assert.equal(code, 1);
+    assert.match(err.join('\n'), new RegExp(`pins process-rules v${newer}.*this is v${packageVersion()}`));
+    assert.match(err.join('\n'), new RegExp(`pnpm add -g \\S+/v${newer}/athya-hq-process-rules-${newer}\\.tgz`), 'says how to update');
+    assert.equal(opened(sys), undefined, 'opens no pull request');
+    assert.equal(signIns(sys), 0, 'asks the owner for nothing');
+  });
+
+  it("refuses when the default branch on GitHub pins a newer release than a checkout that is behind", async () => {
+    const sys = fresh();
+    sys.route('GET', `${REPO}/contents/${WORKFLOW_PATH}?ref=main`, encoded(workflow('main', newer, false)));
+    const { code, err } = await run(sys);
+    assert.equal(code, 1);
+    assert.match(err.join('\n'), new RegExp(`v${newer} \\(\\S+ on main\\)`));
+    assert.equal(opened(sys), undefined);
+  });
+
+  it("refuses to overwrite an onboard pull request that a newer release opened", async () => {
+    const sys = fresh();
+    sys.route('GET', `${REPO}/contents/${WORKFLOW_PATH}?ref=process-rules%2Fonboard`, encoded(workflow('main', newer, false)));
+    const { code, err } = await run(sys);
+    assert.equal(code, 1);
+    assert.match(err.join('\n'), new RegExp(`v${newer} \\(\\S+ on process-rules/onboard\\)`));
+    assert.equal(opened(sys), undefined);
+    assert.equal(sys.calls.some((call) => call.command === 'git' && call.args.includes('push')), false, 'pushes nothing');
+  });
+
+  it('refuses when the cloud setup file installs a newer release', async () => {
+    const sys = fresh();
+    sys.files.set(`${ROOT}/${CLOUD_SETUP_PATH}`, cloudRepoScript(newer, RELEASE_SHA256));
+    const { code } = await run(sys);
+    assert.equal(code, 1);
+    assert.equal(opened(sys), undefined);
+  });
+
+  it('goes ahead when every pin is this release or older', async () => {
+    const sys = fresh();
+    sys.files.set(WORKFLOW, workflow('main', '0.0.1', false));
+    sys.route('GET', `${REPO}/contents/${WORKFLOW_PATH}?ref=main`, encoded(workflow('main', '0.0.1', false)));
+    const { code } = await run(sys);
+    assert.equal(code, 0);
+  });
+});

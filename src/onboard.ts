@@ -22,10 +22,10 @@ import { setUpBoard } from './board.ts';
 import { type OwnerToken, asOwner, isOrganisation, ownerScopes, signInOnce } from './owner-login.ts';
 import { appendToArray, replaceValues, setMember } from './jsonedit.ts';
 import { DEFAULT_SCHEDULE, type Feature, FEATURES, FIGMA_FILE_KEY, NEEDS_ISSUE_TYPES, featuresIn, parseFeatures, renamedLines, scheduleIn } from './features.ts';
-import { type Change, CLOUD_SETUP_PATH, HOOKS_PATH, WORKFLOW_PATH, autoMerge, mergeQueue, openPull } from './onboard-pull.ts';
-import { cloudRepoScript, cloudScriptVersion, releaseSha256 } from './cloud.ts';
+import { type Change, CLOUD_SETUP_PATH, HOOKS_PATH, ONBOARD_BRANCH, WORKFLOW_PATH, autoMerge, mergeQueue, openPull, remoteFile } from './onboard-pull.ts';
+import { cloudRepoScript, cloudScriptVersion, releaseSha256, releaseTarball } from './cloud.ts';
 import { setSecret } from './secrets.ts';
-import { packageVersion } from './version.ts';
+import { isNewer, packageVersion } from './version.ts';
 import type { Output, Sys } from './types.ts';
 import { GITHUB_WEB } from './host.ts';
 import { type Item, type Paint, closing, heading, painter, planLines, runStep } from './layout.ts';
@@ -435,6 +435,36 @@ export function workflowUpdate(
     return { kind: 'repin', text, ...(stale ? { from: stale } : {}), ...(moved ? { branch } : {}), ...(rescheduled ? { schedule } : {}), ...(text !== pinned ? { secrets: true as const } : {}) };
   }
   return { kind: 'replace', text: wanted };
+}
+
+/**
+ * The newest process-rules release the repository already pins, when it is
+ * newer than `version`, and where: the checkout's workflow or cloud setup
+ * file, the workflow on the default branch on GitHub (a checkout may be
+ * behind it), or on an open onboard pull request's branch, which a newer
+ * release may have pushed. An older CLI onboarding over any of them would
+ * move the pins back and drop what the newer release added.
+ */
+async function newerPin(
+  sys: Sys,
+  slug: string,
+  token: string,
+  branch: string | undefined,
+  readable: boolean,
+  fileAt: (path: string) => string | undefined,
+  version: string,
+): Promise<{ version: string; where: string } | undefined> {
+  const found: { version: string; where: string }[] = [
+    ...workflowPins(fileAt(WORKFLOW_PATH) ?? '').map((pin) => ({ version: pin, where: `${WORKFLOW_PATH} in this checkout` })),
+    ...[cloudScriptVersion(fileAt(CLOUD_SETUP_PATH) ?? '')].filter((pin) => pin !== undefined).map((pin) => ({ version: pin, where: `${CLOUD_SETUP_PATH} in this checkout` })),
+  ];
+  if (readable) {
+    for (const ref of [...(branch === undefined ? [] : [branch]), ONBOARD_BRANCH]) {
+      const text = await remoteFile(sys, slug, WORKFLOW_PATH, ref, token);
+      found.push(...workflowPins(text ?? '').map((pin) => ({ version: pin, where: `${WORKFLOW_PATH} on ${ref}` })));
+    }
+  }
+  return found.filter((pin) => isNewer(pin.version, version)).reduce<{ version: string; where: string } | undefined>((best, pin) => (best === undefined || isNewer(pin.version, best.version) ? pin : best), undefined);
 }
 
 /** What GitHub says about the agent's access to a repository. */
@@ -887,6 +917,12 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
   let reach = await access(sys, slug, token);
   if (reach.kind === 'refused') {
     io.err(`onboard: ${reach.reason}`);
+    return 1;
+  }
+  const ahead = await newerPin(sys, slug, token, reach.kind === 'push' ? reach.branch : undefined, reach.kind !== 'none', fileAt, version);
+  if (ahead !== undefined) {
+    io.err(`onboard: ${slug} already pins process-rules v${ahead.version} (${ahead.where}), and this is v${version}; onboard never moves the pin back`);
+    io.err(`  Update this Mac's process-rules first: pnpm add -g ${releaseTarball(ahead.version)}`);
     return 1;
   }
   // The default branch, which the workflow's pushes run on, is GitHub's to say once the agent can push; until then
