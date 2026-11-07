@@ -2029,14 +2029,56 @@ describe('onboard never moves the pin backwards', () => {
     assert.equal(opened(sys), undefined);
   });
 
+  const OPEN_PULLS = `${REPO}/pulls?state=open&head=example-org:process-rules/onboard`;
+
   it("refuses to overwrite an onboard pull request that a newer release opened", async () => {
     const sys = fresh();
+    sys.route('GET', OPEN_PULLS, { status: 200, json: [{ number: 7 }] });
     sys.route('GET', `${REPO}/contents/${WORKFLOW_PATH}?ref=process-rules%2Fonboard`, encoded(workflow('main', newer, false)));
     const { code, err } = await run(sys);
     assert.equal(code, 1);
     assert.match(err.join('\n'), new RegExp(`v${newer} \\(\\S+ on process-rules/onboard\\)`));
     assert.equal(opened(sys), undefined);
     assert.equal(sys.calls.some((call) => call.command === 'git' && call.args.includes('push')), false, 'pushes nothing');
+  });
+
+  it('leaves alone an onboard branch no open pull request uses', async () => {
+    const sys = fresh();
+    sys.route('GET', `${REPO}/contents/${WORKFLOW_PATH}?ref=process-rules%2Fonboard`, encoded(workflow('main', newer, false)));
+    const { code } = await run(sys);
+    assert.equal(code, 0, 'a closed pull request\'s branch is pushed over');
+  });
+
+  it('refuses when GitHub does not say what the repository pins', async () => {
+    for (const [path, answer] of [
+      [`${REPO}/contents/${WORKFLOW_PATH}?ref=main`, { status: 502, json: null }],
+      [OPEN_PULLS, { status: 403, json: { message: 'Forbidden' } }],
+    ] as const) {
+      const sys = fresh();
+      sys.route('GET', path, answer);
+      const { code, err } = await run(sys);
+      assert.equal(code, 1, path);
+      assert.match(err.join('\n'), /HTTP (502|403).*run it again/, path);
+      assert.equal(opened(sys), undefined, path);
+    }
+  });
+
+  it('reads the default branch when the agent can only read the repository', async () => {
+    const sys = fresh();
+    sys.route('GET', REPO, { status: 200, json: { ...repoJson(), permissions: { push: false } } });
+    sys.route('GET', `${REPO}/contents/${WORKFLOW_PATH}?ref=main`, encoded(workflow('main', newer, false)));
+    const { code, err } = await run(sys);
+    assert.equal(code, 1);
+    assert.match(err.join('\n'), /on main\)/);
+  });
+
+  it('refuses a newer checkout before asking the owner to sign in', async () => {
+    const sys = fresh();
+    sys.files.set(WORKFLOW, workflow('main', newer, false));
+    const { io, err } = capture();
+    assert.equal(await onboard(sys, io, []), 1);
+    assert.match(err.join('\n'), /never moves the pin back/);
+    assert.equal(signIns(sys), 0);
   });
 
   it('refuses when the cloud setup file installs a newer release', async () => {

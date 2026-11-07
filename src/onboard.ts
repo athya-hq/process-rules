@@ -437,40 +437,64 @@ export function workflowUpdate(
   return { kind: 'replace', text: wanted };
 }
 
+/** A process-rules release a repository pins, and where. */
+interface Pin {
+  version: string;
+  where: string;
+}
+
+/** The newest of `pins` that is newer than `version`, if any. */
+function newest(pins: Pin[], version: string): Pin | undefined {
+  return pins.filter((pin) => isNewer(pin.version, version)).reduce<Pin | undefined>((best, pin) => (best === undefined || isNewer(pin.version, best.version) ? pin : best), undefined);
+}
+
 /**
- * The newest process-rules release the repository already pins, when it is
- * newer than `version`, and where: the checkout's workflow or cloud setup
- * file, the workflow on the default branch on GitHub (a checkout may be
- * behind it), or on an open onboard pull request's branch, which a newer
- * release may have pushed. An older CLI onboarding over any of them would
+ * A release newer than `version` that the checkout pins already, in its
+ * workflow or its cloud setup file. An older CLI onboarding over it would
  * move the pins back and drop what the newer release added.
  */
-async function newerPin(
-  sys: Sys,
-  slug: string,
-  token: string,
-  branch: string | undefined,
-  readable: boolean,
-  fileAt: (path: string) => string | undefined,
-  version: string,
-): Promise<{ version: string; where: string } | undefined> {
-  const found: { version: string; where: string }[] = [
-    ...workflowPins(fileAt(WORKFLOW_PATH) ?? '').map((pin) => ({ version: pin, where: `${WORKFLOW_PATH} in this checkout` })),
-    ...[cloudScriptVersion(fileAt(CLOUD_SETUP_PATH) ?? '')].filter((pin) => pin !== undefined).map((pin) => ({ version: pin, where: `${CLOUD_SETUP_PATH} in this checkout` })),
-  ];
-  if (readable) {
-    for (const ref of [...(branch === undefined ? [] : [branch]), ONBOARD_BRANCH]) {
-      const text = await remoteFile(sys, slug, WORKFLOW_PATH, ref, token);
-      found.push(...workflowPins(text ?? '').map((pin) => ({ version: pin, where: `${WORKFLOW_PATH} on ${ref}` })));
-    }
+function newerPinHere(fileAt: (path: string) => string | undefined, version: string): Pin | undefined {
+  return newest(
+    [
+      ...workflowPins(fileAt(WORKFLOW_PATH) ?? '').map((pin) => ({ version: pin, where: `${WORKFLOW_PATH} in this checkout` })),
+      ...[cloudScriptVersion(fileAt(CLOUD_SETUP_PATH) ?? '')].filter((pin) => pin !== undefined).map((pin) => ({ version: pin, where: `${CLOUD_SETUP_PATH} in this checkout` })),
+    ],
+    version,
+  );
+}
+
+/**
+ * A release newer than `version` that the repository pins on GitHub: on the
+ * default branch, which a checkout may be behind, or on the branch of an open
+ * onboard pull request, which a newer release may have pushed and this run
+ * would push over. A problem when GitHub does not say, so a run never moves
+ * a pin back for want of an answer.
+ */
+async function newerPinOnGitHub(sys: Sys, slug: string, token: string, branch: string | undefined, version: string): Promise<Pin | { problem: string } | undefined> {
+  const refs = branch === undefined ? [] : [branch];
+  const pulls = await sys.http(`${API}/repos/${slug}/pulls?state=open&head=${slug.split('/')[0]}:${ONBOARD_BRANCH}`, { token }).catch(() => ({ status: 0, json: undefined }));
+  if (pulls.status !== 200 || !Array.isArray(pulls.json)) return { problem: `GitHub did not say whether an onboard pull request is open (${pulls.status === 0 ? 'no answer' : `HTTP ${pulls.status}`})` };
+  if (pulls.json.length > 0) refs.push(ONBOARD_BRANCH);
+  const pins: Pin[] = [];
+  for (const ref of refs) {
+    const read = await remoteFile(sys, slug, WORKFLOW_PATH, ref, token);
+    if ('problem' in read) return read;
+    pins.push(...workflowPins(read.text ?? '').map((pin) => ({ version: pin, where: `${WORKFLOW_PATH} on ${ref}` })));
   }
-  return found.filter((pin) => isNewer(pin.version, version)).reduce<{ version: string; where: string } | undefined>((best, pin) => (best === undefined || isNewer(pin.version, best.version) ? pin : best), undefined);
+  return newest(pins, version);
+}
+
+/** onboard's refusal of a repository that pins a newer release than this one. */
+function refuseOlder(io: Output, slug: string, pin: Pin, version: string): number {
+  io.err(`onboard: ${slug} already pins process-rules v${pin.version} (${pin.where}), and this is v${version}; onboard never moves the pin back`);
+  io.err(`  Update this Mac's process-rules first: pnpm add -g ${releaseTarball(pin.version)}`);
+  return 1;
 }
 
 /** What GitHub says about the agent's access to a repository. */
 type Access =
   | { kind: 'push'; branch: string }
-  | { kind: 'read' }
+  | { kind: 'read'; branch?: string }
   | { kind: 'none' }
   | { kind: 'refused'; reason: string };
 
@@ -480,7 +504,7 @@ async function access(sys: Sys, slug: string, token: string): Promise<Access> {
   if (status === 200) {
     return repo?.permissions?.push === true && typeof repo.default_branch === 'string'
       ? { kind: 'push', branch: repo.default_branch }
-      : { kind: 'read' };
+      : { kind: 'read', ...(typeof repo?.default_branch === 'string' ? { branch: repo.default_branch } : {}) };
   }
   if (status === 404) return { kind: 'none' };
   const sso = /url=(\S+)/.exec(headers['x-github-sso'] ?? '')?.[1];
@@ -722,6 +746,9 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     const before = held ? held.before : fileAt(path);
     changes.set(path, { path, before, text, what: held ? `${held.what}; ${what}` : what });
   };
+  // Before anything is asked or planned: a checkout a newer release onboarded is never moved back.
+  const aheadHere = newerPinHere(fileAt, version);
+  if (aheadHere !== undefined) return refuseOlder(io, slug, aheadHere, version);
   // The plan, by group, and the steps that carry it out after the yes.
   const pull: Item[] = [];
   const github: Item[] = [];
@@ -919,11 +946,14 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     io.err(`onboard: ${reach.reason}`);
     return 1;
   }
-  const ahead = await newerPin(sys, slug, token, reach.kind === 'push' ? reach.branch : undefined, reach.kind !== 'none', fileAt, version);
-  if (ahead !== undefined) {
-    io.err(`onboard: ${slug} already pins process-rules v${ahead.version} (${ahead.where}), and this is v${version}; onboard never moves the pin back`);
-    io.err(`  Update this Mac's process-rules first: pnpm add -g ${releaseTarball(ahead.version)}`);
-    return 1;
+  // An agent that cannot see the repository has no pull request open on it, and the checkout was checked above.
+  if (reach.kind !== 'none') {
+    const ahead = await newerPinOnGitHub(sys, slug, token, reach.branch, version);
+    if (ahead !== undefined && 'problem' in ahead) {
+      io.err(`onboard: ${ahead.problem}; run it again`);
+      return 1;
+    }
+    if (ahead !== undefined) return refuseOlder(io, slug, ahead, version);
   }
   // The default branch, which the workflow's pushes run on, is GitHub's to say once the agent can push; until then
   // the workflow is worked out again once it can, and the plan says only what it can know without it.
