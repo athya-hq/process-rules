@@ -32,7 +32,8 @@ wait for adoption outside Athya (#50).
 macOS is the supported platform: the agent's token lives in the macOS
 keychain. On any other platform `machine` and `doctor` refuse, and
 `session-start` keeps GitHub locked out of the session; Claude cloud sessions
-need no keychain and work as before. The token is read and stored through
+need no keychain and work as before, and `doctor` runs its cloud checks there
+(see Claude cloud sessions below). The token is read and stored through
 one token-store interface (`src/token-store.ts`), so a Linux or Windows store
 can be added there when an adopter needs one.
 
@@ -253,7 +254,8 @@ This Mac, GitHub and This repo, one line each: `✓` fine, `▲` worth fixing,
 
 It closes with `└  All good` or `└  N to fix`, and exits 1 when anything is
 `✗`. A token that ends within 14 days is `▲`, and still exits 0. It needs no
-terminal.
+terminal. In a Claude cloud session it runs the cloud checks instead (see
+Claude cloud sessions below).
 
 ## Adopting
 
@@ -738,6 +740,36 @@ the snippet over it, once. It only warns: the session works on.
 
 claude.ai has one GitHub connection per account, so it is the agent's for
 every cloud session that account starts.
+
+`process-rules doctor` in a cloud session (`CLAUDE_CODE_REMOTE=true`) only
+reads, in the same layout and with the same exit codes as on a Mac:
+
+```
+◆  process-rules doctor   AGENT
+│
+◇  This cloud session
+✗  .github/process-rules/cloud-setup.sh installs 0.5.24, but .github/workflows/process-rules.yml pins v0.5.25 → process-rules onboard again
+✓  process-rules 0.5.24 runs here
+▲  /opt/process-rules/from-setup missing, so the cloud environment's Setup script does not run .github/process-rules/cloud-setup.sh → paste what process-rules cloud-setup prints into the cloud environment's Setup script, once
+│
+◇  GitHub — as AGENT
+✓  the proxy acts as AGENT, an agent the repo's settings name
+✓  session-start gave this session AGENT's identity
+│
+└  2 to fix
+```
+
+This cloud session checks that `cloud-setup.sh` opens with the comment
+`onboard` writes, naming the release it installs, and that this release is
+the workflow's pin (`✗`, fixed by running `onboard` again; a workflow that pins no one version is `▲`), that the CLI running is that
+release (`▲`: `session-start` installs it, or `bash
+.github/process-rules/cloud-setup.sh` does), and that the Setup script
+runs the repo's file (`▲` without `/opt/process-rules/from-setup`). GitHub
+checks that the account the proxy acts as is one of the settings' agents,
+and that `session-start` gave the session that identity (`✗` otherwise:
+`gh` and git stay locked out). This repo lists hooks that reach GitHub
+outside `as-agent`, as on a Mac. It installs nothing; on Linux outside a
+cloud session, `doctor` still refuses.
 
 ### Releases and upgrading
 

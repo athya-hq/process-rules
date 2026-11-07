@@ -12,9 +12,9 @@ import {
   sessionScript,
   type Settings,
 } from './agent.ts';
-import { FROM_SETUP, cloudLogin, cloudScriptVersion, cloudToken } from './cloud.ts';
+import { FROM_SETUP, cloudLogin, cloudToken, repoReleases } from './cloud.ts';
 import { CLOUD_SETUP_PATH, WORKFLOW_PATH } from './onboard-pull.ts';
-import { PRE_PUSH_HOOK, prePushHook, workflowPins } from './onboard.ts';
+import { PRE_PUSH_HOOK, prePushHook } from './onboard.ts';
 import { packageVersion } from './version.ts';
 import { tokenStore, unsupported } from './token-store.ts';
 import type { Output, Sys } from './types.ts';
@@ -70,16 +70,9 @@ function cloudDrift(sys: Sys): string | undefined {
   } catch {
     return undefined;
   }
-  let pinned: string | undefined;
-  try {
-    const pins = new Set(workflowPins(sys.read(`${root}/${WORKFLOW_PATH}`)));
-    if (pins.size === 1) [pinned] = pins;
-  } catch {
-    pinned = undefined;
-  }
+  const { pinned, scripted } = repoReleases(sys, root);
   const installed = packageVersion();
   const file = `${root}/${CLOUD_SETUP_PATH}`;
-  const scripted = sys.exists(file) ? cloudScriptVersion(sys.read(file)) : undefined;
   if (scripted === undefined) {
     if (!pinned || pinned === installed) return undefined;
     return `process-rules: this cloud session runs process-rules ${installed}, but ${WORKFLOW_PATH} pins v${pinned}, and the repo has no ${CLOUD_SETUP_PATH} to install it from. Run process-rules onboard again, which writes it; then paste what process-rules cloud-setup prints over the process-rules part of the cloud environment's Setup script, once.`;
@@ -259,7 +252,7 @@ function start(sys: Sys): Said {
 export const AUTO_FIX = 'After each `gh pr create`, when the ccd_pr tools are here and get_status shows auto_fix off, turn it on with set_monitor (auto_fix and address_comments true, and the pull request\'s url): the desktop app turns it on by itself only for a session open on screen, and the owner wants it on for every agent pull request.';
 
 /** The top of the git repository the session runs in. */
-function repoRoot(sys: Sys): string {
+export function repoRoot(sys: Sys): string {
   const dir = sys.env.CLAUDE_PROJECT_DIR ?? sys.cwd;
   const top = sys.exec('git', ['rev-parse', '--show-toplevel'], { cwd: dir });
   if (top.code !== 0) throw new Error(`${dir} is not inside a git repository`);

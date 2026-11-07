@@ -784,3 +784,25 @@
   configuration is parsed with the `yaml` package, which onboard alone
   loads, as it does `@clack/prompts`; a line scan missed YAML's other
   forms.
+- **2026-11-07 — Record: doctor checks a Claude cloud session (State #171
+  of P-22).** A cloud session ran `process-rules doctor` to check its
+  environment and got only "process-rules supports macOS only", exit 1,
+  while every other cloud check passed; the owner asked for doctor to be
+  useful there. Where `CLAUDE_CODE_REMOTE=true`, the test session-start and
+  `as-agent` use, doctor now runs cloud checks before it looks for a token
+  store, in the same grouped layout, fixes and exit codes: the release the
+  cloud setup file's opening comment names against the workflow's pin
+  (`✗`, run `onboard` again, as session-start's drift line says), the running CLI against that release
+  (`▲`: session-start installs the repo's release itself when they differ,
+  so a drifted CLI here means that install failed), the Setup snippet's
+  `/opt/process-rules/from-setup` mark (`▲`, paste the snippet once), the
+  account the proxy acts as among the settings' agents and the
+  `PROCESS_RULES_AGENT` session-start exports when it lifts the lock, which
+  must be that same account (`✗` each: GitHub is locked out or someone
+  else's), and the repo's hooks as on
+  a Mac. The pin and the file are read by one function session-start's
+  drift check shares. Doctor installs nothing, as it only reads; the fix
+  for a drifted CLI names `bash .github/process-rules/cloud-setup.sh`.
+  Rejected: a Linux token store (a cloud session has no token of its own,
+  only the proxy's), and lifting the refusal on every Linux (outside a cloud
+  session nothing holds the agent's token, so the refusal stands).
