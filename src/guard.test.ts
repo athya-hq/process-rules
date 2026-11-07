@@ -74,3 +74,50 @@ describe('guard', () => {
     assert.equal(check(sys, 'git push').code, 2);
   });
 });
+
+describe('guard on comments that ask the owner', () => {
+  const PAGE = 'https://claude.ai/artifact/WrvVo6T7V8fe9pQvYEyvJW';
+  const agentSys = (): FakeSys => {
+    const sys = new FakeSys();
+    sys.files.set(RECORD, '{"agent":"ExampleBot"}\n');
+    return sys;
+  };
+  const run = (sys: FakeSys, command: string, cwd?: string): { code: number; err: string[] } => {
+    const { io, out, err } = capture();
+    const code = guard(sys, io, JSON.stringify({ session_id: 'abc-123', ...(cwd ? { cwd } : {}), tool_input: { command } }));
+    assert.deepEqual(out, []);
+    return { code, err };
+  };
+
+  it('refuses a long ask that links no page, naming the rule and the fix', () => {
+    const long = `Proposal: drop the W-35 lint rule. ${'Here is every detail of why. '.repeat(20)}`;
+    const { code, err } = run(agentSys(), `gh issue comment 3206 --body "${long}"`);
+    assert.equal(code, 2);
+    assert.equal(err.length, 1);
+    assert.match(
+      err[0] ?? '',
+      /^process-rules: refused, because this comment asks the owner \(it opens with "Proposal:"\), and it links no published page .* and runs \d+ characters, over 500\. The rule: anything the owner must read, approve or choose arrives as a published page; .* Fix: publish the page first/,
+    );
+  });
+
+  it('refuses an ask in a heredoc or a file as it does inline, and @-mentions of the owner', () => {
+    const sys = agentSys();
+    sys.files.set('/repo/sub/ask.md', 'Needs you: pick one');
+    assert.equal(run(sys, "gh pr comment 1 --body \"$(cat <<'EOF'\nNeeds you: pick one\nEOF\n)\"").code, 2);
+    assert.equal(run(sys, 'gh issue comment 1 --body-file ask.md', '/repo/sub').code, 2);
+    // A cwd that is not a path is not used, so ask.md is looked for in the checkout, where there is none to read.
+    assert.match(run(sys, 'gh issue comment 1 --body-file ask.md', 'relative').err[0] ?? '', /cannot see how this comment opens/);
+    assert.equal(run(sys, 'gh api repos/o/r/issues/1/comments -f body="@example-owner please look"').code, 2);
+  });
+
+  it('lets through a short ask that links a page, and comments that ask nothing', () => {
+    const sys = agentSys();
+    assert.deepEqual(run(sys, `gh issue comment 3206 --body "Needs you: keep or delete the rule? Page: ${PAGE} Answer: comment on the page."`), { code: 0, err: [] });
+    assert.deepEqual(run(sys, `gh pr comment 5 --body "Evidence: ${'all green. '.repeat(80)}"`), { code: 0, err: [] });
+    assert.deepEqual(run(sys, 'gh pr comment 5 --body "Merged at $SHA"'), { code: 0, err: [] });
+  });
+
+  it('checks the agent identity first', () => {
+    assert.match(run(new FakeSys(), 'gh issue comment 1 --body "Needs you: x"').err[0] ?? '', /does not work as the agent/);
+  });
+});

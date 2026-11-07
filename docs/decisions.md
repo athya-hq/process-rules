@@ -806,3 +806,21 @@
   Rejected: a Linux token store (a cloud session has no token of its own,
   only the proxy's), and lifting the refusal on every Linux (outside a cloud
   session nothing holds the agent's token, so the refusal stands).
+- **2026-11-08 — Record: an ask reaches the owner as a page, and the Needs
+  you list keeps itself (State #176 of P-40).** The owner approved athya_mono's
+  0156 S-2 (athya_mono#3301, decision 3) to be built here: since 24 Oct, 41 of
+  43 `Proposal:` comments there linked no page. The guard, which already sees
+  every `gh` command, reads the comment bodies `gh` posts (inline, heredoc,
+  `$(cat file)`, `--body-file`, `gh api` fields and `--input`) with a small
+  shell reader, and refuses an ask over 500 characters or without a
+  claude.ai artifact link. A body it cannot read in full is judged by what it
+  spells out, so a variable in an ordinary comment still passes; only an ask,
+  or a body that opens with the unknown part, is refused. `propose` is left
+  alone: it posts through the API. The label job is a fourth client job,
+  started only by comments that contain an opening word, the `approved`
+  label and an hourly cron (`41 * * * *`), so other comments run nothing; the
+  weekly job and the shared decisions job skip that cron. The sweep reads
+  only 👍 and `Decision:` after the latest agent ask, leaving issues with no
+  agent ask (undo issues) alone. Rejected: a separate client workflow file
+  (onboard would track two files), and refusing every body with a variable
+  (it would block routine comments).

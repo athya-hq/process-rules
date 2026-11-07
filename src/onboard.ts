@@ -21,6 +21,7 @@ import {
 import { setUpBoard } from './board.ts';
 import { type OwnerToken, asOwner, isOrganisation, ownerScopes, signInOnce } from './owner-login.ts';
 import { appendToArray, replaceValues, setMember } from './jsonedit.ts';
+import { HOURLY } from './asks.ts';
 import { DEFAULT_SCHEDULE, type Feature, FEATURES, FIGMA_FILE_KEY, NEEDS_ISSUE_TYPES, featuresIn, parseFeatures, renamedLines, scheduleIn } from './features.ts';
 import { type Change, CLOUD_SETUP_PATH, HOOKS_PATH, WORKFLOW_PATH, autoMerge, mergeQueue, openPull } from './onboard-pull.ts';
 import { cloudRepoScript, cloudScriptVersion, releaseSha256 } from './cloud.ts';
@@ -181,7 +182,48 @@ const TRIGGER_TYPES = [
 const OLDER_TRIGGER_TYPES = ['    # edited: a changed "Slice: #N" line is checked again.', '    types: [opened, synchronize, reopened, edited]'];
 /** The read-only job's condition: a closed pull request runs the merged job alone. */
 const READ_ONLY_IF = "    if: (github.event_name == 'pull_request' && github.event.action != 'closed') || github.event_name == 'push'";
-const SPLIT_COMMENT = '# The weekly and merged jobs are split out so pull request and push runs stay read-only.';
+const SPLIT_COMMENT = '# The weekly, merged and needs-owner jobs are split out so pull request and push runs stay read-only.';
+/** The comment before the needs-owner job. */
+const MERGED_SPLIT_COMMENT = '# The weekly and merged jobs are split out so pull request and push runs stay read-only.';
+
+/** The events an ask and the owner's answer to it raise: since 0156 S-2, a comment and a label. */
+const ASK_TRIGGERS = [
+  "  # A comment that asks the owner labels its issue needs-owner; the owner's approved label or Decision: comment takes it off.",
+  '  issue_comment:',
+  '    types: [created]',
+  '  issues:',
+  '    types: [labeled]',
+];
+/** The second cron, after the decisions job's: the hourly needs-owner sweep. */
+const HOURLY_CRON = ["    # Hourly: the owner's 👍 on an ask takes its needs-owner label off.", `    - cron: '${HOURLY}'`];
+/** The weekly job's condition: the decisions job's cron, not the hourly one, or a run by hand. */
+const WEEKLY_IF = `    if: (github.event_name == 'schedule' && github.event.schedule != '${HOURLY}') || github.event_name == 'workflow_dispatch'`;
+/** The weekly job's condition before the hourly sweep. */
+const OLDER_WEEKLY_IF = "    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'";
+
+/**
+ * The job that labels an issue where the agent asks the owner, and takes the
+ * label off at the owner's answer: only comments that may ask or decide, the
+ * owner's approved label and the hourly sweep start it, so other comments run
+ * nothing.
+ */
+function asksJob(version: string, secrets: string[]): string[] {
+  return [
+    "  # An ask labels its issue needs-owner, which the board's Needs you view lists; the owner's answer takes it off.",
+    '  process-rules-asks:',
+    '    if: >-',
+    "      (github.event_name == 'issue_comment' && (contains(github.event.comment.body, 'Needs you:') ||",
+    "      contains(github.event.comment.body, 'Proposal:') || contains(github.event.comment.body, 'Decision:'))) ||",
+    "      (github.event_name == 'issues' && github.event.label.name == 'approved') ||",
+    `      (github.event_name == 'schedule' && github.event.schedule == '${HOURLY}')`,
+    '    permissions:',
+    '      contents: read',
+    '      issues: write',
+    '      pull-requests: write',
+    ...callChecks(version, secrets),
+    '',
+  ];
+}
 
 /** The job that closes the slice a merged pull request names, which alone of a pull request's runs writes to issues. */
 function mergedJob(version: string, secrets: string[]): string[] {
@@ -208,7 +250,7 @@ function mergedJob(version: string, secrets: string[]): string[] {
  * optional, the others mark the template.
  */
 const BEFORE_MERGED: { was: string; now: string; optional?: true }[] = [
-  { was: '# The weekly job is split out so pull request and push runs stay read-only.', now: SPLIT_COMMENT, optional: true },
+  { was: '# The weekly job is split out so pull request and push runs stay read-only.', now: MERGED_SPLIT_COMMENT, optional: true },
   { was: OLDER_TRIGGER_TYPES.join('\n'), now: TRIGGER_TYPES.join('\n') },
   { was: "    if: github.event_name == 'pull_request' || github.event_name == 'push'", now: READ_ONLY_IF },
 ];
@@ -230,8 +272,24 @@ function addMergedJob(before: string, version: string, figma: boolean): string |
   return `${text.replace(/\n*$/, '\n')}\n${mergedJob(version, figma ? FIGMA_SECRETS : []).join('\n')}`;
 }
 
-/** The workflow's head, down to its jobs, which every template shares. */
-function workflowHead(branch: string, version: string, comments: string[], schedule = DEFAULT_SCHEDULE, types = TRIGGER_TYPES): string[] {
+/**
+ * A three-job workflow from before the needs-owner job, as `before`, with
+ * that job added at the version it pins: the comment and label triggers
+ * before the schedule, the hourly cron after the decisions job's one, and the
+ * weekly job made to leave the hourly runs alone. Undefined when its lines
+ * are not the template's.
+ */
+function addAsksJob(before: string, version: string, figma: boolean): string | undefined {
+  if (before.split(OLDER_WEEKLY_IF).length !== 2 || !SCHEDULE.test(before)) return undefined;
+  const text = before
+    .replace(MERGED_SPLIT_COMMENT, SPLIT_COMMENT)
+    .replace(OLDER_WEEKLY_IF, WEEKLY_IF)
+    .replace(SCHEDULE, (lines: string) => `${ASK_TRIGGERS.join('\n')}\n${lines}\n${HOURLY_CRON.join('\n')}`);
+  return `${text.replace(/\n*$/, '\n')}\n${asksJob(version, figma ? FIGMA_SECRETS : []).join('\n')}`;
+}
+
+/** The workflow's head, down to its jobs, which every template shares; `asks` adds the needs-owner job's triggers. */
+function workflowHead(branch: string, version: string, comments: string[], schedule = DEFAULT_SCHEDULE, types = TRIGGER_TYPES, asks = true): string[] {
   return [
     `# Written by process-rules onboard: the shared process-rules checks at v${version}.`,
     ...comments,
@@ -242,9 +300,11 @@ function workflowHead(branch: string, version: string, comments: string[], sched
     ...types,
     '  push:',
     `    branches: [${JSON.stringify(branch)}]`,
+    ...(asks ? ASK_TRIGGERS : []),
     scheduleComment(schedule),
     '  schedule:',
     `    - cron: '${schedule}'`,
+    ...(asks ? HOURLY_CRON : []),
     '  workflow_dispatch:',
     '',
     'permissions:',
@@ -316,7 +376,7 @@ export function workflow(branch: string, version: string, figma: boolean, schedu
     '',
     '  # The weekly run alone writes to issues: it comments and opens undo issues.',
     '  process-rules-weekly:',
-    "    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'",
+    WEEKLY_IF,
     '    permissions:',
     '      contents: read',
     '      issues: write',
@@ -324,6 +384,7 @@ export function workflow(branch: string, version: string, figma: boolean, schedu
     ...callChecks(version, secrets),
     '',
     ...mergedJob(version, secrets),
+    ...asksJob(version, secrets),
   ].join('\n');
 }
 
@@ -334,7 +395,7 @@ export function workflow(branch: string, version: string, figma: boolean, schedu
 export function olderWorkflows(branch: string, version: string): string[] {
   return [
     [
-      ...workflowHead(branch, version, ['# To upgrade, change the version on both lines that name it.'], DEFAULT_SCHEDULE, OLDER_TRIGGER_TYPES),
+      ...workflowHead(branch, version, ['# To upgrade, change the version on both lines that name it.'], DEFAULT_SCHEDULE, OLDER_TRIGGER_TYPES, false),
       '  process-rules:',
       '    # Write to issues for this job only: the weekly run comments and opens undo issues.',
       '    permissions:',
@@ -362,9 +423,9 @@ const PUSH_BRANCH = /^( {2}push:\n {4}branches: \[\s*)(['"]?)([^,'"\]\s]+)\2(\s*
 /**
  * The one cron a workflow's `schedule:` trigger names, as `onboard` writes it,
  * quoted or not, with the comment `onboard` writes above it when it is there:
- * no other item follows it, past blank and comment lines.
+ * no other item follows it, past blank and comment lines, but the hourly needs-owner sweep's.
  */
-const SCHEDULE = /^( {2}# The (?:weekly )?decisions job:[^\n]*\n)?( {2}schedule:\n {4}- cron: )(['"]?)([^'"#\n]+?)\3([ \t]*)$(?!(?:\n[ \t]*(?:#[^\n]*)?)*\n {4}- )/m;
+const SCHEDULE = new RegExp(String.raw`^( {2}# The (?:weekly )?decisions job:[^\n]*\n)?( {2}schedule:\n {4}- cron: )(['"]?)([^'"#\n]+?)\3([ \t]*)$(?!(?:\n[ \t]*(?:#[^\n]*)?)*\n {4}- (?!cron: '${HOURLY.replaceAll('*', '\\*')}'[ \t]*$))`, 'm');
 
 /**
  * `value` as a YAML flow scalar in the `quote` style the line already uses:
@@ -397,7 +458,7 @@ export function workflowUpdate(
 ):
   | { kind: 'same' }
   | { kind: 'write' | 'replace-older' | 'replace'; text: string; from?: string }
-  | { kind: 'repin'; text: string; from?: string; branch?: string; schedule?: string; secrets?: true; merged?: true } {
+  | { kind: 'repin'; text: string; from?: string; branch?: string; schedule?: string; secrets?: true; merged?: true; asks?: true } {
   const wanted = workflow(branch, version, figma, schedule);
   if (before === undefined) return { kind: 'write', text: wanted };
   if (before === wanted) return { kind: 'same' };
@@ -414,7 +475,13 @@ export function workflowUpdate(
     const update = workflowUpdate(added, branch, version, figma, schedule);
     return { ...(update.kind === 'repin' ? update : { text: added }), kind: 'repin', merged: true };
   }
-  if (split && merged && pins.length === 6) {
+  const asks = /^ {2}process-rules-asks:\s*$/m.test(before);
+  const withAsks = split && merged && !asks && pins.length === 6 && from !== undefined ? addAsksJob(before, from, figma) : undefined;
+  if (withAsks !== undefined) {
+    const update = workflowUpdate(withAsks, branch, version, figma, schedule);
+    return { ...(update.kind === 'repin' ? update : { text: withAsks }), kind: 'repin', asks: true };
+  }
+  if (split && merged && asks && pins.length === 8) {
     const moved = pushed !== undefined && pushed !== branch;
     const cron = SCHEDULE.exec(before)?.[4]?.trim();
     const rescheduled = cron !== undefined && cron.split(/\s+/).join(' ') !== schedule;
@@ -614,6 +681,7 @@ function workflowDetail(update: Exclude<ReturnType<typeof workflowUpdate>, { kin
       ...(update.schedule ? [`schedule → ${update.schedule}`] : []),
       ...(update.secrets ? [figma ? 'Figma secrets' : 'no Figma secrets'] : []),
       ...(update.merged ? ['merged job'] : []),
+      ...(update.asks ? ['needs-owner job'] : []),
     ].join(', ') || `header → v${version}`
   );
 }
@@ -633,6 +701,7 @@ function workflowWhat(update: Exclude<ReturnType<typeof workflowUpdate>, { kind:
     ...(update.schedule ? [`run the weekly decisions job on the schedule ${schedulePath} sets, cron ${update.schedule} UTC`] : []),
     ...(update.secrets ? [figma ? 'pass the FIGMA_TOKEN and FIGMA_LIBRARY secrets' : 'stop passing Figma secrets, with figma off'] : []),
     ...(update.merged ? ['add a job that closes the slice a merged pull request names, the one pull request run that writes to issues'] : []),
+    ...(update.asks ? ["add a job that labels an issue needs-owner where the agent asks the owner, and takes it off at the owner's approved label, Decision: comment or (hourly) 👍"] : []),
   ];
   return `in ${WORKFLOW_PATH}, ${parts.join(' and ') || `set the version in its header comment to v${version}`}, leaving the rest as it is`;
 }
