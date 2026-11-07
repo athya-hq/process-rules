@@ -1770,12 +1770,12 @@ describe('workflow', () => {
     assert.match(weeklyJob, /^ {4}permissions:\n {6}contents: read\n {6}issues: write\n {6}pull-requests: read$/m);
     assert.ok(
       asksJob.includes(
-        "    if: >-\n      (github.event_name == 'issue_comment' && (contains(github.event.comment.body, 'Needs you:') ||\n      contains(github.event.comment.body, 'Proposal:') || contains(github.event.comment.body, 'Decision:'))) ||\n      (github.event_name == 'issues' && github.event.label.name == 'approved') ||\n      (github.event_name == 'schedule' && github.event.schedule == '41 * * * *')\n",
+        "    if: >-\n      ((github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment') &&\n      (contains(github.event.comment.body, 'Needs you:') || contains(github.event.comment.body, 'Proposal:') ||\n      contains(github.event.comment.body, 'Decision:'))) ||\n      (github.event_name == 'issues' && github.event.label.name == 'approved') ||\n      (github.event_name == 'schedule' && github.event.schedule == '41 * * * *')\n",
       ),
       'only comments that may ask or decide, the approved label and the hourly sweep',
     );
     assert.match(asksJob, /^ {4}permissions:\n {6}contents: read\n {6}issues: write\n {6}pull-requests: write$/m);
-    assert.ok(text.includes("  issue_comment:\n    types: [created]\n  issues:\n    types: [labeled]\n  # The weekly decisions job: Mondays, 06:17 UTC.\n  schedule:\n    - cron: '17 6 * * 1'\n    # Hourly: the owner's 👍 on an ask takes its needs-owner label off.\n    - cron: '41 * * * *'\n  workflow_dispatch:\n"));
+    assert.ok(text.includes("  issue_comment:\n    types: [created]\n  pull_request_review_comment:\n    types: [created]\n  issues:\n    types: [labeled]\n  # The weekly decisions job: Mondays, 06:17 UTC.\n  schedule:\n    - cron: '17 6 * * 1'\n    # Hourly: the owner's 👍 on an ask takes its needs-owner label off.\n    - cron: '41 * * * *'\n  workflow_dispatch:\n"));
     assert.ok(
       mergedJob.includes(
         "    if: >-\n      github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged &&\n      github.event.pull_request.base.ref == github.event.repository.default_branch &&\n      github.event.pull_request.head.repo.full_name == github.repository\n",
@@ -1794,7 +1794,7 @@ function threeJobs(version: string, figma: boolean, schedule?: string): string {
   return workflow('main', version, figma, schedule)
     .replace(/\n {2}# An ask labels its issue[\s\S]*$/, '\n')
     .replace('# The weekly, merged and needs-owner jobs are split out', '# The weekly and merged jobs are split out')
-    .replace(/ {2}# A comment that asks the owner[^\n]*\n {2}issue_comment:\n {4}types: \[created\]\n {2}issues:\n {4}types: \[labeled\]\n/, '')
+    .replace(/ {2}# A comment that asks the owner[^\n]*\n {2}issue_comment:\n {4}types: \[created\]\n {2}pull_request_review_comment:\n {4}types: \[created\]\n {2}issues:\n {4}types: \[labeled\]\n/, '')
     .replace(/ {4}# Hourly:[^\n]*\n {4}- cron: '41 \* \* \* \*'\n/, '')
     .replace("(github.event_name == 'schedule' && github.event.schedule != '41 * * * *') || github.event_name == 'workflow_dispatch'", "github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'");
 }

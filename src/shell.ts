@@ -43,6 +43,8 @@ class Reader {
   pos = 0;
   /** Heredocs waiting for the next line break, each with the command it feeds. */
   private readonly pending: { delimiter: string; strip: boolean; quoted: boolean; into: Simple }[] = [];
+  /** The commands run inside $(…) and backquotes, which the shell runs too. */
+  readonly nested: Simple[] = [];
 
   private readonly src: string;
   private readonly read: ReadFile;
@@ -155,7 +157,9 @@ class Reader {
       append('', false);
     } else if (next === '(') {
       this.pos += 2;
-      const value = this.substitution(this.list(true));
+      const inner = this.list(true);
+      this.nested.push(...inner);
+      const value = this.substitution(inner);
       if (value === undefined) append('', false);
       else append(value);
     } else if (next === '{') {
@@ -197,11 +201,13 @@ class Reader {
     return text?.replace(/\n+$/, '');
   }
 
-  /** From an opening backquote to just past its closing one; its text stays unknown. */
+  /** From an opening backquote to just past its closing one: its output stays unknown, but the commands it runs are kept. */
   private backquoted(): void {
     const src = this.src;
-    this.pos++;
+    const start = ++this.pos;
     while (this.pos < src.length && src[this.pos] !== '`') this.pos += src[this.pos] === '\\' ? 2 : 1;
+    const inner = new Reader(src.slice(start, this.pos).replace(/\\([`\\$])/g, '$1'), this.read);
+    this.nested.push(...inner.list(false), ...inner.nested);
     this.pos++;
   }
 
@@ -219,7 +225,9 @@ class Reader {
       const strip = src[this.pos] === '-';
       if (strip) this.pos++;
       const word = this.word();
-      this.pending.push({ delimiter: word.text, strip, quoted: /['"\\]/.test(word.raw), into });
+      // The shell does not expand a delimiter; it only takes its quotes off.
+      const delimiter = word.raw.replace(/\\(.)/g, '$1').replace(/['"]/g, '');
+      this.pending.push({ delimiter, strip, quoted: /['"\\]/.test(word.raw), into });
       return;
     }
     const input = src[this.pos] === '<' && src[this.pos + 1] !== '&';
@@ -291,14 +299,20 @@ function closing(src: string, from: number, open: string, close: string): number
   return at;
 }
 
-/** The simple commands a command line runs, read as a shell would, a nested `sh -c` script's included. */
+/**
+ * The simple commands a command line runs, read as a shell would: those
+ * inside `$(…)` and backquotes, and a nested `sh -c` (or `bash -lc`)
+ * script's, included.
+ */
 export function commands(line: string, read: ReadFile): Simple[] {
   const found: Simple[] = [];
-  for (const simple of new Reader(line, read).list(false)) {
+  const reader = new Reader(line, read);
+  const top = reader.list(false);
+  for (const simple of [...top, ...reader.nested]) {
     found.push(simple);
     const words = simple.words;
     const shell = words.findIndex((word) => /^(?:.*\/)?(?:ba|z|da)?sh$/.test(word.text));
-    const script = shell < 0 ? -1 : words.findIndex((word, at) => at > shell && word.text === '-c');
+    const script = shell < 0 ? -1 : words.findIndex((word, at) => at > shell && /^-[A-Za-z]*c[A-Za-z]*$/.test(word.text));
     const body = script < 0 ? undefined : words[script + 1];
     if (body?.known) found.push(...commands(body.text, read));
   }

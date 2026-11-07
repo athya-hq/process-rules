@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { ASK_LIMIT, askProblem, askRefusal, askedBy, commentBodies, commentProblem, needsOwner, opensAsk, opensDecision, ownersAround } from './asks.ts';
+import { readFileSync } from 'node:fs';
+
+import { ASK_LIMIT, HOURLY, askProblem, askRefusal, askedBy, commentBodies, commentProblem, needsOwner, opensAsk, opensDecision, ownersAround } from './asks.ts';
 import { AGENT, FakeSys, ROOT, capture } from './fake.test.ts';
 import { UNKNOWN } from './shell.ts';
 
@@ -79,10 +81,15 @@ describe('commentBodies', () => {
     assert.deepEqual(texts('gh issue comment 1 --body-file -'), ['?']);
     assert.deepEqual(texts('gh pr comment 1 --body'), ['?']);
     assert.deepEqual(texts("cd /repo && /opt/bin/gh pr comment 9 --body \"$(cat <<'EOF'\nNeeds you: heredoc\nEOF\n)\""), ['Needs you: heredoc']);
+    assert.deepEqual(texts('gh pr comment -R o/r 9 --body "from -R"'), ['from -R']);
+    assert.deepEqual(texts('gh issue comment 1 --body="$X rest"'), ['?? rest'], 'a joined value that opens with a variable');
+    assert.equal(commentBodies('gh issue comment 1 -b"$X"', read)[0]?.opensUnknown, true);
+    // With no body in the command, gh takes it from an editor, a prompt or the browser.
+    assert.deepEqual(texts('gh issue comment 1 --web; gh pr comment 2 --editor; gh issue comment 3 --edit-last'), ['?', '?', '?']);
   });
 
   it('leaves alone gh commands that post no comment', () => {
-    assert.deepEqual(texts('gh issue comment 1 --edit-last --web'), []);
+    assert.deepEqual(texts('gh issue comment 1 --delete-last --yes'), []);
     assert.deepEqual(texts('gh issue view 1 --comments; gh pr create --body "Needs you: x"; git push'), []);
     assert.deepEqual(texts('gh api repos/o/r/issues/1/comments --paginate --jq .[].body'), []);
     assert.deepEqual(texts('gh api -X POST repos/o/r/issues/1/labels -f labels[]=x'), []);
@@ -107,7 +114,10 @@ describe('commentBodies', () => {
 
   it('reads a GraphQL comment mutation: its body variable, its input, or else its query', () => {
     assert.deepEqual(texts('gh api graphql -f query="mutation(\\$b: String!) { addComment(input: {subjectId: \\"I\\", body: \\$b}) { clientMutationId } }" -f body="Needs you: v"'), ['Needs you: v']);
-    assert.deepEqual(texts('gh api graphql -f query=\'mutation { addComment(input: {subjectId: "I", body: "Proposal: inline"}) { clientMutationId } }\''), ['mutation { addComment(input: {subjectId: "I", body: "Proposal: inline"}) { clientMutationId } }']);
+    assert.deepEqual(texts('gh api graphql -f query=\'mutation { addComment(input: {subjectId: "I", body: "Proposal: inline\\nline two"}) { clientMutationId } }\''), ['Proposal: inline\nline two']);
+    assert.deepEqual(texts('gh api graphql -f query=\'mutation { addComment(input: {subjectId: "I", body: "bad \\q"}) { x } }\''), ['?']);
+    assert.deepEqual(texts('gh api graphql -f query="mutation { addComment(input: {body: \\"$B\\"}) { x } }"'), ['?']);
+    assert.deepEqual(texts('gh api graphql -f query=\'mutation { addComment(input: {subjectId: "I"}) { x } }\''), ['mutation { addComment(input: {subjectId: "I"}) { x } }']);
     assert.deepEqual(texts('gh api graphql -f query=\'mutation { updateIssueComment(input: {}) { x } }\' --input vars.json'), ['Needs you: in variables']);
   });
 });
@@ -184,6 +194,23 @@ describe('needsOwner', () => {
     assert.deepEqual(calls(approved), [`DELETE /repos/${SLUG}/issues/7/labels/needs-owner`]);
     const bare = job('issues', { action: 'labeled', label: { name: 'approved' }, sender: { login: OWNER }, issue: { number: 7 } });
     assert.deepEqual((await runJob(bare)).out, ['needs-owner: the owner approved #7']);
+  });
+
+  it('labels a pull request where the agent asks in a review comment, and clears it at a decision there', async () => {
+    const asked = job('pull_request_review_comment', { action: 'created', comment: { body: `Proposal: x ${PAGE}`, user: { login: AGENT } }, pull_request: { number: 7, labels: [] } });
+    assert.deepEqual((await runJob(asked)).out, ['needs-owner: #7 asks the owner (Proposal:); labelled needs-owner']);
+    assert.deepEqual(calls(asked), [`POST /repos/${SLUG}/issues/7/labels`]);
+    const decided = job('pull_request_review_comment', { action: 'created', comment: { body: 'Decision: yes', user: { login: OWNER } }, pull_request: { number: 7, labels: [{ name: 'needs-owner' }] } });
+    await runJob(decided);
+    assert.deepEqual(calls(decided), [`DELETE /repos/${SLUG}/issues/7/labels/needs-owner`]);
+    assert.deepEqual((await runJob(job('pull_request', { action: 'opened', pull_request: { number: 7 } }))).out, ['needs-owner: nothing to do on a pull_request event']);
+  });
+
+  it('names the hourly cron in the shared workflow as the code does', () => {
+    const checks = readFileSync(new URL('../.github/workflows/checks.yml', import.meta.url), 'utf8');
+    assert.equal(checks.split(`github.event.schedule != '${HOURLY}'`).length, 2, 'the decisions job skips it');
+    assert.equal(checks.split(`github.event.schedule == '${HOURLY}'`).length, 2, 'the needs-owner job runs on it');
+    assert.match(checks, /pull_request_review_comment/);
   });
 
   it('leaves the label where someone else answers, or the comment is not an ask', async () => {

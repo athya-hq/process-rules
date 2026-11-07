@@ -108,6 +108,8 @@ export function notAdoptedLine(sys: Sys, root: string, command: string): string 
 
 /** When the weekly decisions job runs, unless the settings say otherwise: Mondays, 06:17 UTC. */
 export const DEFAULT_SCHEDULE = '17 6 * * 1';
+/** The hourly needs-owner sweep's cron, which the client's workflow and the shared one both name. */
+export const HOURLY = '41 * * * *';
 
 const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
 const DAYS = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
@@ -144,5 +146,7 @@ export function scheduleIn(raw: unknown): string {
   if (fields.length !== 5 || !fields.every((field, index) => cronField(field, CRON_FIELDS[index] as (typeof CRON_FIELDS)[number]))) {
     throw new Error(`${SETTINGS_PATH}: "schedule" must be a five-field cron, such as "${DEFAULT_SCHEDULE}" (Mondays, 06:17 UTC)`);
   }
-  return fields.join(' ');
+  const cron = fields.join(' ');
+  if (cron === HOURLY) throw new Error(`${SETTINGS_PATH}: "schedule" may not be ${HOURLY}, the hourly needs-owner sweep's cron, or the weekly job would never run`);
+  return cron;
 }

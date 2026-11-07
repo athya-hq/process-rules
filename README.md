@@ -168,7 +168,7 @@ refused, naming the rule and the fix: publish the page, then post the
 question, the link and how to answer. A body the guard cannot read in full
 (a variable, a command substitution other than `cat`) is judged by what it
 spells out; where that asks the owner, or the body opens with the unknown
-part, it is refused with how to write it so the guard can read it. `propose`
+part, it is refused with how to write it so the guard can read it; so is a comment with no body in the command, which gh would take from an editor, a prompt or the browser. Commands inside `$(…)`, backquotes and `sh -c` are read too. `propose`
 posts its own text through GitHub's API, not through `gh`, so this check
 does not see it.
 
@@ -488,7 +488,7 @@ it starts, and pre-push or a re-run of Work rules sees the 👍.
 
 **The Needs you list keeps itself.** With `board` on, the client workflow's
 `process-rules-asks` job runs `process-rules needs-owner`. An agent's comment
-opening with `Needs you:` or `Proposal:` labels its issue or pull request
+opening with `Needs you:` or `Proposal:`, on an issue, a pull request or a review thread, labels its issue or pull request
 `needs-owner`, so it shows in the owner's Needs you view. The owner's
 `approved` label or `Decision:` comment takes the label off at once. Hourly
 (cron `41 * * * *`), and on a run by hand, a sweep takes it off each open
@@ -652,7 +652,7 @@ the weekly job, `reviews-due` and the pre-push hook each pass, saying so, when
 their feature is off; `onboard` writes the workflow only once a check needs it. `project` names the board's
 Project (by default `<repo> work`). `schedule` sets when the weekly job runs,
 as a five-field cron in UTC (by default `"17 6 * * 1"`, Mondays at 06:17);
-`onboard` refuses one that is not a cron and writes it into the workflow, so
+`onboard` refuses one that is not a cron, or that is `41 * * * *`, the hourly needs-owner sweep's, and writes it into the workflow, so
 run `onboard` again after changing it.
 
 GitHub has issue types for organisations only, so on a repository a personal

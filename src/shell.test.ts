@@ -30,7 +30,7 @@ describe('commands', () => {
   });
 
   it('marks what only the running shell knows', () => {
-    assert.deepEqual(words('echo $HOME ${X:-y} $1 $? $((1+2)) `date` "$(date)" "`id`" $ a$'), [['echo', '?', '?', '?', '?', '?', '?', '?', '?', '$', 'a$']]);
+    assert.deepEqual(words('echo $HOME ${X:-y} $1 $? $((1+2)) `date` "$(date)" "`id`" $ a$'), [['echo', '?', '?', '?', '?', '?', '?', '?', '?', '$', 'a$'], ['date'], ['date'], ['id']]);
     const [simple] = commands('echo "$X tail" "head $Y"', read);
     assert.deepEqual(
       simple?.words.map(({ known, opensUnknown }) => ({ known, opensUnknown })),
@@ -40,13 +40,14 @@ describe('commands', () => {
         { known: false, opensUnknown: false },
       ],
     );
-    assert.deepEqual(words('echo ${a{b}c} `a\\`b` ${open'), [['echo', '?', '?', '?']]);
+    assert.deepEqual(words('echo ${a{b}c} `a\\`b` ${open'), [['echo', '?', '?', '?'], ['a?'], ['b']], 'an escaped backquote nests a substitution, as in bash');
   });
 
   it("reads cat's heredoc or file in a command substitution", () => {
-    assert.deepEqual(words("gh x --body \"$(cat <<'EOF'\nline one\n  line (two)\nEOF\n)\" --after"), [['gh', 'x', '--body', 'line one\n  line (two)', '--after']]);
-    assert.deepEqual(words('x "$(cat body.md)" $(cat missing) $(cat a b) $(ls) $(cat "$F") $(a; b)'), [['x', 'from a file', '?', '?', '?', '?', '?']]);
-    assert.deepEqual(words('x $(cat)'), [['x', '?']]);
+    assert.deepEqual(words("gh x --body \"$(cat <<'EOF'\nline one\n  line (two)\nEOF\n)\" --after"), [['gh', 'x', '--body', 'line one\n  line (two)', '--after'], ['cat']]);
+    assert.deepEqual(words('x "$(cat body.md)" $(cat missing) $(cat a b) $(ls) $(cat "$F") $(a; b)')[0], ['x', 'from a file', '?', '?', '?', '?', '?']);
+    assert.deepEqual(words('echo $(gh issue comment 1 -b hi) `gh pr comment 2 -b yo`').slice(1), [['gh', 'issue', 'comment', '1', '-b', 'hi'], ['gh', 'pr', 'comment', '2', '-b', 'yo']], 'the commands a substitution runs are read too');
+    assert.deepEqual(words('x $(cat)'), [['x', '?'], ['cat']]);
   });
 
   it('feeds heredocs, here-strings and < files to their command', () => {
@@ -56,6 +57,9 @@ describe('commands', () => {
     assert.deepEqual(stdin('cmd <<"EOF"\n`x`\nEOF'), { text: '`x`\n', known: true, opensUnknown: false });
     assert.deepEqual(stdin('cmd <<-\\EOF\n\tindented\n\tEOF'), { text: 'indented\n', known: true, opensUnknown: false });
     assert.deepEqual(stdin('cmd <<EOF\nunterminated'), { text: 'unterminated\n', known: true, opensUnknown: false });
+    // The shell takes a delimiter as written, quotes off, never expanded.
+    assert.deepEqual(words('cmd <<$D\nbody\n$D\ngh after'), [['cmd'], ['gh', 'after']]);
+    assert.equal(stdin("cmd <<'$D'\nbody\n$D")?.text, 'body\n');
     assert.deepEqual(stdin('cmd <<< "a string"'), { text: 'a string\n', known: true, opensUnknown: false });
     assert.deepEqual(stdin('cmd < body.md'), { text: 'from a file\n', known: true, opensUnknown: false });
     assert.deepEqual(stdin('cmd < missing'), { text: '', known: false, opensUnknown: true });
@@ -71,7 +75,8 @@ describe('commands', () => {
 
   it('reads the script of sh -c, bash -c and the like', () => {
     assert.deepEqual(words(`bash -c 'gh pr comment 1 --body "hi"'`), [['bash', '-c', 'gh pr comment 1 --body "hi"'], ['gh', 'pr', 'comment', '1', '--body', 'hi']]);
-    assert.deepEqual(words('/bin/sh -lc x'), [['/bin/sh', '-lc', 'x']]);
+    assert.deepEqual(words('/bin/sh -lc x'), [['/bin/sh', '-lc', 'x'], ['x']]);
+    assert.deepEqual(words('bash --rcfile x'), [['bash', '--rcfile', 'x']]);
     assert.deepEqual(words('zsh -c "$X"'), [['zsh', '-c', '?']]);
     assert.deepEqual(words('sh -c'), [['sh', '-c']]);
   });

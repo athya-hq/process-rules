@@ -10,7 +10,7 @@ export const ASK_LIMIT = 500;
 /** A published page: a claude.ai artifact, as a session publishes it. */
 export const PAGE_LINK = /https:\/\/claude\.ai\/(?:code\/)?artifact\/[\w-]+/;
 /** The hourly sweep's cron, which the client's workflow and the shared one both name. */
-export const HOURLY = '41 * * * *';
+export { HOURLY } from './features.ts';
 
 /** A comment's opening word, past any Markdown emphasis, heading or quote marks before it. */
 const OPENING = /^\s*(?:[*_#>]+\s*)*([A-Za-z][A-Za-z ]*?):/;
@@ -48,7 +48,7 @@ export function askedBy(body: string, owners: readonly string[]): string | undef
  */
 export function askProblem(body: Text, owners: readonly string[]): string | undefined {
   if (body.opensUnknown) {
-    return 'the guard cannot see how this comment opens, since it starts with a part only the shell knows (a variable or a command substitution), so it cannot tell whether it asks the owner';
+    return 'the guard cannot see how this comment opens, since it starts with a part only the shell knows (a variable or a command substitution) or comes from an editor, a prompt or the browser, so it cannot tell whether it asks the owner';
   }
   const why = askedBy(body.text.replaceAll(UNKNOWN, ' '), owners);
   if (!why) return undefined;
@@ -87,7 +87,8 @@ function flagValue(words: Text[], at: number, names: readonly string[]): { value
     if (word.text === name) return { value: words[at + 1], next: at + 2 };
     const joined = name.startsWith('--') ? `${name}=` : name;
     if (word.text.startsWith(joined) && word.text.length > joined.length) {
-      return { value: { ...word, text: word.text.slice(joined.length), opensUnknown: false }, next: at + 1 };
+      const text = word.text.slice(joined.length);
+      return { value: { ...word, text, opensUnknown: text.startsWith(UNKNOWN) }, next: at + 1 };
     }
   }
   return undefined;
@@ -103,7 +104,11 @@ function fromFile(path: Text | undefined, simple: Simple, read: ReadFile): Text 
   return text === undefined ? UNREADABLE('') : { text, known: true, opensUnknown: false };
 }
 
-/** The body a `gh issue comment` or `gh pr comment` posts, or undefined when it names none. */
+/**
+ * The body a `gh issue comment` or `gh pr comment` posts; undefined only for
+ * `--delete-last`, which posts none. With no body in the command, gh takes
+ * it from an editor, a prompt or the browser, which the guard cannot read.
+ */
 function commentBody(args: Text[], simple: Simple, read: ReadFile): Text | undefined {
   let body: Text | undefined;
   for (let at = 0; at < args.length; ) {
@@ -113,7 +118,31 @@ function commentBody(args: Text[], simple: Simple, read: ReadFile): Text | undef
     else if (file) body = fromFile(file.value, simple, read);
     at = inline?.next ?? file?.next ?? at + 1;
   }
-  return body;
+  if (body) return body;
+  return args.some((word) => word.text === '--delete-last') ? undefined : UNREADABLE('');
+}
+
+/** A body written into a GraphQL query as `body: "…"`, read as GraphQL reads the string, or undefined. */
+function queryBody(query: Text): Text | undefined {
+  const written = /\bbody\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(query.text)?.[1];
+  if (written === undefined) return undefined;
+  try {
+    const text = JSON.parse(`"${written}"`) as string;
+    return { text, known: query.known && !text.includes(UNKNOWN), opensUnknown: text.startsWith(UNKNOWN) };
+  } catch {
+    return UNREADABLE('');
+  }
+}
+
+/** The words of a gh command that are not flags or a flag's value, in order. */
+function positionals(args: Text[]): string[] {
+  const found: string[] = [];
+  for (let at = 0; at < args.length; at++) {
+    const word = (args[at] as Text).text;
+    if (!word.startsWith('-')) found.push(word);
+    else if (GH_VALUED.has(word)) at++;
+  }
+  return found;
 }
 
 /** A `key=value` field of gh api, its value read as -F reads it (`@file`) when `typed`. */
@@ -162,8 +191,8 @@ function apiBody(args: Text[], simple: Simple, read: ReadFile): Text | undefined
       return UNREADABLE('');
     }
   }
-  // A mutation with its body written into the query is judged by the query.
-  return endpoint === 'graphql' ? query : undefined;
+  // A mutation with its body written into the query: that string, or else the whole query.
+  return endpoint === 'graphql' && query ? (queryBody(query) ?? query) : undefined;
 }
 
 /** The comment bodies a command line posts or edits through gh, each as the command spells it. */
@@ -173,7 +202,7 @@ export function commentBodies(line: string, read: ReadFile): Text[] {
     const at = simple.words.findIndex((word) => word.known && /^(?:.*\/)?gh$/.test(word.text));
     if (at < 0) continue;
     const args = simple.words.slice(at + 1);
-    const [group, action] = args.filter((word) => !word.text.startsWith('-')).map((word) => word.text);
+    const [group, action] = positionals(args);
     const body =
       (group === 'issue' || group === 'pr') && action === 'comment'
         ? commentBody(args, simple, read)
@@ -276,6 +305,7 @@ interface Event {
   action?: string;
   comment?: { body?: string | null; user?: { login?: string } | null };
   issue?: { number: number; labels?: { name: string }[] };
+  pull_request?: { number: number; labels?: { name: string }[] };
   label?: { name?: string };
   sender?: { login?: string };
 }
@@ -303,9 +333,11 @@ export async function needsOwner(sys: Sys, io: Output): Promise<number> {
     return 0;
   }
   const event = JSON.parse(sys.read(eventPath)) as Event;
-  const issue = event.issue?.number;
-  const labelled = (event.issue?.labels ?? []).some((label) => label.name === NEEDS_OWNER);
-  if (name === 'issue_comment' && issue !== undefined) {
+  // A review comment's event names its pull request rather than an issue; GitHub labels both alike.
+  const target = event.issue ?? (name === 'pull_request_review_comment' ? event.pull_request : undefined);
+  const issue = target?.number;
+  const labelled = (target?.labels ?? []).some((label) => label.name === NEEDS_OWNER);
+  if ((name === 'issue_comment' || name === 'pull_request_review_comment') && issue !== undefined) {
     const author = event.comment?.user?.login ?? undefined;
     const body = event.comment?.body ?? '';
     if (event.action === 'created' && anyLogin(settings.agents, author) && opensAsk(body)) {

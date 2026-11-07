@@ -103,8 +103,8 @@ describe('guard on comments that ask the owner', () => {
   it('refuses an ask in a heredoc or a file as it does inline, and @-mentions of the owner', () => {
     const sys = agentSys();
     sys.files.set('/repo/sub/ask.md', 'Needs you: pick one');
-    assert.equal(run(sys, "gh pr comment 1 --body \"$(cat <<'EOF'\nNeeds you: pick one\nEOF\n)\"").code, 2);
-    assert.equal(run(sys, 'gh issue comment 1 --body-file ask.md', '/repo/sub').code, 2);
+    assert.match(run(sys, "gh pr comment 1 --body \"$(cat <<'EOF'\nNeeds you: pick one\nEOF\n)\"").err[0] ?? '', /links no published page/, 'the heredoc was read');
+    assert.match(run(sys, 'gh issue comment 1 --body-file ask.md', '/repo/sub').err[0] ?? '', /links no published page/, 'the file was read');
     // A cwd that is not a path is not used, so ask.md is looked for in the checkout, where there is none to read.
     assert.match(run(sys, 'gh issue comment 1 --body-file ask.md', 'relative').err[0] ?? '', /cannot see how this comment opens/);
     assert.equal(run(sys, 'gh api repos/o/r/issues/1/comments -f body="@example-owner please look"').code, 2);
