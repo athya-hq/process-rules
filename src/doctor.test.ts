@@ -432,6 +432,17 @@ describe('doctor in a Claude cloud session', () => {
     ]);
   });
 
+  it('refuses an identity session-start gave that is not the account the proxy acts as now', async () => {
+    const sys = cloud('SecondBot');
+    sys.files.set(`${ROOT}/.github/process-rules.json`, JSON.stringify({ owner: 'example-owner', agent: [AGENT, 'SecondBot'] }));
+    const { code, out } = await check(sys);
+    assert.equal(code, 1);
+    assert.ok(out.includes("✓  the proxy acts as SecondBot, an agent the repo's settings name"));
+    assert.deepEqual(marked(out, '✗'), [
+      '✗  session-start did not give this session the agent identity, so gh and git stay locked out → a new session; its first process-rules line says why',
+    ]);
+  });
+
   it("refuses outside the repo's clone, and still checks the Setup script", async () => {
     const sys = cloud();
     sys.inRepo = false;

@@ -5,6 +5,7 @@ import {
   anyLogin,
   either,
   loadSettings,
+  sameLogin,
   checkToken,
   keyBody,
   keyPairProblem,
@@ -209,9 +210,10 @@ async function cloudDoctor(sys: Sys, io: Output, named?: string): Promise<number
     );
   }
   // What session-start exported when it lifted the lock; without it, gh and git in this session reach GitHub as nobody.
+  // It must be an agent, and the account the proxy acts as now: another means the connection changed since.
   const given = sys.env.PROCESS_RULES_AGENT;
   github.push(
-    given && (agents === undefined || anyLogin(agents, given))
+    given && (agents === undefined || anyLogin(agents, given)) && (!('login' in asked) || sameLogin(given, asked.login))
       ? { mark: '✓', text: `session-start gave this session ${given}'s identity` }
       : {
           mark: '✗',

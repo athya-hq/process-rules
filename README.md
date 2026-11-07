@@ -759,9 +759,9 @@ reads, in the same layout and with the same exit codes as on a Mac:
 └  2 to fix
 ```
 
-This cloud session checks that `cloud-setup.sh` is the file `onboard`
-writes, at the workflow's pin (`✗`, fixed by running `onboard` again; a
-workflow that pins no one version is `▲`), that the CLI running is that
+This cloud session checks that `cloud-setup.sh` opens with the comment
+`onboard` writes, naming the release it installs, and that this release is
+the workflow's pin (`✗`, fixed by running `onboard` again; a workflow that pins no one version is `▲`), that the CLI running is that
 release (`▲`: `session-start` installs it, or `bash
 .github/process-rules/cloud-setup.sh` does), and that the Setup script
 runs the repo's file (`▲` without `/opt/process-rules/from-setup`). GitHub
