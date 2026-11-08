@@ -824,3 +824,22 @@
   agent ask (undo issues) alone. Rejected: a separate client workflow file
   (onboard would track two files), and refusing every body with a variable
   (it would block routine comments).
+- **2026-11-08 — Record: an edited `Decision:` counts only if owners made
+  every edit (State #185 of P-40).** The owner approved this in a client's
+  spec: a `Decision:` counts only if the owner made every edit. Repo writers,
+  agents included, can edit anyone's comment, and the work rules and the
+  Needs you sweep read only who wrote one. GitHub's GraphQL
+  `userContentEdits` lists every revision, the comment as written included,
+  each with its editor; public repositories show a bot's comment edited by
+  two maintainers in turn, each named. So both read it, for an owner's edited
+  `Decision:` alone: an unedited one settles as before, through REST, and the
+  work rules ask GraphQL nothing when an unedited decision or a request
+  settles the slice. An edit by a deleted account, an edit past the first
+  100, or a comment GraphQL cannot find makes it not count. The work rules
+  read REST, and GraphQL only for an edited `Decision:`, so a Claude cloud
+  session's proxy, which refuses GraphQL, can still run them; there an
+  edited `Decision:` does not count and the refusal says why, as an edited
+  request already does not. Rejected: never counting
+  an edited `Decision:` (the owner's own corrections would stop counting) and
+  trusting the last editor alone (an agent's edit followed by the owner's
+  would hide the agent's).

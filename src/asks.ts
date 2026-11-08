@@ -1,4 +1,5 @@
 import { API, type Settings, anyLogin, loadSettings } from './agent.ts';
+import { ownersAlone } from './edits.ts';
 import { isOn, notAdoptedLine, offLine } from './features.ts';
 import { type ReadFile, type Simple, type Text, UNKNOWN, commands } from './shell.ts';
 import type { Output, Sys } from './types.ts';
@@ -252,6 +253,8 @@ export function commentProblem(sys: Sys, line: string, cwd: string): string | un
 
 interface Comment {
   id: number;
+  /** Its GraphQL id, from which its edits are read. */
+  node_id?: string;
   body?: string | null;
   user?: { login?: string } | null;
   created_at: string;
@@ -287,7 +290,8 @@ async function removeLabel(sys: Sys, token: string, slug: string, number: number
 
 /**
  * Whether the owner has answered the latest ask on issue `number`, from its
- * comments: a `Decision:` comment after it, or a 👍 after its last edit.
+ * comments: a `Decision:` comment after it that no one but owners edited,
+ * or a 👍 after its last edit.
  * Undefined when no agent asked there, which leaves the label to whoever put
  * it on, such as the weekly job's undo issues.
  */
@@ -295,9 +299,9 @@ async function answered(sys: Sys, token: string, slug: string, number: number, {
   const comments = await every<Comment>(sys, token, `${API}/repos/${slug}/issues/${number}/comments`);
   const ask = comments.filter((comment) => anyLogin(agents, comment.user?.login ?? undefined) && opensAsk(comment.body ?? '')).at(-1);
   if (!ask) return undefined;
-  if (comments.some((comment) => comment.created_at > ask.created_at && anyLogin(owners, comment.user?.login ?? undefined) && opensDecision(comment.body ?? ''))) {
-    return 'a Decision: comment';
-  }
+  const decisions = comments.filter((comment) => comment.created_at > ask.created_at && anyLogin(owners, comment.user?.login ?? undefined) && opensDecision(comment.body ?? ''));
+  // A Decision: someone other than an owner edited answers nothing.
+  if (decisions.length > 0 && (await ownersAlone(sys, token, decisions, owners)).kept.length > 0) return 'a Decision: comment';
   const since = ask.updated_at && ask.updated_at > ask.created_at ? ask.updated_at : ask.created_at;
   const reactions = await every<Reaction>(sys, token, `${API}/repos/${slug}/issues/comments/${ask.id}/reactions?content=%2B1`);
   return reactions.some((reaction) => anyLogin(owners, reaction.user?.login ?? undefined) && reaction.created_at > since) ? 'a 👍 on the latest ask' : false;

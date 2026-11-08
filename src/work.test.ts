@@ -106,12 +106,38 @@ let ids = 0;
 const comment = (body: string, created_at = LATEST, login = OWNER, edited: string | null = null): Node => ({
   event: 'commented',
   id: `IC_${++ids}`,
+  node_id: `IC_${ids}`,
   user: { login },
   body,
   created_at,
   updated_at: edited ?? created_at,
 });
 const thumb = (created_at = LATEST, login = OWNER): Node => ({ user: { login }, created_at });
+
+/** After LATEST: when a comment made at LATEST was edited. */
+const EDITED = '2026-10-05T00:00:00Z';
+
+/**
+ * The work rules on slice `issue`, with GitHub's GraphQL API listing each
+ * comment's revisions by `revisions`, newest first, the comment as written
+ * last; or refusing it, as a Claude cloud session's proxy does. Also how many
+ * times they asked GraphQL.
+ */
+async function withEdits(issue: Node, revisions: Record<string, string[]> | 'refused'): Promise<{ problems: string[]; graphql: number }> {
+  const sys = new FakeSys();
+  github(sys, issue);
+  sys.route('POST', '/graphql', () => {
+    if (revisions === 'refused') return { status: 403, json: { message: 'Forbidden' } };
+    const { ids } = (sys.requests.at(-1)?.body as { variables: { ids: string[] } }).variables;
+    const nodes = ids.map((id) => ({ id, userContentEdits: { totalCount: revisions[id]?.length ?? 0, nodes: (revisions[id] ?? []).map((login) => ({ editor: { login } })) } }));
+    return { status: 200, json: { data: { nodes } } };
+  });
+  const found = await sliceProblems(sys, 'tok', SLUG, 12, ACCOUNTS, {});
+  return { problems: found, graphql: sys.requests.filter((request) => request.url.endsWith('/graphql')).length };
+}
+
+const OTHERS_EDITED = ' (a "Decision:" comment someone other than an owner edited does not count)';
+const UNREAD = ' (an edited "Decision:" comment counts only once GitHub\'s GraphQL API shows owners made every edit, and it did not answer here)';
 
 async function problems(issue: Node | null, pulls: Node[] = [], mine: { pull?: number; branch?: string } = {}, accounts = ACCOUNTS): Promise<string[]> {
   const sys = new FakeSys();
@@ -235,6 +261,59 @@ describe('sliceProblems', () => {
         assert.deepEqual(await problems(g.issue), [refused]);
       });
     }
+
+    describe("an owner's edited Decision:", () => {
+      const proposes = '; ExampleBot proposes it with: process-rules propose 12';
+
+      it('is refused when the agent edited it, on the slice or on the work item', async () => {
+        const g = added();
+        const made = comment('Decision: keep it', LATEST, OWNER, EDITED);
+        g.comments.push(made);
+        assert.deepEqual(await withEdits(g.issue, { [made.id as string]: [AGENT, OWNER] }), { problems: [`${proposed}${OTHERS_EDITED}${proposes}`], graphql: 1 });
+        const h = added();
+        const there = comment('Decision: add #12', LATEST, OWNER, EDITED);
+        h.timeline.push(there);
+        // An agent's edit counts against it even when an owner edited it again after.
+        assert.deepEqual(await withEdits(h.issue, { [there.id as string]: [OWNER, AGENT, OWNER] }), { problems: [`${proposed}${OTHERS_EDITED}${proposes}`], graphql: 1 });
+      });
+
+      it('passes when owners alone edited it, on the slice or on the work item', async () => {
+        const g = added();
+        const made = comment('Decision: keep it', LATEST, OWNER, EDITED);
+        g.comments.push(made);
+        assert.deepEqual(await withEdits(g.issue, { [made.id as string]: [OWNER, OWNER] }), { problems: [], graphql: 1 });
+        const h = added();
+        const there = comment('Decision: add #12', LATEST, OWNER, EDITED);
+        h.timeline.push(there);
+        assert.deepEqual(await withEdits(h.issue, { [there.id as string]: [OWNER, OWNER] }), { problems: [], graphql: 1 });
+      });
+
+      it('does not count where GraphQL is refused, and says why', async () => {
+        const g = added();
+        g.comments.push(comment('Decision: keep it', LATEST, OWNER, EDITED));
+        assert.deepEqual(await withEdits(g.issue, 'refused'), { problems: [`${proposed}${UNREAD}${proposes}`], graphql: 1 });
+      });
+
+      it('asks GraphQL nothing when an unedited decision, or a request, settles it', async () => {
+        const g = added();
+        g.comments.push(comment('Decision: keep it', LATEST, OWNER, EDITED), comment('Decision: keep it'));
+        assert.deepEqual(await withEdits(g.issue, 'refused'), { problems: [], graphql: 0 });
+        const h = added();
+        const request = { ...comment('Please add the thing', APPROVED), id: 4321 };
+        h.issue.body = `${h.issue.body as string}\n\nRequested: https://github.com/${SLUG}/issues/10#issuecomment-4321`;
+        h.timeline.push(request, comment('Decision: add #12', LATEST, OWNER, EDITED));
+        assert.deepEqual(await withEdits(h.issue, 'refused'), { problems: [], graphql: 0 });
+      });
+
+      it("still passes with the owner's 👍 on the proposal", async () => {
+        const g = added();
+        const made = comment('Decision: keep it', LATEST, OWNER, EDITED);
+        const proposal = comment('Proposal: add #12', LATER, AGENT);
+        g.comments.push(made, proposal);
+        g.thumbs.set(proposal.id as string, [thumb()]);
+        assert.deepEqual(await withEdits(g.issue, { [made.id as string]: [AGENT, OWNER] }), { problems: [], graphql: 1 });
+      });
+    });
 
     describe("a request on the work item the slice links", () => {
       const LINK = `https://github.com/${SLUG}/issues/10#issuecomment-`;
@@ -423,6 +502,25 @@ describe('sliceProblems', () => {
       h.states.push(state());
       h.comments.push(comment('Decision: drop #30'));
       assert.deepEqual(await problems(h.issue), []);
+    });
+
+    it("refuses the owner's Decision: the agent edited, on the state or the slice, and takes one owners alone edited", async () => {
+      const onState = comment('Decision: drop it', LATEST, OWNER, EDITED);
+      const g = graph();
+      g.states.push(state({ comments: [onState] }));
+      const why = refused.replace('; ExampleBot proposes', `${OTHERS_EDITED}; ExampleBot proposes`);
+      assert.deepEqual(await withEdits(g.issue, { [onState.id as string]: [AGENT, OWNER] }), { problems: [why], graphql: 1 });
+      assert.deepEqual(await withEdits(g.issue, { [onState.id as string]: [OWNER, OWNER] }), { problems: [], graphql: 1 });
+      const onSlice = comment('Decision: drop #30', LATEST, OWNER, EDITED);
+      const h = graph();
+      h.states.push(state());
+      h.comments.push(onSlice);
+      assert.deepEqual(await withEdits(h.issue, { [onSlice.id as string]: [AGENT, OWNER] }), { problems: [why], graphql: 1 });
+      // An unedited Decision: on the state still settles it, and needs no GraphQL.
+      const i = graph();
+      i.states.push(state({ comments: [comment('Decision: drop it')] }));
+      i.comments.push(onSlice);
+      assert.deepEqual(await withEdits(i.issue, 'refused'), { problems: [], graphql: 0 });
     });
 
     it("passes with the owner's 👍 on the agent's proposal for it on the slice", async () => {
