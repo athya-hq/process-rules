@@ -1344,10 +1344,15 @@ describe('propose', () => {
     });
     return g;
   };
-  async function run(sys: FakeSys, number = 12): Promise<{ code: number; out: string[]; err: string[] }> {
+  async function run(sys: FakeSys, ...numbers: number[]): Promise<{ code: number; out: string[]; err: string[] }> {
     const { io, out, err } = capture();
-    return { code: await propose(sys, io, number), out, err };
+    return { code: await propose(sys, io, numbers.length > 0 ? numbers : [12]), out, err };
   }
+  /** Settings that name #700 as the Approvals issue. */
+  const withApprovals = (sys: FakeSys): void => {
+    sys.files.set(`${ROOT}/.github/process-rules.json`, JSON.stringify({ ...JSON.parse(SETTINGS), approvals: APPROVALS }));
+  };
+  const BATCH = `example-owner answers all 2 with one comment on https://github.com/${SLUG}/issues/700, the Approvals issue, whose first line is this (deleting a number leaves that one waiting):`;
   const posted = (sys: FakeSys): string[] =>
     sys.requests.filter((r) => r.method === 'POST' && r.url.endsWith('/comments')).map((r) => (r.body as { body: string }).body);
 
@@ -1404,6 +1409,64 @@ describe('propose', () => {
     ((g.states[0] as Node).comments as Node[]).push(comment('Decision: drop it'));
     assert.equal((await run(sys)).code, 0);
     assert.deepEqual(posted(sys), []);
+  });
+
+  describe('with an Approvals issue', () => {
+    it('says each proposal can be answered there, and ends with the batch answer, ready to paste', async () => {
+      const { sys } = session(owing());
+      withApprovals(sys);
+      const { code, out } = await run(sys);
+      assert.equal(code, 0);
+      assert.deepEqual(out.slice(-2), [BATCH, 'Decision: approve #12 #30']);
+      const asks = posted(sys).map((body) => body.split('\n\n').at(-1));
+      const ask = '@example-owner: react 👍 to this comment to approve it, or comment "Decision:", or answer the batch on Approvals, #700.';
+      assert.deepEqual(asks, [ask, ask]);
+    });
+
+    it('names each waiting proposal once, though several numbers share a slice', async () => {
+      const g = owing();
+      g.comments.push(comment('Proposal: add #12', LATER, AGENT), comment('Proposal: drop state #30', LATER, AGENT));
+      const { sys } = session(g);
+      withApprovals(sys);
+      const { code, out } = await run(sys, 12, 30, 12);
+      assert.equal(code, 0);
+      assert.deepEqual(out.filter((line) => line.startsWith('Decision:')), ['Decision: approve #12 #30']);
+      assert.equal(out.filter((line) => line === BATCH).length, 1);
+      // Both were proposed before, so each run links them and posts nothing.
+      assert.deepEqual(posted(sys), []);
+    });
+
+    it('still hands over what waits when one of the numbers is refused, and fails', async () => {
+      const { sys } = session(owing());
+      withApprovals(sys);
+      sys.route('GET', `/repos/${SLUG}/issues/30/parent`, { status: 403, json: { message: 'Resource not accessible by integration' } });
+      const { code, out, err } = await run(sys, 30, 12);
+      assert.equal(code, 1);
+      assert.equal(err[0], "✗ could not read #30's parent (HTTP 403: Resource not accessible by integration)");
+      assert.deepEqual(out.slice(-2), [BATCH, 'Decision: approve #12 #30']);
+    });
+
+    it('leaves out what has no proposal yet, and says "it" for one', async () => {
+      const { sys } = session(owing());
+      withApprovals(sys);
+      const { out } = await run(sys, 30);
+      assert.deepEqual(out.slice(-2), [
+        `example-owner answers it with one comment on https://github.com/${SLUG}/issues/700, the Approvals issue, whose first line is this (deleting a number leaves that one waiting):`,
+        'Decision: approve #30',
+      ]);
+      assert.match(out.at(-3) ?? '', /; ExampleBot proposes #12 with: process-rules propose 12$/);
+    });
+
+    it('prints no batch answer when nothing waits', async () => {
+      const g = owing();
+      g.comments.push(comment('Decision: add it'));
+      ((g.states[0] as Node).comments as Node[]).push(comment('Decision: drop it'));
+      const { sys } = session(g);
+      withApprovals(sys);
+      const { code, out } = await run(sys, 12, 30);
+      assert.equal(code, 0);
+      assert.equal(out.some((line) => line.startsWith('Decision:') || line.includes('Approvals issue')), false);
+    });
   });
 
   it('proposes a state alone, given the state', async () => {
@@ -1653,13 +1716,13 @@ describe('with two owners and two agents', () => {
     sys.route('POST', `/repos/${SLUG}/issues/12/comments`, { status: 201, json: { html_url: `https://github.com/${SLUG}/issues/12#issuecomment-9` } });
     sys.route('POST', `/repos/${SLUG}/issues/12/labels`, { status: 200, json: [] });
     const { io, out } = capture();
-    assert.equal(await propose(sys, io, 12), 0);
+    assert.equal(await propose(sys, io, [12]), 0);
     assert.equal(out.at(-1), `#12 is labeled needs-owner, waiting on example-owner or Second-Owner's 👍 on https://github.com/${SLUG}/issues/12#issuecomment-9`);
     const body = (sys.requests.find((r) => r.method === 'POST' && r.url.endsWith('/comments'))?.body as { body: string }).body;
     assert.match(body, /\n\n@example-owner or @Second-Owner: react 👍 to this comment to approve it, or comment "Decision:"\.$/);
     sys.acceptToken('ghp_good', OWNER_2);
     const refused = capture();
-    assert.equal(await propose(sys, refused.io, 12), 1);
+    assert.equal(await propose(sys, refused.io, [12]), 1);
     assert.equal(refused.err[0], "✗ propose posts as ExampleBot or OtherBot, but this session's token is Second-Owner");
   });
 });

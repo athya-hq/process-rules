@@ -4,7 +4,7 @@ import { agentSession, pushIdentityProblem } from './push-identity.ts';
 import { cloudToken } from './cloud.ts';
 import { ONBOARD_BRANCH, ONBOARD_FILES } from './onboard-pull.ts';
 import type { Output, Sys } from './types.ts';
-import { GITHUB_HOST_RE } from './host.ts';
+import { GITHUB_HOST_RE, GITHUB_WEB } from './host.ts';
 import { boardStarted } from './board.ts';
 import { ownersAlone, whyNotCounted } from './edits.ts';
 import { batchAnswers } from './approvals.ts';
@@ -690,7 +690,7 @@ function proposalGap(one: Owed): string | undefined {
  * The `Proposal:` comment for `one`: what changes, why, what it costs and
  * what happens if the owner declines, so it stands alone.
  */
-function proposalBody(one: Owed, slice: number, parent: number | undefined, owners: string[]): string {
+function proposalBody(one: Owed, slice: number, parent: number | undefined, { owners, approvals }: Settings): string {
   // The issue it is for comes first: that is how the work rules match a 👍 to it.
   const lines = one.kind === 'added'
     ? [
@@ -707,18 +707,22 @@ function proposalBody(one: Owed, slice: number, parent: number | undefined, owne
         `**What it costs:** ${section(one.body, 'Cost') ?? `what state #${one.number} would show is not built.`}`,
         `**If you decline:** state #${one.number} is reopened and built as you approved it.`,
       ];
-  return `${lines.join('\n\n')}\n\n${either(owners.map((owner) => `@${owner}`))}: react 👍 to this comment to approve it, or comment "Decision:".`;
+  // Where the settings name an Approvals issue, the owner may answer this there, among a batch.
+  const batch = approvals === undefined ? '' : `, or answer the batch on Approvals, #${approvals}`;
+  return `${lines.join('\n\n')}\n\n${either(owners.map((owner) => `@${owner}`))}: react 👍 to this comment to approve it, or comment "Decision:"${batch}.`;
 }
 
 /**
- * Proposes what slice `number` owes the owner, run by an agent session: one
- * `Proposal:` comment on the slice, as the agent, for its addition after the
- * work item's approval and one for each state dropped after it, labeling
- * the slice `needs-owner`. Given a State, proposes that state alone. Run
+ * Proposes what each of `numbers` owes the owner, run by an agent session:
+ * for a slice, one `Proposal:` comment on it, as the agent, for its addition
+ * after the work item's approval and one for each state dropped after it,
+ * labeling the slice `needs-owner`; for a State, that state alone. Run
  * again, it posts nothing twice, and once the owner has settled everything
- * it takes the label off.
+ * it takes the label off. Where the settings name an Approvals issue, it
+ * ends with the first line of the owner's batch answer there, naming every
+ * proposal still waiting, ready to paste.
  */
-export async function propose(sys: Sys, io: Output, number: number): Promise<number> {
+export async function propose(sys: Sys, io: Output, numbers: readonly number[]): Promise<number> {
   const { root, slug } = repoAt(sys);
   const accounts = loadSettings(sys, root);
   if (!isOn(sys, root, 'work-rules')) {
@@ -738,23 +742,53 @@ export async function propose(sys: Sys, io: Output, number: number): Promise<num
     return report(io, 'propose', [`propose posts as ${either(accounts.agents)}, but this session's token is ${login ?? 'refused'}`]);
   }
 
+  let code = 0;
+  // Each issue once, in the order given, though two of the numbers share a slice.
+  const waiting = new Set<number>();
+  for (const number of numbers) {
+    const one = await proposeOne(sys, io, token, slug, accounts, number);
+    code = Math.max(code, one.code);
+    for (const each of one.waiting) waiting.add(each);
+  }
+  if (accounts.approvals !== undefined && waiting.size > 0) {
+    // The agent hands the line over; only the owner's own comment approves anything.
+    io.out(
+      `${either(accounts.owners)} answers ${waiting.size === 1 ? 'it' : `all ${waiting.size}`} with one comment on ${GITHUB_WEB}/${slug}/issues/${accounts.approvals}, the Approvals issue, whose first line is this (deleting a number leaves that one waiting):`,
+    );
+    io.out(`Decision: approve ${[...waiting].map((number) => `#${number}`).join(' ')}`);
+  }
+  return code;
+}
+
+/**
+ * `propose` for one issue: its exit code, and the issues whose proposals
+ * still wait on the owner, each the number a batch answer names.
+ */
+async function proposeOne(
+  sys: Sys,
+  io: Output,
+  token: string,
+  slug: string,
+  accounts: Settings,
+  number: number,
+): Promise<{ code: number; waiting: number[] }> {
   const issue = await readIssue(sys, token, slug, number);
   const { parent, problem } = issue?.type?.name === 'State' ? await parentOf(sys, token, issue) : {};
-  if (problem) return report(io, 'propose', [problem]);
+  if (problem) return { code: report(io, 'propose', [problem]), waiting: [] };
   const state = parent?.type?.name === 'Slice';
   const slice = state ? parent.number : number;
   const read = await readSlice(sys, token, slug, slice, accounts);
-  if (read.problems.length > 0) return report(io, 'propose', read.problems);
+  if (read.problems.length > 0) return { code: report(io, 'propose', read.problems), waiting: [] };
   const owner = either(accounts.owners);
   const asked = read.owed.filter((one) => !state || one.number === number);
   if (asked.length === 0) {
     io.out(`propose: #${number} needs no decision from ${owner}`);
-    return 0;
+    return { code: 0, waiting: [] };
   }
 
   // A proposal says what it asks for, so one whose body cannot say it is not posted.
   const gaps = asked.filter((one) => !one.settled && one.proposals.length === 0).map(proposalGap).filter((gap) => gap !== undefined);
-  if (gaps.length > 0) return report(io, 'propose', gaps);
+  if (gaps.length > 0) return { code: report(io, 'propose', gaps), waiting: [] };
 
   const issues = `${API}/repos/${slug}/issues/${slice}`;
   // Each link opens the very comment the owner reacts 👍 to, never the slice's top or a label's list.
@@ -767,7 +801,7 @@ export async function propose(sys: Sys, io: Output, number: number): Promise<num
       links.set(one, newest(one.proposals).html_url);
       io.out(`${what}: proposed on #${slice}, waiting on ${owner}'s 👍: ${links.get(one)}`);
     } else {
-      const posted = await sys.http(`${issues}/comments`, { method: 'POST', token, body: { body: proposalBody(one, slice, read.parent, accounts.owners) } });
+      const posted = await sys.http(`${issues}/comments`, { method: 'POST', token, body: { body: proposalBody(one, slice, read.parent, accounts) } });
       if (posted.status !== 201) throw new Error(`cannot comment on #${slice} (HTTP ${posted.status})`);
       const url = (posted.json as { html_url?: string } | null)?.html_url;
       links.set(one, url);
@@ -784,11 +818,12 @@ export async function propose(sys: Sys, io: Output, number: number): Promise<num
     const urls = [...links.values()].filter((url) => url !== undefined);
     const where = urls.length > 0 ? `, waiting on ${owner}'s 👍 on ${urls.join(' and ')}` : '';
     io.out(`#${slice} is labeled ${NEEDS_OWNER}${where}${unproposed.join('')}`);
-    return 0;
+    // Only what the owner can read a proposal for goes into a batch answer.
+    return { code: 0, waiting: waiting.filter((one) => links.has(one)).map((one) => one.number) };
   }
   const removed = await sys.http(`${issues}/labels/${NEEDS_OWNER}`, { method: 'DELETE', token });
   // 404: the slice had no such label.
   if (removed.status !== 200 && removed.status !== 404) throw new Error(`cannot take ${NEEDS_OWNER} off #${slice} (HTTP ${removed.status})`);
   io.out(`✓ #${slice}: nothing waits on ${owner}`);
-  return 0;
+  return { code: 0, waiting: [] };
 }

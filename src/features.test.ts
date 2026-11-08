@@ -262,7 +262,7 @@ describe('checks on a personal repository', () => {
   it('propose posts nothing, saying why', async () => {
     const sys = personal();
     const { io, out } = capture();
-    assert.equal(await propose(sys, io, 1), 0);
+    assert.equal(await propose(sys, io, [1]), 0);
     assert.deepEqual(out, [`propose: work-rules is off ${WHY}; nothing to check`]);
     askedOnce(sys);
   });
