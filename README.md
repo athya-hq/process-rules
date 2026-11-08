@@ -495,8 +495,9 @@ opening with `Needs you:` or `Proposal:`, on an issue, a pull request or a revie
 issue whose latest agent ask the owner has answered: a 👍 on it after its last
 edit, or a `Decision:` comment after it. An issue labelled with no agent ask
 on it, such as the weekly job's undo issues, is left as it is. Only comments
-that may ask or decide, the `approved` label and the hourly cron start the
-job, so other comments run nothing.
+that may ask or decide, from the owner, a member or a collaborator, the
+`approved` label and the hourly cron start the job, so other comments, and an
+outsider's, run nothing.
 
 **Answering review threads.** In an agent session, `process-rules
 review-thread <thread-id> --reply <text> --resolve` replies on a review
@@ -622,7 +623,8 @@ to issues, is replaced; a workflow split into `process-rules` and
 closes a merged pull request's slice, and runs on closed pull requests; a
 workflow with those three jobs alone gets the `process-rules-asks` job, with
 the comment and label triggers and the hourly cron it runs on, and the weekly
-job leaves that cron alone; a
+job leaves that cron alone; a 0.5.28 `process-rules-asks` job, which any
+commenter's ask started, starts on an owner's, member's or collaborator's alone; a
 workflow already split into its jobs keeps everything but its version pins, which move to the
 new release, the one branch pushes run on, which follows a changed default
 branch, and the one cron the weekly job runs on, which follows a changed

@@ -1770,9 +1770,9 @@ describe('workflow', () => {
     assert.match(weeklyJob, /^ {4}permissions:\n {6}contents: read\n {6}issues: write\n {6}pull-requests: read$/m);
     assert.ok(
       asksJob.includes(
-        "    if: >-\n      ((github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment') &&\n      (contains(github.event.comment.body, 'Needs you:') || contains(github.event.comment.body, 'Proposal:') ||\n      contains(github.event.comment.body, 'Decision:'))) ||\n      (github.event_name == 'issues' && github.event.label.name == 'approved') ||\n      (github.event_name == 'schedule' && github.event.schedule == '41 * * * *')\n",
+        "    if: >-\n      ((github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment') &&\n      contains(fromJSON('[\"OWNER\", \"MEMBER\", \"COLLABORATOR\"]'), github.event.comment.author_association) &&\n      (contains(github.event.comment.body, 'Needs you:') || contains(github.event.comment.body, 'Proposal:') ||\n      contains(github.event.comment.body, 'Decision:'))) ||\n      (github.event_name == 'issues' && github.event.label.name == 'approved') ||\n      (github.event_name == 'schedule' && github.event.schedule == '41 * * * *')\n",
       ),
-      'only comments that may ask or decide, the approved label and the hourly sweep',
+      'only comments by the owner, a member or a collaborator that may ask or decide, the approved label and the hourly sweep',
     );
     assert.match(asksJob, /^ {4}permissions:\n {6}contents: read\n {6}issues: write\n {6}pull-requests: write$/m);
     assert.ok(text.includes("  issue_comment:\n    types: [created]\n  pull_request_review_comment:\n    types: [created]\n  issues:\n    types: [labeled]\n  # The weekly decisions job: Mondays, 06:17 UTC.\n  schedule:\n    - cron: '17 6 * * 1'\n    # Hourly: the owner's 👍 on an ask takes its needs-owner label off.\n    - cron: '41 * * * *'\n  workflow_dispatch:\n"));
@@ -2027,6 +2027,25 @@ describe('workflowUpdate', () => {
     assert.ok(update.kind === 'repin' && update.asks);
     assert.equal(update.text, workflow('main', '0.5.27', true).replace(/^# The weekly, merged and needs-owner jobs[^\n]*\n/m, '').replace('name: process-rules\n', 'name: process-rules\n# Our own note.\n'));
     assert.deepEqual(workflowPins(update.text), Array(8).fill('0.5.27'));
+  });
+
+  it('starts the needs-owner job on a comment from an owner, member or collaborator alone, where 0.5.28 started it on anyone\'s', async () => {
+    const older = (version: string, figma: boolean) => workflow('main', version, figma).replace(/^ {6}contains\(fromJSON[^\n]*\n/m, '');
+    for (const figma of [true, false]) {
+      assert.deepEqual(workflowUpdate(older('0.5.28', figma), 'main', '0.5.29', figma), { kind: 'repin', text: workflow('main', '0.5.29', figma), from: '0.5.28', authors: true });
+    }
+    assert.deepEqual(workflowUpdate(older('0.5.29', true), 'main', '0.5.29', true), { kind: 'repin', text: workflow('main', '0.5.29', true), authors: true });
+    assert.deepEqual(workflowUpdate(workflow('main', '0.5.28', true), 'main', '0.5.29', true), { kind: 'repin', text: workflow('main', '0.5.29', true), from: '0.5.28' });
+    const sys = fresh();
+    sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity', 'work-rules'] }));
+    sys.files.set(HOOKS, JSON.stringify(CLAUDE));
+    sys.files.set(PRE_PUSH, PRE_PUSH_HOOK);
+    sys.files.set(CLOUD, CLOUD_FILE);
+    sys.files.set(WORKFLOW, older(packageVersion(), false));
+    const { out } = await run(sys);
+    assert.deepEqual(planned(out, 'Pull request'), ['workflow: needs-owner job only for owners, members and collaborators', 'auto-merge: when checks pass']);
+    assert.ok(opened(sys)?.body.includes(`\n- \`${WORKFLOW_PATH}\`: in ${WORKFLOW_PATH}, start the needs-owner job only on a comment by the owner, a member or a collaborator, leaving the rest as it is\n`));
+    assert.equal(repo(sys).get(WORKFLOW), workflow('main', packageVersion(), false));
   });
 
   it('replaces a three-job workflow whose weekly job or schedule is its own', () => {

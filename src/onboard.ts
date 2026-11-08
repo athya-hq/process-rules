@@ -202,21 +202,30 @@ const HOURLY_CRON = ["    # Hourly: the owner's 👍 on an ask takes its needs-o
 const WEEKLY_IF = `    if: (github.event_name == 'schedule' && github.event.schedule != '${HOURLY}') || github.event_name == 'workflow_dispatch'`;
 /** The weekly job's condition before the hourly sweep. */
 const OLDER_WEEKLY_IF = "    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'";
+/** The asks job's comment clause: a comment by the owner, a member or a collaborator that may ask or decide. */
+const ASKS_COMMENT_IF = [
+  "      ((github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment') &&",
+  `      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association) &&`,
+  "      (contains(github.event.comment.body, 'Needs you:') || contains(github.event.comment.body, 'Proposal:') ||",
+  "      contains(github.event.comment.body, 'Decision:'))) ||",
+];
+/** The clause 0.5.28 wrote, which any commenter's comment met; onboard adds the author check. */
+const OLDER_ASKS_COMMENT_IF = ASKS_COMMENT_IF.filter((_, at) => at !== 1);
 
 /**
  * The job that labels an issue where the agent asks the owner, and takes the
  * label off at the owner's answer: only comments that may ask or decide, the
  * owner's approved label and the hourly sweep start it, so other comments run
- * nothing.
+ * nothing. A comment starts it only from the owner, a member or a collaborator,
+ * so no outsider's comment runs a job that may write; needs-owner itself acts
+ * only on the agent's ask and the owner's answer.
  */
 function asksJob(version: string, secrets: string[]): string[] {
   return [
     "  # An ask labels its issue needs-owner, which the board's Needs you view lists; the owner's answer takes it off.",
     '  process-rules-asks:',
     '    if: >-',
-    "      ((github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment') &&",
-    "      (contains(github.event.comment.body, 'Needs you:') || contains(github.event.comment.body, 'Proposal:') ||",
-    "      contains(github.event.comment.body, 'Decision:'))) ||",
+    ...ASKS_COMMENT_IF,
     "      (github.event_name == 'issues' && github.event.label.name == 'approved') ||",
     `      (github.event_name == 'schedule' && github.event.schedule == '${HOURLY}')`,
     '    permissions:',
@@ -461,7 +470,7 @@ export function workflowUpdate(
 ):
   | { kind: 'same' }
   | { kind: 'write' | 'replace-older' | 'replace'; text: string; from?: string }
-  | { kind: 'repin'; text: string; from?: string; branch?: string; schedule?: string; secrets?: true; merged?: true; asks?: true } {
+  | { kind: 'repin'; text: string; from?: string; branch?: string; schedule?: string; secrets?: true; merged?: true; asks?: true; authors?: true } {
   const wanted = workflow(branch, version, figma, schedule);
   if (before === undefined) return { kind: 'write', text: wanted };
   if (before === wanted) return { kind: 'same' };
@@ -488,7 +497,9 @@ export function workflowUpdate(
     const moved = pushed !== undefined && pushed !== branch;
     const cron = SCHEDULE.exec(before)?.[4]?.trim();
     const rescheduled = cron !== undefined && cron.split(/\s+/).join(' ') !== schedule;
+    const authors = before.includes(OLDER_ASKS_COMMENT_IF.join('\n'));
     const pinned = before
+      .replace(OLDER_ASKS_COMMENT_IF.join('\n'), ASKS_COMMENT_IF.join('\n'))
       .replace(CHECKS_PIN, (_, head: string) => `${head}${version}`)
       .replace(REF_PIN, (_, head: string) => `${head}${version}`)
       .replace(HEADER_PIN, (_, head: string, _old: string, dot: string) => `${head}${version}${dot}`)
@@ -502,7 +513,7 @@ export function workflowUpdate(
     const text = pinned.replace(SECRETS_AFTER_REF, (_, ref: string) => `${ref}${secrets}`);
     if (text === before) return { kind: 'same' };
     const stale = pins.find((pin) => pin !== version);
-    return { kind: 'repin', text, ...(stale ? { from: stale } : {}), ...(moved ? { branch } : {}), ...(rescheduled ? { schedule } : {}), ...(text !== pinned ? { secrets: true as const } : {}) };
+    return { kind: 'repin', text, ...(stale ? { from: stale } : {}), ...(moved ? { branch } : {}), ...(rescheduled ? { schedule } : {}), ...(text !== pinned ? { secrets: true as const } : {}), ...(authors ? { authors: true as const } : {}) };
   }
   return { kind: 'replace', text: wanted };
 }
@@ -739,6 +750,7 @@ function workflowDetail(update: Exclude<ReturnType<typeof workflowUpdate>, { kin
       ...(update.secrets ? [figma ? 'Figma secrets' : 'no Figma secrets'] : []),
       ...(update.merged ? ['merged job'] : []),
       ...(update.asks ? ['needs-owner job'] : []),
+      ...(update.authors ? ['needs-owner job only for owners, members and collaborators'] : []),
     ].join(', ') || `header → v${version}`
   );
 }
@@ -759,6 +771,7 @@ function workflowWhat(update: Exclude<ReturnType<typeof workflowUpdate>, { kind:
     ...(update.secrets ? [figma ? 'pass the FIGMA_TOKEN and FIGMA_LIBRARY secrets' : 'stop passing Figma secrets, with figma off'] : []),
     ...(update.merged ? ['add a job that closes the slice a merged pull request names, the one pull request run that writes to issues'] : []),
     ...(update.asks ? ["add a job that labels an issue needs-owner where the agent asks the owner, and takes it off at the owner's approved label, Decision: comment or (hourly) 👍"] : []),
+    ...(update.authors ? ['start the needs-owner job only on a comment by the owner, a member or a collaborator'] : []),
   ];
   return `in ${WORKFLOW_PATH}, ${parts.join(' and ') || `set the version in its header comment to v${version}`}, leaving the rest as it is`;
 }
