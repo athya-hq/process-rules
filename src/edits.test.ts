@@ -103,6 +103,14 @@ describe('ownersAlone', () => {
       assert.deepEqual(await ownersAlone(sys, 'tok', [unedited, comment('IC_2'), comment('IC_3')], [OWNER]), { kept: [unedited], othersEdited: 0, unread: 2 });
     }
   });
+
+  it('counts no edited comment where the GraphQL request fails outright', async () => {
+    const sys = new FakeSys();
+    sys.route('POST', '/graphql', () => {
+      throw new Error('fetch failed');
+    });
+    assert.deepEqual(await ownersAlone(sys, 'tok', [comment('IC_1')], [OWNER]), { kept: [], othersEdited: 0, unread: 1 });
+  });
 });
 
 describe('whyNotCounted', () => {

@@ -43,7 +43,10 @@ export async function ownersAlone<T extends Written>(sys: Sys, token: string, co
   let answered = true;
   // GitHub looks up at most 100 nodes a request.
   for (let at = 0; at < ids.length; at += 100) {
-    const { status, json } = await sys.http(`${API}/graphql`, { method: 'POST', token, body: { query: QUERY, variables: { ids: ids.slice(at, at + 100) } } });
+    // A request that fails outright, or a body that is not JSON, is GraphQL not answering too.
+    const { status, json } = await sys
+      .http(`${API}/graphql`, { method: 'POST', token, body: { query: QUERY, variables: { ids: ids.slice(at, at + 100) } } })
+      .catch(() => ({ status: 0, json: null }));
     const nodes = (json as { data?: { nodes?: (Node | null)[] } } | null)?.data?.nodes;
     if (status !== 200 || !Array.isArray(nodes)) {
       answered = false;

@@ -836,9 +836,10 @@
   work rules ask GraphQL nothing when an unedited decision or a request
   settles the slice. An edit by a deleted account, an edit past the first
   100, or a comment GraphQL cannot find makes it not count. The work rules
-  read only REST so a Claude cloud session's proxy, which refuses GraphQL,
-  can run them; there an edited `Decision:` does not count and the refusal
-  says why, as an edited request already does not. Rejected: never counting
+  read REST, and GraphQL only for an edited `Decision:`, so a Claude cloud
+  session's proxy, which refuses GraphQL, can still run them; there an
+  edited `Decision:` does not count and the refusal says why, as an edited
+  request already does not. Rejected: never counting
   an edited `Decision:` (the owner's own corrections would stop counting) and
   trusting the last editor alone (an agent's edit followed by the owner's
   would hide the agent's).
