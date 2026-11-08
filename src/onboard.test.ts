@@ -1633,7 +1633,7 @@ describe('the plan and its one question', () => {
     assert.equal(code, 0);
     assert.ok(!board.operations.includes('copyProjectV2'), 'not replaced');
     assert.equal(board.project?.closed, undefined);
-    assert.equal(byHand(out)[0], `group 2 views, auto-archive → ${URL}`);
+    assert.equal(byHand(out)[0], `Type on Needs you, group 2 views, auto-archive → ${URL}`);
     assert.ok(opened(sys)?.body.includes('  - Finish the Project'), 'the checklist is in the pull request');
   });
 });

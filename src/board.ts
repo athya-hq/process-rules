@@ -25,14 +25,30 @@ export const FIELDS = [
   { name: 'Review date' },
 ];
 
-/** The Project's views; onboard makes them, or updates the view that has the name. */
-export const VIEWS = [
-  { name: 'Needs you', layout: 'TABLE_LAYOUT', filter: 'label:needs-owner is:open', show: [] },
+/**
+ * A Project view: the fields it must show and the fields it must not, by
+ * name; any other column the owner shows by hand stays.
+ */
+export interface ViewSpec {
+  name: string;
+  layout: 'TABLE_LAYOUT' | 'BOARD_LAYOUT';
+  filter: string;
+  show: string[];
+  hide: string[];
+}
+
+/**
+ * The Project's views; onboard makes them, or updates the view that has the name.
+ * Needs you also shows Type, which GitHub's API cannot show (viewsChecklist).
+ */
+export const VIEWS: ViewSpec[] = [
+  // What waits on the owner, of every type; a slice's Parent issue is the work item it belongs to.
+  { name: 'Needs you', layout: 'TABLE_LAYOUT', filter: 'label:needs-owner is:open', show: ['Parent issue'], hide: ['Assignees'] },
   // The work in motion: slices and briefs. Closed ones leave Done when the auto-archive workflow archives them.
-  { name: 'Board', layout: 'BOARD_LAYOUT', filter: 'type:Slice,Brief', show: ['Linked pull requests'] },
-  { name: 'Work items', layout: 'TABLE_LAYOUT', filter: 'type:"Work item"', show: ['Sub-issues progress'] },
-  { name: 'Decisions', layout: 'TABLE_LAYOUT', filter: 'type:Decision', show: [] },
-  { name: 'Reviews due', layout: 'TABLE_LAYOUT', filter: '"Review date":<=@today', show: [] },
+  { name: 'Board', layout: 'BOARD_LAYOUT', filter: 'type:Slice,Brief', show: ['Linked pull requests'], hide: [] },
+  { name: 'Work items', layout: 'TABLE_LAYOUT', filter: 'type:"Work item"', show: ['Sub-issues progress'], hide: [] },
+  { name: 'Decisions', layout: 'TABLE_LAYOUT', filter: 'type:Decision', show: [], hide: [] },
+  { name: 'Reviews due', layout: 'TABLE_LAYOUT', filter: '"Review date":<=@today', show: [], hide: [] },
 ];
 
 /** The name GitHub gives a new Project's first view, which onboard renames rather than leaves. */
@@ -63,6 +79,7 @@ const ARCHIVE_FILTER = 'is:closed updated:<@today-7d';
 export function viewsChecklist(url: string): string[] {
   return [
     `Finish the Project ${url} by hand (GitHub's API cannot):`,
+    '  [ ] Needs you: show Type',
     '  [ ] Work items: group by Step',
     '  [ ] Decisions: group by Decision',
     `  [ ] Workflows → Auto-archive items: ${ARCHIVE_FILTER}`,
@@ -273,7 +290,7 @@ export async function setUpBoard(
   const byHand: string[] = [];
   if (!done.grouped) {
     for (const line of viewsChecklist(project.url)) io.out(line);
-    byHand.push(`group 2 views, auto-archive → ${project.url}`);
+    byHand.push(`Type on Needs you, group 2 views, auto-archive → ${project.url}`);
   } else io.out(`- Board shows slices and briefs; Done keeps one until the Auto-archive items workflow archives it, with the template's filter ${ARCHIVE_FILTER}, which GitHub's API can neither read nor set`);
   if (done.off.length > 0) {
     io.out(`Turn on the workflows ${done.off.join(', ')} in ${project.url} → Workflows (GitHub's API cannot)`);
@@ -454,9 +471,14 @@ async function moveItems(sys: Sys, token: string, items: Item[], projectId: stri
   }
 }
 
-type View = { id: string; name: string; layout: string; filter: string | null; configuration: { visibleFields: { nodes: { id?: string }[] } } };
+type View = { id: string; name: string; layout: string; filter: string | null; configuration: { visibleFields: { nodes: { name?: string }[] } } };
 
-const VIEW = 'id name layout filter configuration { visibleFields(first: 50) { nodes { ... on ProjectV2FieldCommon { id } } } }';
+/**
+ * A view, its visible fields by name: GitHub gives a visible field an id that
+ * updateProjectV2View can refuse (Status's PVTF_ there, PVTSSF_ in the
+ * Project's fields), so the ids it is sent come from the Project's fields.
+ */
+const VIEW = 'id name layout filter configuration { visibleFields(first: 50) { nodes { ... on ProjectV2FieldCommon { name } } } }';
 
 /**
  * Makes the Project's views, or updates the view that already has the name,
@@ -501,7 +523,7 @@ export async function setUpViews(
         { project: projectId, name: spec.name, layout: spec.layout },
       )) as { createProjectV2View: { projectV2View: View } }).createProjectV2View.projectV2View;
     if (settled(view, spec, fieldIds)) continue;
-    const show = hidden(view, spec, fieldIds);
+    const visible = columns(view, spec, fieldIds);
     await graphql(
       sys,
       token,
@@ -511,26 +533,34 @@ export async function setUpViews(
         name: spec.name,
         layout: spec.layout,
         filter: spec.filter,
-        configuration: show.length > 0 ? { visibleFieldIds: [...visibleIds(view), ...show] } : null,
+        configuration: visible ? { visibleFieldIds: visible } : null,
       },
     );
   }
   return true;
 }
 
-function visibleIds(view: View): string[] {
-  return view.configuration.visibleFields.nodes.map((field) => field.id).filter((id) => id !== undefined);
+function visibleNames(view: View): string[] {
+  return view.configuration.visibleFields.nodes.map((field) => field.name).filter((name) => name !== undefined);
 }
 
-/** The fields the spec shows that the view hides. */
-function hidden(view: View, spec: (typeof VIEWS)[number], fieldIds: Map<string | undefined, string | undefined>): string[] {
-  const visible = visibleIds(view);
-  return spec.show.map((name) => fieldIds.get(name)).filter((id): id is string => id !== undefined && !visible.includes(id));
+/**
+ * The ids of the fields the view should show, in its order, when they differ
+ * from what it shows: less the fields the spec hides, with the ones it shows.
+ * Undefined when the view's fields are already right. GitHub's API reads no
+ * Type column and cannot show one, so sending these drops a Type the owner
+ * showed by hand; a settled view is never sent them.
+ */
+function columns(view: View, spec: ViewSpec, fieldIds: Map<string | undefined, string | undefined>): string[] | undefined {
+  const visible = visibleNames(view);
+  const show = spec.show.filter((name) => fieldIds.has(name) && !visible.includes(name));
+  if (show.length === 0 && !spec.hide.some((name) => visible.includes(name))) return undefined;
+  return [...visible.filter((name) => !spec.hide.includes(name)), ...show].map((name) => fieldIds.get(name)).filter((id) => id !== undefined);
 }
 
 /** Whether the view already is what the spec asks for. */
-function settled(view: View, spec: (typeof VIEWS)[number], fieldIds: Map<string | undefined, string | undefined>): boolean {
-  return view.name === spec.name && view.layout === spec.layout && (view.filter ?? '') === spec.filter && hidden(view, spec, fieldIds).length === 0;
+function settled(view: View, spec: ViewSpec, fieldIds: Map<string | undefined, string | undefined>): boolean {
+  return view.name === spec.name && view.layout === spec.layout && (view.filter ?? '') === spec.filter && columns(view, spec, fieldIds) === undefined;
 }
 
 /**
