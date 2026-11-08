@@ -263,7 +263,7 @@ This Mac, GitHub and This repo, one line each: `✓` fine, `▲` worth fixing,
 ✓  signing key ~/.ssh/agent_signing
 ✓  session file
 ✗  launcher missing, so hooks need node on PATH → process-rules machine
-▲  process-rules 0.5.20 runs here; 0.5.32 is out → process-rules upgrade
+▲  process-rules 0.5.20 runs here; 0.5.30 is out → process-rules upgrade
 │
 ◇  GitHub — as AGENT
 ▲  token ends in 11 days → process-rules machine
