@@ -437,8 +437,19 @@ slice may be built:
   `Decision:` comment;
 - no other open pull request names it.
 
-A `Decision:` comment counts only while it says what owners wrote: unedited,
-or edited by owners alone. Repo writers, agents included, can edit anyone's
+**One comment answers a batch.** Settings that name the repository's standing
+Approvals issue (`"approvals": N`) let the owner answer many asks at once:
+an owner's comment there whose first line opens `Decision: approve`, then
+`#N` for each issue it approves (`Decision: approve #31 #12 #40`). Only that
+line approves; the lines under it are reasons, so `Not #44 yet` approves
+nothing. The work rules take it for a slice added after the approval when it
+names the slice and was made after the slice was last added, and for a
+dropped State when it names the State and was made after the State was
+closed. They read the Approvals issue's comments once a check, only when a
+decision is owed; one GitHub cannot find answers nothing.
+
+A `Decision:` comment, a batch answer included, counts only while it says
+what owners wrote: unedited, or edited by owners alone. Repo writers, agents included, can edit anyone's
 comment, and only GitHub's GraphQL API (`userContentEdits`) names who made
 each edit, so the work rules read it for an owner's edited `Decision:` alone;
 an unedited one is read through REST, as before. Where GraphQL is refused, as
@@ -503,10 +514,13 @@ it starts, and pre-push or a re-run of Work rules sees the 👍.
 `process-rules-asks` job runs `process-rules needs-owner`. An agent's comment
 opening with `Needs you:` or `Proposal:`, on an issue, a pull request or a review thread, labels its issue or pull request
 `needs-owner`, so it shows in the owner's Needs you view. The owner's
-`approved` label or `Decision:` comment takes the label off at once. Hourly
+`approved` label or `Decision:` comment takes the label off at once, and the
+owner's batch answer on the Approvals issue takes it off each issue its first
+line names. Hourly
 (cron `41 * * * *`), and on a run by hand, a sweep takes it off each open
 issue whose latest agent ask the owner has answered: a 👍 on it after its last
-edit, or a `Decision:` comment after it that no one but owners edited. An issue labelled with no agent ask
+edit, or a `Decision:` comment after it, on the issue or a batch answer naming
+it on the Approvals issue, that no one but owners edited. An issue labelled with no agent ask
 on it, such as the weekly job's undo issues, is left as it is. Only comments
 that may ask or decide, from the owner, a member or a collaborator, the
 `approved` label and the hourly cron start the job, so other comments, and an
@@ -668,7 +682,9 @@ their feature is off; `onboard` writes the workflow only once a check needs it. 
 Project (by default `<repo> work`). `schedule` sets when the weekly job runs,
 as a five-field cron in UTC (by default `"17 6 * * 1"`, Mondays at 06:17);
 `onboard` refuses one that is not a cron, or that is `41 * * * *`, the hourly needs-owner sweep's, and writes it into the workflow, so
-run `onboard` again after changing it.
+run `onboard` again after changing it. `approvals` names the repository's
+standing Approvals issue, where one owner comment answers a batch of asks
+(see the work rules); without it, every ask is answered on its own issue.
 
 GitHub has issue types for organisations only, so on a repository a personal
 account owns, `work-rules`, `decisions` and `figma` cannot run: the work rules

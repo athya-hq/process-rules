@@ -198,6 +198,81 @@ describe('needsOwner', () => {
     assert.deepEqual((await runJob(bare)).out, ['needs-owner: the owner approved #7']);
   });
 
+  describe('a batch answer on the Approvals issue', () => {
+    /** Settings naming #7, where the comments of these tests are made, as the Approvals issue. */
+    const ON_7 = { owner: OWNER, agent: AGENT, approvals: 7 };
+    const NOV_8 = 'Decision: approve #2925 #2924 #2923 #2922 #2742 #2740 #2739 #2814\nNot #2748 yet: I want W-36 to land first.';
+    const approved = [2925, 2924, 2923, 2922, 2742, 2740, 2739, 2814];
+    const off = (number: number) => `${API}/repos/${SLUG}/issues/${number}/labels/needs-owner`;
+
+    it('takes the label off at once from each issue its first line names, and from none below it', async () => {
+      const sys = job('issue_comment', comment(OWNER, NOV_8, ['needs-owner']), ON_7);
+      for (const number of approved) sys.route('DELETE', off(number), { status: number === 2814 ? 404 : 200, json: null });
+      assert.deepEqual((await runJob(sys)).out, [
+        'needs-owner: the owner approved #2925, #2924, #2923, #2922, #2742, #2740, #2739, #2814 on #7, the Approvals issue; needs-owner taken off #2925, #2924, #2923, #2922, #2742, #2740, #2739; #2814 had no needs-owner',
+      ]);
+      assert.deepEqual(calls(sys), approved.map((number) => `DELETE /repos/${SLUG}/issues/${number}/labels/needs-owner`));
+      const none = job('issue_comment', comment(OWNER, 'Decision: approve #2925'), ON_7);
+      none.route('DELETE', off(2925), { status: 404, json: null });
+      assert.deepEqual((await runJob(none)).out, ['needs-owner: the owner approved #2925 on #7, the Approvals issue; #2925 had no needs-owner']);
+    });
+
+    it('is an ordinary decision on any other issue, from anyone but an owner, or without "approve"', async () => {
+      const elsewhere = job('issue_comment', comment(OWNER, NOV_8, ['needs-owner']));
+      assert.deepEqual((await runJob(elsewhere)).out, ['needs-owner: the owner decided on #7; needs-owner taken off']);
+      assert.deepEqual(calls(elsewhere), [`DELETE /repos/${SLUG}/issues/7/labels/needs-owner`]);
+      const plain = job('issue_comment', comment(OWNER, 'Decision: go', ['needs-owner']), ON_7);
+      assert.deepEqual((await runJob(plain)).out, ['needs-owner: the owner decided on #7; needs-owner taken off']);
+      for (const event of [comment(AGENT, NOV_8), { ...comment(OWNER, NOV_8), action: 'edited' }]) {
+        const sys = job('issue_comment', event, ON_7);
+        assert.deepEqual((await runJob(sys)).out, ['needs-owner: the comment on #7 neither asks the owner nor is their decision; nothing to do']);
+        assert.deepEqual(calls(sys), []);
+      }
+    });
+
+    it("sweeps: off where an owner's batch answer after the latest ask names it on the first line; read once", async () => {
+      const sys = job('schedule', {}, { owner: OWNER, agent: AGENT, approvals: 70 });
+      const at = (hour: number) => `2026-11-08T${String(hour).padStart(2, '0')}:00:00Z`;
+      sys.route('GET', `${API}/repos/${SLUG}/issues?state=open&labels=needs-owner&per_page=100&page=1`, { status: 200, json: [1, 2, 3, 4].map((number) => ({ number })) });
+      for (const number of [1, 2, 3, 4]) {
+        sys.route('GET', `${API}/repos/${SLUG}/issues/${number}/comments?per_page=100&page=1`, { status: 200, json: [{ id: number * 10, body: `Proposal: ${number}`, user: { login: AGENT }, created_at: at(1) }] });
+        sys.route('GET', `${API}/repos/${SLUG}/issues/comments/${number * 10}/reactions?content=%2B1&per_page=100&page=1`, { status: 200, json: [] });
+      }
+      const approvals = `${API}/repos/${SLUG}/issues/70/comments?per_page=100&page=1`;
+      sys.route('GET', approvals, {
+        status: 200,
+        json: [
+          // #1 approved after its ask; #3 named only below the first line.
+          { id: 700, body: 'Decision: approve #1\nNot #3 yet.', user: { login: OWNER }, created_at: at(3) },
+          // #2 approved before its latest ask.
+          { id: 701, body: 'Decision: approve #2', user: { login: OWNER }, created_at: at(0) },
+          // #4 approved in a comment the agent edited.
+          { id: 702, node_id: 'IC_702', body: 'Decision: approve #4', user: { login: OWNER }, created_at: at(3), updated_at: at(4) },
+        ],
+      });
+      sys.route('POST', `${API}/graphql`, { status: 200, json: { data: { nodes: [{ id: 'IC_702', userContentEdits: { totalCount: 2, nodes: [{ editor: { login: AGENT } }, { editor: { login: OWNER } }] } }] } } });
+      sys.route('DELETE', `${API}/repos/${SLUG}/issues/1/labels/needs-owner`, { status: 200, json: null });
+      assert.deepEqual((await runJob(sys)).out, [
+        '#1: the owner answered with a "Decision: approve" on #70, the Approvals issue; needs-owner taken off',
+        '#2: waits on the owner',
+        '#3: waits on the owner',
+        '#4: waits on the owner',
+        'needs-owner: 4 labelled needs-owner, 1 cleared',
+      ]);
+      assert.deepEqual(calls(sys), [`DELETE /repos/${SLUG}/issues/1/labels/needs-owner`, 'POST /graphql']);
+      assert.equal(sys.requests.filter((request) => request.url === approvals).length, 1);
+    });
+
+    it('sweeps on where GitHub cannot find the Approvals issue', async () => {
+      const sys = job('schedule', {}, { owner: OWNER, agent: AGENT, approvals: 71 });
+      sys.route('GET', `${API}/repos/${SLUG}/issues?state=open&labels=needs-owner&per_page=100&page=1`, { status: 200, json: [{ number: 1 }] });
+      sys.route('GET', `${API}/repos/${SLUG}/issues/1/comments?per_page=100&page=1`, { status: 200, json: [{ id: 10, body: 'Proposal: 1', user: { login: AGENT }, created_at: '2026-11-08T01:00:00Z' }] });
+      sys.route('GET', `${API}/repos/${SLUG}/issues/comments/10/reactions?content=%2B1&per_page=100&page=1`, { status: 200, json: [] });
+      sys.route('GET', `${API}/repos/${SLUG}/issues/71/comments?per_page=100&page=1`, { status: 404, json: { message: 'Not Found' } });
+      assert.deepEqual((await runJob(sys)).out, ['#1: waits on the owner', 'needs-owner: 1 labelled needs-owner, 0 cleared']);
+    });
+  });
+
   it('labels a pull request where the agent asks in a review comment, and clears it at a decision there', async () => {
     const asked = job('pull_request_review_comment', { action: 'created', comment: { body: `Proposal: x ${PAGE}`, user: { login: AGENT } }, pull_request: { number: 7, labels: [] } });
     assert.deepEqual((await runJob(asked)).out, ['needs-owner: #7 asks the owner (Proposal:); labelled needs-owner']);

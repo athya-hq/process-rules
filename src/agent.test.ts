@@ -46,6 +46,20 @@ describe('loadSettings', () => {
     assert.deepEqual(loadSettings(sys, ROOT), { owners: ['example-owner', 'Second-Owner'], agents: [AGENT, 'OtherBot'] });
   });
 
+  it('reads the Approvals issue the settings name, and none when they name none', () => {
+    const sys = withSettings({ owner: 'example-owner', agent: AGENT, approvals: 42 });
+    assert.deepEqual(loadSettings(sys, ROOT), { owners: ['example-owner'], agents: [AGENT], approvals: 42 });
+    assert.equal('approvals' in loadSettings(new FakeSys(), ROOT), false);
+  });
+
+  for (const approvals of ['"42"', '0', '-3', '4.5', 'null', '[42]']) {
+    it(`refuses "approvals": ${approvals}`, () => {
+      const sys = new FakeSys();
+      sys.files.set(`${ROOT}/.github/process-rules.json`, `{"owner":"me","agent":"bot","approvals":${approvals}}`);
+      assert.throws(() => loadSettings(sys, ROOT), /^Error: \.github\/process-rules\.json: "approvals" must be the number of the repository's Approvals issue, such as 42$/);
+    });
+  }
+
   it('says when the file is missing', () => {
     const sys = new FakeSys();
     sys.files.clear();
