@@ -132,6 +132,20 @@ describe('upgrade', () => {
     assert.match(err.join('\n'), new RegExp(`${PNPM_BIN}/process-rules  ${NEW}  ← keep`), "keeps pnpm's own copy");
   });
 
+  it('reads empty and relative PATH entries against the working folder, as the shell does', async () => {
+    for (const entry of ['', '.', 'bin']) {
+      const sys = machine({ [PNPM_BIN]: OLD });
+      const here = entry === 'bin' ? `${sys.cwd}/bin` : sys.cwd;
+      sys.env = { PATH: `${entry}:${PNPM_BIN}` };
+      sys.files.set(`${here}/process-rules`, '#!/usr/bin/env node');
+      const inner = sys.execOverride;
+      sys.execOverride = (call) => (call.command === `${here}/process-rules` ? { code: 0, stdout: `${OLD}\n`, stderr: '' } : inner(call));
+      const { code, err } = await upgraded(sys);
+      assert.equal(code, 1, `PATH entry ${JSON.stringify(entry)}`);
+      assert.match(err.at(-1) ?? '', new RegExp(`Remove ${here}/process-rules, or uninstall`));
+    }
+  });
+
   it("fails when the only copy on PATH is an older one, and pnpm's folder is not on PATH", async () => {
     const sys = machine({ [STRAY]: OLD });
     const { code, err } = await upgraded(sys);

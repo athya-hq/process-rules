@@ -889,25 +889,6 @@
   and only `doctor`, whose cloud checks already show ▲ for a workflow that
   pins several versions but which runs in a session, not on the bot's pull
   request.
-- **2026-11-09 — Record: Needs you judges each proposal on an issue (State
-  #205 of P-40, from #203).** `propose` posts one `Proposal:` per decision a slice owes
-  (its late addition, each dropped State), and the batch line names each by
-  its own number, as the work rules read them; the Needs you job judged only
-  an issue's latest ask, and its comment event took `needs-owner` off
-  whatever numbers a batch named. So a batch naming a dropped State cleared
-  nothing, and one naming the slice cleared it while the State's proposal
-  still waited. The sweep, and now the comment event on Approvals, judge
-  each agent `Proposal:` on its own, for the first `#N` of its first line
-  (this repository's, HTML entities not counting, as `approvedIn` reads
-  them; the issue itself when it names none): a `Decision:` after it, a 👍
-  after its last edit, or a batch naming its number after it. The label
-  comes off only when every one is answered. A `Needs you:` keeps the old
-  rule: owed when it is the latest ask. The comment event cannot map a
-  State's number to its slice from the batch alone, so it runs the sweep,
-  counting the comment it brings though the list may not show it yet; an
-  issue no agent asked on still comes off when the batch names it.
-  Rejected: matching only the latest proposal's number (#202, reverted:
-  it cleared a slice while another proposal there waited).
 - **2026-11-08 — Record: P-46, `process-rules upgrade` updates the CLI in
   one step (#192).** The owner, in chat: "Shouldn't it be simple like
   `process-rules upgrade`?" Updating meant copying the README's `pnpm add -g`
@@ -931,3 +912,22 @@
   repo's pin instead of the newest release (a Mac would stay behind until a
   repo moved), and warning about stray copies without failing (the owner
   would miss it, as before).
+- **2026-11-09 — Record: Needs you judges each proposal on an issue (State
+  #205 of P-40, from #203).** `propose` posts one `Proposal:` per decision a slice owes
+  (its late addition, each dropped State), and the batch line names each by
+  its own number, as the work rules read them; the Needs you job judged only
+  an issue's latest ask, and its comment event took `needs-owner` off
+  whatever numbers a batch named. So a batch naming a dropped State cleared
+  nothing, and one naming the slice cleared it while the State's proposal
+  still waited. The sweep, and now the comment event on Approvals, judge
+  each agent `Proposal:` on its own, for the first `#N` of its first line
+  (this repository's, HTML entities not counting, as `approvedIn` reads
+  them; the issue itself when it names none): a `Decision:` after it, a 👍
+  after its last edit, or a batch naming its number after it. The label
+  comes off only when every one is answered. A `Needs you:` keeps the old
+  rule: owed when it is the latest ask. The comment event cannot map a
+  State's number to its slice from the batch alone, so it runs the sweep,
+  counting the comment it brings though the list may not show it yet; an
+  issue no agent asked on still comes off when the batch names it.
+  Rejected: matching only the latest proposal's number (#202, reverted:
+  it cleared a slice while another proposal there waited).

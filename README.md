@@ -887,11 +887,13 @@ process-rules upgrade
 `upgrade` asks GitHub's public releases API for the newest release, with no
 token and no sign-in, and when it is newer than the CLI running, installs it
 with the same `pnpm add -g`, printing old → new and the version the shell then
-runs. On the newest release it says so and exits 0; it never moves back to an
-older one. When GitHub cannot be reached, the release has no package attached
-yet, or pnpm fails, it says which and exits 1. Then it walks `PATH`, as `type
--a process-rules` does: when more than one `process-rules` is there, or the
-first is not the release just installed, it lists each path and its version,
+runs. On the newest release it says so and installs nothing; it never moves
+back to an older one. When GitHub cannot be reached, the release has no package
+attached yet, or pnpm fails, it says which and exits 1. Either way it then walks
+`PATH`, as `type -a process-rules` does, reading an empty or relative entry
+against the current folder as the shell does. It exits 0 when exactly one
+`process-rules` is there and it is the newest release. When more than one is
+there, or the first is not that release, it lists each path and its version,
 marks pnpm's own copy to keep, names the others to remove, and exits 1, since
 an older copy the shell finds first is how a Mac keeps running an old release
 after an upgrade. It works in an agent session on a Mac too; in a Claude cloud

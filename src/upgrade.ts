@@ -46,7 +46,9 @@ export interface Copy {
 
 /** Each `process-rules` on PATH, as `type -a process-rules` lists them, first the one the shell runs. */
 export function copiesOnPath(sys: Sys): Copy[] {
-  const dirs = [...new Set((sys.env.PATH ?? '').split(':').filter((dir) => dir.startsWith('/')))];
+  if (!sys.env.PATH) return [];
+  // The shell reads an empty or relative entry against the folder it is in, so this does too.
+  const dirs = [...new Set((sys.env.PATH ?? '').split(':').map((dir) => (dir.startsWith('/') ? dir : `${sys.cwd}/${dir || '.'}`.replace(/\/\.$/, ''))))];
   return dirs
     .map((dir) => `${dir.replace(/\/+$/, '')}/process-rules`)
     .filter((path) => sys.exists(path))
