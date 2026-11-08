@@ -278,6 +278,32 @@ describe('needsOwner', () => {
     assert.deepEqual(calls(sys), [`DELETE /repos/${SLUG}/issues/1/labels/needs-owner`, `DELETE /repos/${SLUG}/issues/4/labels/needs-owner`]);
   });
 
+  it('sweeps: a Decision: someone other than an owner edited answers nothing; one owners alone edited does', async () => {
+    const sys = job('schedule', {});
+    const issues = (number: number) => `${API}/repos/${SLUG}/issues/${number}/comments?per_page=100&page=1`;
+    sys.route('GET', `${API}/repos/${SLUG}/issues?state=open&labels=needs-owner&per_page=100&page=1`, { status: 200, json: [1, 2].map((number) => ({ number })) });
+    const ask = (id: number) => ({ id, body: `Needs you: ${id}`, user: { login: AGENT }, created_at: '2026-11-07T01:00:00Z' });
+    const decision = (id: number) => ({ id, node_id: `IC_${id}`, body: 'Decision: yes', user: { login: OWNER }, created_at: '2026-11-07T02:00:00Z', updated_at: '2026-11-07T03:00:00Z' });
+    // #1: the agent edited the owner's decision; #2: only the owner did.
+    sys.route('GET', issues(1), { status: 200, json: [ask(10), decision(11)] });
+    sys.route('GET', `${API}/repos/${SLUG}/issues/comments/10/reactions?content=%2B1&per_page=100&page=1`, { status: 200, json: [] });
+    sys.route('GET', issues(2), { status: 200, json: [ask(20), decision(21)] });
+    const edits: Record<string, string[]> = { IC_11: [AGENT, OWNER], IC_21: [OWNER, OWNER] };
+    sys.route('POST', `${API}/graphql`, () => {
+      const { ids } = (sys.requests.at(-1)?.body as { variables: { ids: string[] } }).variables;
+      const nodes = ids.map((id) => ({ id, userContentEdits: { totalCount: 2, nodes: (edits[id] ?? []).map((login) => ({ editor: { login } })) } }));
+      return { status: 200, json: { data: { nodes } } };
+    });
+    sys.route('DELETE', `${API}/repos/${SLUG}/issues/2/labels/needs-owner`, { status: 200, json: null });
+    assert.deepEqual((await runJob(sys)).out, [
+      '#1: waits on the owner',
+      '#2: the owner answered with a Decision: comment; needs-owner taken off',
+      'needs-owner: 2 labelled needs-owner, 1 cleared',
+    ]);
+    // One edit read for each issue's edited decision; the label comes off #2 alone.
+    assert.deepEqual(calls(sys), ['POST /graphql', 'POST /graphql', `DELETE /repos/${SLUG}/issues/2/labels/needs-owner`]);
+  });
+
   it('sweeps on a run by hand too, reading every page', async () => {
     const sys = job('workflow_dispatch', {});
     const list = `${API}/repos/${SLUG}/issues?state=open&labels=needs-owner&per_page=100`;

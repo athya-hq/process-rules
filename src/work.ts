@@ -6,6 +6,7 @@ import { ONBOARD_BRANCH, ONBOARD_FILES } from './onboard-pull.ts';
 import type { Output, Sys } from './types.ts';
 import { GITHUB_HOST_RE } from './host.ts';
 import { boardStarted } from './board.ts';
+import { ownersAlone, whyNotCounted } from './edits.ts';
 
 /** How a pull request or a commit names the slice it builds. */
 const SLICE_LINE = new RegExp(`^Slice:\\s*(?:#|https://${GITHUB_HOST_RE}/[^/\\s]+/[^/\\s]+/issues/)(\\d+)\\s*$`, 'gim');
@@ -17,6 +18,8 @@ export function slicesNamed(text: string): number[] {
 
 interface Comment {
   id: number | string;
+  /** Its GraphQL id, from which its edits are read. */
+  node_id?: string;
   user: { login: string } | null;
   body: string;
   created_at: string;
@@ -81,15 +84,27 @@ async function every<T>(sys: Sys, token: string, slice: number, url: string, mis
 /** When a comment was last edited, or undefined: GitHub moves `updated_at` on an edit, not on a reaction. */
 const editedAt = (comment: Comment): string | undefined => (comment.updated_at > comment.created_at ? comment.updated_at : undefined);
 
-/** Whether an owner left a `Decision:` comment among `comments`, after `since` when given, mentioning `mention` when given. */
-function decided(comments: Comment[], owners: string[], since?: string, mention?: string): boolean {
-  return comments.some(
+/** The owners' `Decision:` comments among `comments`, after `since` when given, mentioning `mention` when given. */
+function decisionsIn(comments: Comment[], owners: string[], since?: string, mention?: string): Comment[] {
+  return comments.filter(
     (comment) =>
       anyLogin(owners, comment.user?.login) &&
       /^\s*Decision:/i.test(comment.body) &&
       (!since || comment.created_at > since) &&
       (!mention || new RegExp(`${mention}\\b`).test(comment.body)),
   );
+}
+
+/**
+ * Whether one of the owners' `decisions` counts: one no one edited does at
+ * once, without GraphQL; an edited one only if owners made every edit. When
+ * none counts and an edit is why, `note` says so.
+ */
+async function decided(sys: Sys, token: string, decisions: Comment[], owners: string[]): Promise<{ settled: boolean; note?: string }> {
+  if (decisions.some((decision) => !editedAt(decision))) return { settled: true };
+  const counted = await ownersAlone(sys, token, decisions, owners);
+  const note = whyNotCounted(counted, '"Decision:" comment');
+  return { settled: counted.kept.length > 0, ...(note ? { note } : {}) };
 }
 
 /** A proposal's first line, and the issue it names first: what the proposal is for. */
@@ -114,6 +129,8 @@ interface Owed {
   proposals: Comment[];
   /** Whether the owner gave it: a `Decision:` comment, a request on the work item the slice links, or 👍 on one of the proposals. */
   settled: boolean;
+  /** Why an owner's edited `Decision:` comment did not settle it, when one was there. */
+  note?: string;
 }
 
 /**
@@ -226,6 +243,9 @@ async function readSlice(
   }
   const added = [...mine, ...hidden].sort().at(-1);
   if (added && added > approvedAt) {
+    const decision = requested(issue.body ?? '', slug, parent.number, parentComments, owners, added)
+      ? { settled: true }
+      : await decided(sys, token, [...decisionsIn(parentComments, owners, added, `#${slice}`), ...decisionsIn(comments, owners, added)], owners);
     owed.push({
       kind: 'added',
       number: slice,
@@ -233,21 +253,23 @@ async function readSlice(
       body: issue.body ?? '',
       since: added,
       proposals: proposalsFor(comments, agents, slice),
-      settled:
-        decided(parentComments, owners, added, `#${slice}`) ||
-        decided(comments, owners, added) ||
-        requested(issue.body ?? '', slug, parent.number, parentComments, owners, added),
+      ...decision,
     });
   }
   for (const state of states) {
     if (state.type?.name !== 'State' || state.state_reason !== 'not_planned' || !state.closed_at || state.closed_at < approvedAt) continue;
+    const onSlice = decisionsIn(comments, owners, undefined, `#${state.number}`);
+    // The state's own comments are read only when no unedited decision on the slice settles it.
+    const decisions = onSlice.some((one) => !editedAt(one))
+      ? onSlice
+      : [...onSlice, ...decisionsIn(await every<Comment>(sys, token, slice, `${state.url}/comments`), owners)];
     owed.push({
       kind: 'dropped',
       number: state.number,
       title: state.title,
       body: state.body ?? '',
       proposals: proposalsFor(comments, agents, state.number),
-      settled: decided(comments, owners, undefined, `#${state.number}`) || decided(await every<Comment>(sys, token, slice, `${state.url}/comments`), owners),
+      ...(await decided(sys, token, decisions, owners)),
     });
   }
 
@@ -265,7 +287,7 @@ function owedProblem(one: Owed, slice: number, parent: number | undefined, { own
   const owner = either(owners);
   // The agent proposes as itself; with several, any of them.
   const agent = either(agents);
-  const ask = one.proposals.length > 0 ? '' : `; ${agent} proposes it with: process-rules propose ${one.number}`;
+  const ask = `${one.note ? ` (${one.note})` : ''}${one.proposals.length > 0 ? '' : `; ${agent} proposes it with: process-rules propose ${one.number}`}`;
   return one.kind === 'added'
     ? `#${slice} was added to work item #${parent} after its approval; ${owner} reacts 👍 on ${agent}'s proposal on #${slice}, or adds a "Decision:" comment naming #${slice}, or #${slice} links ${owner}'s request for it on #${parent}${ask}`
     : `state #${one.number} was closed as not planned after approval; ${owner} reacts 👍 on ${agent}'s proposal for it on #${slice}, or adds a "Decision:" comment to it${ask}`;

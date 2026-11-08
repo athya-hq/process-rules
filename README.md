@@ -437,6 +437,14 @@ slice may be built:
   `Decision:` comment;
 - no other open pull request names it.
 
+A `Decision:` comment counts only while it says what owners wrote: unedited,
+or edited by owners alone. Repo writers, agents included, can edit anyone's
+comment, and only GitHub's GraphQL API (`userContentEdits`) names who made
+each edit, so the work rules read it for an owner's edited `Decision:` alone;
+an unedited one is read through REST, as before. Where GraphQL is refused, as
+in a Claude cloud session, an edited `Decision:` does not count, and the
+refusal says why.
+
 **The board follows the work.** When an agent session's push names a slice
 the work rules let it build, pre-push moves the board on, as the agent, on
 every open Project of the repository's owner that holds the issues: the
@@ -444,8 +452,8 @@ slice's Status to In Progress; its work item's Step to Build, since its first
 slice has started; and any open Work item with no Step to Frame, where a new
 one starts. A workflow's `GITHUB_TOKEN` cannot write to a Project, so the
 agent's push does this, with the agent token's `project` scope, with `board`
-on. It uses GitHub's REST API for Projects alone, as the work rules do, so it
-works through a Claude cloud session's GitHub proxy, which refuses GraphQL.
+on. It uses GitHub's REST API for Projects alone, so it works through a
+Claude cloud session's GitHub proxy, which refuses GraphQL.
 A board it cannot read, or a move GitHub refuses, is said and does not stop
 the push; a push for a closed slice, such as a fix, moves nothing. When a pull request naming a slice merges into the default branch,
 the shared workflow comments on the slice, linking the pull request, and
@@ -493,7 +501,7 @@ opening with `Needs you:` or `Proposal:`, on an issue, a pull request or a revie
 `approved` label or `Decision:` comment takes the label off at once. Hourly
 (cron `41 * * * *`), and on a run by hand, a sweep takes it off each open
 issue whose latest agent ask the owner has answered: a 👍 on it after its last
-edit, or a `Decision:` comment after it. An issue labelled with no agent ask
+edit, or a `Decision:` comment after it that no one but owners edited. An issue labelled with no agent ask
 on it, such as the weekly job's undo issues, is left as it is. Only comments
 that may ask or decide, from the owner, a member or a collaborator, the
 `approved` label and the hourly cron start the job, so other comments, and an
@@ -734,7 +742,9 @@ an agent, so these pass, and GitHub records the agent as having pushed
 them.
 
 The proxy refuses GitHub's GraphQL API, so the work rules and `reviews-due`
-read only its REST API, here and everywhere else.
+read only its REST API, here and everywhere else. The one exception is who
+edited an owner's edited `Decision:` comment, which only GraphQL names; here
+such a comment does not count.
 
 The cloud environment's Setup script, which runs as root once the repo is
 cloned and before Claude Code starts, installs the CLI. Claude Code has no
