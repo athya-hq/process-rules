@@ -546,8 +546,9 @@ answer after it on the Approvals issue whose first line names its issue,
 that no one but owners edited. So a batch naming one proposal on a slice
 leaves the slice on Needs you while another there waits. A proposal for the
 slice's own addition counts only answers after the slice was last added to
-its work item, as the work rules count them, so a slice taken out and added
-again waits on the owner again. An issue labelled
+its work item, so a slice taken out and added again waits on the owner
+again. The sweep reads that from the slice's own timeline; unlike the work
+rules, it misses an addition GitHub records only on the work item's. An issue labelled
 with no agent ask on it, such as the weekly job's undo issues, is left as it
 is, unless the owner's batch answer names it. Only comments
 that may ask or decide, from the owner, a member or a collaborator, the
