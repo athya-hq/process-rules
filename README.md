@@ -516,8 +516,11 @@ it starts, and pre-push or a re-run of Work rules sees the 👍.
 **The Needs you list keeps itself.** With `board` on, the client workflow's
 `process-rules-asks` job runs `process-rules needs-owner`. An agent's comment
 opening with `Needs you:` or `Proposal:`, on an issue, a pull request or a review thread, labels its issue or pull request
-`needs-owner`, so it shows in the owner's Needs you view. The owner's
-`approved` label or `Decision:` comment takes the label off at once, and the
+`needs-owner`, so it shows in the owner's Needs you view. On an issue, the
+owner's `approved` label or `Decision:` comment takes the label off at once;
+on a pull request, where a label approves nothing (approvals are given on
+issues only), the owner answers with a `Decision:` comment, which takes it
+off at once, or a 👍 on the ask, which the hourly sweep counts. The
 owner's batch answer on the Approvals issue takes it off each issue its first
 line names. Hourly
 (cron `41 * * * *`), and on a run by hand, a sweep takes it off each open
