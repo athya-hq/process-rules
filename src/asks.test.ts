@@ -202,19 +202,116 @@ describe('needsOwner', () => {
     /** Settings naming #7, where the comments of these tests are made, as the Approvals issue. */
     const ON_7 = { owner: OWNER, agent: AGENT, approvals: 7 };
     const NOV_8 = 'Decision: approve #2925 #2924 #2923 #2922 #2742 #2740 #2739 #2814\nNot #2748 yet: I want W-36 to land first.';
-    const approved = [2925, 2924, 2923, 2922, 2742, 2740, 2739, 2814];
     const off = (number: number) => `${API}/repos/${SLUG}/issues/${number}/labels/needs-owner`;
 
-    it('takes the label off at once from each issue its first line names, and from none below it', async () => {
-      const sys = job('issue_comment', comment(OWNER, NOV_8, ['needs-owner']), ON_7);
-      for (const number of approved) sys.route('DELETE', off(number), { status: number === 2814 ? 404 : 200, json: null });
+    const hour = (h: number) => `2026-11-08T${String(h).padStart(2, '0')}:00:00Z`;
+    const LABELLED = `${API}/repos/${SLUG}/issues?state=open&labels=needs-owner&per_page=100&page=1`;
+    const onIssue = (number: number) => `${API}/repos/${SLUG}/issues/${number}/comments?per_page=100&page=1`;
+    const thumbs = (id: number) => `${API}/repos/${SLUG}/issues/comments/${id}/reactions?content=%2B1&per_page=100&page=1`;
+    /** The owner's batch answer as the comment event brings it: made on #7, the Approvals issue, at 05:00. */
+    const answer = (body: string, made: Record<string, unknown> = {}) => ({
+      action: 'created',
+      comment: { id: 700, node_id: 'IC_700', body, user: { login: OWNER }, created_at: hour(5), updated_at: hour(5), ...made },
+      issue: { number: 7, labels: [] },
+    });
+    type Said = { id: number; body: string; user: { login: string }; created_at: string };
+    const says = (login: string, id: number, body: string, h: number): Said => ({ id, body, user: { login }, created_at: hour(h) });
+    /** Routes issue `number`'s comments, and each one's 👍s: the owner's at `liked[id]`, none elsewhere. */
+    const comments = (sys: FakeSys, number: number, list: Said[], liked: Record<number, string> = {}) => {
+      sys.route('GET', onIssue(number), { status: 200, json: list });
+      for (const { id } of list) sys.route('GET', thumbs(id), { status: 200, json: liked[id] ? [{ user: { login: OWNER }, created_at: liked[id] }] : [] });
+    };
+
+    it('judges each labelled issue at once, this answer counted, though the Approvals issue does not list it yet', async () => {
+      const sys = job('issue_comment', answer(NOV_8), ON_7);
+      sys.route('GET', LABELLED, { status: 200, json: [2925, 2748, 2924, 5].map((number) => ({ number })) });
+      // #2925 asked before the answer, which names it; #2748, named only below the first line; #2924 and #5, where no agent asked.
+      comments(sys, 2925, [says(AGENT, 1, `Needs you: approve? ${PAGE}`, 1)]);
+      comments(sys, 2748, [says(AGENT, 2, `Proposal: add #2748 ${PAGE}`, 1)]);
+      comments(sys, 2924, []);
+      comments(sys, 5, []);
+      comments(sys, 7, []);
+      for (const number of [2925, 2924]) sys.route('DELETE', off(number), { status: 200, json: null });
       assert.deepEqual((await runJob(sys)).out, [
-        'needs-owner: the owner approved #2925, #2924, #2923, #2922, #2742, #2740, #2739, #2814 on #7, the Approvals issue; needs-owner taken off #2925, #2924, #2923, #2922, #2742, #2740, #2739; #2814 had no needs-owner',
+        'needs-owner: the owner approved #2925, #2924, #2923, #2922, #2742, #2740, #2739, #2814 on #7, the Approvals issue; judging each issue labelled needs-owner',
+        '#2925: the owner answered with a "Decision: approve" on #7, the Approvals issue; needs-owner taken off',
+        '#2748: waits on the owner (the proposal for #2748)',
+        "#2924: no agent asked there, and the owner's batch answer names it; needs-owner taken off",
+        '#5: no agent asked there; left as it is',
+        'needs-owner: 4 labelled needs-owner, 2 cleared',
       ]);
-      assert.deepEqual(calls(sys), approved.map((number) => `DELETE /repos/${SLUG}/issues/${number}/labels/needs-owner`));
-      const none = job('issue_comment', comment(OWNER, 'Decision: approve #2925'), ON_7);
-      none.route('DELETE', off(2925), { status: 404, json: null });
-      assert.deepEqual((await runJob(none)).out, ['needs-owner: the owner approved #2925 on #7, the Approvals issue; #2925 had no needs-owner']);
+      assert.deepEqual(calls(sys), [`DELETE /repos/${SLUG}/issues/2925/labels/needs-owner`, `DELETE /repos/${SLUG}/issues/2924/labels/needs-owner`]);
+      assert.equal(sys.requests.filter((request) => request.url === onIssue(7)).length, 1, 'the Approvals issue is read once');
+    });
+
+    it('counts the answer once where the Approvals issue lists it, and only from that list when the event names no id', async () => {
+      for (const [made, listed, line] of [
+        [{ node_id: undefined, updated_at: undefined }, true, '#12: the owner answered with a "Decision: approve" on #7, the Approvals issue; needs-owner taken off'],
+        [{ id: undefined }, false, '#12: waits on the owner (the Needs you: ask)'],
+      ] as const) {
+        const sys = job('issue_comment', answer('Decision: approve #12', made), ON_7);
+        sys.route('GET', LABELLED, { status: 200, json: [{ number: 12 }] });
+        comments(sys, 12, [says(AGENT, 1, `Needs you: go? ${PAGE}`, 1)]);
+        comments(sys, 7, listed ? [says(OWNER, 700, 'Decision: approve #12', 5)] : []);
+        sys.route('DELETE', off(12), { status: 200, json: null });
+        assert.equal((await runJob(sys)).out[1], line);
+      }
+    });
+
+    describe('one proposal at a time (#203)', () => {
+      const ADD = `Proposal: add #12 (Late slice) to work item #5, after its approval. ${PAGE}`;
+      const DROP = `Proposal: drop state #30 (Dropped state), closed as not planned after work item #5's approval. ${PAGE}`;
+      const add = (h: number) => says(AGENT, 120, ADD, h);
+      const drop = (h: number) => says(AGENT, 121, DROP, h);
+
+      /** What the sweep, then the comment event on Approvals, say of slice #12 with these comments and the owner's batch answer `batch`, made at 05:00. */
+      const both = async (list: Said[], batch: string, liked: Record<number, string> = {}): Promise<string[]> => {
+        const lines: string[] = [];
+        for (const name of ['schedule', 'issue_comment']) {
+          const sys = job(name, name === 'schedule' ? {} : answer(batch), ON_7);
+          sys.route('GET', LABELLED, { status: 200, json: [{ number: 12 }] });
+          comments(sys, 12, list, liked);
+          comments(sys, 7, name === 'schedule' ? [says(OWNER, 700, batch, 5)] : []);
+          sys.route('DELETE', off(12), { status: 200, json: null });
+          lines.push(...(await runJob(sys)).out.filter((line) => line.startsWith('#12: ')));
+        }
+        return lines;
+      };
+      const twice = (line: string) => [line, line];
+      const BATCHED = '#12: the owner answered with a "Decision: approve" on #7, the Approvals issue; needs-owner taken off';
+
+      it("1. clears a slice owing only a State's drop when the batch names the State, and not when it names the slice", async () => {
+        assert.deepEqual(await both([drop(1)], 'Decision: approve #30'), twice(BATCHED));
+        assert.deepEqual(await both([drop(1)], 'Decision: approve #12'), twice('#12: waits on the owner (the proposal for #30)'));
+      });
+
+      it('2. keeps a slice whose other proposal waits when the batch names one, and clears it when it names both', async () => {
+        assert.deepEqual(await both([add(1), drop(2)], 'Decision: approve #12'), twice('#12: waits on the owner (the proposal for #30)'));
+        assert.deepEqual(await both([add(1), drop(2)], 'Decision: approve #30'), twice('#12: waits on the owner (the proposal for #12)'));
+        assert.deepEqual(await both([add(1), drop(2)], 'Decision: approve #12 #30'), twice(BATCHED));
+      });
+
+      it('3. keeps a slice where the owner 👍d the latest proposal and an earlier one waits, and clears it when each is answered', async () => {
+        assert.deepEqual(await both([add(1), drop(2)], 'Decision: approve #99', { 121: hour(3) }), twice('#12: waits on the owner (the proposal for #12)'));
+        assert.deepEqual(await both([add(1), drop(2)], 'Decision: approve #99', { 120: hour(3), 121: hour(3) }), twice('#12: the owner answered with a 👍 on the ask; needs-owner taken off'));
+        assert.deepEqual(
+          await both([add(1), drop(2)], 'Decision: approve #12', { 121: hour(3) }),
+          twice('#12: the owner answered with a 👍 on the ask and a "Decision: approve" on #7, the Approvals issue; needs-owner taken off'),
+        );
+      });
+
+      it('counts a Decision: on the slice only for the proposals before it', async () => {
+        assert.deepEqual(await both([add(1), says(OWNER, 122, 'Decision: yes', 2), drop(3)], 'Decision: approve #99'), twice('#12: waits on the owner (the proposal for #30)'));
+        assert.deepEqual(await both([add(1), drop(2), says(OWNER, 122, 'Decision: yes', 3)], 'Decision: approve #99'), twice('#12: the owner answered with a Decision: comment; needs-owner taken off'));
+      });
+
+      it('judges a Needs you: ask as before: the latest ask, when it is one', async () => {
+        const ask = (h: number) => says(AGENT, 123, `Needs you: go? ${PAGE}`, h);
+        // A Needs you: before a later proposal is not owed; the latest one is, for the slice itself.
+        assert.deepEqual(await both([ask(1), drop(2)], 'Decision: approve #30'), twice(BATCHED));
+        assert.deepEqual(await both([drop(1), ask(2)], 'Decision: approve #30'), twice('#12: waits on the owner (the Needs you: ask)'));
+        assert.deepEqual(await both([drop(1), ask(2)], 'Decision: approve #30 #12'), twice(BATCHED));
+      });
     });
 
     it('is an ordinary decision on any other issue, from anyone but an owner, or without "approve"', async () => {
@@ -254,9 +351,9 @@ describe('needsOwner', () => {
       sys.route('DELETE', `${API}/repos/${SLUG}/issues/1/labels/needs-owner`, { status: 200, json: null });
       assert.deepEqual((await runJob(sys)).out, [
         '#1: the owner answered with a "Decision: approve" on #70, the Approvals issue; needs-owner taken off',
-        '#2: waits on the owner',
-        '#3: waits on the owner',
-        '#4: waits on the owner',
+        '#2: waits on the owner (the proposal for #2)',
+        '#3: waits on the owner (the proposal for #3)',
+        '#4: waits on the owner (the proposal for #4)',
         'needs-owner: 4 labelled needs-owner, 1 cleared',
       ]);
       assert.deepEqual(calls(sys), [`DELETE /repos/${SLUG}/issues/1/labels/needs-owner`, 'POST /graphql']);
@@ -269,7 +366,7 @@ describe('needsOwner', () => {
       sys.route('GET', `${API}/repos/${SLUG}/issues/1/comments?per_page=100&page=1`, { status: 200, json: [{ id: 10, body: 'Proposal: 1', user: { login: AGENT }, created_at: '2026-11-08T01:00:00Z' }] });
       sys.route('GET', `${API}/repos/${SLUG}/issues/comments/10/reactions?content=%2B1&per_page=100&page=1`, { status: 200, json: [{ user: { login: OWNER }, created_at: '2026-11-08T02:00:00Z' }] });
       sys.route('DELETE', `${API}/repos/${SLUG}/issues/1/labels/needs-owner`, { status: 200, json: null });
-      assert.deepEqual((await runJob(sys)).out, ['#1: the owner answered with a 👍 on the latest ask; needs-owner taken off', 'needs-owner: 1 labelled needs-owner, 1 cleared']);
+      assert.deepEqual((await runJob(sys)).out, ['#1: the owner answered with a 👍 on the ask; needs-owner taken off', 'needs-owner: 1 labelled needs-owner, 1 cleared']);
       assert.equal(sys.requests.some((request) => request.url.includes('/issues/70/')), false);
     });
 
@@ -279,7 +376,7 @@ describe('needsOwner', () => {
       sys.route('GET', `${API}/repos/${SLUG}/issues/1/comments?per_page=100&page=1`, { status: 200, json: [{ id: 10, body: 'Proposal: 1', user: { login: AGENT }, created_at: '2026-11-08T01:00:00Z' }] });
       sys.route('GET', `${API}/repos/${SLUG}/issues/comments/10/reactions?content=%2B1&per_page=100&page=1`, { status: 200, json: [] });
       sys.route('GET', `${API}/repos/${SLUG}/issues/71/comments?per_page=100&page=1`, { status: 404, json: { message: 'Not Found' } });
-      assert.deepEqual((await runJob(sys)).out, ['#1: waits on the owner', 'needs-owner: 1 labelled needs-owner, 0 cleared']);
+      assert.deepEqual((await runJob(sys)).out, ['#1: waits on the owner (the proposal for #1)', 'needs-owner: 1 labelled needs-owner, 0 cleared']);
     });
   });
 
@@ -352,12 +449,12 @@ describe('needsOwner', () => {
     sys.route('GET', reactions(61), { status: 200, json: [] });
     for (const number of [1, 4]) sys.route('DELETE', `${API}/repos/${SLUG}/issues/${number}/labels/needs-owner`, { status: 404, json: null });
     assert.deepEqual((await runJob(sys)).out, [
-      '#1: the owner answered with a 👍 on the latest ask; needs-owner taken off',
-      '#2: waits on the owner',
-      '#3: waits on the owner',
+      '#1: the owner answered with a 👍 on the ask; needs-owner taken off',
+      '#2: waits on the owner (the Needs you: ask)',
+      '#3: waits on the owner (the Needs you: ask)',
       '#4: the owner answered with a Decision: comment; needs-owner taken off',
       '#5: no agent asked there; left as it is',
-      '#6: waits on the owner',
+      '#6: waits on the owner (the Needs you: ask)',
       'needs-owner: 6 labelled needs-owner, 2 cleared',
     ]);
     assert.deepEqual(calls(sys), [`DELETE /repos/${SLUG}/issues/1/labels/needs-owner`, `DELETE /repos/${SLUG}/issues/4/labels/needs-owner`]);
@@ -381,7 +478,7 @@ describe('needsOwner', () => {
     });
     sys.route('DELETE', `${API}/repos/${SLUG}/issues/2/labels/needs-owner`, { status: 200, json: null });
     assert.deepEqual((await runJob(sys)).out, [
-      '#1: waits on the owner',
+      '#1: waits on the owner (the Needs you: ask)',
       '#2: the owner answered with a Decision: comment; needs-owner taken off',
       'needs-owner: 2 labelled needs-owner, 1 cleared',
     ]);

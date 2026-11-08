@@ -521,9 +521,9 @@ the owner's answer there, ready to paste: `Decision: approve #12 #30 #41`,
 one number per proposal still waiting (a slice for its addition, a State for
 its drop). The owner pastes it as a comment on Approvals, deleting any number
 they refuse. The agent hands the line over and never posts it: only the
-owner's own comment approves anything. The work rules read a dropped
-State's number, but `needs-owner` is on its slice, so a slice whose only
-waiting proposal is a State's keeps the label until `propose` runs again.
+owner's own comment approves anything. The Needs you job reads each
+proposal by its own number, so a slice whose only waiting proposal is a
+State's leaves Needs you as soon as the batch names the State.
 
 **The Needs you list keeps itself.** With `board` on, the client workflow's
 `process-rules-asks` job runs `process-rules needs-owner`. An agent's comment
@@ -532,14 +532,19 @@ opening with `Needs you:` or `Proposal:`, on an issue, a pull request or a revie
 owner's `approved` label or `Decision:` comment takes the label off at once;
 on a pull request, where a label approves nothing (approvals are given on
 issues only), the owner answers with a `Decision:` comment, which takes it
-off at once, or a 👍 on the ask, which the hourly sweep counts. The
-owner's batch answer on the Approvals issue takes it off each issue its first
-line names. Hourly
-(cron `41 * * * *`), and on a run by hand, a sweep takes it off each open
-issue whose latest agent ask the owner has answered: a 👍 on it after its last
-edit, or a `Decision:` comment after it, on the issue or a batch answer naming
-it on the Approvals issue, that no one but owners edited. An issue labelled with no agent ask
-on it, such as the weekly job's undo issues, is left as it is. Only comments
+off at once, or a 👍 on the ask, which the hourly sweep counts. Hourly
+(cron `41 * * * *`), on a run by hand, and at once when the owner posts a
+batch answer on the Approvals issue, a sweep takes it off each open issue
+whose every agent ask the owner has answered. Each `Proposal:` is an ask of
+its own, for the issue its first line names first (a slice for its addition,
+a State for its drop; the issue itself when it names none); a `Needs you:` is
+one when it is the latest agent ask there. An ask is answered by a 👍 on it
+after its last edit, a `Decision:` comment after it on the issue, or a batch
+answer after it on the Approvals issue whose first line names its issue,
+that no one but owners edited. So a batch naming one proposal on a slice
+leaves the slice on Needs you while another there waits. An issue labelled
+with no agent ask on it, such as the weekly job's undo issues, is left as it
+is, unless the owner's batch answer names it. Only comments
 that may ask or decide, from the owner, a member or a collaborator, the
 `approved` label and the hourly cron start the job, so other comments, and an
 outsider's, run nothing.
