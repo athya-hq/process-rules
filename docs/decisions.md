@@ -908,3 +908,20 @@
   issue no agent asked on still comes off when the batch names it.
   Rejected: matching only the latest proposal's number (#202, reverted:
   it cleared a slice while another proposal there waited).
+- **2026-11-09 — Record: Needs you counts a re-added slice's answers after
+  its re-addition (State #207 of P-40).** The work rules count the owner's
+  say on a slice's addition only after its latest addition; `propose` posts
+  no new proposal when one exists, so a slice taken out and added again
+  keeps its old one. The sweep counted a 👍 on it from before the
+  re-addition and took `needs-owner` off while the work rules still owed
+  the decision (Cubic, on #206). Now a proposal for the issue itself counts
+  a `Decision:`, a 👍 or a batch answer only after the issue's latest
+  `parent_issue_added` event in its own timeline, read only when such a
+  proposal waits, none where GitHub cannot find it. A State's drop and a
+  `Needs you:` keep their own times. The work rules also count the work
+  item's `sub_issue_added` events that name no issue (a private
+  repository's workflow token reads them so); the sweep reads only the
+  slice's own events, which that token reads in full. Rejected: running the
+  work rules' reader on each labelled slice (a dozen reads more a slice an
+  hour, and its problems, such as an unapproved work item, are not the
+  owner's answer).
