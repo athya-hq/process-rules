@@ -843,3 +843,30 @@
   an edited `Decision:` (the owner's own corrections would stop counting) and
   trusting the last editor alone (an agent's edit followed by the owner's
   would hide the agent's).
+- **2026-11-08 — Record: the checks run their own commit's CLI (State #195
+  of P-11).** Each client job pins the release twice, `checks.yml@vX` and
+  `process-rules-ref: vX`, and Dependabot and Renovate move a reusable
+  workflow's `uses:` line alone: Dependabot's #168 moved this repository's
+  three `uses:` lines to v0.5.24 and left `process-rules-ref` at v0.5.19, so
+  v0.5.24's checks would have run the v0.5.19 CLI, every check green. A
+  called workflow can now read its own commit: GitHub's `job.workflow_sha`
+  and `job.workflow_repository`, which GitHub's docs use to check out a
+  reusable workflow's own source and its own `github/gh-aw` uses. So every
+  job of `checks.yml` checks the CLI out there, falling back to
+  `process-rules-ref` only on GitHub Enterprise Server, which has neither;
+  and Settings, which runs on every event, fails a run whose
+  `process-rules-ref` names another release (by version, or by commit for a
+  commit pin), naming the client's file and the fix. A bot's bump is still
+  never a whole upgrade: it misses the cloud setup file's pin and any job a
+  newer release adds (this repository's v0.5.19 file had no needs-owner job),
+  so the upgrade stays `onboard`, its Dependabot here ignores
+  `athya-hq/process-rules`, and the README tells clients to do the same.
+  actionlint 1.7.12 does not know `job.workflow_*` yet
+  (rhysd/actionlint#707), so `.github/actionlint.yaml` ignores that one
+  error in `checks.yml`. Rejected: one pin per job, the `process-rules-ref`
+  line dropped (every client file onboard repins counts two per job, so it
+  is its own onboard change, once clients run a release with this check);
+  passing a mismatch with a warning (no one reads a green run's warnings);
+  and only `doctor`, whose cloud checks already show ▲ for a workflow that
+  pins several versions but which runs in a session, not on the bot's pull
+  request.

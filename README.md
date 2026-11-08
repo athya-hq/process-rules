@@ -408,7 +408,9 @@ Claude cloud sessions below).
    a feature that is off; they apply from the next pull request.
 
 The shared checks run five jobs. **Settings** validates
-`.github/process-rules.json`. **PR identity** runs on pull requests: every
+`.github/process-rules.json`, and fails when a job's `process-rules-ref`
+names another release than the `checks.yml@` line it calls (see Releases and
+upgrading). **PR identity** runs on pull requests: every
 commit that claims the agent (its login or its no-reply address) must be
 Verified as the agent, and agent commits must be pushed by the agent, so agent
 work pushed with the owner's login fails. Who pushed comes only from GitHub's
@@ -832,11 +834,19 @@ pnpm add -g https://github.com/athya-hq/process-rules/releases/download/v0.5.32/
 
 `onboard` pins the client's workflow to one version, the release of the CLI
 that ran it. Each job writes the pin twice, `checks.yml@vX.Y.Z` and, two lines
-below it under `with:`, `process-rules-ref: vX.Y.Z`, because a called
-workflow cannot read its own ref from GitHub's contexts. Upgrading is one
-step: install the new CLI and run `onboard` again, which moves all four pins
-together. Editing the version by hand means changing all four lines, two per
-job. A split workflow needs v0.5.4 or later: GitHub refuses a whole run, before
+below it under `with:`, `process-rules-ref: vX.Y.Z`. Every job of
+`checks.yml` runs the CLI from the commit it was called at (GitHub's
+`job.workflow_sha`), so the checks and the CLI are always one release; on
+GitHub Enterprise Server, which has no `job.workflow_sha`, the CLI comes from
+`process-rules-ref`. Settings fails a run whose `process-rules-ref` names
+another release, saying which and how to fix it: Dependabot and Renovate move
+a job's `uses:` line and nothing else, so their bump of process-rules leaves
+the pair apart, and it also leaves out the cloud setup file's pin and any job a
+newer release adds. So leave `athya-hq/process-rules` out of their updates (a
+Dependabot `ignore` entry, a Renovate `packageRules` entry with `enabled:
+false`). Upgrading is one step: install the new CLI and run `onboard` again,
+which moves every pin together. Editing the version by hand means changing
+every line that names it, two per job. A split workflow needs v0.5.4 or later: GitHub refuses a whole run, before
 any job's `if:`, when the called workflow asks for more than the calling job
 grants, and before v0.5.4 `checks.yml` asked for `issues: write` itself. The hooks run the
 launcher `machine` writes, else `process-rules` from the `PATH`; without
