@@ -2,11 +2,16 @@ name: process-rules checks
 
 # The shared workflow every client calls from the workflow `onboard` writes.
 # Later slices add their checks here as jobs.
+# Each job runs the CLI from this workflow's own commit, job.workflow_sha, so
+# the checks and the CLI are always one release. Settings fails a caller whose
+# process-rules-ref names another release: Dependabot and Renovate move a
+# job's `uses:` line alone. GitHub Enterprise Server has no job.workflow_*, so
+# there the CLI comes from process-rules-ref, as before.
 on:
   workflow_call:
     inputs:
       process-rules-ref:
-        description: The process-rules version whose checks run
+        description: The process-rules release the caller pins, which must be the one its uses line names
         type: string
         default: main
     secrets:
@@ -50,6 +55,46 @@ jobs:
           lower() { printf %s "$1" | tr '[:upper:]' '[:lower:]'; }
           [ "$(lower "$owner")" != "$(lower "$agent")" ] || fail "owner and agent must be different accounts"
           echo "process-rules: owner $owner approves; agent $agent builds."
+      # This workflow's own package.json: the release whose CLI every job here runs.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository || 'athya-hq/process-rules' }}
+          ref: ${{ job.workflow_sha || inputs.process-rules-ref }}
+          path: .process-rules
+          sparse-checkout: package.json
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Check process-rules-ref names the release that runs
+        env:
+          REF: ${{ inputs.process-rules-ref }}
+          CALLER: ${{ github.workflow_ref }}
+          OWN_SHA: ${{ job.workflow_sha }}
+          SERVER: ${{ github.server_url }}
+        run: |
+          set -euo pipefail
+          # Without job.workflow_sha the CLI came from process-rules-ref itself, so the two always agree here.
+          if [ -z "$OWN_SHA" ] && [ "$SERVER" = https://github.com ]; then
+            echo "::warning::GitHub gave no job.workflow_sha, so the checks run the CLI at process-rules-ref $REF, which may not be their own release."
+          fi
+          # The caller's workflow file: owner/repo/<path>@<ref>.
+          file=${CALLER#*/*/}
+          file=${file%%@*}
+          version=$(jq -r .version .process-rules/package.json)
+          sha=$(git -C .process-rules rev-parse HEAD)
+          # A release tag is vX.Y.Z and a commit its full sha, as uses: lines take them; anything else is a branch.
+          if [[ $REF =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            [ "${REF#v}" = "$version" ] && same=1 || same=
+          elif [[ $REF =~ ^[0-9a-f]{40}$ ]]; then
+            [ "$REF" = "$sha" ] && same=1 || same=
+          else
+            echo "process-rules: process-rules-ref is the branch $REF; these checks run v$version ($sha)."
+            exit 0
+          fi
+          if [ -z "$same" ]; then
+            echo "::error file=$file::process-rules-ref is $REF, but this workflow runs the shared checks at v$version. Dependabot and Renovate move only a job's uses: line. Run process-rules onboard with v$version, which moves every pin, or set process-rules-ref: v$version on every job."
+            exit 1
+          fi
+          echo "process-rules: process-rules-ref $REF is the release that runs, v$version ($sha)."
 
   identity:
     name: PR identity
@@ -69,8 +114,8 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: athya-hq/process-rules
-          ref: ${{ inputs.process-rules-ref }}
+          repository: ${{ job.workflow_repository || 'athya-hq/process-rules' }}
+          ref: ${{ job.workflow_sha || inputs.process-rules-ref }}
           path: .process-rules
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -98,8 +143,8 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: athya-hq/process-rules
-          ref: ${{ inputs.process-rules-ref }}
+          repository: ${{ job.workflow_repository || 'athya-hq/process-rules' }}
+          ref: ${{ job.workflow_sha || inputs.process-rules-ref }}
           path: .process-rules
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -127,8 +172,8 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: athya-hq/process-rules
-          ref: ${{ inputs.process-rules-ref }}
+          repository: ${{ job.workflow_repository || 'athya-hq/process-rules' }}
+          ref: ${{ job.workflow_sha || inputs.process-rules-ref }}
           path: .process-rules
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -159,8 +204,8 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: athya-hq/process-rules
-          ref: ${{ inputs.process-rules-ref }}
+          repository: ${{ job.workflow_repository || 'athya-hq/process-rules' }}
+          ref: ${{ job.workflow_sha || inputs.process-rules-ref }}
           path: .process-rules
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -189,8 +234,8 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: athya-hq/process-rules
-          ref: ${{ inputs.process-rules-ref }}
+          repository: ${{ job.workflow_repository || 'athya-hq/process-rules' }}
+          ref: ${{ job.workflow_sha || inputs.process-rules-ref }}
           path: .process-rules
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -218,8 +263,8 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: athya-hq/process-rules
-          ref: ${{ inputs.process-rules-ref }}
+          repository: ${{ job.workflow_repository || 'athya-hq/process-rules' }}
+          ref: ${{ job.workflow_sha || inputs.process-rules-ref }}
           path: .process-rules
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
