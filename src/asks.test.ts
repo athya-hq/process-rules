@@ -265,12 +265,13 @@ describe('needsOwner', () => {
       const drop = (h: number) => says(AGENT, 121, DROP, h);
 
       /** What the sweep, then the comment event on Approvals, say of slice #12 with these comments and the owner's batch answer `batch`, made at 05:00. */
-      const both = async (list: Said[], batch: string, liked: Record<number, string> = {}): Promise<string[]> => {
+      const both = async (list: Said[], batch: string, liked: Record<number, string> = {}, timeline?: unknown[]): Promise<string[]> => {
         const lines: string[] = [];
         for (const name of ['schedule', 'issue_comment']) {
           const sys = job(name, name === 'schedule' ? {} : answer(batch), ON_7);
           sys.route('GET', LABELLED, { status: 200, json: [{ number: 12 }] });
           comments(sys, 12, list, liked);
+          if (timeline) sys.route('GET', `${API}/repos/${SLUG}/issues/12/timeline?per_page=100&page=1`, { status: 200, json: timeline });
           comments(sys, 7, name === 'schedule' ? [says(OWNER, 700, batch, 5)] : []);
           sys.route('DELETE', off(12), { status: 200, json: null });
           lines.push(...(await runJob(sys)).out.filter((line) => line.startsWith('#12: ')));
@@ -311,6 +312,24 @@ describe('needsOwner', () => {
         assert.deepEqual(await both([ask(1), drop(2)], 'Decision: approve #30'), twice(BATCHED));
         assert.deepEqual(await both([drop(1), ask(2)], 'Decision: approve #30'), twice('#12: waits on the owner (the Needs you: ask)'));
         assert.deepEqual(await both([drop(1), ask(2)], 'Decision: approve #30 #12'), twice(BATCHED));
+      });
+
+      it("counts an answer to a slice's addition only after the slice was last added (#207)", async () => {
+        const readded = (h: number) => [{ event: 'parent_issue_added', created_at: hour(0) }, { event: 'commented' }, { event: 'parent_issue_added', created_at: hour(h) }];
+        // Taken out and added again at 04:00, after the proposal at 01:00: a 👍 or a Decision: before that answers nothing.
+        assert.deepEqual(await both([add(1)], 'Decision: approve #99', { 120: hour(3) }, readded(4)), twice('#12: waits on the owner (the proposal for #12)'));
+        assert.deepEqual(await both([add(1)], 'Decision: approve #99', { 120: hour(6) }, readded(4)), twice('#12: the owner answered with a 👍 on the ask; needs-owner taken off'));
+        assert.deepEqual(await both([add(1), says(OWNER, 122, 'Decision: yes', 3)], 'Decision: approve #99', {}, readded(4)), twice('#12: waits on the owner (the proposal for #12)'));
+        assert.deepEqual(await both([add(1), says(OWNER, 122, 'Decision: yes', 6)], 'Decision: approve #99', {}, readded(4)), twice('#12: the owner answered with a Decision: comment; needs-owner taken off'));
+        // The batch answer at 05:00 counts after an addition at 04:00, not after one at 06:00.
+        assert.deepEqual(await both([add(1)], 'Decision: approve #12', {}, readded(4)), twice(BATCHED));
+        assert.deepEqual(await both([add(1)], 'Decision: approve #12', {}, readded(6)), twice('#12: waits on the owner (the proposal for #12)'));
+        // A State's drop is not the slice's addition, and an addition before the proposal changes nothing.
+        assert.deepEqual(
+          await both([add(1), drop(2)], 'Decision: approve #12', { 121: hour(3) }, readded(4)),
+          twice('#12: the owner answered with a 👍 on the ask and a "Decision: approve" on #7, the Approvals issue; needs-owner taken off'),
+        );
+        assert.deepEqual(await both([add(1)], 'Decision: approve #99', { 120: hour(3) }, [{ event: 'parent_issue_added', created_at: hour(0) }]), twice('#12: the owner answered with a 👍 on the ask; needs-owner taken off'));
       });
     });
 
