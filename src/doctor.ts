@@ -112,7 +112,7 @@ export async function doctor(sys: Sys, io: Output, named?: string): Promise<numb
   ]);
 }
 
-/** Client hooks that reach GitHub outside `as-agent`, on a Mac or in a cloud session alike. */
+/** Client hooks that reach GitHub outside `as-agent` where doctor runs, a Mac or a cloud session. */
 function repoFindings(sys: Sys): Finding[] {
   return hooksHittingLock(sys).map(
     (hook): Finding => ({

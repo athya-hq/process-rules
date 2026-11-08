@@ -908,3 +908,22 @@
   issue no agent asked on still comes off when the batch names it.
   Rejected: matching only the latest proposal's number (#202, reverted:
   it cleared a slice while another proposal there waited).
+- **2026-11-09 — Record: doctor names only hooks that really miss
+  `as-agent` (State #211 of P-43).** After the owner rotated the agent's
+  token, `doctor` in the first client passed every Mac and GitHub check but
+  warned about two hooks that do not hit the lock on a Mac: one runs `gh`
+  only through a Python helper whose `wrap` runs `as-agent` (doctor matched
+  a variable named `gh` and messages naming `git push`), and one exits
+  outside the cloud before it fetches. A warning that never goes away is
+  skipped, so a real one would be too. `hooksHittingLock` now takes a script
+  that imports a repo Python module running `as-agent` as routed, finding
+  the module with `git ls-files` under any folder, since a hook sets its own
+  `sys.path`; and, outside a cloud session, reads a script only up to a
+  column-0 line that exits unless `CLAUDE_CODE_REMOTE` is `true`. That cut
+  is sound for bash: nothing after a top-level exit runs, and a function
+  must be defined before it is called. In a cloud session the whole script
+  is judged, as before, since that is where it runs. Rejected: dropping
+  string literals (a command handed to code as a string is still a call);
+  a marker comment that silences a hook (it asserts instead of reading);
+  following `in_cloud`-style functions into sourced files (the client moves
+  the guard to the top instead).

@@ -265,4 +265,58 @@ describe('hooksHittingLock', () => {
     sys.files.set(`${ROOT}/.claude/settings.local.json`, JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: 'git push' }] }] } }));
     assert.deepEqual(hooksHittingLock(sys), ['.claude/settings.local.json Stop hook "git push"']);
   });
+
+  /** A bash hook running Python from a heredoc that imports `module` and names gh and git push as a variable and in a message (#211). */
+  const pythonHook = (module: string): string =>
+    `#!/bin/bash\nexec python3 - <<'PY'\nimport json, os, shutil\ntry:\n    ${module}\nexcept Exception:\n    pass\ngh = shutil.which("gh")\nprint("Push the branch first (git push -u origin HEAD)")\nPY\n`;
+  const helper = '"""Runs a hook\'s gh through as-agent."""\ndef wrap(argv, session_id):\n    return ["process-rules", "as-agent", "--session", session_id, "--"] + list(argv)\n';
+
+  it('takes a script that imports a repo helper running as-agent as routed through it (#211)', () => {
+    const sys = withHooks(
+      { PreToolUse: ['.claude/hooks/routed.sh', '.claude/hooks/dotted.sh', '.claude/hooks/prose.sh', '.claude/hooks/untracked.sh', '.claude/hooks/relative.sh'] },
+      {
+        '.claude/hooks/routed.sh': pythonHook('import hook_as_agent'),
+        '.claude/hooks/dotted.sh': pythonHook('from lib.agent_wrap import wrap'),
+        '.claude/hooks/prose.sh': pythonHook('import hook_prose'),
+        '.claude/hooks/untracked.sh': pythonHook('import nowhere'),
+        '.claude/hooks/relative.sh': pythonHook('from . import hook_as_agent'),
+        'scripts/lib/hook_as_agent.py': helper,
+        'tools/lib/agent_wrap.py': helper,
+        'scripts/lib/hook_prose.py': '"""Not routed through as-agent."""\n# as-agent is only named here\ndef wrap(argv):\n    return argv\n',
+      },
+    );
+    assert.deepEqual(hooksHittingLock(sys), [
+      '.claude/settings.json PreToolUse hook .claude/hooks/prose.sh',
+      '.claude/settings.json PreToolUse hook .claude/hooks/untracked.sh',
+      '.claude/settings.json PreToolUse hook .claude/hooks/relative.sh',
+    ]);
+    const listed = sys.calls.find((call) => call.args[0] === 'ls-files');
+    assert.deepEqual(listed?.args, ['ls-files', '-z', '--', ':(glob)**/json.py', ':(glob)**/os.py', ':(glob)**/shutil.py', ':(glob)**/hook_as_agent.py']);
+    assert.equal(listed?.cwd, ROOT);
+  });
+
+  it('judges an importing script by its text when git cannot list the repo, or a listed helper cannot be read', () => {
+    for (const listing of [{ code: 128, stdout: '', stderr: 'fatal' }, { code: 0, stdout: 'scripts/lib/gone.py\0', stderr: '' }]) {
+      const sys = withHooks({ PreToolUse: ['.claude/hooks/routed.sh'] }, { '.claude/hooks/routed.sh': pythonHook('import hook_as_agent'), 'scripts/lib/hook_as_agent.py': helper });
+      sys.execOverride = (call) => (call.args[0] === 'ls-files' ? listing : undefined);
+      assert.deepEqual(hooksHittingLock(sys), ['.claude/settings.json PreToolUse hook .claude/hooks/routed.sh']);
+    }
+  });
+
+  it('reads a script only up to a top-level cloud-only line outside the cloud, and all of it in a cloud session (#211)', () => {
+    const scripts = {
+      '.claude/hooks/cloud.sh': '#!/usr/bin/env bash\nset -uo pipefail\n[ "${CLAUDE_CODE_REMOTE:-}" = true ] || exit 0\nfetch() {\n  git -C "$REPO" fetch origin main\n}\nfetch\n',
+      '.claude/hooks/negated.sh': "#!/bin/bash\n[[ $CLAUDE_CODE_REMOTE != 'true' ]] && exit\ngh pr view\n",
+      '.claude/hooks/indented.sh': '#!/bin/bash\nmain() {\n  [ "$CLAUDE_CODE_REMOTE" = true ] || exit 0\n  gh pr view\n}\nmain\n',
+      '.claude/hooks/after.sh': '#!/bin/bash\ngh pr view\n[ "$CLAUDE_CODE_REMOTE" = true ] || exit 0\n',
+      '.claude/hooks/commented.sh': '#!/bin/bash\n# [ "$CLAUDE_CODE_REMOTE" = true ] || exit 0\ngh pr view\n',
+      '.claude/hooks/mac-only.sh': '#!/bin/bash\n[ "$CLAUDE_CODE_REMOTE" = true ] && exit 0\ngh pr view\n',
+    };
+    const names = Object.keys(scripts);
+    const sys = withHooks({ SessionStart: names }, scripts);
+    const named = (...hooks: string[]): string[] => hooks.map((hook) => `.claude/settings.json SessionStart hook .claude/hooks/${hook}.sh`);
+    assert.deepEqual(hooksHittingLock(sys), named('indented', 'after', 'commented', 'mac-only'), 'on a Mac');
+    sys.env.CLAUDE_CODE_REMOTE = 'true';
+    assert.deepEqual(hooksHittingLock(sys), named('cloud', 'negated', 'indented', 'after', 'commented', 'mac-only'), 'in a cloud session');
+  });
 });

@@ -125,11 +125,15 @@ const OWN_COMMANDS = new Set([HOOK_COMMAND, GUARD_COMMAND, ...OLDER_HOOK_COMMAND
  * hook's command, or by a script in the repo it names. Like the guard, it
  * reads text, so a script that runs another script is missed. Comments and
  * docstrings are left out, so prose that names gh or git push is not a call.
+ * A script that loads a repo helper running `as-agent` is taken as routed
+ * through it (`routedByHelper`). Outside a cloud session, a script is read
+ * only up to a top-level line that exits there (`CLOUD_ONLY`).
  */
 export function hooksHittingLock(sys: Sys): string[] {
   const top = sys.exec('git', ['rev-parse', '--show-toplevel'], { cwd: sys.cwd });
   if (top.code !== 0) return [];
   const root = top.stdout.trim();
+  const cloud = sys.env.CLAUDE_CODE_REMOTE === 'true';
   const found: string[] = [];
   for (const file of SETTINGS_FILES) {
     let settings: { hooks?: Record<string, unknown> };
@@ -145,8 +149,10 @@ export function hooksHittingLock(sys: Sys): string[] {
           const command = (hook as { command?: unknown } | null)?.command;
           if (typeof command !== 'string' || OWN_COMMANDS.has(command)) continue;
           const script = scriptOf(sys, root, command);
-          const text = script ? `${command}\n${script.text}` : command;
-          if (reachesGitHub(withoutAsAgent(withoutComments(text)))) found.push(`${file} ${event} hook ${script ? script.path : JSON.stringify(command)}`);
+          if (script && routedByHelper(sys, root, script.text)) continue;
+          const code = withoutComments(script ? `${command}\n${script.text}` : command);
+          const judged = cloud ? code : beforeCloudOnly(code);
+          if (reachesGitHub(withoutAsAgent(judged))) found.push(`${file} ${event} hook ${script ? script.path : JSON.stringify(command)}`);
         }
       }
     }
@@ -182,6 +188,57 @@ function withoutComment(line: string): string {
     else if (char === '#' && (i === 0 || /[\s;&|()]/.test(line[i - 1] ?? ''))) return line.slice(0, i);
   }
   return line;
+}
+
+/** `$CLAUDE_CODE_REMOTE`, quoted or not, braced or not, with or without `:-`. */
+const REMOTE = String.raw`"?\$\{?CLAUDE_CODE_REMOTE(?::-)?\}?"?`;
+const TRUE = String.raw`(?:"true"|'true'|true)`;
+/**
+ * A line at column 0 that exits unless the session is a Claude cloud one:
+ * `[ "$CLAUDE_CODE_REMOTE" = true ] || exit`, or `!= true ] && exit`, with
+ * `[` or `[[`. Outside the cloud, bash runs nothing after it, and a function
+ * must be defined before it is called, so what follows it never runs there.
+ * One indented, or inside a function or an `if`, is not counted.
+ */
+const CLOUD_ONLY = new RegExp(
+  String.raw`^\[\[?[ \t]+${REMOTE}[ \t]+(?:==?[ \t]+${TRUE}[ \t]+\]\]?[ \t]*\|\||!=[ \t]+${TRUE}[ \t]+\]\]?[ \t]*&&)[ \t]*exit\b`,
+  'm',
+);
+
+/** The code up to its first cloud-only line, all of it when it has none. */
+function beforeCloudOnly(code: string): string {
+  const at = code.search(CLOUD_ONLY);
+  return at === -1 ? code : code.slice(0, at);
+}
+
+/** A Python `import a, b.c` or `from a.b import c`, at a line's start. */
+const IMPORT = /^[ \t]*(?:from[ \t]+([\w.]+)[ \t]+import\b|import[ \t]+([\w.]+(?:[ \t]*,[ \t]*[\w.]+)*))/gm;
+
+/**
+ * Whether the script imports a Python module tracked in the repo, found by
+ * its path under any folder (`a.b` is `a/b.py`), whose code runs `as-agent`.
+ * Such a helper is how a hook routes its gh and git through `as-agent`, so
+ * the script is taken as routed, as a command that runs `as-agent` is. Read
+ * as text, so a routed script that also calls gh on its own is missed.
+ */
+function routedByHelper(sys: Sys, root: string, script: string): boolean {
+  const modules = [...withoutComments(script).matchAll(IMPORT)]
+    .flatMap((match) => (match[1] ?? match[2] ?? '').split(','))
+    .map((name) => name.trim())
+    .filter((name) => !name.startsWith('.'));
+  if (modules.length === 0) return false;
+  const listed = sys.exec('git', ['ls-files', '-z', '--', ...modules.map((name) => `:(glob)**/${name.replaceAll('.', '/')}.py`)], { cwd: root });
+  if (listed.code !== 0) return false;
+  return listed.stdout
+    .split('\0')
+    .filter(Boolean)
+    .some((path) => {
+      try {
+        return /\bas-agent\b/.test(withoutComments(sys.read(`${root}/${path}`)));
+      } catch {
+        return false;
+      }
+    });
 }
 
 /** The text with each command that runs `as-agent` taken out, the rest of its line kept. */

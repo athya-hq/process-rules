@@ -765,7 +765,14 @@ password or SSH. Use the launcher line above, as the hooks `onboard` writes do:
 the app's hooks may have no node on their `PATH`. `process-rules doctor`,
 run in the client repo, warns under "This repo" about each hook in `.claude/settings.json` or
 `.claude/settings.local.json` whose command, or the repo script it runs,
-calls `gh` or git's remote commands outside `as-agent`.
+calls `gh` or git's remote commands outside `as-agent`. A script that
+imports a Python module tracked in the repo whose code runs `as-agent` (a
+helper wrapping each `gh` call) counts as routed through it. Outside a cloud
+session, a script is read only up to a line at its top level, column 0, that
+exits there, `[ "${CLAUDE_CODE_REMOTE:-}" = true ] || exit 0` or
+`[ "$CLAUDE_CODE_REMOTE" != true ] && exit`: bash runs nothing after it on a
+Mac. Both are read as text, so a routed script that also calls `gh` on its
+own, or a cloud guard inside a function, is not told apart.
 
 ### Claude cloud sessions
 
