@@ -532,7 +532,9 @@ opening with `Needs you:` or `Proposal:`, on an issue, a pull request or a revie
 owner's `approved` label or `Decision:` comment takes the label off at once;
 on a pull request, where a label approves nothing (approvals are given on
 issues only), the owner answers with a `Decision:` comment, which takes it
-off at once, or a 👍 on the ask, which the hourly sweep counts. Hourly
+off at once, or a 👍 on the ask, which the hourly sweep counts. The sweep
+reads an issue's or pull request's own comments, not review threads, so an
+ask in a review thread is answered with a `Decision:` reply there. Hourly
 (cron `41 * * * *`), on a run by hand, and at once when the owner posts a
 batch answer on the Approvals issue, a sweep takes it off each open issue
 whose every agent ask the owner has answered. Each `Proposal:` is an ask of
@@ -542,7 +544,9 @@ one when it is the latest agent ask there. An ask is answered by a 👍 on it
 after its last edit, a `Decision:` comment after it on the issue, or a batch
 answer after it on the Approvals issue whose first line names its issue,
 that no one but owners edited. So a batch naming one proposal on a slice
-leaves the slice on Needs you while another there waits. An issue labelled
+leaves the slice on Needs you while another there waits. The sweep does not
+know when a slice was last re-added, so a 👍 from before that still counts
+here, though the work rules ask again (#207). An issue labelled
 with no agent ask on it, such as the weekly job's undo issues, is left as it
 is, unless the owner's batch answer names it. Only comments
 that may ask or decide, from the owner, a member or a collaborator, the
