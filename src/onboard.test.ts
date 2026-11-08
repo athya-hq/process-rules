@@ -2087,7 +2087,7 @@ describe('onboard never moves the pin backwards', () => {
     const { code, err } = await run(sys);
     assert.equal(code, 1);
     assert.match(err.join('\n'), new RegExp(`pins process-rules v${newer}.*this is v${packageVersion()}`));
-    assert.match(err.join('\n'), new RegExp(`pnpm add -g \\S+/v${newer}/athya-hq-process-rules-${newer}\\.tgz`), 'says how to update');
+    assert.match(err.join('\n'), /first: process-rules upgrade$/m, 'says how to update');
     assert.equal(opened(sys), undefined, 'opens no pull request');
     assert.equal(signIns(sys), 0, 'asks the owner for nothing');
   });

@@ -11,6 +11,7 @@ import { reviewsDue } from './reviews.ts';
 import { reviewThread, threadArgs } from './review-thread.ts';
 import { onboard, onboardArgs } from './onboard.ts';
 import { sessionStart } from './session-start.ts';
+import { upgrade } from './upgrade.ts';
 import { prMerged, prePush, prWorkRules, propose } from './work.ts';
 import type { Output, Sys } from './types.ts';
 
@@ -27,6 +28,7 @@ Commands:
   doctor [agent]   Check agent sessions here can work as the agent account
   onboard [owner agent] [--features a,b] [--add feature] [--yes] [--dry-run]
                    Set up the client repo here, for the features it turns on
+  upgrade          Install the newest release with pnpm, and check PATH runs it alone
   cloud-setup      Print the Setup snippet for a Claude cloud environment, pasted once
   session-start    Run by a client's SessionStart hook: the agent identity, or GitHub locked out
   guard            Run by a client's PreToolUse hook: gh and git's remote commands only as the agent
@@ -134,7 +136,9 @@ export async function run(
     case 'pre-push':
     case 'propose':
     case 'review-thread':
+    case 'upgrade':
       try {
+        if (command === 'upgrade') return await upgrade(await sys(), io);
         if (command === 'review-thread') return await reviewThread(await sys(), io, rest);
         if (command === 'propose') return await propose(await sys(), io, rest.map((arg) => Number(arg.replace('#', ''))));
         if (command === 'reviews-due') return await reviewsDue(await sys(), io);

@@ -23,6 +23,7 @@ import { CLOUD_SETUP_PATH, WORKFLOW_PATH } from './onboard-pull.ts';
 import { repoRoot } from './session-start.ts';
 import { tokenStore, unsupported } from './token-store.ts';
 import type { Output, Sys } from './types.ts';
+import { installedFindings } from './upgrade.ts';
 import { packageVersion } from './version.ts';
 
 const MACHINE = 'process-rules machine';
@@ -85,6 +86,7 @@ export async function doctor(sys: Sys, io: Output, named?: string): Promise<numb
       : runs.code !== 0
         ? { mark: '✗', text: `launcher does not run (${runs.stderr.trim() || `exit ${runs.code}`}); its node removed?`, fix: MACHINE }
         : { mark: '✓', text: 'launcher' },
+    ...(await installedFindings(sys)),
   );
   const { left, kept } = setAside(exposure(sys, agent), readDeclined(sys, agent));
   mac.push(...kept.map((text): Finding => ({ mark: '✓', text })), ...exposureFindings(left, sys.home), ...movedFindings(sys, agent));
