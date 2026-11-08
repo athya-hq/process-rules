@@ -23,9 +23,6 @@ export function opensAsk(body: string): string | undefined {
   return word === 'Needs you' || word === 'Proposal' ? word : undefined;
 }
 
-/** The issue a `Proposal:` is for: the first `#N` of its first line, this repository's, as the work rules read it. */
-const PROPOSES = /^\s*(?:[*_#>]+\s*)*Proposal:[^\n#]*?(?<![\w/.&-])#(\d+)\b/;
-
 /** Whether a comment opens with `Decision:`, the owner's word. */
 export function opensDecision(body: string): boolean {
   return OPENING.exec(body)?.[1] === 'Decision';
@@ -320,12 +317,8 @@ async function answered(
   const since = ask.updated_at && ask.updated_at > ask.created_at ? ask.updated_at : ask.created_at;
   const reactions = await every<Reaction>(sys, token, `${API}/repos/${slug}/issues/comments/${ask.id}/reactions?content=%2B1`);
   if (reactions.some((reaction) => anyLogin(owners, reaction.user?.login ?? undefined) && reaction.created_at > since)) return 'a 👍 on the latest ask';
-  // The Approvals issue is read last, only for an ask the issue itself has not answered. A batch answers the
-  // ask when it names this issue or the one a proposal here is for: a State dropped from this slice is asked
-  // about on the slice, and named by its own number, as `process-rules propose` prints it.
-  const proposed = PROPOSES.exec(ask.body ?? '')?.[1];
-  const answers = await batch();
-  const batched = [...new Set([number, ...(proposed === undefined ? [] : [Number(proposed)])].flatMap((named) => batchAnswers(answers, owners, named, ask.created_at)))];
+  // The Approvals issue is read last, only for an ask the issue itself has not answered.
+  const batched = batchAnswers(await batch(), owners, number, ask.created_at);
   if (batched.length > 0 && (await ownersAlone(sys, token, batched, owners)).kept.length > 0) return `a "Decision: approve" on #${approvals}, the Approvals issue`;
   return false;
 }

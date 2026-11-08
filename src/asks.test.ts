@@ -263,30 +263,6 @@ describe('needsOwner', () => {
       assert.equal(sys.requests.filter((request) => request.url === approvals).length, 1);
     });
 
-    it('sweeps: off a slice whose latest proposal is for a dropped State the batch names', async () => {
-      const sys = job('schedule', {}, { owner: OWNER, agent: AGENT, approvals: 70 });
-      const at = (hour: number) => `2026-11-08T${String(hour).padStart(2, '0')}:00:00Z`;
-      sys.route('GET', `${API}/repos/${SLUG}/issues?state=open&labels=needs-owner&per_page=100&page=1`, { status: 200, json: [{ number: 12 }, { number: 13 }] });
-      // #12's latest proposal is for State #30, which the batch names; #13's is for State #31, which it does not.
-      for (const [slice, state] of [[12, 30], [13, 31]] as const) {
-        sys.route('GET', `${API}/repos/${SLUG}/issues/${slice}/comments?per_page=100&page=1`, {
-          status: 200,
-          json: [{ id: slice * 10, body: `Proposal: drop state #${state} (Empty list), closed as not planned after work item #10's approval.`, user: { login: AGENT }, created_at: at(1) }],
-        });
-        sys.route('GET', `${API}/repos/${SLUG}/issues/comments/${slice * 10}/reactions?content=%2B1&per_page=100&page=1`, { status: 200, json: [] });
-      }
-      sys.route('GET', `${API}/repos/${SLUG}/issues/70/comments?per_page=100&page=1`, {
-        status: 200,
-        json: [{ id: 700, body: 'Decision: approve #30 other/repo#31', user: { login: OWNER }, created_at: at(3) }],
-      });
-      sys.route('DELETE', `${API}/repos/${SLUG}/issues/12/labels/needs-owner`, { status: 200, json: null });
-      assert.deepEqual((await runJob(sys)).out, [
-        '#12: the owner answered with a "Decision: approve" on #70, the Approvals issue; needs-owner taken off',
-        '#13: waits on the owner',
-        'needs-owner: 2 labelled needs-owner, 1 cleared',
-      ]);
-    });
-
     it("sweeps: an owner's 👍 on the ask clears it without reading the Approvals issue", async () => {
       const sys = job('schedule', {}, { owner: OWNER, agent: AGENT, approvals: 70 });
       sys.route('GET', `${API}/repos/${SLUG}/issues?state=open&labels=needs-owner&per_page=100&page=1`, { status: 200, json: [{ number: 1 }] });

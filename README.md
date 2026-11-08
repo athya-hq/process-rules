@@ -521,7 +521,9 @@ the owner's answer there, ready to paste: `Decision: approve #12 #30 #41`,
 one number per proposal still waiting (a slice for its addition, a State for
 its drop). The owner pastes it as a comment on Approvals, deleting any number
 they refuse. The agent hands the line over and never posts it: only the
-owner's own comment approves anything.
+owner's own comment approves anything. The work rules read a dropped
+State's number, but `needs-owner` is on its slice, so a slice whose only
+waiting proposal is a State's keeps the label until `propose` runs again.
 
 **The Needs you list keeps itself.** With `board` on, the client workflow's
 `process-rules-asks` job runs `process-rules needs-owner`. An agent's comment
@@ -536,7 +538,7 @@ line names. Hourly
 (cron `41 * * * *`), and on a run by hand, a sweep takes it off each open
 issue whose latest agent ask the owner has answered: a 👍 on it after its last
 edit, or a `Decision:` comment after it, on the issue or a batch answer naming
-it on the Approvals issue (or naming the State that ask proposes to drop), that no one but owners edited. An issue labelled with no agent ask
+it on the Approvals issue, that no one but owners edited. An issue labelled with no agent ask
 on it, such as the weekly job's undo issues, is left as it is. Only comments
 that may ask or decide, from the owner, a member or a collaborator, the
 `approved` label and the hourly cron start the job, so other comments, and an
