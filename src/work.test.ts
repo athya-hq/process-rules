@@ -111,6 +111,8 @@ const comment = (body: string, created_at = LATEST, login = OWNER, edited: strin
   body,
   created_at,
   updated_at: edited ?? created_at,
+  // Where the owner acts on it; the propose tests' proposals are on slice #12.
+  html_url: `https://github.com/${SLUG}/issues/12#issuecomment-${ids}`,
 });
 const thumb = (created_at = LATEST, login = OWNER): Node => ({ user: { login }, created_at });
 
@@ -1227,7 +1229,8 @@ describe('propose', () => {
     sys.env = { PROCESS_RULES_AGENT: AGENT, GH_TOKEN: 'ghp_good' };
     sys.acceptToken('ghp_good', AGENT);
     github(sys, g.issue);
-    sys.route('POST', `${ISSUE}/comments`, { status: 201, json: { html_url: 'https://github.com/example-org/example-app/issues/12#issuecomment-1' } });
+    let made = 0;
+    sys.route('POST', `${ISSUE}/comments`, () => ({ status: 201, json: { html_url: `https://github.com/example-org/example-app/issues/12#issuecomment-${++made}` } }));
     sys.route('POST', `${ISSUE}/labels`, { status: 200, json: [] });
     sys.route('DELETE', `${ISSUE}/labels/needs-owner`, { status: 200, json: [] });
     return { sys, g };
@@ -1259,8 +1262,8 @@ describe('propose', () => {
       code: 0,
       out: [
         '✓ #12: proposed on #12: https://github.com/example-org/example-app/issues/12#issuecomment-1',
-        '✓ state #30: proposed on #12: https://github.com/example-org/example-app/issues/12#issuecomment-1',
-        "#12 is labeled needs-owner, so it shows in example-owner's Needs you view",
+        '✓ state #30: proposed on #12: https://github.com/example-org/example-app/issues/12#issuecomment-2',
+        "#12 is labeled needs-owner, waiting on example-owner's 👍 on https://github.com/example-org/example-app/issues/12#issuecomment-1 and https://github.com/example-org/example-app/issues/12#issuecomment-2",
       ],
       err: [],
     });
@@ -1326,18 +1329,51 @@ describe('propose', () => {
     assert.deepEqual(posted(sys), []);
   });
 
-  it('posts nothing twice, and keeps the label while the owner has not decided', async () => {
+  it("posts nothing twice, linking the waiting proposal itself, and keeps the label while the owner has not decided", async () => {
     const g = owing();
-    g.comments.push(comment('Proposal: add #12', LATER, AGENT));
+    const older = comment('Proposal: add #12', LATER, AGENT);
+    const made = comment('Proposal: add #12', LATER, AGENT);
+    g.comments.push(older, made);
     // On the slice, any Decision: also settles its addition.
     ((g.states[0] as Node).comments as Node[]).push(comment('Decision: drop it'));
     const { sys } = session(g);
+    // The newest proposal's own comment, never the slice's top or the needs-owner list.
+    assert.notEqual(older.html_url, made.html_url);
     assert.deepEqual((await run(sys)).out, [
-      "#12: proposed on #12, waiting on example-owner's 👍",
+      `#12: proposed on #12, waiting on example-owner's 👍: ${made.html_url as string}`,
       '✓ state #30: example-owner has decided',
-      "#12 is labeled needs-owner, so it shows in example-owner's Needs you view",
+      `#12 is labeled needs-owner, waiting on example-owner's 👍 on ${made.html_url as string}`,
     ]);
     assert.deepEqual(posted(sys), []);
+  });
+
+  it("links, given a state, the slice's own waiting proposal too, or says how to post it", async () => {
+    const g = owing();
+    const { sys } = session(g);
+    assert.deepEqual((await run(sys, 30)).out, [
+      '✓ state #30: proposed on #12: https://github.com/example-org/example-app/issues/12#issuecomment-1',
+      "#12 is labeled needs-owner, waiting on example-owner's 👍 on https://github.com/example-org/example-app/issues/12#issuecomment-1; ExampleBot proposes #12 with: process-rules propose 12",
+    ]);
+    const made = comment('Proposal: add #12', LATER, AGENT);
+    g.comments.push(made);
+    ((g.states[0] as Node).comments as Node[]).push(comment('Decision: drop it'));
+    assert.deepEqual((await run(sys, 30)).out, [
+      '✓ state #30: example-owner has decided',
+      `#12 is labeled needs-owner, waiting on example-owner's 👍 on ${made.html_url as string}`,
+    ]);
+    g.comments.pop();
+    assert.deepEqual((await run(sys, 30)).out, [
+      '✓ state #30: example-owner has decided',
+      '#12 is labeled needs-owner; ExampleBot proposes #12 with: process-rules propose 12',
+    ]);
+  });
+
+  it('still counts a proposal GitHub answered without its link as posted', async () => {
+    const g = owing();
+    g.states.pop();
+    const { sys } = session(g);
+    sys.route('POST', `${ISSUE}/comments`, { status: 201, json: null });
+    assert.deepEqual((await run(sys)).out, ['✓ #12: proposed on #12', '#12 is labeled needs-owner']);
   });
 
   it("takes the label off once the owner's 👍 settles everything", async () => {
@@ -1519,11 +1555,11 @@ describe('with two owners and two agents', () => {
     sys.env = { PROCESS_RULES_AGENT: AGENT_2, GH_TOKEN: 'ghp_good' };
     sys.acceptToken('ghp_good', AGENT_2);
     github(sys, added().issue);
-    sys.route('POST', `/repos/${SLUG}/issues/12/comments`, { status: 201, json: {} });
+    sys.route('POST', `/repos/${SLUG}/issues/12/comments`, { status: 201, json: { html_url: `https://github.com/${SLUG}/issues/12#issuecomment-9` } });
     sys.route('POST', `/repos/${SLUG}/issues/12/labels`, { status: 200, json: [] });
     const { io, out } = capture();
     assert.equal(await propose(sys, io, 12), 0);
-    assert.equal(out.at(-1), "#12 is labeled needs-owner, so it shows in example-owner or Second-Owner's Needs you view");
+    assert.equal(out.at(-1), `#12 is labeled needs-owner, waiting on example-owner or Second-Owner's 👍 on https://github.com/${SLUG}/issues/12#issuecomment-9`);
     const body = (sys.requests.find((r) => r.method === 'POST' && r.url.endsWith('/comments'))?.body as { body: string }).body;
     assert.match(body, /\n\n@example-owner or @Second-Owner: react 👍 to this comment to approve it, or comment "Decision:"\.$/);
     sys.acceptToken('ghp_good', OWNER_2);

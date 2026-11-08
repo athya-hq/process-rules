@@ -24,6 +24,8 @@ interface Comment {
   body: string;
   created_at: string;
   updated_at: string;
+  /** Its own address on GitHub, `…/issues/N#issuecomment-ID`: where the owner acts on it. */
+  html_url: string;
 }
 
 interface Issue {
@@ -634,6 +636,11 @@ export async function prMerged(sys: Sys, io: Output): Promise<number> {
   return 0;
 }
 
+/** The newest of `comments`, which is not empty: GitHub lists comments oldest first. */
+function newest(comments: Comment[]): Comment {
+  return comments[comments.length - 1] as Comment;
+}
+
 /** The label that puts an issue in the owner's Needs you view. */
 const NEEDS_OWNER = 'needs-owner';
 
@@ -731,22 +738,33 @@ export async function propose(sys: Sys, io: Output, number: number): Promise<num
   if (gaps.length > 0) return report(io, 'propose', gaps);
 
   const issues = `${API}/repos/${slug}/issues/${slice}`;
+  // Each link opens the very comment the owner reacts 👍 to, never the slice's top or a label's list.
+  const links = new Map<Owed, string | undefined>();
   for (const one of asked) {
     const what = one.kind === 'added' ? `#${slice}` : `state #${one.number}`;
     if (one.settled) {
       io.out(`✓ ${what}: ${owner} has decided`);
     } else if (one.proposals.length > 0) {
-      io.out(`${what}: proposed on #${slice}, waiting on ${owner}'s 👍`);
+      links.set(one, newest(one.proposals).html_url);
+      io.out(`${what}: proposed on #${slice}, waiting on ${owner}'s 👍: ${links.get(one)}`);
     } else {
       const posted = await sys.http(`${issues}/comments`, { method: 'POST', token, body: { body: proposalBody(one, slice, read.parent, accounts.owners) } });
       if (posted.status !== 201) throw new Error(`cannot comment on #${slice} (HTTP ${posted.status})`);
-      io.out(`✓ ${what}: proposed on #${slice}: ${(posted.json as { html_url?: string } | null)?.html_url ?? ''}`.trimEnd());
+      const url = (posted.json as { html_url?: string } | null)?.html_url;
+      links.set(one, url);
+      io.out(`✓ ${what}: proposed on #${slice}${url ? `: ${url}` : ''}`);
     }
   }
-  if (read.owed.some((one) => !one.settled)) {
+  const waiting = read.owed.filter((one) => !one.settled);
+  if (waiting.length > 0) {
     const labeled = await sys.http(`${issues}/labels`, { method: 'POST', token, body: { labels: [NEEDS_OWNER] } });
     if (labeled.status !== 200) throw new Error(`cannot label #${slice} ${NEEDS_OWNER} (HTTP ${labeled.status})`);
-    io.out(`#${slice} is labeled ${NEEDS_OWNER}, so it shows in ${owner}'s Needs you view`);
+    // A decision this run did not ask for still has its proposal's link, or the command that posts one.
+    for (const one of waiting) if (!links.has(one) && one.proposals.length > 0) links.set(one, newest(one.proposals).html_url);
+    const unproposed = waiting.filter((one) => !links.has(one)).map((one) => `; ${either(accounts.agents)} proposes #${one.number} with: process-rules propose ${one.number}`);
+    const urls = [...links.values()].filter((url) => url !== undefined);
+    const where = urls.length > 0 ? `, waiting on ${owner}'s 👍 on ${urls.join(' and ')}` : '';
+    io.out(`#${slice} is labeled ${NEEDS_OWNER}${where}${unproposed.join('')}`);
     return 0;
   }
   const removed = await sys.http(`${issues}/labels/${NEEDS_OWNER}`, { method: 'DELETE', token });
