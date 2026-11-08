@@ -296,6 +296,8 @@ interface Owed {
   ask: Comment;
   number: number;
   kind: 'Needs you' | 'Proposal';
+  /** The owner's answer counts only after this: the ask, or for a slice's addition its latest addition, if later. */
+  since: string;
 }
 
 /**
@@ -309,8 +311,8 @@ function owedOn(comments: Comment[], agents: string[], number: number): Owed[] {
   const asks = comments.filter((comment) => anyLogin(agents, comment.user?.login ?? undefined) && opensAsk(comment.body ?? ''));
   return asks.flatMap((ask, at): Owed[] => {
     const body = ask.body ?? '';
-    if (opensAsk(body) === 'Proposal') return [{ ask, number: firstIssue(body.split(/\r?\n/, 1)[0] as string) ?? number, kind: 'Proposal' }];
-    return at === asks.length - 1 ? [{ ask, number, kind: 'Needs you' }] : [];
+    if (opensAsk(body) === 'Proposal') return [{ ask, number: firstIssue(body.split(/\r?\n/, 1)[0] as string) ?? number, kind: 'Proposal', since: ask.created_at }];
+    return at === asks.length - 1 ? [{ ask, number, kind: 'Needs you', since: ask.created_at }] : [];
   });
 }
 
@@ -322,7 +324,10 @@ type Standing = { asked: false } | { answer: string } | { waiting: Owed[] };
  * from its comments, each ask on its own: a `Decision:` comment after it
  * that no one but owners edited, a 👍 after its last edit, or a batch answer
  * after it on the Approvals issue (`batch` reads its comments) whose first
- * line names the ask's issue, that no one but owners edited.
+ * line names the ask's issue, that no one but owners edited. A proposal for
+ * the issue itself, a slice's addition, counts only answers after the issue
+ * was last added to a parent, as the work rules count them, so a slice taken
+ * out and added again waits on the owner's say again.
  * No agent asked there leaves the label to whoever put it on, such as the
  * weekly job's undo issues.
  */
@@ -330,6 +335,13 @@ async function answered(sys: Sys, token: string, slug: string, number: number, {
   const comments = await every<Comment>(sys, token, `${API}/repos/${slug}/issues/${number}/comments`);
   const owed = owedOn(comments, agents, number);
   if (owed.length === 0) return { asked: false };
+  // The issue's own timeline says when it was last added to a parent: read only for a proposal for the issue itself,
+  // and none where GitHub cannot find it.
+  if (owed.some((one) => one.kind === 'Proposal' && one.number === number)) {
+    const timeline = await every<{ event?: string; created_at?: string }>(sys, token, `${API}/repos/${slug}/issues/${number}/timeline`, true);
+    const added = timeline.flatMap((event) => (event.event === 'parent_issue_added' && event.created_at ? [event.created_at] : [])).sort().at(-1);
+    for (const one of owed) if (added && one.kind === 'Proposal' && one.number === number && added > one.since) one.since = added;
+  }
   const earliest = owed.map(({ ask }) => ask.created_at).sort()[0] as string;
   const decisions = comments.filter((comment) => comment.created_at > earliest && anyLogin(owners, comment.user?.login ?? undefined) && opensDecision(comment.body ?? ''));
   // A Decision: someone other than an owner edited answers nothing.
@@ -337,11 +349,12 @@ async function answered(sys: Sys, token: string, slug: string, number: number, {
   const how = new Map<Owed, string>();
   for (const one of owed) {
     const { ask } = one;
-    if (decided.some((decision) => decision.created_at > ask.created_at)) {
+    if (decided.some((decision) => decision.created_at > one.since)) {
       how.set(one, 'a Decision: comment');
       continue;
     }
-    const since = ask.updated_at && ask.updated_at > ask.created_at ? ask.updated_at : ask.created_at;
+    const edited = ask.updated_at && ask.updated_at > ask.created_at ? ask.updated_at : ask.created_at;
+    const since = edited > one.since ? edited : one.since;
     const reactions = await every<Reaction>(sys, token, `${API}/repos/${slug}/issues/comments/${ask.id}/reactions?content=%2B1`);
     if (reactions.some((reaction) => anyLogin(owners, reaction.user?.login ?? undefined) && reaction.created_at > since)) how.set(one, 'a 👍 on the ask');
   }
@@ -349,7 +362,7 @@ async function answered(sys: Sys, token: string, slug: string, number: number, {
   const open = owed.filter((one) => !how.has(one));
   if (open.length > 0) {
     const answers = await batch();
-    const named = open.map((one) => ({ one, batched: batchAnswers(answers, owners, one.number, one.ask.created_at) }));
+    const named = open.map((one) => ({ one, batched: batchAnswers(answers, owners, one.number, one.since) }));
     const all = [...new Set(named.flatMap(({ batched }) => batched))];
     const counted = all.length > 0 ? (await ownersAlone(sys, token, all, owners)).kept : [];
     for (const { one, batched } of named) {

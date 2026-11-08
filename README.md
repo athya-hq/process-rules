@@ -544,9 +544,11 @@ one when it is the latest agent ask there. An ask is answered by a 👍 on it
 after its last edit, a `Decision:` comment after it on the issue, or a batch
 answer after it on the Approvals issue whose first line names its issue,
 that no one but owners edited. So a batch naming one proposal on a slice
-leaves the slice on Needs you while another there waits. The sweep does not
-know when a slice was last re-added, so a 👍 from before that still counts
-here, though the work rules ask again (#207). An issue labelled
+leaves the slice on Needs you while another there waits. A proposal for the
+slice's own addition counts only answers after the slice was last added to
+its work item, so a slice taken out and added again waits on the owner
+again. The sweep reads that from the slice's own timeline; unlike the work
+rules, it misses an addition GitHub records only on the work item's. An issue labelled
 with no agent ask on it, such as the weekly job's undo issues, is left as it
 is, unless the owner's batch answer names it. Only comments
 that may ask or decide, from the owner, a member or a collaborator, the
@@ -878,7 +880,7 @@ release, attaching the CLI package it built and tested. Install that package on
 each machine with pnpm; nothing is built on install:
 
 ```bash
-pnpm add -g https://github.com/athya-hq/process-rules/releases/download/v0.5.35/athya-hq-process-rules-0.5.35.tgz
+pnpm add -g https://github.com/athya-hq/process-rules/releases/download/v0.5.36/athya-hq-process-rules-0.5.36.tgz
 ```
 
 `onboard` pins the client's workflow to one version, the release of the CLI
