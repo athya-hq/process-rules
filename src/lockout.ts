@@ -56,10 +56,12 @@ export function exposure(sys: Sys, agent: string): Exposure {
  * nothing: StrictHostKeyChecking=yes refuses a host not yet known instead of
  * adding it, even where the owner's SSH config says accept-new or no, and
  * UpdateHostKeys=no stops OpenSSH's default rewrite of ~/.ssh/known_hosts with
- * the host keys GitHub offers after a key signs in, so doctor only reads.
+ * the host keys GitHub offers after a key signs in, and ControlMaster=no with
+ * ControlPath=none stops a config that shares connections from leaving a
+ * socket behind, so doctor only reads.
  */
 function sshLogin(sys: Sys, agent: string): string | undefined {
-  const tried = sys.exec('ssh', ['-T', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'UpdateHostKeys=no', '-o', 'ConnectTimeout=5', GITHUB_SSH], { env: ownerEnv(sys), timeoutMs: 15_000 });
+  const tried = sys.exec('ssh', ['-T', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'UpdateHostKeys=no', '-o', 'ControlMaster=no', '-o', 'ControlPath=none', '-o', 'ConnectTimeout=5', GITHUB_SSH], { env: ownerEnv(sys), timeoutMs: 15_000 });
   const login = /^Hi ([A-Za-z0-9-]+)!/m.exec(`${tried.stdout}\n${tried.stderr}`)?.[1];
   return login && !sameLogin(login, agent) ? login : undefined;
 }
