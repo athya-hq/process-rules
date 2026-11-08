@@ -877,7 +877,7 @@ release, attaching the CLI package it built and tested. Install that package on
 each machine with pnpm, once; nothing is built on install:
 
 ```bash
-pnpm add -g https://github.com/athya-hq/process-rules/releases/download/v0.5.36/athya-hq-process-rules-0.5.36.tgz
+pnpm add -g https://github.com/athya-hq/process-rules/releases/download/v0.5.37/athya-hq-process-rules-0.5.37.tgz
 ```
 
 After that, update it with one command on each machine:
