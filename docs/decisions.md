@@ -843,3 +843,20 @@
   an edited `Decision:` (the owner's own corrections would stop counting) and
   trusting the last editor alone (an agent's edit followed by the owner's
   would hide the agent's).
+- **2026-11-08 — Record: one comment on the Approvals issue answers a batch
+  (State #191 of P-40).** The owner approved this in a client's spec
+  (decisions 1 to 3): after answering 18 asks across 11 Work items one at a
+  time, one comment should answer them all. Settings may name a standing
+  Approvals issue (`"approvals": N`); an owner's comment there whose first
+  line opens `Decision: approve` approves each `#N` on that line, and
+  nothing below it, so a reason such as `Not #44 yet` approves nothing. The
+  work rules take it for a slice added after approval (made after the
+  addition) and for a dropped State (made after the drop); the Needs you job
+  takes `needs-owner` off each named issue at once, and its sweep counts it
+  after an issue's latest ask. The edit rule of State #185 holds for it.
+  Only the one issue counts, so the readers read one more list, once a
+  check or sweep. Rejected: each batch's own ask issue (every proposal would
+  have to name it, and the readers follow that link), counting a number
+  anywhere in the comment (a reason naming an item would approve it), and
+  teaching the Needs you job alone (the push check would still want one
+  comment per Work item).
