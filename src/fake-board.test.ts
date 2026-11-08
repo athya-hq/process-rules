@@ -18,16 +18,22 @@ export interface FakeView {
 }
 
 /** The fields GitHub gives every new Project, as the fake keeps them. */
-export const BUILT_IN = ['Title', 'Status', 'Linked pull requests', 'Sub-issues progress'];
+export const BUILT_IN = ['Title', 'Assignees', 'Status', 'Linked pull requests', 'Parent issue', 'Sub-issues progress'];
 
 /** The view GitHub gives a new Project. */
 export function defaultView(): FakeView {
-  return { id: 'V_1', name: 'View 1', layout: 'TABLE_LAYOUT', filter: null, visible: ['Title', 'Status'] };
+  return { id: 'V_1', name: 'View 1', layout: 'TABLE_LAYOUT', filter: null, visible: ['Title', 'Assignees', 'Status'] };
 }
 
 /** The views as onboard leaves them. */
 export function settledViews(): FakeView[] {
-  return VIEWS.map((spec, index) => ({ id: `V_${index + 1}`, name: spec.name, layout: spec.layout, filter: spec.filter, visible: ['Title', 'Status', ...spec.show] }));
+  return VIEWS.map((spec, index) => ({
+    id: `V_${index + 1}`,
+    name: spec.name,
+    layout: spec.layout,
+    filter: spec.filter,
+    visible: [...['Title', 'Assignees', 'Status'].filter((name) => !spec.hide.includes(name)), ...spec.show],
+  }));
 }
 
 /** An item on a fake Project, its values by field name: an option's name, a date or a number. */
@@ -247,20 +253,22 @@ export class Board {
       }
       case 'views(first': {
         const project = this.at(variables.id);
-        const json = (view: FakeView) => ({ ...view, configuration: { visibleFields: { nodes: [...view.visible.map((name) => ({ id: `F_${name}` })), {}] } } });
+        // GitHub gives a visible field an id updateProjectV2View can refuse, so the fake's differ from the fields' ids.
+        const json = (view: FakeView) => ({ ...view, configuration: { visibleFields: { nodes: [...view.visible.map((name) => ({ id: `VF_${name}`, name })), {}] } } });
         const fields = [...project.fields.map((name) => ({ id: `F_${name}`, name })), {}];
         return data({ node: { views: { nodes: (project.views ?? []).map(json) }, fields: { nodes: fields } } });
       }
       case 'createProjectV2View': {
         const views = (this.at(variables.project).views ??= []);
-        const view = { id: `V_${views.length + 1}`, name: String(variables.name), layout: String(variables.layout), filter: null, visible: ['Title', 'Status'] };
+        const view = { id: `V_${views.length + 1}`, name: String(variables.name), layout: String(variables.layout), filter: null, visible: ['Title', 'Assignees', 'Status'] };
         views.push(view);
-        return data({ createProjectV2View: { projectV2View: { ...view, configuration: { visibleFields: { nodes: view.visible.map((name) => ({ id: `F_${name}` })) } } } } });
+        return data({ createProjectV2View: { projectV2View: { ...view, configuration: { visibleFields: { nodes: view.visible.map((name) => ({ id: `VF_${name}`, name })) } } } } });
       }
       case 'updateProjectV2View': {
         const view = [this.old, this.project].flatMap((project) => project?.views ?? []).find((had) => had.id === variables.view)!;
-        Object.assign(view, { name: variables.name, layout: variables.layout, filter: variables.filter });
         const ids = (variables.configuration as { visibleFieldIds: string[] } | null)?.visibleFieldIds;
+        if (ids?.some((id) => !id.startsWith('F_'))) return { status: 200, json: { errors: [{ message: 'Visible field ID type does not match the field.' }] } };
+        Object.assign(view, { name: variables.name, layout: variables.layout, filter: variables.filter });
         if (ids) view.visible = ids.map((id) => id.replace(/^F_/, ''));
         return data({ updateProjectV2View: { projectV2View: { id: view.id } } });
       }

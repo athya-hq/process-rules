@@ -36,11 +36,11 @@ describe('setUpBoard', () => {
     ]);
     assert.deepEqual(out.slice(6), viewsChecklist(URL));
     assert.deepEqual(board.project?.views, [
-      { id: 'V_1', name: 'Needs you', layout: 'TABLE_LAYOUT', filter: 'label:needs-owner is:open', visible: ['Title', 'Status'] },
-      { id: 'V_2', name: 'Board', layout: 'BOARD_LAYOUT', filter: 'type:Slice,Brief', visible: ['Title', 'Status', 'Linked pull requests'] },
-      { id: 'V_3', name: 'Work items', layout: 'TABLE_LAYOUT', filter: 'type:"Work item"', visible: ['Title', 'Status', 'Sub-issues progress'] },
-      { id: 'V_4', name: 'Decisions', layout: 'TABLE_LAYOUT', filter: 'type:Decision', visible: ['Title', 'Status'] },
-      { id: 'V_5', name: 'Reviews due', layout: 'TABLE_LAYOUT', filter: '"Review date":<=@today', visible: ['Title', 'Status'] },
+      { id: 'V_1', name: 'Needs you', layout: 'TABLE_LAYOUT', filter: 'label:needs-owner is:open', visible: ['Title', 'Status', 'Parent issue'] },
+      { id: 'V_2', name: 'Board', layout: 'BOARD_LAYOUT', filter: 'type:Slice,Brief', visible: ['Title', 'Assignees', 'Status', 'Linked pull requests'] },
+      { id: 'V_3', name: 'Work items', layout: 'TABLE_LAYOUT', filter: 'type:"Work item"', visible: ['Title', 'Assignees', 'Status', 'Sub-issues progress'] },
+      { id: 'V_4', name: 'Decisions', layout: 'TABLE_LAYOUT', filter: 'type:Decision', visible: ['Title', 'Assignees', 'Status'] },
+      { id: 'V_5', name: 'Reviews due', layout: 'TABLE_LAYOUT', filter: '"Review date":<=@today', visible: ['Title', 'Assignees', 'Status'] },
     ]);
     assert.equal(
       sys.asked[0],
@@ -149,7 +149,7 @@ describe('setUpBoard', () => {
     const { url, out } = await setUp(sys);
     assert.equal(url, URL);
     assert.ok(out.includes("- the process-rules template could not be copied (GitHub's GraphQL API refused: Resource not accessible by integration); building the Project instead"));
-    assert.deepEqual(out.slice(-4), viewsChecklist(URL));
+    assert.deepEqual(out.slice(-viewsChecklist(URL).length), viewsChecklist(URL));
     assert.ok(board.operations.includes('createProjectV2('));
   });
 
@@ -220,10 +220,10 @@ describe('setUpBoard', () => {
     older(board, [{ content: 'ISSUE_a', values: {} }]);
     const { url, out, byHand } = await setUp(sys, ['n']);
     assert.equal(url, URL);
-    assert.deepEqual(byHand, [`group 2 views, auto-archive → ${URL}`]);
+    assert.deepEqual(byHand, [`Type on Needs you, group 2 views, auto-archive → ${URL}`]);
     assert.ok(!board.operations.includes('copyProjectV2'));
     assert.equal(board.project?.closed, undefined);
-    assert.deepEqual(out.slice(-4), viewsChecklist(URL));
+    assert.deepEqual(out.slice(-viewsChecklist(URL).length), viewsChecklist(URL));
   });
 
   it('keeps a Project made before the template when GitHub refuses the copy', async () => {
@@ -235,7 +235,7 @@ describe('setUpBoard', () => {
     assert.equal(url, URL);
     assert.deepEqual({ title: board.project?.title, closed: board.project?.closed }, { title: 'example-app work', closed: undefined }, 'renamed back, its closed state untouched');
     assert.ok(out.includes("- the process-rules template could not be copied (GitHub's GraphQL API refused: Resource not accessible by integration); keeping the Project as it is"));
-    assert.deepEqual(out.slice(-4), viewsChecklist(URL));
+    assert.deepEqual(out.slice(-viewsChecklist(URL).length), viewsChecklist(URL));
   });
 
   for (const [index, step] of ['issue types', 'labels', 'project', 'fields', 'views'].entries()) {
@@ -318,6 +318,31 @@ describe('setUpBoard', () => {
     assert.deepEqual(board.titles, ['example-app work']);
     assert.deepEqual(board.project?.views?.map((v) => v.name), VIEWS.map((v) => v.name));
     assert.ok(!board.operations.some((o) => o.includes('ProjectV2View') || o === 'createProjectV2Field'));
+  });
+
+  it('hides Assignees on Needs you and shows Parent issue, keeping columns the owner added, then leaves it', async () => {
+    const sys = new FakeSys();
+    const board = new Board(sys);
+    const views = settledViews();
+    views[0] = { ...views[0]!, visible: ['Title', 'Assignees', 'Status', 'Linked pull requests', 'Sub-issues progress'] };
+    board.project = { fields: [...BUILT_IN, ...FIELDS.map((f) => f.name)], linked: true, views, grouped: true };
+    await setUp(sys, ['y', 'y', 'y']);
+    assert.ok(sys.asked.includes('Set up the views Needs you in "example-app work"?'));
+    assert.deepEqual(board.project.views?.[0]?.visible, ['Title', 'Status', 'Linked pull requests', 'Sub-issues progress', 'Parent issue']);
+    assert.deepEqual(board.project.views?.slice(1), settledViews().slice(1));
+    const operations = board.operations.length;
+    await setUp(sys, ['y', 'y']);
+    assert.ok(!board.operations.slice(operations).some((o) => o.includes('ProjectV2View')));
+  });
+
+  it('changes no columns of a view whose fields are right but whose filter is not', async () => {
+    const sys = new FakeSys();
+    const board = new Board(sys);
+    const views = settledViews();
+    views[3] = { ...views[3]!, filter: 'is:open', visible: ['Title', 'Status', 'Labels'] };
+    board.project = { fields: [...BUILT_IN, ...FIELDS.map((f) => f.name)], linked: true, views, grouped: true };
+    await setUp(sys, ['y', 'y', 'y']);
+    assert.deepEqual(board.project.views?.[3], { ...settledViews()[3]!, visible: ['Title', 'Status', 'Labels'] });
   });
 
   it('renames the default view to the first view the Project lacks, with no other change', async () => {
