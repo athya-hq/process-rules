@@ -888,8 +888,9 @@ process-rules upgrade
 token and no sign-in, and when it is newer than the CLI running, installs it
 with the same `pnpm add -g`, printing old → new and the version the shell then
 runs. On the newest release it says so and installs nothing; it never moves
-back to an older one. When GitHub cannot be reached, the release has no package
-attached yet, or pnpm fails, it says which and exits 1. Either way it then walks
+back to an older one. When GitHub cannot be reached, or a newer release has no
+package attached yet, or pnpm fails, it says which and exits 1, checking
+nothing more. After an install, or when there was nothing to install, it walks
 `PATH`, as `type -a process-rules` does, reading an empty or relative entry
 against the current folder as the shell does. It exits 0 when exactly one
 `process-rules` is there and it is the newest release. When more than one is
