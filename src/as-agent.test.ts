@@ -273,10 +273,21 @@ describe('hooksHittingLock', () => {
 
   it('takes a script that imports a repo helper running as-agent as routed through it (#211)', () => {
     const sys = withHooks(
-      { PreToolUse: ['.claude/hooks/routed.sh', '.claude/hooks/dotted.sh', '.claude/hooks/prose.sh', '.claude/hooks/untracked.sh', '.claude/hooks/relative.sh'] },
+      {
+        PreToolUse: [
+          '.claude/hooks/routed.sh',
+          '.claude/hooks/dotted.sh',
+          '.claude/hooks/package.sh',
+          '.claude/hooks/prose.sh',
+          '.claude/hooks/untracked.sh',
+          '.claude/hooks/relative.sh',
+          '.claude/hooks/routed.sh && gh pr list',
+        ],
+      },
       {
         '.claude/hooks/routed.sh': pythonHook('import hook_as_agent'),
         '.claude/hooks/dotted.sh': pythonHook('from lib.agent_wrap import wrap'),
+        '.claude/hooks/package.sh': pythonHook('from lib import other, agent_wrap as w'),
         '.claude/hooks/prose.sh': pythonHook('import hook_prose'),
         '.claude/hooks/untracked.sh': pythonHook('import nowhere'),
         '.claude/hooks/relative.sh': pythonHook('from . import hook_as_agent'),
@@ -289,7 +300,10 @@ describe('hooksHittingLock', () => {
       '.claude/settings.json PreToolUse hook .claude/hooks/prose.sh',
       '.claude/settings.json PreToolUse hook .claude/hooks/untracked.sh',
       '.claude/settings.json PreToolUse hook .claude/hooks/relative.sh',
+      '.claude/settings.json PreToolUse hook .claude/hooks/routed.sh',
     ]);
+    const packaged = sys.calls.filter((call) => call.args[0] === 'ls-files')[2];
+    assert.deepEqual(packaged?.args.slice(-3), [':(glob)**/lib.py', ':(glob)**/lib/other.py', ':(glob)**/lib/agent_wrap.py'], 'from a package, each name is a module too');
     const listed = sys.calls.find((call) => call.args[0] === 'ls-files');
     assert.deepEqual(listed?.args, ['ls-files', '-z', '--', ':(glob)**/json.py', ':(glob)**/os.py', ':(glob)**/shutil.py', ':(glob)**/hook_as_agent.py']);
     assert.equal(listed?.cwd, ROOT);
@@ -305,18 +319,23 @@ describe('hooksHittingLock', () => {
 
   it('reads a script only up to a top-level cloud-only line outside the cloud, and all of it in a cloud session (#211)', () => {
     const scripts = {
-      '.claude/hooks/cloud.sh': '#!/usr/bin/env bash\nset -uo pipefail\n[ "${CLAUDE_CODE_REMOTE:-}" = true ] || exit 0\nfetch() {\n  git -C "$REPO" fetch origin main\n}\nfetch\n',
+      '.claude/hooks/cloud.sh':
+        '#!/usr/bin/env bash\n# Cloud only.\nset -uo pipefail\n\nSELF="${BASH_SOURCE[0]}"\n. "$(dirname "$SELF")/lib.sh"\nexport A=1\n[ "${CLAUDE_CODE_REMOTE:-}" = true ] || exit 0\nfetch() {\n  git -C "$REPO" fetch origin main\n}\nfetch\n',
       '.claude/hooks/negated.sh': "#!/bin/bash\n[[ $CLAUDE_CODE_REMOTE != 'true' ]] && exit\ngh pr view\n",
       '.claude/hooks/indented.sh': '#!/bin/bash\nmain() {\n  [ "$CLAUDE_CODE_REMOTE" = true ] || exit 0\n  gh pr view\n}\nmain\n',
+      '.claude/hooks/branch.sh': '#!/bin/bash\nif false; then\n[ "$CLAUDE_CODE_REMOTE" = true ] || exit 0\nfi\ngh pr view\n',
+      '.claude/hooks/continued.sh': '#!/bin/bash\nexport A=1 \\\n[ "$CLAUDE_CODE_REMOTE" = true ] || exit 0\ngh pr view\n',
+      '.claude/hooks/early.sh': '#!/bin/bash\nwho=$(gh api user)\n[ "$CLAUDE_CODE_REMOTE" = true ] || exit 0\n',
       '.claude/hooks/after.sh': '#!/bin/bash\ngh pr view\n[ "$CLAUDE_CODE_REMOTE" = true ] || exit 0\n',
       '.claude/hooks/commented.sh': '#!/bin/bash\n# [ "$CLAUDE_CODE_REMOTE" = true ] || exit 0\ngh pr view\n',
       '.claude/hooks/mac-only.sh': '#!/bin/bash\n[ "$CLAUDE_CODE_REMOTE" = true ] && exit 0\ngh pr view\n',
     };
     const names = Object.keys(scripts);
-    const sys = withHooks({ SessionStart: names }, scripts);
+    const sys = withHooks({ SessionStart: [...names, '.claude/hooks/cloud.sh && gh pr view'] }, scripts);
     const named = (...hooks: string[]): string[] => hooks.map((hook) => `.claude/settings.json SessionStart hook .claude/hooks/${hook}.sh`);
-    assert.deepEqual(hooksHittingLock(sys), named('indented', 'after', 'commented', 'mac-only'), 'on a Mac');
+    const offMac = ['indented', 'branch', 'continued', 'early', 'after', 'commented', 'mac-only', 'cloud'];
+    assert.deepEqual(hooksHittingLock(sys), named(...offMac), 'on a Mac, the command that runs a cloud-only script still judged');
     sys.env.CLAUDE_CODE_REMOTE = 'true';
-    assert.deepEqual(hooksHittingLock(sys), named('cloud', 'negated', 'indented', 'after', 'commented', 'mac-only'), 'in a cloud session');
+    assert.deepEqual(hooksHittingLock(sys), named('cloud', 'negated', ...offMac), 'in a cloud session');
   });
 });

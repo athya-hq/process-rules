@@ -149,9 +149,9 @@ export function hooksHittingLock(sys: Sys): string[] {
           const command = (hook as { command?: unknown } | null)?.command;
           if (typeof command !== 'string' || OWN_COMMANDS.has(command)) continue;
           const script = scriptOf(sys, root, command);
-          if (script && routedByHelper(sys, root, script.text)) continue;
-          const code = withoutComments(script ? `${command}\n${script.text}` : command);
-          const judged = cloud ? code : beforeCloudOnly(code);
+          // A routed script's own text is not judged; the command that runs it still is.
+          const code = script && !routedByHelper(sys, root, script.text) ? withoutComments(script.text) : '';
+          const judged = `${withoutComments(command)}\n${cloud ? code : beforeCloudOnly(code)}`;
           if (reachesGitHub(withoutAsAgent(judged))) found.push(`${file} ${event} hook ${script ? script.path : JSON.stringify(command)}`);
         }
       }
@@ -194,25 +194,62 @@ function withoutComment(line: string): string {
 const REMOTE = String.raw`"?\$\{?CLAUDE_CODE_REMOTE(?::-)?\}?"?`;
 const TRUE = String.raw`(?:"true"|'true'|true)`;
 /**
- * A line at column 0 that exits unless the session is a Claude cloud one:
+ * A line that exits unless the session is a Claude cloud one:
  * `[ "$CLAUDE_CODE_REMOTE" = true ] || exit`, or `!= true ] && exit`, with
- * `[` or `[[`. Outside the cloud, bash runs nothing after it, and a function
- * must be defined before it is called, so what follows it never runs there.
- * One indented, or inside a function or an `if`, is not counted.
+ * `[` or `[[`, at column 0.
  */
 const CLOUD_ONLY = new RegExp(
   String.raw`^\[\[?[ \t]+${REMOTE}[ \t]+(?:==?[ \t]+${TRUE}[ \t]+\]\]?[ \t]*\|\||!=[ \t]+${TRUE}[ \t]+\]\]?[ \t]*&&)[ \t]*exit\b`,
-  'm',
 );
+/**
+ * A line that opens no block, so one after it still runs at the top level: a
+ * blank line, `set`, `shopt`, `export` and the like, a `.` or `source`, or an
+ * assignment, not continued onto the next line.
+ */
+const PRELUDE = /^(?:|(?:set|shopt|export|readonly|declare|typeset|umask)\b.*|(?:\.|source)[ \t].*|[A-Za-z_]\w*=.*)(?<!\\)$/;
 
-/** The code up to its first cloud-only line, all of it when it has none. */
+/**
+ * The script's code up to its cloud-only line, when that line comes before
+ * anything but prelude lines; otherwise all of it. Outside the cloud, bash
+ * runs nothing after it, and a function must be defined before it is
+ * called, so what follows never runs there. A guard after an `if`, a
+ * function or any other command is not counted, since it may not run.
+ */
 function beforeCloudOnly(code: string): string {
-  const at = code.search(CLOUD_ONLY);
-  return at === -1 ? code : code.slice(0, at);
+  const lines = code.split('\n');
+  for (const [at, line] of lines.entries()) {
+    if (CLOUD_ONLY.test(line)) return lines.slice(0, at).join('\n');
+    if (!PRELUDE.test(line)) return code;
+  }
+  return code;
 }
 
-/** A Python `import a, b.c` or `from a.b import c`, at a line's start. */
-const IMPORT = /^[ \t]*(?:from[ \t]+([\w.]+)[ \t]+import\b|import[ \t]+([\w.]+(?:[ \t]*,[ \t]*[\w.]+)*))/gm;
+/**
+ * A Python import at a line's start: `from a.b import c, d as e` (the
+ * module, then the names) or `import a, b.c as d` (the modules).
+ */
+const IMPORT = /^[ \t]*(?:from[ \t]+([\w.]+)[ \t]+import[ \t]+\(?([\w \t,]*)|import[ \t]+([\w. \t,]+))/gm;
+
+/** The names in `a, b as c`, each without its `as`. */
+function importNames(list: string): string[] {
+  return list
+    .split(',')
+    .map((part) => part.trim().split(/[ \t]+/)[0] ?? '')
+    .filter(Boolean);
+}
+
+/**
+ * The files a script's Python imports may be, as repo paths under any
+ * folder: `import a.b` is `a/b.py`; `from a import b` is `a.py` or
+ * `a/b.py`. Relative imports are not followed.
+ */
+function importedPaths(code: string): string[] {
+  const modules = [...code.matchAll(IMPORT)].flatMap(([, from, names = '', imported = '']) => {
+    if (from === undefined) return importNames(imported).filter((name) => !name.startsWith('.'));
+    return from.startsWith('.') ? [] : [from, ...importNames(names).map((name) => `${from}.${name}`)];
+  });
+  return [...new Set(modules.map((name) => `${name.replaceAll('.', '/')}.py`))];
+}
 
 /**
  * Whether the script imports a Python module tracked in the repo, found by
@@ -222,12 +259,9 @@ const IMPORT = /^[ \t]*(?:from[ \t]+([\w.]+)[ \t]+import\b|import[ \t]+([\w.]+(?
  * as text, so a routed script that also calls gh on its own is missed.
  */
 function routedByHelper(sys: Sys, root: string, script: string): boolean {
-  const modules = [...withoutComments(script).matchAll(IMPORT)]
-    .flatMap((match) => (match[1] ?? match[2] ?? '').split(','))
-    .map((name) => name.trim())
-    .filter((name) => !name.startsWith('.'));
-  if (modules.length === 0) return false;
-  const listed = sys.exec('git', ['ls-files', '-z', '--', ...modules.map((name) => `:(glob)**/${name.replaceAll('.', '/')}.py`)], { cwd: root });
+  const paths = importedPaths(withoutComments(script));
+  if (paths.length === 0) return false;
+  const listed = sys.exec('git', ['ls-files', '-z', '--', ...paths.map((path) => `:(glob)**/${path}`)], { cwd: root });
   if (listed.code !== 0) return false;
   return listed.stdout
     .split('\0')

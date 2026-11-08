@@ -170,6 +170,7 @@ export class FakeSys implements Sys {
     if (command === 'git' && args[0] === 'rev-parse') return this.inRepo ? ok(`${ROOT}\n`) : fail();
     // The repo's files under ROOT whose path ends in a `:(glob)**/<path>` given.
     if (command === 'git' && args[0] === 'ls-files') {
+      if (!this.inRepo) return fail('not a git repository');
       const tails = args.slice(args.indexOf('--') + 1).map((spec) => spec.replace(':(glob)**/', ''));
       const paths = [...this.files.keys()].filter((path) => path.startsWith(`${ROOT}/`)).map((path) => path.slice(ROOT.length + 1));
       return ok(paths.filter((path) => tails.some((tail) => path === tail || path.endsWith(`/${tail}`))).map((path) => `${path}\0`).join(''));

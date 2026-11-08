@@ -935,10 +935,13 @@
   skipped, so a real one would be too. `hooksHittingLock` now takes a script
   that imports a repo Python module running `as-agent` as routed, finding
   the module with `git ls-files` under any folder, since a hook sets its own
-  `sys.path`; and, outside a cloud session, reads a script only up to a
-  column-0 line that exits unless `CLAUDE_CODE_REMOTE` is `true`. That cut
-  is sound for bash: nothing after a top-level exit runs, and a function
-  must be defined before it is called. In a cloud session the whole script
+  `sys.path` (`from a import b` may be `a.py` or `a/b.py`), still judging
+  the hook's own command; and, outside a cloud session, reads a script only
+  up to a column-0 line that exits unless `CLAUDE_CODE_REMOTE` is `true`,
+  when only lines that open no block (`set`, `export`, `.`, assignments, not
+  continued) come before it. That cut is sound for bash: such a line always
+  runs, nothing after a top-level exit runs, and a function must be defined
+  before it is called. In a cloud session the whole script
   is judged, as before, since that is where it runs. Rejected: dropping
   string literals (a command handed to code as a string is still a call);
   a marker comment that silences a hook (it asserts instead of reading);
