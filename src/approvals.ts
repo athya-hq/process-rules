@@ -14,6 +14,12 @@ export function approvedIn(body: string): number[] {
   return first ? [...new Set([...(first[1] as string).matchAll(ISSUE)].map((match) => Number(match[1])))] : [];
 }
 
+/** The first issue of this repository a line names as `#N`, read as `approvedIn` reads them, or undefined. */
+export function firstIssue(line: string): number | undefined {
+  const first = [...line.matchAll(ISSUE)][0];
+  return first ? Number(first[1]) : undefined;
+}
+
 /** A comment on the Approvals issue, as GitHub's REST API gives it. */
 export interface Answer {
   body?: string | null;

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { approvedIn, batchAnswers } from './approvals.ts';
+import { approvedIn, batchAnswers, firstIssue } from './approvals.ts';
 
 /** The spec's example, from the batch of 2026-11-08: eight approved, #2748 left waiting. */
 const NOV_8 = 'Decision: approve #2925 #2924 #2923 #2922 #2742 #2740 #2739 #2814\nNot #2748 yet: I want W-36 to land first.';
@@ -20,6 +20,14 @@ describe('approvedIn', () => {
 
   it("reads this repository's issues alone, not another's or a longer number", () => {
     assert.deepEqual(approvedIn('Decision: approve other/repo#7 x#8 #9a &#35;12 &amp;#35;13 #10 (#11);#14'), [10, 11, 14]);
+  });
+});
+
+describe('firstIssue', () => {
+  it('reads the first issue of this repository a line names, as approvedIn reads them', () => {
+    assert.equal(firstIssue('Proposal: drop state #30 (x), after work item #5\'s approval.'), 30);
+    assert.equal(firstIssue('Proposal: drop other/repo#7 &#35;12 &amp;#35;13 then (#31) and #32'), 31);
+    assert.equal(firstIssue('Proposal: no number here'), undefined);
   });
 });
 

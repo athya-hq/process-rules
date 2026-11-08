@@ -1,6 +1,6 @@
 import { API, type Settings, anyLogin, loadSettings } from './agent.ts';
 import { ownersAlone } from './edits.ts';
-import { approvedIn, batchAnswers } from './approvals.ts';
+import { approvedIn, batchAnswers, firstIssue } from './approvals.ts';
 import { isOn, notAdoptedLine, offLine } from './features.ts';
 import { type ReadFile, type Simple, type Text, UNKNOWN, commands } from './shell.ts';
 import type { Output, Sys } from './types.ts';
@@ -291,41 +291,120 @@ async function removeLabel(sys: Sys, token: string, slug: string, number: number
   return removed.status === 200;
 }
 
+/** An ask the owner owes an answer on an issue, and the issue a batch answer names to answer it. */
+interface Owed {
+  ask: Comment;
+  number: number;
+  kind: 'Needs you' | 'Proposal';
+}
+
 /**
- * Whether the owner has answered the latest ask on issue `number`, from its
- * comments: a `Decision:` comment after it that no one but owners edited,
- * a batch answer after it on the Approvals issue (`batch` reads its
- * comments) whose first line approves `number`, likewise, or a 👍 after
- * the ask's last edit.
- * Undefined when no agent asked there, which leaves the label to whoever put
- * it on, such as the weekly job's undo issues.
+ * The asks the owner owes on issue `number`, from its comments: each agent
+ * `Proposal:`, for the issue its first line names first (this repository's
+ * `#N`, as a batch answer names it: a slice for its addition, a State for
+ * its drop; the issue itself when it names none), and the latest agent ask
+ * when it is a `Needs you:`, for the issue itself.
  */
-async function answered(
-  sys: Sys,
-  token: string,
-  slug: string,
-  number: number,
-  { owners, agents, approvals }: Settings,
-  batch: () => Promise<Comment[]>,
-): Promise<string | undefined | false> {
+function owedOn(comments: Comment[], agents: string[], number: number): Owed[] {
+  const asks = comments.filter((comment) => anyLogin(agents, comment.user?.login ?? undefined) && opensAsk(comment.body ?? ''));
+  return asks.flatMap((ask, at): Owed[] => {
+    const body = ask.body ?? '';
+    if (opensAsk(body) === 'Proposal') return [{ ask, number: firstIssue(body.split(/\r?\n/, 1)[0] as string) ?? number, kind: 'Proposal' }];
+    return at === asks.length - 1 ? [{ ask, number, kind: 'Needs you' }] : [];
+  });
+}
+
+/** How the owner stands on an issue's asks: no agent asked there, every ask answered (and with what), or the asks still waiting. */
+type Standing = { asked: false } | { answer: string } | { waiting: Owed[] };
+
+/**
+ * Whether the owner has answered every ask on issue `number` (see `owedOn`),
+ * from its comments, each ask on its own: a `Decision:` comment after it
+ * that no one but owners edited, a 👍 after its last edit, or a batch answer
+ * after it on the Approvals issue (`batch` reads its comments) whose first
+ * line names the ask's issue, that no one but owners edited.
+ * No agent asked there leaves the label to whoever put it on, such as the
+ * weekly job's undo issues.
+ */
+async function answered(sys: Sys, token: string, slug: string, number: number, { owners, agents, approvals }: Settings, batch: () => Promise<Comment[]>): Promise<Standing> {
   const comments = await every<Comment>(sys, token, `${API}/repos/${slug}/issues/${number}/comments`);
-  const ask = comments.filter((comment) => anyLogin(agents, comment.user?.login ?? undefined) && opensAsk(comment.body ?? '')).at(-1);
-  if (!ask) return undefined;
-  const decisions = comments.filter((comment) => comment.created_at > ask.created_at && anyLogin(owners, comment.user?.login ?? undefined) && opensDecision(comment.body ?? ''));
+  const owed = owedOn(comments, agents, number);
+  if (owed.length === 0) return { asked: false };
+  const earliest = owed.map(({ ask }) => ask.created_at).sort()[0] as string;
+  const decisions = comments.filter((comment) => comment.created_at > earliest && anyLogin(owners, comment.user?.login ?? undefined) && opensDecision(comment.body ?? ''));
   // A Decision: someone other than an owner edited answers nothing.
-  if (decisions.length > 0 && (await ownersAlone(sys, token, decisions, owners)).kept.length > 0) return 'a Decision: comment';
-  const since = ask.updated_at && ask.updated_at > ask.created_at ? ask.updated_at : ask.created_at;
-  const reactions = await every<Reaction>(sys, token, `${API}/repos/${slug}/issues/comments/${ask.id}/reactions?content=%2B1`);
-  if (reactions.some((reaction) => anyLogin(owners, reaction.user?.login ?? undefined) && reaction.created_at > since)) return 'a 👍 on the latest ask';
-  // The Approvals issue is read last, only for an ask the issue itself has not answered.
-  const batched = batchAnswers(await batch(), owners, number, ask.created_at);
-  if (batched.length > 0 && (await ownersAlone(sys, token, batched, owners)).kept.length > 0) return `a "Decision: approve" on #${approvals}, the Approvals issue`;
-  return false;
+  const decided = decisions.length > 0 ? (await ownersAlone(sys, token, decisions, owners)).kept : [];
+  const how = new Map<Owed, string>();
+  for (const one of owed) {
+    const { ask } = one;
+    if (decided.some((decision) => decision.created_at > ask.created_at)) {
+      how.set(one, 'a Decision: comment');
+      continue;
+    }
+    const since = ask.updated_at && ask.updated_at > ask.created_at ? ask.updated_at : ask.created_at;
+    const reactions = await every<Reaction>(sys, token, `${API}/repos/${slug}/issues/comments/${ask.id}/reactions?content=%2B1`);
+    if (reactions.some((reaction) => anyLogin(owners, reaction.user?.login ?? undefined) && reaction.created_at > since)) how.set(one, 'a 👍 on the ask');
+  }
+  // The Approvals issue is read last, only for asks the issue itself has not answered.
+  const open = owed.filter((one) => !how.has(one));
+  if (open.length > 0) {
+    const answers = await batch();
+    const named = open.map((one) => ({ one, batched: batchAnswers(answers, owners, one.number, one.ask.created_at) }));
+    const all = [...new Set(named.flatMap(({ batched }) => batched))];
+    const counted = all.length > 0 ? (await ownersAlone(sys, token, all, owners)).kept : [];
+    for (const { one, batched } of named) {
+      if (batched.some((answer) => counted.includes(answer))) how.set(one, `a "Decision: approve" on #${approvals}, the Approvals issue`);
+    }
+  }
+  const waiting = owed.filter((one) => !how.has(one));
+  return waiting.length > 0 ? { waiting } : { answer: [...new Set(how.values())].join(' and ') };
+}
+
+/** The asks still waiting, as the sweep names them. */
+function waitingOn(waiting: Owed[]): string {
+  return waiting.map(({ kind, number }) => (kind === 'Proposal' ? `the proposal for #${number}` : 'the Needs you: ask')).join(', ');
+}
+
+/**
+ * Judges each open issue labelled `needs-owner` by its asks, and takes the
+ * label off where every one is answered. `posted`, the batch answer an
+ * event brings, counts though the Approvals issue's list may not show it
+ * yet; an issue no agent asked on comes off only when `named`, which that
+ * answer names.
+ */
+async function sweep(sys: Sys, token: string, slug: string, settings: Settings, io: Output, posted?: Comment, named: readonly number[] = []): Promise<void> {
+  const waiting = await every<{ number: number }>(sys, token, `${API}/repos/${slug}/issues?state=open&labels=${NEEDS_OWNER}`);
+  // The Approvals issue's comments, read once a sweep and only when an issue's own comments have not answered it.
+  let approvals: Comment[] | undefined;
+  const batch = async (): Promise<Comment[]> => {
+    if (settings.approvals === undefined) return [];
+    approvals ??= await every<Comment>(sys, token, `${API}/repos/${slug}/issues/${settings.approvals}/comments`, true);
+    if (posted && !approvals.some((comment) => comment.id === posted.id)) approvals.push(posted);
+    return approvals;
+  };
+  let cleared = 0;
+  for (const { number } of waiting) {
+    const standing = await answered(sys, token, slug, number, settings, batch);
+    if ('waiting' in standing) {
+      io.out(`#${number}: waits on the owner (${waitingOn(standing.waiting)})`);
+    } else if ('answer' in standing) {
+      await removeLabel(sys, token, slug, number);
+      cleared++;
+      io.out(`#${number}: the owner answered with ${standing.answer}; ${NEEDS_OWNER} taken off`);
+    } else if (named.includes(number)) {
+      await removeLabel(sys, token, slug, number);
+      cleared++;
+      io.out(`#${number}: no agent asked there, and the owner's batch answer names it; ${NEEDS_OWNER} taken off`);
+    } else {
+      io.out(`#${number}: no agent asked there; left as it is`);
+    }
+  }
+  io.out(`needs-owner: ${waiting.length} labelled ${NEEDS_OWNER}, ${cleared} cleared`);
 }
 
 interface Event {
   action?: string;
-  comment?: { body?: string | null; user?: { login?: string } | null };
+  comment?: { id?: number; node_id?: string; body?: string | null; user?: { login?: string } | null; created_at?: string; updated_at?: string };
   issue?: { number: number; labels?: { name: string }[] };
   pull_request?: { number: number; labels?: { name: string }[] };
   label?: { name?: string };
@@ -335,11 +414,11 @@ interface Event {
 /**
  * The needs-owner job, run by the shared workflow. An agent's comment that
  * opens with `Needs you:` or `Proposal:` labels its issue `needs-owner`; the
- * owner's `approved` label or `Decision:` comment takes it off at once, and
- * the owner's comment on the Approvals issue whose first line opens
- * `Decision: approve` takes it off each issue that line names; the hourly
- * sweep (and a run by hand) takes it off each open issue whose latest ask the
- * owner has answered with a 👍, a `Decision:` comment or such a batch answer.
+ * owner's `approved` label or `Decision:` comment takes it off at once; the
+ * hourly sweep (and a run by hand) takes it off each open issue whose every
+ * ask the owner has answered (see `answered`), and so does the owner's
+ * comment on the Approvals issue whose first line opens `Decision: approve`,
+ * at once, counting itself.
  */
 export async function needsOwner(sys: Sys, io: Output): Promise<number> {
   const { GITHUB_EVENT_NAME: name, GITHUB_EVENT_PATH: eventPath, GITHUB_REPOSITORY: slug, GH_TOKEN: token } = sys.env;
@@ -369,17 +448,14 @@ export async function needsOwner(sys: Sys, io: Output): Promise<number> {
       io.out(`needs-owner: #${issue} asks the owner (${opensAsk(body)}:); labelled ${NEEDS_OWNER}`);
       return 0;
     }
-    // The owner's batch answer on the Approvals issue: its first line takes the label off each issue it names.
+    // The owner's batch answer on the Approvals issue names a proposal's own issue, such as a dropped State, not
+    // always the issue it waits on, so each labelled issue is judged by its asks, this answer counted.
     const batch = issue === settings.approvals && event.action === 'created' && anyLogin(settings.owners, author) ? approvedIn(body) : [];
     if (batch.length > 0) {
-      const off: number[] = [];
-      for (const number of batch) if (await removeLabel(sys, token, slug, number)) off.push(number);
-      const named = (numbers: number[]): string => numbers.map((number) => `#${number}`).join(', ');
-      const rest = batch.filter((number) => !off.includes(number));
-      io.out(
-        `needs-owner: the owner approved ${named(batch)} on #${issue}, the Approvals issue` +
-          `${off.length > 0 ? `; ${NEEDS_OWNER} taken off ${named(off)}` : ''}${rest.length > 0 ? `; ${named(rest)} had no ${NEEDS_OWNER}` : ''}`,
-      );
+      const { id, node_id, user, created_at, updated_at } = event.comment ?? {};
+      const posted = id !== undefined && created_at ? { id, created_at, body, user: user ?? null, ...(node_id ? { node_id } : {}), ...(updated_at ? { updated_at } : {}) } : undefined;
+      io.out(`needs-owner: the owner approved ${batch.map((number) => `#${number}`).join(', ')} on #${issue}, the Approvals issue; judging each issue labelled ${NEEDS_OWNER}`);
+      await sweep(sys, token, slug, settings, io, posted, batch);
       return 0;
     }
     if (event.action === 'created' && anyLogin(settings.owners, author) && opensDecision(body)) {
@@ -400,28 +476,7 @@ export async function needsOwner(sys: Sys, io: Output): Promise<number> {
     return 0;
   }
   if (name === 'schedule' || name === 'workflow_dispatch') {
-    const waiting = await every<{ number: number }>(sys, token, `${API}/repos/${slug}/issues?state=open&labels=${NEEDS_OWNER}`);
-    // The Approvals issue's comments, read once a sweep and only when an issue's own comments have not answered it.
-    let approvals: Comment[] | undefined;
-    const batch = async (): Promise<Comment[]> => {
-      if (settings.approvals === undefined) return [];
-      approvals ??= await every<Comment>(sys, token, `${API}/repos/${slug}/issues/${settings.approvals}/comments`, true);
-      return approvals;
-    };
-    let cleared = 0;
-    for (const { number } of waiting) {
-      const answer = await answered(sys, token, slug, number, settings, batch);
-      if (answer === undefined) {
-        io.out(`#${number}: no agent asked there; left as it is`);
-      } else if (answer === false) {
-        io.out(`#${number}: waits on the owner`);
-      } else {
-        await removeLabel(sys, token, slug, number);
-        cleared++;
-        io.out(`#${number}: the owner answered with ${answer}; ${NEEDS_OWNER} taken off`);
-      }
-    }
-    io.out(`needs-owner: ${waiting.length} labelled ${NEEDS_OWNER}, ${cleared} cleared`);
+    await sweep(sys, token, slug, settings, io);
     return 0;
   }
   io.out(`needs-owner: nothing to do on a ${name} event`);
