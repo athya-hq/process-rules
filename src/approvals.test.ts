@@ -19,7 +19,7 @@ describe('approvedIn', () => {
   });
 
   it("reads this repository's issues alone, not another's or a longer number", () => {
-    assert.deepEqual(approvedIn('Decision: approve other/repo#7 x#8 #9a &#35;12 #10 (#11)'), [10, 11]);
+    assert.deepEqual(approvedIn('Decision: approve other/repo#7 x#8 #9a &#35;12 &amp;#35;13 #10 (#11);#14'), [10, 11, 14]);
   });
 });
 

@@ -314,11 +314,13 @@ async function answered(
   const decisions = comments.filter((comment) => comment.created_at > ask.created_at && anyLogin(owners, comment.user?.login ?? undefined) && opensDecision(comment.body ?? ''));
   // A Decision: someone other than an owner edited answers nothing.
   if (decisions.length > 0 && (await ownersAlone(sys, token, decisions, owners)).kept.length > 0) return 'a Decision: comment';
-  const batched = batchAnswers(await batch(), owners, number, ask.created_at);
-  if (batched.length > 0 && (await ownersAlone(sys, token, batched, owners)).kept.length > 0) return `a "Decision: approve" on #${approvals}, the Approvals issue`;
   const since = ask.updated_at && ask.updated_at > ask.created_at ? ask.updated_at : ask.created_at;
   const reactions = await every<Reaction>(sys, token, `${API}/repos/${slug}/issues/comments/${ask.id}/reactions?content=%2B1`);
-  return reactions.some((reaction) => anyLogin(owners, reaction.user?.login ?? undefined) && reaction.created_at > since) ? 'a 👍 on the latest ask' : false;
+  if (reactions.some((reaction) => anyLogin(owners, reaction.user?.login ?? undefined) && reaction.created_at > since)) return 'a 👍 on the latest ask';
+  // The Approvals issue is read last, only for an ask the issue itself has not answered.
+  const batched = batchAnswers(await batch(), owners, number, ask.created_at);
+  if (batched.length > 0 && (await ownersAlone(sys, token, batched, owners)).kept.length > 0) return `a "Decision: approve" on #${approvals}, the Approvals issue`;
+  return false;
 }
 
 interface Event {

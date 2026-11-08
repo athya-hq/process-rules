@@ -446,7 +446,8 @@ nothing. The work rules take it for a slice added after the approval when it
 names the slice and was made after the slice was last added, and for a
 dropped State when it names the State and was made after the State was
 closed. They read the Approvals issue's comments once a check, only when a
-decision is owed; one GitHub cannot find answers nothing.
+decision is owed. If GitHub cannot find the Approvals issue, it answers
+nothing and the check goes on.
 
 A `Decision:` comment, a batch answer included, counts only while it says
 what owners wrote: unedited, or edited by owners alone. Repo writers, agents included, can edit anyone's
@@ -684,7 +685,8 @@ as a five-field cron in UTC (by default `"17 6 * * 1"`, Mondays at 06:17);
 `onboard` refuses one that is not a cron, or that is `41 * * * *`, the hourly needs-owner sweep's, and writes it into the workflow, so
 run `onboard` again after changing it. `approvals` names the repository's
 standing Approvals issue, where one owner comment answers a batch of asks
-(see the work rules); without it, every ask is answered on its own issue.
+(see the work rules); without it, there are no batch answers on an
+Approvals issue.
 
 GitHub has issue types for organisations only, so on a repository a personal
 account owns, `work-rules`, `decisions` and `figma` cannot run: the work rules

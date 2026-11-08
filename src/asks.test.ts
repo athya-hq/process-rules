@@ -263,6 +263,16 @@ describe('needsOwner', () => {
       assert.equal(sys.requests.filter((request) => request.url === approvals).length, 1);
     });
 
+    it("sweeps: an owner's 👍 on the ask clears it without reading the Approvals issue", async () => {
+      const sys = job('schedule', {}, { owner: OWNER, agent: AGENT, approvals: 70 });
+      sys.route('GET', `${API}/repos/${SLUG}/issues?state=open&labels=needs-owner&per_page=100&page=1`, { status: 200, json: [{ number: 1 }] });
+      sys.route('GET', `${API}/repos/${SLUG}/issues/1/comments?per_page=100&page=1`, { status: 200, json: [{ id: 10, body: 'Proposal: 1', user: { login: AGENT }, created_at: '2026-11-08T01:00:00Z' }] });
+      sys.route('GET', `${API}/repos/${SLUG}/issues/comments/10/reactions?content=%2B1&per_page=100&page=1`, { status: 200, json: [{ user: { login: OWNER }, created_at: '2026-11-08T02:00:00Z' }] });
+      sys.route('DELETE', `${API}/repos/${SLUG}/issues/1/labels/needs-owner`, { status: 200, json: null });
+      assert.deepEqual((await runJob(sys)).out, ['#1: the owner answered with a 👍 on the latest ask; needs-owner taken off', 'needs-owner: 1 labelled needs-owner, 1 cleared']);
+      assert.equal(sys.requests.some((request) => request.url.includes('/issues/70/')), false);
+    });
+
     it('sweeps on where GitHub cannot find the Approvals issue', async () => {
       const sys = job('schedule', {}, { owner: OWNER, agent: AGENT, approvals: 71 });
       sys.route('GET', `${API}/repos/${SLUG}/issues?state=open&labels=needs-owner&per_page=100&page=1`, { status: 200, json: [{ number: 1 }] });
