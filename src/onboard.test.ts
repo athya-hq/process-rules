@@ -2029,7 +2029,7 @@ describe('workflowUpdate', () => {
     assert.deepEqual(workflowPins(update.text), Array(8).fill('0.5.27'));
   });
 
-  it('starts the needs-owner job on a comment from a member alone, where 0.5.28 started it on anyone\'s', async () => {
+  it('starts the needs-owner job on a comment from an owner, member or collaborator alone, where 0.5.28 started it on anyone\'s', async () => {
     const older = (version: string, figma: boolean) => workflow('main', version, figma).replace(/^ {6}contains\(fromJSON[^\n]*\n/m, '');
     for (const figma of [true, false]) {
       assert.deepEqual(workflowUpdate(older('0.5.28', figma), 'main', '0.5.29', figma), { kind: 'repin', text: workflow('main', '0.5.29', figma), from: '0.5.28', authors: true });
@@ -2043,7 +2043,7 @@ describe('workflowUpdate', () => {
     sys.files.set(CLOUD, CLOUD_FILE);
     sys.files.set(WORKFLOW, older(packageVersion(), false));
     const { out } = await run(sys);
-    assert.deepEqual(planned(out, 'Pull request'), ['workflow: needs-owner job only for members', 'auto-merge: when checks pass']);
+    assert.deepEqual(planned(out, 'Pull request'), ['workflow: needs-owner job only for owners, members and collaborators', 'auto-merge: when checks pass']);
     assert.ok(opened(sys)?.body.includes(`\n- \`${WORKFLOW_PATH}\`: in ${WORKFLOW_PATH}, start the needs-owner job only on a comment by the owner, a member or a collaborator, leaving the rest as it is\n`));
     assert.equal(repo(sys).get(WORKFLOW), workflow('main', packageVersion(), false));
   });

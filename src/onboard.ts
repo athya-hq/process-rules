@@ -750,7 +750,7 @@ function workflowDetail(update: Exclude<ReturnType<typeof workflowUpdate>, { kin
       ...(update.secrets ? [figma ? 'Figma secrets' : 'no Figma secrets'] : []),
       ...(update.merged ? ['merged job'] : []),
       ...(update.asks ? ['needs-owner job'] : []),
-      ...(update.authors ? ['needs-owner job only for members'] : []),
+      ...(update.authors ? ['needs-owner job only for owners, members and collaborators'] : []),
     ].join(', ') || `header → v${version}`
   );
 }

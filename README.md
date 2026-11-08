@@ -624,7 +624,7 @@ closes a merged pull request's slice, and runs on closed pull requests; a
 workflow with those three jobs alone gets the `process-rules-asks` job, with
 the comment and label triggers and the hourly cron it runs on, and the weekly
 job leaves that cron alone; a 0.5.28 `process-rules-asks` job, which any
-commenter's ask started, starts on a member's alone; a
+commenter's ask started, starts on an owner's, member's or collaborator's alone; a
 workflow already split into its jobs keeps everything but its version pins, which move to the
 new release, the one branch pushes run on, which follows a changed default
 branch, and the one cron the weekly job runs on, which follows a changed
