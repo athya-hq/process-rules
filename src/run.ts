@@ -40,7 +40,8 @@ Commands:
   needs-owner      Run by the shared workflow: an ask labels its issue needs-owner; the owner's answer takes it off
   reviews-due      For the review routine: open decisions whose review date has come, as JSON lines
   pre-push         Run by the pre-push git hook: the same rules before an agent session pushes
-  propose <issue>... As the agent: ask the owner to approve, with a 👍, a slice added late or a dropped state;
+  propose <issue>...
+                   As the agent: ask the owner to approve, with a 👍, a slice added late or a dropped state;
                    with an Approvals issue, it prints the first line of one comment there answering them all
   review-thread <thread-id> [--reply <text>] [--resolve]
                    As the agent: answer a review thread on one of its own pull requests here

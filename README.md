@@ -536,7 +536,7 @@ line names. Hourly
 (cron `41 * * * *`), and on a run by hand, a sweep takes it off each open
 issue whose latest agent ask the owner has answered: a 👍 on it after its last
 edit, or a `Decision:` comment after it, on the issue or a batch answer naming
-it on the Approvals issue, that no one but owners edited. An issue labelled with no agent ask
+it on the Approvals issue (or naming the State that ask proposes to drop), that no one but owners edited. An issue labelled with no agent ask
 on it, such as the weekly job's undo issues, is left as it is. Only comments
 that may ask or decide, from the owner, a member or a collaborator, the
 `approved` label and the hourly cron start the job, so other comments, and an
