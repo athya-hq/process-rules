@@ -513,6 +513,18 @@ waiting decision with no proposal yet gets the command that posts one,
 reaction does not re-run a pull request's checks: the agent proposes before
 it starts, and pre-push or a re-run of Work rules sees the 👍.
 
+**Many at once.** `propose` takes several issues, `process-rules propose 12
+30 41`, and asks for each in turn. Where the settings name an Approvals issue
+(`"approvals": N`), each proposal also says it can be answered in the batch
+on Approvals, and the run ends with that issue's link and the first line of
+the owner's answer there, ready to paste: `Decision: approve #12 #30 #41`,
+one number per proposal still waiting (a slice for its addition, a State for
+its drop). The owner pastes it as a comment on Approvals, deleting any number
+they refuse. The agent hands the line over and never posts it: only the
+owner's own comment approves anything. The work rules read a dropped
+State's number, but `needs-owner` is on its slice, so a slice whose only
+waiting proposal is a State's keeps the label until `propose` runs again.
+
 **The Needs you list keeps itself.** With `board` on, the client workflow's
 `process-rules-asks` job runs `process-rules needs-owner`. An agent's comment
 opening with `Needs you:` or `Proposal:`, on an issue, a pull request or a review thread, labels its issue or pull request

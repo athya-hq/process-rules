@@ -40,7 +40,9 @@ Commands:
   needs-owner      Run by the shared workflow: an ask labels its issue needs-owner; the owner's answer takes it off
   reviews-due      For the review routine: open decisions whose review date has come, as JSON lines
   pre-push         Run by the pre-push git hook: the same rules before an agent session pushes
-  propose <issue>  As the agent: ask the owner to approve, with a 👍, a slice added late or a dropped state
+  propose <issue>...
+                   As the agent: ask the owner to approve, with a 👍, a slice added late or a dropped state;
+                   with an Approvals issue, it prints the first line of one comment there answering them all
   review-thread <thread-id> [--reply <text>] [--resolve]
                    As the agent: answer a review thread on one of its own pull requests here
   help             Show this text
@@ -62,7 +64,7 @@ export async function run(
   sys: () => Sys | Promise<Sys>,
 ): Promise<number> {
   const [command, ...rest] = args;
-  const allowed = command === 'onboard' || command === 'machine' || command === 'review-thread' || command === 'as-agent' ? Infinity : command === 'pre-push' ? 2 : command === 'doctor' || command === 'propose' ? 1 : 0;
+  const allowed = command === 'onboard' || command === 'machine' || command === 'review-thread' || command === 'as-agent' || command === 'propose' ? Infinity : command === 'pre-push' ? 2 : command === 'doctor' ? 1 : 0;
   const extra = rest[allowed];
   if (extra !== undefined) {
     io.err(`process-rules: unexpected argument "${extra}"`);
@@ -79,8 +81,10 @@ export async function run(
       return 2;
     }
   }
-  if (command === 'propose' && !/^#?0*[1-9]\d*$/.test(rest[0] ?? '')) {
-    io.err(`process-rules: propose needs an issue number${rest[0] === undefined ? '' : `, not "${rest[0]}"`}`);
+  // One issue number or several, each checked; the first that is not one is named.
+  const notIssue = command === 'propose' ? (rest.length === 0 ? '' : rest.find((arg) => !/^#?0*[1-9]\d*$/.test(arg))) : undefined;
+  if (notIssue !== undefined) {
+    io.err(`process-rules: propose needs an issue number${notIssue === '' ? '' : `, not "${notIssue}"`}`);
     io.err(USAGE);
     return 2;
   }
@@ -132,7 +136,7 @@ export async function run(
     case 'review-thread':
       try {
         if (command === 'review-thread') return await reviewThread(await sys(), io, rest);
-        if (command === 'propose') return await propose(await sys(), io, Number((rest[0] as string).replace('#', '')));
+        if (command === 'propose') return await propose(await sys(), io, rest.map((arg) => Number(arg.replace('#', ''))));
         if (command === 'reviews-due') return await reviewsDue(await sys(), io);
         if (command === 'decisions-weekly') return await decisionsWeekly(await sys(), io);
         if (command === 'needs-owner') return await needsOwner(await sys(), io);
