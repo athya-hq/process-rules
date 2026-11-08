@@ -44,7 +44,7 @@ describe('checks.yml', () => {
       spawnSync('bash', ['-c', script], { cwd: dir, encoding: 'utf8', env: { PATH: process.env.PATH, REF: ref, CALLER, OWN_SHA: own, SERVER: server } });
 
     it('passes a ref that names the release that runs, by version or by commit', () => {
-      for (const ref of ['v0.5.33', sha, sha.slice(0, 12)]) {
+      for (const ref of ['v0.5.33', sha]) {
         const result = run(ref);
         assert.equal(result.status, 0, `${ref}: ${result.stdout}${result.stderr}`);
         assert.equal(result.stdout.trim(), `process-rules: process-rules-ref ${ref} is the release that runs, v0.5.33 (${sha}).`);
@@ -70,10 +70,12 @@ describe('checks.yml', () => {
       assert.doesNotMatch(run('v0.5.33').stdout, /::warning::/);
     });
 
-    it('lets a branch through, saying which release runs', () => {
-      const result = run('main');
-      assert.equal(result.status, 0);
-      assert.equal(result.stdout.trim(), `process-rules: process-rules-ref is the branch main; these checks run v0.5.33 (${sha}).`);
+    it('lets a branch through, saying which release runs, though it looks like a version or a commit', () => {
+      for (const ref of ['main', 'v2-preview', 'v0.5.33-rc', 'deadbeef', sha.slice(0, 12)]) {
+        const result = run(ref);
+        assert.equal(result.status, 0, ref);
+        assert.equal(result.stdout.trim(), `process-rules: process-rules-ref is the branch ${ref}; these checks run v0.5.33 (${sha}).`);
+      }
     });
   });
 });

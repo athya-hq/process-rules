@@ -1,5 +1,6 @@
 import { API, type Settings, anyLogin, loadSettings } from './agent.ts';
 import { ownersAlone } from './edits.ts';
+import { approvedIn, batchAnswers } from './approvals.ts';
 import { isOn, notAdoptedLine, offLine } from './features.ts';
 import { type ReadFile, type Simple, type Text, UNKNOWN, commands } from './shell.ts';
 import type { Output, Sys } from './types.ts';
@@ -266,11 +267,12 @@ interface Reaction {
   created_at: string;
 }
 
-/** Every page of a list GitHub returns. */
-async function every<T>(sys: Sys, token: string, url: string): Promise<T[]> {
+/** Every page of a list GitHub returns; none on 404 when `missing` allows it. */
+async function every<T>(sys: Sys, token: string, url: string, missing = false): Promise<T[]> {
   const items: T[] = [];
   for (let page = 1; ; page++) {
     const { status, json } = await sys.http(`${url}${url.includes('?') ? '&' : '?'}per_page=100&page=${page}`, { token });
+    if (status === 404 && missing) return items;
     if (status !== 200 || !Array.isArray(json)) throw new Error(`cannot read ${url.replace(API, '')} (HTTP ${status})`);
     items.push(...(json as T[]));
     if (json.length < 100) return items;
@@ -282,20 +284,30 @@ async function addLabel(sys: Sys, token: string, slug: string, number: number): 
   if (added.status !== 200) throw new Error(`cannot label #${number} ${NEEDS_OWNER} (HTTP ${added.status})`);
 }
 
-/** Takes the label off; one already gone is fine. */
-async function removeLabel(sys: Sys, token: string, slug: string, number: number): Promise<void> {
+/** Takes the label off; one already gone is fine. Whether it was on. */
+async function removeLabel(sys: Sys, token: string, slug: string, number: number): Promise<boolean> {
   const removed = await sys.http(`${API}/repos/${slug}/issues/${number}/labels/${NEEDS_OWNER}`, { method: 'DELETE', token });
   if (removed.status !== 200 && removed.status !== 404) throw new Error(`cannot take ${NEEDS_OWNER} off #${number} (HTTP ${removed.status})`);
+  return removed.status === 200;
 }
 
 /**
  * Whether the owner has answered the latest ask on issue `number`, from its
  * comments: a `Decision:` comment after it that no one but owners edited,
- * or a 👍 after its last edit.
+ * a batch answer after it on the Approvals issue (`batch` reads its
+ * comments) whose first line approves `number`, likewise, or a 👍 after
+ * the ask's last edit.
  * Undefined when no agent asked there, which leaves the label to whoever put
  * it on, such as the weekly job's undo issues.
  */
-async function answered(sys: Sys, token: string, slug: string, number: number, { owners, agents }: Settings): Promise<string | undefined | false> {
+async function answered(
+  sys: Sys,
+  token: string,
+  slug: string,
+  number: number,
+  { owners, agents, approvals }: Settings,
+  batch: () => Promise<Comment[]>,
+): Promise<string | undefined | false> {
   const comments = await every<Comment>(sys, token, `${API}/repos/${slug}/issues/${number}/comments`);
   const ask = comments.filter((comment) => anyLogin(agents, comment.user?.login ?? undefined) && opensAsk(comment.body ?? '')).at(-1);
   if (!ask) return undefined;
@@ -304,7 +316,11 @@ async function answered(sys: Sys, token: string, slug: string, number: number, {
   if (decisions.length > 0 && (await ownersAlone(sys, token, decisions, owners)).kept.length > 0) return 'a Decision: comment';
   const since = ask.updated_at && ask.updated_at > ask.created_at ? ask.updated_at : ask.created_at;
   const reactions = await every<Reaction>(sys, token, `${API}/repos/${slug}/issues/comments/${ask.id}/reactions?content=%2B1`);
-  return reactions.some((reaction) => anyLogin(owners, reaction.user?.login ?? undefined) && reaction.created_at > since) ? 'a 👍 on the latest ask' : false;
+  if (reactions.some((reaction) => anyLogin(owners, reaction.user?.login ?? undefined) && reaction.created_at > since)) return 'a 👍 on the latest ask';
+  // The Approvals issue is read last, only for an ask the issue itself has not answered.
+  const batched = batchAnswers(await batch(), owners, number, ask.created_at);
+  if (batched.length > 0 && (await ownersAlone(sys, token, batched, owners)).kept.length > 0) return `a "Decision: approve" on #${approvals}, the Approvals issue`;
+  return false;
 }
 
 interface Event {
@@ -319,9 +335,11 @@ interface Event {
 /**
  * The needs-owner job, run by the shared workflow. An agent's comment that
  * opens with `Needs you:` or `Proposal:` labels its issue `needs-owner`; the
- * owner's `approved` label or `Decision:` comment takes it off at once; the
- * hourly sweep (and a run by hand) takes it off each open issue whose latest
- * ask the owner has answered with a 👍 or a `Decision:` comment.
+ * owner's `approved` label or `Decision:` comment takes it off at once, and
+ * the owner's comment on the Approvals issue whose first line opens
+ * `Decision: approve` takes it off each issue that line names; the hourly
+ * sweep (and a run by hand) takes it off each open issue whose latest ask the
+ * owner has answered with a 👍, a `Decision:` comment or such a batch answer.
  */
 export async function needsOwner(sys: Sys, io: Output): Promise<number> {
   const { GITHUB_EVENT_NAME: name, GITHUB_EVENT_PATH: eventPath, GITHUB_REPOSITORY: slug, GH_TOKEN: token } = sys.env;
@@ -351,6 +369,19 @@ export async function needsOwner(sys: Sys, io: Output): Promise<number> {
       io.out(`needs-owner: #${issue} asks the owner (${opensAsk(body)}:); labelled ${NEEDS_OWNER}`);
       return 0;
     }
+    // The owner's batch answer on the Approvals issue: its first line takes the label off each issue it names.
+    const batch = issue === settings.approvals && event.action === 'created' && anyLogin(settings.owners, author) ? approvedIn(body) : [];
+    if (batch.length > 0) {
+      const off: number[] = [];
+      for (const number of batch) if (await removeLabel(sys, token, slug, number)) off.push(number);
+      const named = (numbers: number[]): string => numbers.map((number) => `#${number}`).join(', ');
+      const rest = batch.filter((number) => !off.includes(number));
+      io.out(
+        `needs-owner: the owner approved ${named(batch)} on #${issue}, the Approvals issue` +
+          `${off.length > 0 ? `; ${NEEDS_OWNER} taken off ${named(off)}` : ''}${rest.length > 0 ? `; ${named(rest)} had no ${NEEDS_OWNER}` : ''}`,
+      );
+      return 0;
+    }
     if (event.action === 'created' && anyLogin(settings.owners, author) && opensDecision(body)) {
       if (labelled) await removeLabel(sys, token, slug, issue);
       io.out(`needs-owner: the owner decided on #${issue}${labelled ? `; ${NEEDS_OWNER} taken off` : ''}`);
@@ -370,9 +401,16 @@ export async function needsOwner(sys: Sys, io: Output): Promise<number> {
   }
   if (name === 'schedule' || name === 'workflow_dispatch') {
     const waiting = await every<{ number: number }>(sys, token, `${API}/repos/${slug}/issues?state=open&labels=${NEEDS_OWNER}`);
+    // The Approvals issue's comments, read once a sweep and only when an issue's own comments have not answered it.
+    let approvals: Comment[] | undefined;
+    const batch = async (): Promise<Comment[]> => {
+      if (settings.approvals === undefined) return [];
+      approvals ??= await every<Comment>(sys, token, `${API}/repos/${slug}/issues/${settings.approvals}/comments`, true);
+      return approvals;
+    };
     let cleared = 0;
     for (const { number } of waiting) {
-      const answer = await answered(sys, token, slug, number, settings);
+      const answer = await answered(sys, token, slug, number, settings, batch);
       if (answer === undefined) {
         io.out(`#${number}: no agent asked there; left as it is`);
       } else if (answer === false) {

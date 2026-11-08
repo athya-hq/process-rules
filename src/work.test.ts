@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, describe, it } from 'node:test';
 
+import type { Settings } from './agent.ts';
 import { RestBoard } from './fake-board.test.ts';
 import { AGENT, FakeSys, ROOT, SETTINGS, capture } from './fake.test.ts';
 import { prMerged, prePush, prWorkRules, propose, section, sliceProblems, slicesNamed } from './work.ts';
@@ -19,8 +20,21 @@ const LATEST = '2026-10-04T00:00:00Z';
 
 type Node = Record<string, unknown>;
 
-/** Slice #12 under work item #10, approved by the owner, with nothing else. */
-function graph(): { issue: Node; timeline: Node[]; own: Node[]; siblings: Node[]; states: Node[]; comments: Node[]; thumbs: Map<string, Node[]> } {
+/** The Approvals issue, as settings that name one name it. */
+const APPROVALS = 700;
+const WITH_APPROVALS = { ...ACCOUNTS, approvals: APPROVALS };
+
+/** Slice #12 under work item #10, approved by the owner, with nothing else; the Approvals issue, #700, with no comments. */
+function graph(): {
+  issue: Node;
+  timeline: Node[];
+  own: Node[];
+  siblings: Node[];
+  states: Node[];
+  comments: Node[];
+  thumbs: Map<string, Node[]>;
+  approvals: Node[];
+} {
   const timeline: Node[] = [
     { event: 'sub_issue_added', created_at: T0, sub_issue: { number: 12 } },
     { event: 'labeled', created_at: APPROVED, actor: { login: OWNER }, label: { name: 'approved' } },
@@ -31,6 +45,7 @@ function graph(): { issue: Node; timeline: Node[]; own: Node[]; siblings: Node[]
   const siblings: Node[] = [];
   const states: Node[] = [];
   const comments: Node[] = [];
+  const approvals: Node[] = [];
   const issue: Node = {
     number: 12,
     title: 'Add the thing',
@@ -44,8 +59,9 @@ function graph(): { issue: Node; timeline: Node[]; own: Node[]; siblings: Node[]
     siblings,
     states,
     thumbs: new Map<string, Node[]>(),
+    approvals,
   };
-  return { issue, timeline, own, siblings, states, comments, thumbs: issue.thumbs as Map<string, Node[]> };
+  return { issue, timeline, own, siblings, states, comments, thumbs: issue.thumbs as Map<string, Node[]>, approvals };
 }
 
 const ISSUES = `https://api.github.com/repos/${SLUG}/issues`;
@@ -61,6 +77,7 @@ function answer(issue: Node | null, url: string): { status: number; json: unknow
     return { status: 200, json: items.slice(from, from + 100) };
   };
   if (!issue) return undefined;
+  if (path === `/${APPROVALS}/comments`) return page(issue.approvals as Node[]);
   const parent = issue.parent as Node | null;
   const states = (issue.states as Node[]).map((state): Node => ({ ...state, url: `${ISSUES}/${state.number}` }));
   // As a workflow's GITHUB_TOKEN reads a private repository: no parent_issue_url, the parent from its endpoint alone.
@@ -125,7 +142,7 @@ const EDITED = '2026-10-05T00:00:00Z';
  * last; or refusing it, as a Claude cloud session's proxy does. Also how many
  * times they asked GraphQL.
  */
-async function withEdits(issue: Node, revisions: Record<string, string[]> | 'refused'): Promise<{ problems: string[]; graphql: number }> {
+async function withEdits(issue: Node, revisions: Record<string, string[]> | 'refused', accounts: Settings = ACCOUNTS): Promise<{ problems: string[]; graphql: number }> {
   const sys = new FakeSys();
   github(sys, issue);
   sys.route('POST', '/graphql', () => {
@@ -134,14 +151,14 @@ async function withEdits(issue: Node, revisions: Record<string, string[]> | 'ref
     const nodes = ids.map((id) => ({ id, userContentEdits: { totalCount: revisions[id]?.length ?? 0, nodes: (revisions[id] ?? []).map((login) => ({ editor: { login } })) } }));
     return { status: 200, json: { data: { nodes } } };
   });
-  const found = await sliceProblems(sys, 'tok', SLUG, 12, ACCOUNTS, {});
+  const found = await sliceProblems(sys, 'tok', SLUG, 12, accounts, {});
   return { problems: found, graphql: sys.requests.filter((request) => request.url.endsWith('/graphql')).length };
 }
 
 const OTHERS_EDITED = ' (a "Decision:" comment someone other than an owner edited does not count)';
 const UNREAD = ' (an edited "Decision:" comment counts only once GitHub\'s GraphQL API shows owners made every edit, and it did not answer here)';
 
-async function problems(issue: Node | null, pulls: Node[] = [], mine: { pull?: number; branch?: string } = {}, accounts = ACCOUNTS): Promise<string[]> {
+async function problems(issue: Node | null, pulls: Node[] = [], mine: { pull?: number; branch?: string } = {}, accounts: Settings = ACCOUNTS): Promise<string[]> {
   const sys = new FakeSys();
   github(sys, issue, pulls);
   return sliceProblems(sys, 'tok', SLUG, 12, accounts, mine);
@@ -263,6 +280,61 @@ describe('sliceProblems', () => {
         assert.deepEqual(await problems(g.issue), [refused]);
       });
     }
+
+    describe('a batch answer on the Approvals issue', () => {
+      const batched = `${proposed}, or example-owner comments on #700, the Approvals issue, with a first line "Decision: approve #12"`;
+      const proposes = '; ExampleBot proposes it with: process-rules propose 12';
+
+      it("passes when the first line of the owner's comment there approves it among others", async () => {
+        const g = added();
+        g.approvals.push(comment('Decision: approve #31 #12 #40\nThe rest are reasons.'));
+        assert.deepEqual(await problems(g.issue, [], {}, WITH_APPROVALS), []);
+      });
+
+      for (const [name, made] of [
+        ['naming it only below the first line', comment('Decision: approve #31\nNot #12 yet: W-36 lands first.')],
+        ['by the agent', comment('Decision: approve #12', LATEST, AGENT)],
+        ['made before the slice was added', comment('Decision: approve #12', APPROVED)],
+        ['that does not open "Decision: approve"', comment('Decision: #12 is fine')],
+        ["naming another repository's #12, or #120", comment('Decision: approve other/repo#12 #120')],
+      ] as const) {
+        it(`ignores a comment there ${name}, and says how to answer`, async () => {
+          const g = added();
+          g.approvals.push(made);
+          assert.deepEqual(await problems(g.issue, [], {}, WITH_APPROVALS), [`${batched}${proposes}`]);
+        });
+      }
+
+      it('reads no Approvals issue when an unedited Decision: on the slice settles it', async () => {
+        const g = added();
+        g.comments.push(comment('Decision: keep it'));
+        const sys = new FakeSys();
+        github(sys, g.issue);
+        assert.deepEqual(await sliceProblems(sys, 'tok', SLUG, 12, WITH_APPROVALS, {}), []);
+        assert.equal(sys.requests.some((request) => request.url.includes(`/issues/${APPROVALS}/`)), false);
+      });
+
+      it('reads no Approvals issue where the settings name none', async () => {
+        const g = added();
+        g.approvals.push(comment('Decision: approve #12'));
+        const sys = new FakeSys();
+        github(sys, g.issue);
+        assert.deepEqual(await sliceProblems(sys, 'tok', SLUG, 12, ACCOUNTS, {}), [refused]);
+        assert.equal(sys.requests.some((request) => request.url.includes(`/issues/${APPROVALS}/`)), false);
+      });
+
+      it('answers nothing, and fails nothing, where GitHub cannot find the Approvals issue', async () => {
+        assert.deepEqual(await problems(added().issue, [], {}, { ...ACCOUNTS, approvals: 701 }), [`${batched.replace('#700', '#701')}${proposes}`]);
+      });
+
+      it('refuses one the agent edited, and takes one owners alone edited', async () => {
+        const g = added();
+        const made = comment('Decision: approve #12', LATEST, OWNER, EDITED);
+        g.approvals.push(made);
+        assert.deepEqual(await withEdits(g.issue, { [made.id as string]: [AGENT, OWNER] }, WITH_APPROVALS), { problems: [`${batched}${OTHERS_EDITED}${proposes}`], graphql: 1 });
+        assert.deepEqual(await withEdits(g.issue, { [made.id as string]: [OWNER, OWNER] }, WITH_APPROVALS), { problems: [], graphql: 1 });
+      });
+    });
 
     describe("an owner's edited Decision:", () => {
       const proposes = '; ExampleBot proposes it with: process-rules propose 12';
@@ -523,6 +595,29 @@ describe('sliceProblems', () => {
       i.states.push(state({ comments: [comment('Decision: drop it')] }));
       i.comments.push(onSlice);
       assert.deepEqual(await withEdits(i.issue, 'refused'), { problems: [], graphql: 0 });
+    });
+
+    it("passes with the owner's batch answer on the Approvals issue made after the state was dropped, not before", async () => {
+      const g = graph();
+      g.states.push(state());
+      g.approvals.push(comment('Decision: approve #30'));
+      assert.deepEqual(await problems(g.issue, [], {}, WITH_APPROVALS), []);
+      const h = graph();
+      h.states.push(state());
+      h.approvals.push(comment('Decision: approve #30', APPROVED));
+      const batched = refused.replace('; ExampleBot proposes', ', or example-owner comments on #700, the Approvals issue, with a first line "Decision: approve #30"; ExampleBot proposes');
+      assert.deepEqual(await problems(h.issue, [], {}, WITH_APPROVALS), [batched]);
+    });
+
+    it('reads the Approvals issue once a check, for an added slice and a dropped state alike', async () => {
+      const g = graph();
+      g.timeline[0] = { event: 'sub_issue_added', created_at: LATER, sub_issue: { number: 12 } };
+      g.states.push(state());
+      g.approvals.push(comment('Decision: approve #30 #12'));
+      const sys = new FakeSys();
+      github(sys, g.issue);
+      assert.deepEqual(await sliceProblems(sys, 'tok', SLUG, 12, WITH_APPROVALS, {}), []);
+      assert.equal(sys.requests.filter((request) => request.url.includes(`/issues/${APPROVALS}/comments`)).length, 1);
     });
 
     it("passes with the owner's 👍 on the agent's proposal for it on the slice", async () => {

@@ -81,12 +81,15 @@ jobs:
           file=${file%%@*}
           version=$(jq -r .version .process-rules/package.json)
           sha=$(git -C .process-rules rev-parse HEAD)
-          same=
-          case $REF in
-            v[0-9]*) if [ "${REF#v}" = "$version" ]; then same=1; fi ;;
-            '' | *[!0-9a-f]*) echo "process-rules: process-rules-ref is the branch $REF; these checks run v$version ($sha)."; exit 0 ;;
-            *) case $sha in "$REF"*) same=1 ;; esac ;;
-          esac
+          # A release tag is vX.Y.Z and a commit its full sha, as uses: lines take them; anything else is a branch.
+          if [[ $REF =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            [ "${REF#v}" = "$version" ] && same=1 || same=
+          elif [[ $REF =~ ^[0-9a-f]{40}$ ]]; then
+            [ "$REF" = "$sha" ] && same=1 || same=
+          else
+            echo "process-rules: process-rules-ref is the branch $REF; these checks run v$version ($sha)."
+            exit 0
+          fi
           if [ -z "$same" ]; then
             echo "::error file=$file::process-rules-ref is $REF, but this workflow runs the shared checks at v$version. Dependabot and Renovate move only a job's uses: line. Run process-rules onboard with v$version, which moves every pin, or set process-rules-ref: v$version on every job."
             exit 1

@@ -44,6 +44,8 @@ export function either(logins: readonly string[]): string {
 export interface Settings {
   owners: string[];
   agents: string[];
+  /** The repository's standing Approvals issue, where one owner comment answers a batch; none when the settings name none. */
+  approvals?: number;
 }
 
 /** Reads and checks the settings file at `root`; throws with the reason. */
@@ -59,7 +61,18 @@ export function loadSettings(sys: Sys, root: string): Settings {
   if (both) {
     throw new Error(`${SETTINGS_PATH}: ${both} is named as both owner and agent; they must be different accounts`);
   }
-  return { owners, agents };
+  const approvals = approvalsIn(raw);
+  return { owners, agents, ...(approvals === undefined ? {} : { approvals }) };
+}
+
+/** The Approvals issue the settings name as `"approvals": N`, or undefined when they name none; anything but an issue number is refused. */
+function approvalsIn(raw: unknown): number | undefined {
+  const value = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>).approvals : undefined;
+  if (value === undefined) return undefined;
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1) {
+    throw new Error(`${SETTINGS_PATH}: "approvals" must be the number of the repository's Approvals issue, such as 42`);
+  }
+  return value;
 }
 
 function logins(raw: unknown, name: string): string[] {

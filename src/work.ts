@@ -7,6 +7,7 @@ import type { Output, Sys } from './types.ts';
 import { GITHUB_HOST_RE } from './host.ts';
 import { boardStarted } from './board.ts';
 import { ownersAlone, whyNotCounted } from './edits.ts';
+import { batchAnswers } from './approvals.ts';
 
 /** How a pull request or a commit names the slice it builds. */
 const SLICE_LINE = new RegExp(`^Slice:\\s*(?:#|https://${GITHUB_HOST_RE}/[^/\\s]+/[^/\\s]+/issues/)(\\d+)\\s*$`, 'gim');
@@ -129,7 +130,11 @@ interface Owed {
   since?: string;
   /** The agent's proposals for it, on the slice. */
   proposals: Comment[];
-  /** Whether the owner gave it: a `Decision:` comment, a request on the work item the slice links, or 👍 on one of the proposals. */
+  /**
+   * Whether the owner gave it: a `Decision:` comment, a request on the work
+   * item the slice links, a batch answer on the Approvals issue naming it on
+   * its first line, or 👍 on one of the proposals.
+   */
   settled: boolean;
   /** Why an owner's edited `Decision:` comment did not settle it, when one was there. */
   note?: string;
@@ -193,7 +198,7 @@ async function readSlice(
   token: string,
   slug: string,
   slice: number,
-  { owners, agents }: Settings,
+  { owners, agents, approvals }: Settings,
 ): Promise<{ problems: string[]; parent?: number; owed: Owed[] }> {
   const issue = await readIssue(sys, token, slug, slice);
   if (!issue) return { problems: [`#${slice} is not an issue in ${slug}`], owed: [] };
@@ -218,6 +223,15 @@ async function readSlice(
   const comments = await every<Comment>(sys, token, slice, `${issue.url}/comments`);
   // Every state, however many: one past the first page can be a dropped one.
   const states = await every<Issue>(sys, token, slice, `${issue.url}/sub_issues`);
+  // The Approvals issue's comments, read once a check and only when a decision owed may need them; an
+  // Approvals issue GitHub cannot find answers nothing. Only an owner's comment whose first line approves
+  // `number`, made after `since`, counts there.
+  let batch: Comment[] | undefined;
+  const batchFor = async (number: number, since: string): Promise<Comment[]> => {
+    if (approvals === undefined) return [];
+    batch ??= await every<Comment>(sys, token, slice, `${API}/repos/${slug}/issues/${approvals}/comments`, true);
+    return batchAnswers(batch, owners, number, since);
+  };
 
   const owed: Owed[] = [];
   // When the slice was last added to its work item. A workflow's GITHUB_TOKEN on a private repository reads the
@@ -245,9 +259,11 @@ async function readSlice(
   }
   const added = [...mine, ...hidden].sort().at(-1);
   if (added && added > approvedAt) {
+    const local = [...decisionsIn(parentComments, owners, added, `#${slice}`), ...decisionsIn(comments, owners, added)];
+    // The Approvals issue is read only when no request and no unedited decision here settles it.
     const decision = requested(issue.body ?? '', slug, parent.number, parentComments, owners, added)
       ? { settled: true }
-      : await decided(sys, token, [...decisionsIn(parentComments, owners, added, `#${slice}`), ...decisionsIn(comments, owners, added)], owners);
+      : await decided(sys, token, local.some((one) => !editedAt(one)) ? local : [...local, ...(await batchFor(slice, added))], owners);
     owed.push({
       kind: 'added',
       number: slice,
@@ -261,10 +277,11 @@ async function readSlice(
   for (const state of states) {
     if (state.type?.name !== 'State' || state.state_reason !== 'not_planned' || !state.closed_at || state.closed_at < approvedAt) continue;
     const onSlice = decisionsIn(comments, owners, undefined, `#${state.number}`);
-    // The state's own comments are read only when no unedited decision on the slice settles it.
+    // The state's own comments, and the Approvals issue's after the state was dropped, are read only when no
+    // unedited decision on the slice settles it.
     const decisions = onSlice.some((one) => !editedAt(one))
       ? onSlice
-      : [...onSlice, ...decisionsIn(await every<Comment>(sys, token, slice, `${state.url}/comments`), owners)];
+      : [...onSlice, ...decisionsIn(await every<Comment>(sys, token, slice, `${state.url}/comments`), owners), ...(await batchFor(state.number, state.closed_at))];
     owed.push({
       kind: 'dropped',
       number: state.number,
@@ -285,14 +302,16 @@ async function readSlice(
 }
 
 /** Why `owed` stops slice `slice`, and how the owner settles it. */
-function owedProblem(one: Owed, slice: number, parent: number | undefined, { owners, agents }: Settings): string {
+function owedProblem(one: Owed, slice: number, parent: number | undefined, { owners, agents, approvals }: Settings): string {
   const owner = either(owners);
   // The agent proposes as itself; with several, any of them.
   const agent = either(agents);
   const ask = `${one.note ? ` (${one.note})` : ''}${one.proposals.length > 0 ? '' : `; ${agent} proposes it with: process-rules propose ${one.number}`}`;
+  // Where the settings name an Approvals issue, one comment there answers this among a batch.
+  const batch = approvals === undefined ? '' : `, or ${owner} comments on #${approvals}, the Approvals issue, with a first line "Decision: approve #${one.number}"`;
   return one.kind === 'added'
-    ? `#${slice} was added to work item #${parent} after its approval; ${owner} reacts 👍 on ${agent}'s proposal on #${slice}, or adds a "Decision:" comment naming #${slice}, or #${slice} links ${owner}'s request for it on #${parent}${ask}`
-    : `state #${one.number} was closed as not planned after approval; ${owner} reacts 👍 on ${agent}'s proposal for it on #${slice}, or adds a "Decision:" comment to it${ask}`;
+    ? `#${slice} was added to work item #${parent} after its approval; ${owner} reacts 👍 on ${agent}'s proposal on #${slice}, or adds a "Decision:" comment naming #${slice}, or #${slice} links ${owner}'s request for it on #${parent}${batch}${ask}`
+    : `state #${one.number} was closed as not planned after approval; ${owner} reacts 👍 on ${agent}'s proposal for it on #${slice}, or adds a "Decision:" comment to it${batch}${ask}`;
 }
 
 /**
