@@ -24,8 +24,9 @@ import { appendToArray, replaceValues, setMember } from './jsonedit.ts';
 import { HOURLY } from './asks.ts';
 import { DEFAULT_SCHEDULE, type Feature, FEATURES, FIGMA_FILE_KEY, NEEDS_ISSUE_TYPES, featuresIn, parseFeatures, renamedLines, scheduleIn } from './features.ts';
 import { type Change, CLOUD_SETUP_PATH, HOOKS_PATH, ONBOARD_BRANCH, WORKFLOW_PATH, autoMerge, mergeQueue, openPull, remoteFile } from './onboard-pull.ts';
-import { cloudRepoScript, cloudScriptVersion, releaseSha256, releaseTarball } from './cloud.ts';
+import { cloudRepoScript, cloudScriptVersion, releaseSha256 } from './cloud.ts';
 import { setSecret } from './secrets.ts';
+import { UPGRADE } from './upgrade.ts';
 import { isNewer, packageVersion } from './version.ts';
 import type { Output, Sys } from './types.ts';
 import { GITHUB_WEB } from './host.ts';
@@ -568,7 +569,7 @@ async function newerPinOnGitHub(sys: Sys, slug: string, token: string, branch: s
 /** onboard's refusal of a repository that pins a newer release than this one. */
 function refuseOlder(io: Output, slug: string, pin: Pin, version: string): number {
   io.err(`onboard: ${slug} already pins process-rules v${pin.version} (${pin.where}), and this is v${version}; onboard never moves the pin back`);
-  io.err(`  Update this Mac's process-rules first: pnpm add -g ${releaseTarball(pin.version)}`);
+  io.err(`  Update this Mac's process-rules first: ${UPGRADE}`);
   return 1;
 }
 

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 
 import { launcherPath, launcherScript } from './agent.ts';
 import type { ExecResult, HttpResult, Sys } from './types.ts';
+import { packageVersion } from './version.ts';
 
 export const HOME = '/home/u';
 export const ROOT = '/repo';
@@ -318,6 +319,11 @@ export class FakeSys implements Sys {
   ownerType: 'Organization' | 'User' = 'Organization';
   private unrouted(url: string): HttpResult {
     const release = /^https:\/\/api\.github\.com\/repos\/athya-hq\/process-rules\/releases\/tags\/v(.+)$/.exec(url);
+    // The newest release is the one this checkout builds, unless a test routes it.
+    if (url === 'https://api.github.com/repos/athya-hq/process-rules/releases/latest') {
+      const version = packageVersion();
+      return { status: 200, json: { tag_name: `v${version}`, assets: [{ name: `athya-hq-process-rules-${version}.tgz` }] } };
+    }
     if (release) return { status: 200, json: { assets: [{ name: `athya-hq-process-rules-${release[1]}.tgz`, digest: `sha256:${RELEASE_SHA256}` }] } };
     if (url === 'https://api.github.com/repos/example-org/example-app') return { status: 200, json: { owner: { login: 'example-org', type: this.ownerType } } };
     if (url === 'https://api.github.com/users/example-org') return { status: 200, json: { login: 'example-org', type: this.ownerType } };

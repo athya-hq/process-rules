@@ -8,7 +8,7 @@ hooks and a shared GitHub Actions workflow.
 
 ## Status
 
-Early. The CLI runs `machine`, `doctor`, `session-start`, `guard`, `onboard` and `propose`. What comes next, and in what
+Early. The CLI runs `machine`, `doctor`, `session-start`, `guard`, `onboard`, `propose` and `upgrade`. What comes next, and in what
 order: the Slice issues under
 [process-rules roadmap v1](https://github.com/athya-hq/process-rules/issues/22),
 on the Project [process-rules work](https://github.com/orgs/athya-hq/projects/2);
@@ -248,7 +248,10 @@ both tries, and one that runs out of time stops with that, not tried
 again.
 
 `process-rules doctor` only reads. It re-checks the key, the token and its
-scopes, the key's registration, the session file, that the launcher runs, and
+scopes, the key's registration, the session file, that the launcher runs,
+that the CLI is the newest release (`▲` when a newer one is out, fixed by
+`process-rules upgrade`) and the only `process-rules` on `PATH` (`✗`
+otherwise, naming each copy and its version), and
 what of the owner's an agent session could reach. It shows them grouped as
 This Mac, GitHub and This repo, one line each: `✓` fine, `▲` worth fixing,
 `✗` broken. Each problem line ends with its fix:
@@ -260,12 +263,13 @@ This Mac, GitHub and This repo, one line each: `✓` fine, `▲` worth fixing,
 ✓  signing key ~/.ssh/agent_signing
 ✓  session file
 ✗  launcher missing, so hooks need node on PATH → process-rules machine
+▲  process-rules 0.5.20 runs here; 0.5.32 is out → process-rules upgrade
 │
 ◇  GitHub — as AGENT
 ▲  token ends in 11 days → process-rules machine
 ✓  signing key registered
 │
-└  2 to fix
+└  3 to fix
 ```
 
 It closes with `└  All good` or `└  N to fix`, and exits 1 when anything is
@@ -868,11 +872,33 @@ cloud session, `doctor` still refuses.
 Each release is a tag `vX.Y.Z` on `main`, matching `package.json`; the
 Release workflow checks both, runs `pnpm check` and publishes the GitHub
 release, attaching the CLI package it built and tested. Install that package on
-each machine with pnpm; nothing is built on install:
+each machine with pnpm, once; nothing is built on install:
 
 ```bash
 pnpm add -g https://github.com/athya-hq/process-rules/releases/download/v0.5.35/athya-hq-process-rules-0.5.35.tgz
 ```
+
+After that, update it with one command on each machine:
+
+```bash
+process-rules upgrade
+```
+
+`upgrade` asks GitHub's public releases API for the newest release, with no
+token and no sign-in, and when it is newer than the CLI running, installs it
+with the same `pnpm add -g`, printing old → new and the version the shell then
+runs. On the newest release it says so and exits 0; it never moves back to an
+older one. When GitHub cannot be reached, the release has no package attached
+yet, or pnpm fails, it says which and exits 1. Then it walks `PATH`, as `type
+-a process-rules` does: when more than one `process-rules` is there, or the
+first is not the release just installed, it lists each path and its version,
+marks pnpm's own copy to keep, names the others to remove, and exits 1, since
+an older copy the shell finds first is how a Mac keeps running an old release
+after an upgrade. It works in an agent session on a Mac too; in a Claude cloud
+session it refuses, because there the repo's `cloud-setup.sh` installs the
+release the workflow pins. A CLI from before `upgrade` has none (`process-rules
+help` lists it when it is there): install the newest release with the line above. `onboard`, when the repo pins a newer release than the
+CLI running, refuses and says to run `process-rules upgrade` first.
 
 `onboard` pins the client's workflow to one version, the release of the CLI
 that ran it. Each job writes the pin twice, `checks.yml@vX.Y.Z` and, two lines
@@ -886,7 +912,7 @@ a job's `uses:` line and nothing else, so their bump of process-rules leaves
 the pair apart, and it also leaves out the cloud setup file's pin and any job a
 newer release adds. So leave `athya-hq/process-rules` out of their updates (a
 Dependabot `ignore` entry, a Renovate `packageRules` entry with `enabled:
-false`). Upgrading is one step: install the new CLI and run `onboard` again,
+false`). Upgrading is two steps: `process-rules upgrade`, then `onboard` again,
 which moves every pin together. Editing the version by hand means changing
 every line that names it, two per job. A split workflow needs v0.5.4 or later: GitHub refuses a whole run, before
 any job's `if:`, when the called workflow asks for more than the calling job

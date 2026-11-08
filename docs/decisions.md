@@ -908,3 +908,26 @@
   issue no agent asked on still comes off when the batch names it.
   Rejected: matching only the latest proposal's number (#202, reverted:
   it cleared a slice while another proposal there waited).
+- **2026-11-08 — Record: P-46, `process-rules upgrade` updates the CLI in
+  one step (#192).** The owner, in chat: "Shouldn't it be simple like
+  `process-rules upgrade`?" Updating meant copying the README's `pnpm add -g`
+  line for the right version; the owner's second Mac kept v0.5.20 for days,
+  and an `onboard` run from it overwrote an athya_mono pull request's newer
+  pin. Decided: `upgrade` reads GitHub's public `releases/latest` with no
+  token (the repository is public, as the install line already relies on),
+  installs a newer release with that same `pnpm add -g`, never an older one,
+  and then walks `PATH` as `type -a` does, exiting 1 while another copy is
+  there or the first is not the new release, since a stray older copy is how
+  the old release kept running. `doctor` on a Mac gains the same two checks;
+  `onboard`'s refusal of a newer pin names `upgrade`. It may run in an agent
+  session on a Mac: it needs no credential, never signs in, only moves
+  forward to a release the Release workflow published from `main`, and does
+  what the owner would do by hand, so an agent finishing a release can
+  update the Mac without an owner step; the guard still governs `gh` and git
+  around it. It refuses in a Claude cloud session, where the CLI comes from
+  the repo's `cloud-setup.sh` at the workflow's pin, not from pnpm. GitHub's
+  "latest" is the newest release by date, which is the highest version while
+  releases are tagged in order from `main`. Rejected: comparing against the
+  repo's pin instead of the newest release (a Mac would stay behind until a
+  repo moved), and warning about stray copies without failing (the owner
+  would miss it, as before).
