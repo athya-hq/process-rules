@@ -491,9 +491,11 @@ agent's comment starting `Proposal:` whose first `#N` is the slice or state
 it approves, and only when made after the proposal's last edit (and, for a
 slice, after it was last added). Run again, `propose` posts nothing twice, and
 once the owner has approved everything it takes `needs-owner` off. Each run
-prints the link to every proposal still waiting, posted now or before: the
-comment's own `#issuecomment-` address, where the owner reacts, never the
-slice's top or the `needs-owner` list. A
+prints, for each decision still waiting, the link GitHub gives its newest
+proposal, posted now or before: the comment's own `#issuecomment-` address,
+where the owner reacts, never the slice's top or the `needs-owner` list. A
+waiting decision with no proposal yet gets the `process-rules propose` command
+that posts one. A
 reaction does not re-run a pull request's checks: the agent proposes before
 it starts, and pre-push or a re-run of Work rules sees the 👍.
 
