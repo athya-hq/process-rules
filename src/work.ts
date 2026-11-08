@@ -755,7 +755,9 @@ export async function propose(sys: Sys, io: Output, numbers: readonly number[]):
     io.out(
       `${either(accounts.owners)} answers ${waiting.size === 1 ? 'it' : `all ${waiting.size}`} with one comment on ${GITHUB_WEB}/${slug}/issues/${accounts.approvals}, the Approvals issue, whose first line is this (deleting a number leaves that one waiting):`,
     );
-    io.out(`Decision: approve ${[...waiting].map((number) => `#${number}`).join(' ')}`);
+    // The issues asked for come first, in the order given; what else waits on their slices follows.
+    const ordered = new Set([...numbers.filter((number) => waiting.has(number)), ...waiting]);
+    io.out(`Decision: approve ${[...ordered].map((number) => `#${number}`).join(' ')}`);
   }
   return code;
 }

@@ -1434,6 +1434,10 @@ describe('propose', () => {
       assert.equal(out.filter((line) => line === BATCH).length, 1);
       // Both were proposed before, so each run links them and posts nothing.
       assert.deepEqual(posted(sys), []);
+      // The issues asked for lead, in the order given, then what else waits on their slices.
+      const { sys: again } = session(g);
+      withApprovals(again);
+      assert.equal((await run(again, 30)).out.at(-1), 'Decision: approve #30 #12');
     });
 
     it('still hands over what waits when one of the numbers is refused, and fails', async () => {
@@ -1443,7 +1447,7 @@ describe('propose', () => {
       const { code, out, err } = await run(sys, 30, 12);
       assert.equal(code, 1);
       assert.equal(err[0], "✗ could not read #30's parent (HTTP 403: Resource not accessible by integration)");
-      assert.deepEqual(out.slice(-2), [BATCH, 'Decision: approve #12 #30']);
+      assert.deepEqual(out.slice(-2), [BATCH, 'Decision: approve #30 #12']);
     });
 
     it('leaves out what has no proposal yet, and says "it" for one', async () => {
