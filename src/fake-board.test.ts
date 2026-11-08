@@ -266,9 +266,9 @@ export class Board {
       }
       case 'updateProjectV2View': {
         const view = [this.old, this.project].flatMap((project) => project?.views ?? []).find((had) => had.id === variables.view)!;
-        Object.assign(view, { name: variables.name, layout: variables.layout, filter: variables.filter });
         const ids = (variables.configuration as { visibleFieldIds: string[] } | null)?.visibleFieldIds;
         if (ids?.some((id) => !id.startsWith('F_'))) return { status: 200, json: { errors: [{ message: 'Visible field ID type does not match the field.' }] } };
+        Object.assign(view, { name: variables.name, layout: variables.layout, filter: variables.filter });
         if (ids) view.visible = ids.map((id) => id.replace(/^F_/, ''));
         return data({ updateProjectV2View: { projectV2View: { id: view.id } } });
       }
