@@ -889,8 +889,8 @@
   and only `doctor`, whose cloud checks already show ▲ for a workflow that
   pins several versions but which runs in a session, not on the bot's pull
   request.
-- **2026-11-09 — Record: Needs you judges each proposal on an issue (#203,
-  under P-40).** `propose` posts one `Proposal:` per decision a slice owes
+- **2026-11-09 — Record: Needs you judges each proposal on an issue (State
+  #205 of P-40, from #203).** `propose` posts one `Proposal:` per decision a slice owes
   (its late addition, each dropped State), and the batch line names each by
   its own number, as the work rules read them; the Needs you job judged only
   an issue's latest ask, and its comment event took `needs-owner` off
