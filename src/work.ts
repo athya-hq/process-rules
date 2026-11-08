@@ -259,14 +259,11 @@ async function readSlice(
   }
   const added = [...mine, ...hidden].sort().at(-1);
   if (added && added > approvedAt) {
+    const local = [...decisionsIn(parentComments, owners, added, `#${slice}`), ...decisionsIn(comments, owners, added)];
+    // The Approvals issue is read only when no request and no unedited decision here settles it.
     const decision = requested(issue.body ?? '', slug, parent.number, parentComments, owners, added)
       ? { settled: true }
-      : await decided(
-          sys,
-          token,
-          [...decisionsIn(parentComments, owners, added, `#${slice}`), ...decisionsIn(comments, owners, added), ...(await batchFor(slice, added))],
-          owners,
-        );
+      : await decided(sys, token, local.some((one) => !editedAt(one)) ? local : [...local, ...(await batchFor(slice, added))], owners);
     owed.push({
       kind: 'added',
       number: slice,

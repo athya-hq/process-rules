@@ -5,8 +5,8 @@ import { anyLogin } from './agent.ts';
  * approves. Only that line approves; the lines under it are reasons.
  */
 const BATCH = /^\s*Decision:\s*approve\b(.*)$/i;
-/** An issue of this repository as `#N`, not another's `owner/repo#N`. */
-const ISSUE = /(?<![\w/.-])#(\d+)\b/g;
+/** An issue of this repository as `#N`, not another's `owner/repo#N` nor an HTML entity such as `&#35;`. */
+const ISSUE = /(?<![\w/.&-])#(\d+)\b/g;
 
 /** The issues a comment approves as a batch: every `#N` on its first line when that line opens `Decision: approve`; none otherwise. */
 export function approvedIn(body: string): number[] {

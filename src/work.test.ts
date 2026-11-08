@@ -305,6 +305,15 @@ describe('sliceProblems', () => {
         });
       }
 
+      it('reads no Approvals issue when an unedited Decision: on the slice settles it', async () => {
+        const g = added();
+        g.comments.push(comment('Decision: keep it'));
+        const sys = new FakeSys();
+        github(sys, g.issue);
+        assert.deepEqual(await sliceProblems(sys, 'tok', SLUG, 12, WITH_APPROVALS, {}), []);
+        assert.equal(sys.requests.some((request) => request.url.includes(`/issues/${APPROVALS}/`)), false);
+      });
+
       it('reads no Approvals issue where the settings name none', async () => {
         const g = added();
         g.approvals.push(comment('Decision: approve #12'));
