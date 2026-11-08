@@ -300,7 +300,7 @@ describe('hooksHittingLock', () => {
       '.claude/settings.json PreToolUse hook .claude/hooks/prose.sh',
       '.claude/settings.json PreToolUse hook .claude/hooks/untracked.sh',
       '.claude/settings.json PreToolUse hook .claude/hooks/relative.sh',
-      '.claude/settings.json PreToolUse hook .claude/hooks/routed.sh',
+      '.claude/settings.json PreToolUse hook ".claude/hooks/routed.sh && gh pr list"',
     ]);
     const packaged = sys.calls.filter((call) => call.args[0] === 'ls-files')[2];
     assert.deepEqual(packaged?.args.slice(-3), [':(glob)**/lib.py', ':(glob)**/lib/other.py', ':(glob)**/lib/agent_wrap.py'], 'from a package, each name is a module too');
@@ -331,11 +331,12 @@ describe('hooksHittingLock', () => {
       '.claude/hooks/mac-only.sh': '#!/bin/bash\n[ "$CLAUDE_CODE_REMOTE" = true ] && exit 0\ngh pr view\n',
     };
     const names = Object.keys(scripts);
-    const sys = withHooks({ SessionStart: [...names, '.claude/hooks/cloud.sh && gh pr view'] }, scripts);
+    const inline = '[ "$CLAUDE_CODE_REMOTE" = true ] || exit; gh pr list';
+    const sys = withHooks({ SessionStart: [...names, '.claude/hooks/cloud.sh && gh pr view', inline] }, scripts);
     const named = (...hooks: string[]): string[] => hooks.map((hook) => `.claude/settings.json SessionStart hook .claude/hooks/${hook}.sh`);
-    const offMac = ['indented', 'branch', 'continued', 'early', 'after', 'commented', 'mac-only', 'cloud'];
-    assert.deepEqual(hooksHittingLock(sys), named(...offMac), 'on a Mac, the command that runs a cloud-only script still judged');
+    const offMac = named('indented', 'branch', 'continued', 'early', 'after', 'commented', 'mac-only', 'cloud');
+    assert.deepEqual(hooksHittingLock(sys), offMac, "on a Mac: the command running a cloud-only script still judged, a guard in the command itself counted");
     sys.env.CLAUDE_CODE_REMOTE = 'true';
-    assert.deepEqual(hooksHittingLock(sys), named('cloud', 'negated', ...offMac), 'in a cloud session');
+    assert.deepEqual(hooksHittingLock(sys), [...named('cloud', 'negated'), ...offMac, `.claude/settings.json SessionStart hook ${JSON.stringify(inline)}`], 'in a cloud session');
   });
 });

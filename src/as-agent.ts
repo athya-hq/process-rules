@@ -149,10 +149,11 @@ export function hooksHittingLock(sys: Sys): string[] {
           const command = (hook as { command?: unknown } | null)?.command;
           if (typeof command !== 'string' || OWN_COMMANDS.has(command)) continue;
           const script = scriptOf(sys, root, command);
-          // A routed script's own text is not judged; the command that runs it still is.
-          const code = script && !routedByHelper(sys, root, script.text) ? withoutComments(script.text) : '';
-          const judged = `${withoutComments(command)}\n${cloud ? code : beforeCloudOnly(code)}`;
-          if (reachesGitHub(withoutAsAgent(judged))) found.push(`${file} ${event} hook ${script ? script.path : JSON.stringify(command)}`);
+          // A routed script's own text is not judged; the command that runs it still is, and then names the hook.
+          const judgedScript = script && !routedByHelper(sys, root, script.text) ? script : undefined;
+          const [line, code] = [withoutComments(command), withoutComments(judgedScript?.text ?? '')];
+          const judged = cloud ? `${line}\n${code}` : `${beforeCloudOnly(line)}\n${beforeCloudOnly(code)}`;
+          if (reachesGitHub(withoutAsAgent(judged))) found.push(`${file} ${event} hook ${judgedScript ? judgedScript.path : JSON.stringify(command)}`);
         }
       }
     }
