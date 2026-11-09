@@ -970,3 +970,13 @@
   a marker comment that silences a hook (it asserts instead of reading);
   following `in_cloud`-style functions into sourced files (the client moves
   the guard to the top instead).
+- **2026-11-09 — Decision: release numbering.** The owner set it in chat:
+  each release bumps the patch number up to 20 (0.6.0, 0.6.1, … 0.6.20),
+  and the release after x.y.20 is x.(y+1).0, so 0.6.20 is followed by 0.7.0.
+  The major number moves only when the owner says so. 0.6.0 starts the rule,
+  with the code of 0.5.38. This replaces the rule of 2026-10-31, "0.5.x patch
+  releases only", which came after sessions bumped the minor number four
+  times in a day. Recording it here rather than only in agent memory means
+  every session reads it with the code. Slice pull requests still never bump
+  the version: one release pull request per batch does, and its tag must
+  match `package.json`.
