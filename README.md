@@ -149,8 +149,9 @@ that its `gh` login wrote it, which holds for the agent's own pull requests.
 Before each Bash command, the client's PreToolUse hook runs `process-rules
 guard`: a command running `gh` or a git command that reaches a remote (push,
 fetch, pull, clone, ls-remote, submodule, and `remote` update, prune, show,
-`add -f` and `set-head -a`; not `remote get-url` and the other local `remote`
-subcommands) is refused, with the reason,
+`add -f`/`--fetch` (unless a later `--no-fetch`) and `set-head -a`/`--auto`;
+not `remote get-url` and the other local `remote` subcommands) is refused,
+with the reason,
 unless session-start gave this session the agent identity. Hooks cannot see
 the variables session-start gives the session's shells, so session-start
 records how it left each session in

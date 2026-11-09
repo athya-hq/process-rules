@@ -6,20 +6,33 @@ import type { Output, Sys } from './types.ts';
 const WORD = String.raw`(?:^|[\s;&|()\`'"$])(?:[\w.~-]*/)*`;
 /** git's options before its subcommand: -C and -c take a value. */
 const GIT_OPTIONS = String.raw`(?:\s+(?:-[Cc]\s+\S+|--[\w-]+(?:=\S+)?|-\w))*`;
-/**
- * The `git remote` subcommands that contact a remote: `update`, `prune`,
- * `show`, `add` with `-f`/`--fetch`, `set-head` with `-a`/`--auto`. The rest
- * (`get-url`, `set-url`, `add`, `rename`, `remove`, `-v`, …) only read or
- * write `.git/config` (#219).
- */
-const GIT_REMOTE_NETWORK = String.raw`remote(?:\s+(?:-v|--verbose))?\s+(?:update|prune|show|(?:add|set-head)[^;&|\n]*\s(?:-f|--fetch|-a|--auto))(?:\s|$)`;
-/** `gh` as a command, and the git commands that reach a remote. */
+/** `git remote`, with `-v` or not, before its subcommand. */
+const GIT_REMOTE = String.raw`${WORD}git${GIT_OPTIONS}\s+remote(?:\s+(?:-v|--verbose))?\s+`;
+/** `gh` as a command, and the git commands that always reach a remote. */
 const GH = new RegExp(`${WORD}gh(?:\\s|$)`);
-const GIT_NETWORK = new RegExp(`${WORD}git${GIT_OPTIONS}\\s+(?:(?:push|fetch|pull|clone|ls-remote|submodule)(?:\\s|$)|${GIT_REMOTE_NETWORK})`);
+const GIT_NETWORK = new RegExp(`${WORD}git${GIT_OPTIONS}\\s+(?:push|fetch|pull|clone|ls-remote|submodule)(?:\\s|$)|${GIT_REMOTE}(?:update|prune|show)(?:\\s|$)`);
+/** `git remote add` or `set-head`, and its words up to the next `;`, `&`, `|` or line end. */
+const GIT_REMOTE_MAYBE = new RegExp(`${GIT_REMOTE}(add|set-head)((?:[ \\t]+[^;&|\\s]+)*)`, 'g');
+
+/**
+ * Whether a `git remote add` fetches (its last of `-f`, `--fetch` and
+ * `--no-fetch` is one of the first two) or a `set-head` asks the remote
+ * (`-a`, `--auto`). The other `git remote` subcommands that contact a remote
+ * are in GIT_NETWORK; the rest (`get-url`, `set-url`, `rename`, `remove`,
+ * `-v`, …) only read or write `.git/config` (#219).
+ */
+function remoteContacted(command: string): boolean {
+  return [...command.matchAll(GIT_REMOTE_MAYBE)].some(([, subcommand, rest = '']) => {
+    const words = rest.trim().split(/\s+/);
+    if (subcommand === 'set-head') return words.some((word) => word === '-a' || word === '--auto');
+    const last = words.filter((word) => ['-f', '--fetch', '--no-fetch'].includes(word)).at(-1);
+    return last === '-f' || last === '--fetch';
+  });
+}
 
 /** Whether a shell command runs gh or a git command that reaches a remote. */
 export function reachesGitHub(command: string): boolean {
-  return GH.test(command) || GIT_NETWORK.test(command);
+  return GH.test(command) || GIT_NETWORK.test(command) || remoteContacted(command);
 }
 
 /**

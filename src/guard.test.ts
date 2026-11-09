@@ -36,6 +36,8 @@ describe('reachesGitHub', () => {
       'git remote set-head origin -a',
       'git remote set-head origin --auto',
       'git remote get-url origin; git remote update',
+      'git remote add --no-fetch -f up https://github.com/a/b',
+      'git remote add up url; git remote add -f other url',
     ];
     for (const command of contacting) it(`finds ${command}`, () => assert.equal(reachesGitHub(command), true));
     const local = [
@@ -51,6 +53,8 @@ describe('reachesGitHub', () => {
       'git remote set-branches origin main',
       'git remote set-head origin main',
       'git remote updates',
+      'git remote add --fetch --no-fetch up https://github.com/a/b',
+      'git remote set-head origin -d',
     ];
     for (const command of local) it(`passes ${command}`, () => assert.equal(reachesGitHub(command), false));
   });
