@@ -23,6 +23,37 @@ describe('reachesGitHub', () => {
   for (const command of ['git commit -m "fix push"', 'git log --grep pull', 'ls', 'git status', 'git commit -m fix', 'git log --oneline', 'cat .github/x', 'pnpm check', 'node gh.js', 'ghq list', '/usr/bin/sigh now']) {
     it(`passes ${command}`, () => assert.equal(reachesGitHub(command), false));
   }
+
+  describe('git remote, only where it contacts the remote (#219)', () => {
+    const contacting = [
+      'git remote update',
+      'git remote prune origin',
+      'git remote show origin',
+      'git remote -v update',
+      'git -C /repo remote show origin',
+      'git remote add -f up https://github.com/a/b',
+      'git remote add up https://github.com/a/b --fetch',
+      'git remote set-head origin -a',
+      'git remote set-head origin --auto',
+      'git remote get-url origin; git remote update',
+    ];
+    for (const command of contacting) it(`finds ${command}`, () => assert.equal(reachesGitHub(command), true));
+    const local = [
+      'git remote',
+      'git remote -v',
+      'git remote get-url origin',
+      'git -C "$REPO" remote get-url origin > /dev/null',
+      'git remote set-url origin https://github.com/a/b',
+      'git remote add up https://github.com/a/b',
+      'git remote add up https://github.com/a/b; git status -f',
+      'git remote rename up upstream',
+      'git remote remove up',
+      'git remote set-branches origin main',
+      'git remote set-head origin main',
+      'git remote updates',
+    ];
+    for (const command of local) it(`passes ${command}`, () => assert.equal(reachesGitHub(command), false));
+  });
 });
 
 describe('guard', () => {

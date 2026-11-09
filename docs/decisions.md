@@ -980,3 +980,14 @@
   every session reads it with the code. Slice pull requests still never bump
   the version: one release pull request per batch does, and its tag must
   match `package.json`.
+- **2026-11-09 — Record: `git remote` reaches GitHub only where it contacts
+  the remote (State #219 of P-17).** `reachesGitHub`, shared by the guard and
+  `doctor`, counted every `git remote` as reaching GitHub, so `doctor` named a
+  hook running `git remote get-url origin`, which reads `.git/config` only,
+  and the guard refused it in sessions not working as the agent. The owner
+  asked for it fixed. Now only `update`, `prune`, `show`, `add -f`/`--fetch`
+  and `set-head -a`/`--auto` count. P-17 is unchanged: every command that
+  contacts a remote still runs only as the agent; what the guard now lets
+  through contacts nothing. `show -n` (no contact) still counts, kept
+  conservative. Rejected: a doctor-only list (the guard and doctor would
+  disagree on what reaches GitHub).

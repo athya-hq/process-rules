@@ -6,9 +6,16 @@ import type { Output, Sys } from './types.ts';
 const WORD = String.raw`(?:^|[\s;&|()\`'"$])(?:[\w.~-]*/)*`;
 /** git's options before its subcommand: -C and -c take a value. */
 const GIT_OPTIONS = String.raw`(?:\s+(?:-[Cc]\s+\S+|--[\w-]+(?:=\S+)?|-\w))*`;
+/**
+ * The `git remote` subcommands that contact a remote: `update`, `prune`,
+ * `show`, `add` with `-f`/`--fetch`, `set-head` with `-a`/`--auto`. The rest
+ * (`get-url`, `set-url`, `add`, `rename`, `remove`, `-v`, …) only read or
+ * write `.git/config` (#219).
+ */
+const GIT_REMOTE_NETWORK = String.raw`remote(?:\s+(?:-v|--verbose))?\s+(?:update|prune|show|(?:add|set-head)[^;&|\n]*\s(?:-f|--fetch|-a|--auto))(?:\s|$)`;
 /** `gh` as a command, and the git commands that reach a remote. */
 const GH = new RegExp(`${WORD}gh(?:\\s|$)`);
-const GIT_NETWORK = new RegExp(`${WORD}git${GIT_OPTIONS}\\s+(?:push|fetch|pull|clone|ls-remote|remote|submodule)(?:\\s|$)`);
+const GIT_NETWORK = new RegExp(`${WORD}git${GIT_OPTIONS}\\s+(?:(?:push|fetch|pull|clone|ls-remote|submodule)(?:\\s|$)|${GIT_REMOTE_NETWORK})`);
 
 /** Whether a shell command runs gh or a git command that reaches a remote. */
 export function reachesGitHub(command: string): boolean {
