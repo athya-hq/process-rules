@@ -988,6 +988,6 @@
   asked for it fixed. Now only `update`, `prune`, `show`, `add -f`/`--fetch`
   and `set-head -a`/`--auto` count. P-17 is unchanged: every command that
   contacts a remote still runs only as the agent; what the guard now lets
-  through contacts nothing. `show -n` (no contact) still counts, kept
-  conservative. Rejected: a doctor-only list (the guard and doctor would
-  disagree on what reaches GitHub).
+  through contacts nothing. `show -n`, and `add` whose last fetch flag is
+  `--no-fetch`, do not count either (review). Rejected: a doctor-only list
+  (the guard and doctor would disagree on what reaches GitHub).

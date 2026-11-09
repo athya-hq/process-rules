@@ -55,6 +55,8 @@ describe('reachesGitHub', () => {
       'git remote updates',
       'git remote add --fetch --no-fetch up https://github.com/a/b',
       'git remote set-head origin -d',
+      'git remote show -n origin',
+      'git remote -v show origin -n',
     ];
     for (const command of local) it(`passes ${command}`, () => assert.equal(reachesGitHub(command), false));
   });

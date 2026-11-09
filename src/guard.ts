@@ -10,20 +10,21 @@ const GIT_OPTIONS = String.raw`(?:\s+(?:-[Cc]\s+\S+|--[\w-]+(?:=\S+)?|-\w))*`;
 const GIT_REMOTE = String.raw`${WORD}git${GIT_OPTIONS}\s+remote(?:\s+(?:-v|--verbose))?\s+`;
 /** `gh` as a command, and the git commands that always reach a remote. */
 const GH = new RegExp(`${WORD}gh(?:\\s|$)`);
-const GIT_NETWORK = new RegExp(`${WORD}git${GIT_OPTIONS}\\s+(?:push|fetch|pull|clone|ls-remote|submodule)(?:\\s|$)|${GIT_REMOTE}(?:update|prune|show)(?:\\s|$)`);
-/** `git remote add` or `set-head`, and its words up to the next `;`, `&`, `|` or line end. */
-const GIT_REMOTE_MAYBE = new RegExp(`${GIT_REMOTE}(add|set-head)((?:[ \\t]+[^;&|\\s]+)*)`, 'g');
+const GIT_NETWORK = new RegExp(`${WORD}git${GIT_OPTIONS}\\s+(?:push|fetch|pull|clone|ls-remote|submodule)(?:\\s|$)|${GIT_REMOTE}(?:update|prune)(?:\\s|$)`);
+/** `git remote add`, `set-head` or `show`, and its words up to the next `;`, `&`, `|` or line end. */
+const GIT_REMOTE_MAYBE = new RegExp(`${GIT_REMOTE}(add|set-head|show)((?:[ \\t]+[^;&|\\s]+)*)`, 'g');
 
 /**
  * Whether a `git remote add` fetches (its last of `-f`, `--fetch` and
- * `--no-fetch` is one of the first two) or a `set-head` asks the remote
- * (`-a`, `--auto`). The other `git remote` subcommands that contact a remote
- * are in GIT_NETWORK; the rest (`get-url`, `set-url`, `rename`, `remove`,
- * `-v`, …) only read or write `.git/config` (#219).
+ * `--no-fetch` is one of the first two), a `set-head` asks the remote
+ * (`-a`, `--auto`), or a `show` does (no `-n`). `update` and `prune` are in
+ * GIT_NETWORK; the rest (`get-url`, `set-url`, `rename`, `remove`, `-v`, …)
+ * only read or write `.git/config` (#219).
  */
 function remoteContacted(command: string): boolean {
   return [...command.matchAll(GIT_REMOTE_MAYBE)].some(([, subcommand, rest = '']) => {
     const words = rest.trim().split(/\s+/);
+    if (subcommand === 'show') return !words.includes('-n');
     if (subcommand === 'set-head') return words.some((word) => word === '-a' || word === '--auto');
     const last = words.filter((word) => ['-f', '--fetch', '--no-fetch'].includes(word)).at(-1);
     return last === '-f' || last === '--fetch';
