@@ -1,5 +1,5 @@
 #!/bin/bash
-# process-rules 0.6.6 for Claude cloud sessions: Node 24.21.0 and the CLI, as process-rules on PATH.
+# niyam 0.6.8 for Claude cloud sessions: Node 24.21.0 and the CLI, as niyam on PATH.
 # niyam onboard writes this file at the version .github/workflows/process-rules.yml pins, and writes it again on every run.
 # The cloud environment's Setup script runs it, from what niyam cloud-setup prints, and so does
 # session-start when the environment holds another release. Change it by running onboard, not by hand.
@@ -15,15 +15,16 @@ if [ "$("$bin" --version 2>/dev/null)" != "v$node" ]; then
   tar -xJ -f "$dir/node.tar.xz" -C "$dir"
   rm "$dir/node.tar.xz"
 fi
-curl -fsSL --connect-timeout 10 --max-time 120 -o "$dir/process-rules.tgz" https://github.com/veda-hq/niyam/releases/download/v0.6.6/veda-hq-niyam-0.6.6.tgz
-echo "f66fc5b2daadf5a22477a53dc570a2988c29b012bc905845a8aa7a38b0cf0892  $dir/process-rules.tgz" | sha256sum -c --quiet -
-cli="$dir/cli-0.6.6"
+curl -fsSL --connect-timeout 10 --max-time 120 -o "$dir/niyam.tgz" https://github.com/veda-hq/niyam/releases/download/v0.6.8/veda-hq-niyam-0.6.8.tgz
+echo "02ceec8a4c6a3c20f1fe0a2c2a88f302805b3ead56dccfaae81676c950633210  $dir/niyam.tgz" | sha256sum -c --quiet -
+cli="$dir/cli-0.6.8"
 rm -rf "$cli"
 mkdir -p "$cli"
-tar -xz -f "$dir/process-rules.tgz" -C "$cli"
-rm "$dir/process-rules.tgz"
-printf '#!/bin/sh\nexec %s %s "$@"\n' "$bin" "$cli/package/dist/cli.js" > /usr/local/bin/process-rules
-chmod 755 /usr/local/bin/process-rules
-ln -sf /usr/local/bin/process-rules /usr/local/bin/niyam
+tar -xz -f "$dir/niyam.tgz" -C "$cli"
+rm "$dir/niyam.tgz"
+rm -f /usr/local/bin/niyam /usr/local/bin/process-rules
+printf '#!/bin/sh\nexec %s %s "$@"\n' "$bin" "$cli/package/dist/cli.js" > /usr/local/bin/niyam
+chmod 755 /usr/local/bin/niyam
+ln -s /usr/local/bin/niyam /usr/local/bin/process-rules
 if [ -n "${PROCESS_RULES_SETUP:-}" ]; then : > /opt/process-rules/from-setup; fi
-process-rules version </dev/null
+niyam version </dev/null
