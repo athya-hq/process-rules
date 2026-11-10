@@ -42,11 +42,14 @@ jobs:
       # upgrade installs athya-hq-process-rules-<version>.tgz, and pnpm refuses a
       # second global package with the bin process-rules. This one replaces the
       # old package in place; niyam upgrade then moves it to @veda-hq/niyam.
+      # Since P-54 the package has no process-rules bin, but the bridge keeps
+      # it: a 0.6.x Mac's launcher runs that command until niyam upgrade
+      # points it at niyam.
       - name: Pack the bridge, the same CLI under its old name
         run: |
           set -euo pipefail
           cp package.json "$RUNNER_TEMP/package.json"
-          jq '.name = "@athya-hq/process-rules"' "$RUNNER_TEMP/package.json" > package.json
+          jq '.name = "@athya-hq/process-rules" | .bin["process-rules"] = "dist/old-cli.js"' "$RUNNER_TEMP/package.json" > package.json
           pnpm pack --pack-destination "$RUNNER_TEMP"
           cp "$RUNNER_TEMP/package.json" package.json
       - name: Publish the release, with the CLI package and the bridge

@@ -115,7 +115,7 @@ export async function releaseSha256(sys: Sys, version: string, token: string): P
  * The repo's cloud setup file, CLOUD_SETUP_PATH, which onboard writes at
  * the version the workflow pins and rewrites on every run: Node and that
  * release of the CLI, unpacked under CLOUD_DIR as root, and a
- * `niyam` on PATH that runs one with the other, `process-rules` linked to it, leaving the image's
+ * `niyam` on PATH that runs one with the other (no `process-rules` since P-54), leaving the image's
  * own Node alone. Each download is checked against the sha256 pinned here
  * before it is unpacked; a Node already unpacked at this version is kept,
  * so a session that runs it again fetches the CLI alone. The Setup snippet
@@ -149,12 +149,10 @@ export function cloudRepoScript(version: string, sha256: string): string {
     'mkdir -p "$cli"',
     'tar -xz -f "$dir/niyam.tgz" -C "$cli"',
     'rm "$dir/niyam.tgz"',
-    // Both gone first: before P-53 niyam was a link to process-rules, which the write would follow.
+    // Both gone first: before P-53 niyam was a link to process-rules, which the write would follow, and since P-54 the old name runs nothing.
     'rm -f /usr/local/bin/niyam /usr/local/bin/process-rules',
     'printf \'#!/bin/sh\\nexec %s %s "$@"\\n\' "$bin" "$cli/package/dist/cli.js" > /usr/local/bin/niyam',
     'chmod 755 /usr/local/bin/niyam',
-    // The old name, for hooks onboarded before P-53, until P-54.
-    'ln -s /usr/local/bin/niyam /usr/local/bin/process-rules',
     `if [ -n "\${PROCESS_RULES_SETUP:-}" ]; then : > ${FROM_SETUP}; fi`,
     'niyam version </dev/null',
     '',

@@ -10,8 +10,7 @@
     "node": ">=24.15"
   },
   "bin": {
-    "niyam": "dist/cli.js",
-    "process-rules": "dist/old-cli.js"
+    "niyam": "dist/cli.js"
   },
   "files": [
     "dist"
