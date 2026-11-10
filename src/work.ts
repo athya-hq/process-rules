@@ -12,9 +12,20 @@ import { batchAnswers } from './approvals.ts';
 /** How a pull request or a commit names the slice it builds. */
 const SLICE_LINE = new RegExp(`^Slice:\\s*(?:#|https://${GITHUB_HOST_RE}/[^/\\s]+/[^/\\s]+/issues/)(\\d+)\\s*$`, 'gim');
 
+/** How a pull request names a State of its slice that it delivers. */
+const STATE_LINE = new RegExp(`^State:\\s*(?:#|https://${GITHUB_HOST_RE}/[^/\\s]+/[^/\\s]+/issues/)(\\d+)\\s*$`, 'gim');
+
+/** The issues `line` names in `text`, in order, without repeats. */
+const named = (line: RegExp, text: string): number[] => [...new Set([...text.matchAll(line)].map((match) => Number(match[1])))];
+
 /** The slices `text` names, in order, without repeats. */
 export function slicesNamed(text: string): number[] {
-  return [...new Set([...text.matchAll(SLICE_LINE)].map((match) => Number(match[1])))];
+  return named(SLICE_LINE, text);
+}
+
+/** The States `text` names with a line `State: #N`, in order, without repeats. */
+export function statesNamed(text: string): number[] {
+  return named(STATE_LINE, text);
 }
 
 interface Comment {
@@ -199,7 +210,7 @@ async function readSlice(
   slug: string,
   slice: number,
   { owners, agents, approvals }: Settings,
-): Promise<{ problems: string[]; parent?: number; owed: Owed[] }> {
+): Promise<{ problems: string[]; parent?: number; owed: Owed[]; closed?: boolean; states?: Issue[] }> {
   const issue = await readIssue(sys, token, slug, slice);
   if (!issue) return { problems: [`#${slice} is not an issue in ${slug}`], owed: [] };
   if (issue.type?.name !== 'Slice') return { problems: [`#${slice} is not a Slice (its type is ${issue.type?.name ?? 'none'})`], owed: [] };
@@ -298,7 +309,26 @@ async function readSlice(
     reactions.set(proposal.id, await every<Reaction>(sys, token, slice, `${API}/repos/${slug}/issues/comments/${proposal.id}/reactions?content=%2B1`, true));
   }
   for (const one of owed) one.settled ||= thumbsUp(one.proposals, reactions, owners, one.since);
-  return { problems: [], parent: parent.number, owed };
+  return { problems: [], parent: parent.number, owed, closed: issue.state === 'closed', states };
+}
+
+/**
+ * What is wrong with the States a pull request for slice `slice` names with
+ * `State: #N` lines, so the merged job can close them: each must be a State
+ * under the slice, and a pull request for a slice closed already, a fix,
+ * must name the open State it is filed as.
+ */
+function stateProblems(slice: number, closed: boolean, states: Issue[], names: number[]): string[] {
+  const problems = names.flatMap((number) =>
+    states.some((state) => state.number === number && state.type?.name === 'State')
+      ? []
+      : [`#${number} is not a State under slice #${slice}; a "State: #N" line names a State sub-issue of the slice the pull request builds`],
+  );
+  const open = states.some((state) => names.includes(state.number) && state.type?.name === 'State' && state.state !== 'closed');
+  if (closed && !open) {
+    problems.push(`#${slice} is closed, so this pull request is a fix: file it as a State under #${slice} and name it with a line "State: #N"`);
+  }
+  return problems;
 }
 
 /** Why `owed` stops slice `slice`, and how the owner settles it. */
@@ -319,7 +349,9 @@ function owedProblem(one: Owed, slice: number, parent: number | undefined, { own
  * built: the slice is a Slice under a Work item the owner approved; a slice
  * added after the approval, and an approved State closed as not planned, each
  * carry the owner's say, a `Decision:` comment or a 👍 on the agent's
- * proposal; and no other open pull request builds the slice.
+ * proposal; no other open pull request builds the slice; and, for a pull
+ * request, whose States are in `mine.states`, each is a State under the slice
+ * and a closed slice's names an open one.
  */
 export async function sliceProblems(
   sys: Sys,
@@ -327,11 +359,12 @@ export async function sliceProblems(
   slug: string,
   slice: number,
   accounts: Settings,
-  mine: { pull?: number; branch?: string },
+  mine: { pull?: number; branch?: string; states?: number[] },
 ): Promise<string[]> {
   const read = await readSlice(sys, token, slug, slice, accounts);
   if (read.problems.length > 0) return read.problems;
   const problems = read.owed.filter((one) => !one.settled).map((one) => owedProblem(one, slice, read.parent, accounts));
+  if (mine.states) problems.push(...stateProblems(slice, read.closed ?? false, read.states ?? [], mine.states));
 
   // The pull request being checked: by number, or by its branch in this repository (not a fork's of the same name).
   for (let page = 1; ; page++) {
@@ -358,7 +391,9 @@ function report(io: Output, where: string, problems: string[]): number {
 /**
  * The work rules on a pull request, run by the shared workflow. The owner's
  * pull requests pass; an agent's must name exactly one slice, as a line
- * `Slice: #N`, that may be built, but for onboard's own: from ONBOARD_BRANCH
+ * `Slice: #N`, that may be built, and name with lines `State: #N` only States
+ * under it, at least one open one when the slice is closed already (a fix);
+ * but for onboard's own: from ONBOARD_BRANCH
  * in this repository, changing only the files onboard writes and deleting
  * none, which the owner confirmed at the terminal and merges.
  */
@@ -411,7 +446,7 @@ export async function prWorkRules(sys: Sys, io: Output): Promise<number> {
     ]);
   }
   const [slice] = slices as [number];
-  const problems = await sliceProblems(sys, token, slug, slice, accounts, { pull: pull.number });
+  const problems = await sliceProblems(sys, token, slug, slice, accounts, { pull: pull.number, states: statesNamed(pull.body ?? '') });
   if (problems.length === 0) io.out(`✓ pr-work-rules: #${pull.number} builds slice #${slice}, which may be built`);
   return report(io, 'pr-work-rules', problems);
 }
@@ -588,13 +623,42 @@ function refused(result: { status: number; json: unknown }, what: string): never
 }
 
 /**
- * Closes the slices a merged pull request names, run by the shared workflow
- * when one merges into the default branch: each open Slice it names with a
- * line `Slice: #N` gets a comment linking the pull request and is closed as
- * completed, which the Project's Item closed workflow moves to Done. A slice
- * line is not one of GitHub's closing keywords, so GitHub does not; a slice
- * GitHub already closed, through one beside it, still gets the comment. A
- * slice that has the comment already gets no second one.
+ * Comments on `issue` that pull request `pull` built it, unless it says so
+ * already, and closes it as completed unless it is closed: a slice or State
+ * GitHub closed already, through a closing keyword beside its line, still
+ * gets the comment.
+ */
+async function closeBuilt(sys: Sys, io: Output, token: string, issue: Issue, pull: { number: number; base: { ref: string } }): Promise<void> {
+  const built = new RegExp(`\\bBuilt in #${pull.number}\\b`);
+  const comments = await every<Comment>(sys, token, issue.number, `${issue.url}/comments`);
+  const commented = comments.some((one) => built.test(one.body ?? ''));
+  if (!commented) {
+    const posted = await sys.http(`${issue.url}/comments`, { method: 'POST', token, body: { body: `Built in #${pull.number}, merged into ${pull.base.ref}.` } });
+    if (posted.status !== 201) refused(posted, `${issue.state === 'closed' ? 'comment on' : 'close'} #${issue.number}`);
+  }
+  if (issue.state === 'closed') {
+    io.out(
+      commented
+        ? `✓ #${issue.number} is closed already and says it was built in #${pull.number}`
+        : `✓ #${issue.number} is closed already; commented that it was built in #${pull.number}`,
+    );
+    return;
+  }
+  const closed = await sys.http(issue.url, { method: 'PATCH', token, body: { state: 'closed', state_reason: 'completed' } });
+  if (closed.status !== 200) refused(closed, `close #${issue.number}`);
+  io.out(`✓ #${issue.number}: closed, built in #${pull.number}`);
+}
+
+/**
+ * Closes the slices and States a merged pull request names, run by the
+ * shared workflow when one merges into the default branch: each open Slice
+ * it names with a line `Slice: #N`, and each open State under one of them it
+ * names with a line `State: #N`, gets a comment linking the pull request and
+ * is closed as completed, which the Project's Item closed workflow moves to
+ * Done. Neither line is one of GitHub's closing keywords, so GitHub does not
+ * close them. One that has the comment already gets no second one; a State
+ * dropped as not planned, or under a slice the pull request does not name,
+ * is left as it is.
  */
 export async function prMerged(sys: Sys, io: Output): Promise<number> {
   const { GITHUB_EVENT_PATH: eventPath, GITHUB_REPOSITORY: slug, GH_TOKEN: token } = sys.env;
@@ -630,27 +694,35 @@ export async function prMerged(sys: Sys, io: Output): Promise<number> {
   }
   const slices = slicesNamed(pull.body ?? '');
   if (slices.length === 0) io.out(`pr-merged: #${pull.number} names no slice; nothing to close`);
+  // The slices named that are Slices: a State is closed only under one of them.
+  const built: number[] = [];
   for (const slice of slices) {
     const issue = await readIssue(sys, token, slug, slice);
     if (issue?.type?.name !== 'Slice') {
       io.out(`- #${slice} is not a Slice in ${slug}; left as it is`);
       continue;
     }
+    built.push(slice);
     // GitHub closes a slice itself when the pull request also says "Closes #N"; the slice still gets its comment, once.
-    const built = new RegExp(`\\bBuilt in #${pull.number}\\b`);
-    const comments = await every<Comment>(sys, token, slice, `${issue.url}/comments`);
-    const commented = comments.some((one) => built.test(one.body ?? ''));
-    if (!commented) {
-      const posted = await sys.http(`${issue.url}/comments`, { method: 'POST', token, body: { body: `Built in #${pull.number}, merged into ${pull.base.ref}.` } });
-      if (posted.status !== 201) refused(posted, `${issue.state === 'closed' ? 'comment on' : 'close'} #${slice}`);
-    }
-    if (issue.state === 'closed') {
-      io.out(commented ? `✓ #${slice} is closed already and says it was built in #${pull.number}` : `✓ #${slice} is closed already; commented that it was built in #${pull.number}`);
+    await closeBuilt(sys, io, token, issue, pull);
+  }
+  for (const number of statesNamed(pull.body ?? '')) {
+    const issue = await readIssue(sys, token, slug, number);
+    if (issue?.type?.name !== 'State') {
+      io.out(`- #${number} is not a State in ${slug}; left as it is`);
       continue;
     }
-    const closed = await sys.http(issue.url, { method: 'PATCH', token, body: { state: 'closed', state_reason: 'completed' } });
-    if (closed.status !== 200) refused(closed, `close #${slice}`);
-    io.out(`✓ #${slice}: closed, built in #${pull.number}`);
+    const { parent, problem } = await parentOf(sys, token, issue);
+    if (problem) throw new Error(`cannot close #${number}: ${problem}`);
+    if (!parent || !built.includes(parent.number)) {
+      io.out(`- #${number} is not a State under a slice #${pull.number} names; left as it is`);
+      continue;
+    }
+    if (issue.state_reason === 'not_planned') {
+      io.out(`- #${number} was closed as not planned; left as it is`);
+      continue;
+    }
+    await closeBuilt(sys, io, token, issue, pull);
   }
   return 0;
 }

@@ -447,7 +447,10 @@ slice may be built:
 - each of its State sub-issues closed as not planned after the approval
   carries the owner's approval: a 👍 on the agent's proposal for it, or a
   `Decision:` comment;
-- no other open pull request names it.
+- no other open pull request names it;
+- each State it names with a line `State: #N` is a State sub-issue of the
+  slice, and when the slice is closed already, so the pull request is a fix,
+  it names at least one open State: the one the fix is filed as.
 
 **One comment answers a batch.** Settings that name the repository's standing
 Approvals issue (`"approvals": N`) let the owner answer many asks at once:
@@ -493,16 +496,20 @@ the push; a push for a closed slice, such as a fix, moves nothing. When a pull r
 the shared workflow comments on the slice, linking the pull request, and
 closes it, and the Project's Item closed workflow moves it to Done: a
 `Slice: #N` line is not one of GitHub's closing keywords, so GitHub does not
-close it. A slice GitHub closed already, through a closing keyword such as
-"Closes #N" beside it, still gets the comment; a slice that has it gets no
-second one. That job alone of a pull request's runs writes to issues. It runs only for
+close it. Each State under that slice the pull request names with a line
+`State: #N` gets the same comment and is closed as completed too; a State
+named only in prose stays open, a State closed as not planned is left as it
+is, and so is one under a slice the pull request does not name. A slice or
+State GitHub closed already, through a closing keyword such as "Closes #N"
+beside it, still gets the comment; one that has it gets no second one. That job alone of a pull request's runs writes to issues. It runs only for
 pull requests from the repository itself: a fork's run gets a read-only token, so
 a slice a fork's pull request builds is closed by hand.
 
 **What needs the owner.** A request the owner made on the work item is its
 own approval, linked as above. A fix needs none: it restores what the owner
 approved and changes nothing they would see beyond it, so it is filed as a
-State under the slice it fixes and its pull request names that slice. The
+State under the slice it fixes and its pull request names that slice, with
+`Slice: #N`, and the State, with `State: #N`, which closes the State on merge. The
 State needs no approval, though that slice's own approval rules still apply,
 as for any pull request naming it. A request made in chat is filed as a slice quoting the
 owner's words and proposed once. Anything else the agent adds, a fix filed
