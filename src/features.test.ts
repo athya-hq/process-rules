@@ -9,7 +9,7 @@ import { prIdentity } from './identity.ts';
 import { reviewsDue } from './reviews.ts';
 import { prePush, prWorkRules, propose } from './work.ts';
 
-const SETTINGS = `${ROOT}/.github/process-rules.json`;
+const SETTINGS = `${ROOT}/.github/niyam.json`;
 
 describe('features', () => {
   it('keeps every feature on for settings that list none', () => {
@@ -31,7 +31,7 @@ describe('features', () => {
 
   it('reads design, the older name of figma, and says so', () => {
     assert.deepEqual(featuresIn({ features: [' design ', 'board'] }), ['identity', 'board', 'figma']);
-    assert.deepEqual(renamedLines({ features: ['design', 'figma'] }), ['.github/process-rules.json lists "design", which is now named "figma"; run niyam onboard to rename it']);
+    assert.deepEqual(renamedLines({ features: ['design', 'figma'] }), ['.github/niyam.json lists "design", which is now named "figma"; run niyam onboard to rename it']);
     assert.deepEqual(renamedLines({ features: ['figma', 2] }), []);
     assert.deepEqual(renamedLines({}), []);
     assert.deepEqual(renamedLines({ features: ['constructor'] }), []);
@@ -80,7 +80,15 @@ describe('features', () => {
     sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity'] }));
     assert.equal(isOn(sys, ROOT, 'identity'), true);
     assert.equal(isOn(sys, ROOT, 'board'), false);
-    assert.equal(offLine('pr-design', 'figma'), 'pr-design: figma is off in .github/process-rules.json; nothing to check');
+    assert.equal(offLine('pr-design', 'figma'), 'pr-design: figma is off in .github/niyam.json; nothing to check');
+  });
+
+  it('reads a feature from .github/process-rules.json in a repo onboarded before niyam (P-50)', () => {
+    const sys = new FakeSys();
+    sys.files.delete(SETTINGS);
+    sys.files.set(`${ROOT}/.github/process-rules.json`, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity', 'board'] }));
+    assert.equal(isOn(sys, ROOT, 'board'), true);
+    assert.equal(isOn(sys, ROOT, 'figma'), false);
   });
 });
 
@@ -97,15 +105,19 @@ describe('pull request checks on a base not adopted yet', () => {
       sys.env = { GITHUB_EVENT_PATH: '/tmp/event.json', GITHUB_ACTOR: AGENT, GITHUB_REPOSITORY: 'example-org/example-app', GH_TOKEN: 'ghs_run', FIGMA_TOKEN: 'figd' };
       const { io, out } = capture();
       assert.equal(await check(sys, io), 0);
-      assert.deepEqual(out, [`${command}: the base branch has no .github/process-rules.json, so the repo is not adopted on its base yet; nothing to check`]);
+      assert.deepEqual(out, [`${command}: the base branch has no .github/niyam.json, so the repo is not adopted on its base yet; nothing to check`]);
       assert.deepEqual(sys.requests, []);
     });
   }
 
-  it('says nothing once the base has settings', () => {
+  it('says nothing once the base has settings, under either name', () => {
     const sys = new FakeSys();
     sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT }));
     assert.equal(notAdoptedLine(sys, ROOT, 'pr-identity'), undefined);
+    const older = new FakeSys();
+    older.files.delete(SETTINGS);
+    older.files.set(`${ROOT}/.github/process-rules.json`, JSON.stringify({ owner: 'example-owner', agent: AGENT }));
+    assert.equal(notAdoptedLine(older, ROOT, 'pr-identity'), undefined);
   });
 });
 
@@ -127,10 +139,10 @@ describe('checks of features that are off', () => {
   }
 
   for (const [command, check, line] of [
-    ['pr-identity', prIdentity, 'pr-identity: pr-identity is off in .github/process-rules.json; nothing to check'],
-    ['pr-work-rules', prWorkRules, 'pr-work-rules: work-rules is off in .github/process-rules.json; nothing to check'],
-    ['pr-design', prDesign, 'pr-design: figma is off in .github/process-rules.json; nothing to check'],
-    ['decisions-weekly', decisionsWeekly, 'decisions-weekly: decisions is off in .github/process-rules.json; nothing to check'],
+    ['pr-identity', prIdentity, 'pr-identity: pr-identity is off in .github/niyam.json; nothing to check'],
+    ['pr-work-rules', prWorkRules, 'pr-work-rules: work-rules is off in .github/niyam.json; nothing to check'],
+    ['pr-design', prDesign, 'pr-design: figma is off in .github/niyam.json; nothing to check'],
+    ['decisions-weekly', decisionsWeekly, 'decisions-weekly: decisions is off in .github/niyam.json; nothing to check'],
   ] as const) {
     it(`${command} passes, saying so, and asks GitHub nothing`, async () => {
       const sys = identityOnly();
@@ -145,7 +157,7 @@ describe('checks of features that are off', () => {
     const sys = identityOnly();
     const { io, out, err } = capture();
     assert.equal(await reviewsDue(sys, io), 0);
-    assert.deepEqual({ out, err }, { out: [], err: ['reviews-due: review is off in .github/process-rules.json; nothing to check'] });
+    assert.deepEqual({ out, err }, { out: [], err: ['reviews-due: review is off in .github/niyam.json; nothing to check'] });
   });
 
   it('pre-push checks only that an agent pushes as the agent, saying the work rules are off', async () => {
@@ -153,7 +165,7 @@ describe('checks of features that are off', () => {
     sys.acceptToken('ghs_run', AGENT);
     const { io, err } = capture();
     assert.equal(await prePush(sys, io, `refs/heads/w ${'a'.repeat(40)} refs/heads/w ${'b'.repeat(40)}`, 'https://github.com/example-org/example-app.git'), 0);
-    assert.deepEqual(err, ['pre-push: work-rules is off in .github/process-rules.json; nothing to check']);
+    assert.deepEqual(err, ['pre-push: work-rules is off in .github/niyam.json; nothing to check']);
   });
 
   it('reviews-due needs no token when review is off', async () => {
@@ -172,7 +184,7 @@ describe('checks of features that are off', () => {
     assert.equal(await decisionsWeekly(sys, io), 0);
     assert.ok(sys.requests.some((r) => r.url.includes('labels=veto')));
     assert.ok(sys.requests.some((r) => r.url.includes('labels=needs-owner')));
-    assert.deepEqual(out, ['decisions-weekly: decisions is off in .github/process-rules.json; nothing to check']);
+    assert.deepEqual(out, ['decisions-weekly: decisions is off in .github/niyam.json; nothing to check']);
   });
 
   it('the weekly job leaves vetoes alone when review is off', async () => {

@@ -354,7 +354,7 @@ describe('prIdentity with two agents', () => {
   });
   const team = (commits: Record<string, unknown>[], pushes: Push[]): FakeSys => {
     const sys = actions('opened', AGENT, commits, pushes);
-    sys.files.set(`${ROOT}/.github/process-rules.json`, JSON.stringify({ owner: ['example-owner', 'Second-Owner'], agent: [AGENT, OTHER] }));
+    sys.files.set(`${ROOT}/.github/niyam.json`, JSON.stringify({ owner: ['example-owner', 'Second-Owner'], agent: [AGENT, OTHER] }));
     sys.route('GET', `/users/${OTHER}`, { status: 200, json: { id: 43, login: OTHER } });
     return sys;
   };

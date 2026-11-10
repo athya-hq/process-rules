@@ -2,6 +2,7 @@ import { OLD_PRODUCT, PRODUCT } from './names.ts';
 import {
   API,
   BASE_ENV,
+  OLD_SETTINGS_PATH,
   SETTINGS_PATH,
   account,
   agentHere,
@@ -169,10 +170,10 @@ export const OLDER_GUARD_COMMANDS = [
 ];
 
 /** The comment above the workflow's schedule, naming when the decisions job runs. */
-function scheduleComment(schedule: string): string {
+function scheduleComment(schedule: string, settings: string = SETTINGS_PATH): string {
   return schedule === DEFAULT_SCHEDULE
     ? '  # The weekly decisions job: Mondays, 06:17 UTC.'
-    : `  # The decisions job: cron ${schedule}, UTC, as "schedule" in ${SETTINGS_PATH} sets it.`;
+    : `  # The decisions job: cron ${schedule}, UTC, as "schedule" in ${settings} sets it.`;
 }
 
 /** The pull request events the workflow runs on, with why: since P-46, closed too. */
@@ -303,7 +304,7 @@ function addAsksJob(before: string, version: string, figma: boolean): string | u
 }
 
 /** The workflow's head, down to its jobs, which every template shares; `asks` adds the needs-owner job's triggers. */
-function workflowHead(branch: string, version: string, comments: string[], schedule = DEFAULT_SCHEDULE, types = TRIGGER_TYPES, asks = true): string[] {
+function workflowHead(branch: string, version: string, comments: string[], schedule = DEFAULT_SCHEDULE, types = TRIGGER_TYPES, asks = true, settings: string = SETTINGS_PATH): string[] {
   return [
     `# Written by process-rules onboard: the shared process-rules checks at v${version}.`,
     ...comments,
@@ -315,7 +316,7 @@ function workflowHead(branch: string, version: string, comments: string[], sched
     '  push:',
     `    branches: [${JSON.stringify(branch)}]`,
     ...(asks ? ASK_TRIGGERS : []),
-    scheduleComment(schedule),
+    scheduleComment(schedule, settings),
     '  schedule:',
     `    - cron: '${schedule}'`,
     ...(asks ? HOURLY_CRON : []),
@@ -371,7 +372,7 @@ function callChecks(version: string, secrets: string[]): string[] {
  * The Figma secrets are passed only when the figma feature is on; the
  * weekly job runs on the settings' `schedule`.
  */
-export function workflow(branch: string, version: string, figma: boolean, schedule = DEFAULT_SCHEDULE): string {
+export function workflow(branch: string, version: string, figma: boolean, schedule = DEFAULT_SCHEDULE, settings: string = SETTINGS_PATH): string {
   const secrets = figma ? FIGMA_SECRETS : [];
   return [
     ...workflowHead(
@@ -382,6 +383,9 @@ export function workflow(branch: string, version: string, figma: boolean, schedu
         SPLIT_COMMENT,
       ],
       schedule,
+      TRIGGER_TYPES,
+      true,
+      settings,
     ),
     '  # Pull request and push runs: read-only.',
     '  process-rules:',
@@ -471,11 +475,12 @@ export function workflowUpdate(
   version: string,
   figma: boolean,
   schedule = DEFAULT_SCHEDULE,
+  settings: string = SETTINGS_PATH,
 ):
   | { kind: 'same' }
   | { kind: 'write' | 'replace-older' | 'replace'; text: string; from?: string }
   | { kind: 'repin'; text: string; from?: string; branch?: string; schedule?: string; secrets?: true; merged?: true; asks?: true; authors?: true } {
-  const wanted = workflow(branch, version, figma, schedule);
+  const wanted = workflow(branch, version, figma, schedule, settings);
   if (before === undefined) return { kind: 'write', text: wanted };
   if (before === wanted) return { kind: 'same' };
   const pins = workflowPins(before);
@@ -488,13 +493,13 @@ export function workflowUpdate(
   const merged = /^ {2}process-rules-merged:\s*$/m.test(before);
   const added = split && !merged && pins.length === 4 && from !== undefined ? addMergedJob(before, from, figma) : undefined;
   if (added !== undefined) {
-    const update = workflowUpdate(added, branch, version, figma, schedule);
+    const update = workflowUpdate(added, branch, version, figma, schedule, settings);
     return { ...(update.kind === 'repin' ? update : { text: added }), kind: 'repin', merged: true };
   }
   const asks = /^ {2}process-rules-asks:\s*$/m.test(before);
   const withAsks = split && merged && !asks && pins.length === 6 && from !== undefined ? addAsksJob(before, from, figma) : undefined;
   if (withAsks !== undefined) {
-    const update = workflowUpdate(withAsks, branch, version, figma, schedule);
+    const update = workflowUpdate(withAsks, branch, version, figma, schedule, settings);
     return { ...(update.kind === 'repin' ? update : { text: withAsks }), kind: 'repin', asks: true };
   }
   if (split && merged && asks && pins.length === 8) {
@@ -511,7 +516,7 @@ export function workflowUpdate(
         moved ? `${head}${flowScalar(branch, quote)}${tail}` : line,
       )
       .replace(SCHEDULE, (line: string, comment: string | undefined, head: string, quote: string, _old: string, tail: string) =>
-        rescheduled ? `${comment === undefined ? '' : `${scheduleComment(schedule)}\n`}${head}${quote || "'"}${schedule}${quote || "'"}${tail}` : line,
+        rescheduled ? `${comment === undefined ? '' : `${scheduleComment(schedule, settings)}\n`}${head}${quote || "'"}${schedule}${quote || "'"}${tail}` : line,
       );
     const secrets = figma ? `${FIGMA_SECRETS.join('\n')}\n` : '';
     const text = pinned.replace(SECRETS_AFTER_REF, (_, ref: string) => `${ref}${secrets}`);
@@ -835,6 +840,8 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     const before = held ? held.before : fileAt(path);
     changes.set(path, { path, before, text, what: held ? `${held.what}; ${what}` : what });
   };
+  // The settings file keeps the name it has: a repo onboarded before niyam keeps .github/process-rules.json, which older CLIs read (P-50).
+  const settingsFile = fileAt(SETTINGS_PATH) === undefined && fileAt(OLD_SETTINGS_PATH) !== undefined ? OLD_SETTINGS_PATH : SETTINGS_PATH;
   // Before anything is asked or planned: a checkout a newer release onboarded is never moved back.
   const aheadHere = newerPinHere(fileAt, version);
   if (aheadHere !== undefined) return refuseOlder(io, slug, aheadHere, version);
@@ -874,24 +881,24 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
   let agent: string;
   let features: Feature[];
   let schedule = DEFAULT_SCHEDULE;
-  if (fileAt(SETTINGS_PATH) !== undefined) {
+  if (fileAt(settingsFile) !== undefined) {
     const settings = loadSettings(sys, root);
     if (chosen) {
-      io.err(`onboard: ${SETTINGS_PATH} already lists its features; turn one more on with --add <feature>`);
+      io.err(`onboard: ${settingsFile} already lists its features; turn one more on with --add <feature>`);
       return 1;
     }
     const [namedOwner, namedAgent] = named;
     if ((namedOwner && !anyLogin(settings.owners, namedOwner)) || (namedAgent && !anyLogin(settings.agents, namedAgent))) {
-      io.err(`onboard: ${SETTINGS_PATH} already names owner ${either(settings.owners)} and agent ${either(settings.agents)}; edit or delete it to change them`);
+      io.err(`onboard: ${settingsFile} already names owner ${either(settings.owners)} and agent ${either(settings.agents)}; edit or delete it to change them`);
       return 1;
     }
     // With several agents, the one named, else the one set up here.
-    const here = namedAgent ? { agent: namedAgent } : agentHere(sys, settings.agents);
+    const here = namedAgent ? { agent: namedAgent } : agentHere(sys, settings.agents, settingsFile);
     if ('problem' in here) {
       io.err(`onboard: ${here.problem}; name the owner and the agent: niyam onboard <owner> <agent>`);
       return 1;
     }
-    let raw = JSON.parse(fileAt(SETTINGS_PATH) as string) as Record<string, unknown>;
+    let raw = JSON.parse(fileAt(settingsFile) as string) as Record<string, unknown>;
     features = featuresIn(raw);
     schedule = scheduleIn(raw);
     // With several owners, the one named, else the one the run's sign-in is, which must be listed: after the
@@ -899,7 +906,7 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     let chosenOwner = namedOwner ?? (settings.owners.length === 1 ? settings.owners[0] : undefined);
     if (!chosenOwner) {
       if (dryRun) {
-        io.err(`onboard: ${SETTINGS_PATH} names the owners ${either(settings.owners)}; name yours for a dry run, which signs in to nothing: niyam onboard <owner> --dry-run`);
+        io.err(`onboard: ${settingsFile} names the owners ${either(settings.owners)}; name yours for a dry run, which signs in to nothing: niyam onboard <owner> --dry-run`);
         return 1;
       }
       const signed = await signIn(settings.owners);
@@ -908,11 +915,11 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
         return 1;
       }
       if (!anyLogin(settings.owners, signed.login)) {
-        io.err(`onboard: the browser signed in to GitHub as ${signed.login}, but ${SETTINGS_PATH} names the owners ${either(settings.owners)}; sign in there as one of them and run it again`);
+        io.err(`onboard: the browser signed in to GitHub as ${signed.login}, but ${settingsFile} names the owners ${either(settings.owners)}; sign in there as one of them and run it again`);
         return 1;
       }
       chosenOwner = signed.login;
-      notes.push(`- onboard signed in before showing its plan: ${SETTINGS_PATH} names several owners, and only the sign-in tells which one ran it.`);
+      notes.push(`- onboard signed in before showing its plan: ${settingsFile} names several owners, and only the sign-in tells which one ran it.`);
     }
     // GitHub's spelling, which the keychain, the session file and commits use.
     owner = (await account(sys, chosenOwner)).login;
@@ -934,10 +941,10 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
           ? []
           : [fileKey ? 'take out "figma" and set its library key as the FIGMA_LIBRARY Actions secret' : 'take out "figma", since the library key belongs in the FIGMA_LIBRARY Actions secret']),
       ];
-      pull.push({ label: 'process-rules.json', detail: [...(renamed ? ['design → figma'] : []), ...(raw.figma === undefined ? [] : ['figma key out'])].join(', ') });
+      pull.push({ label: settingsFile.slice('.github/'.length), detail: [...(renamed ? ['design → figma'] : []), ...(raw.figma === undefined ? [] : ['figma key out'])].join(', ') });
       const { figma: _figma, ...rest } = raw;
       raw = { ...rest, ...(rest.features === undefined ? {} : { features }) };
-      change(SETTINGS_PATH, `${JSON.stringify(raw, null, 2)}\n`, updates.join(' and '));
+      change(settingsFile, `${JSON.stringify(raw, null, 2)}\n`, updates.join(' and '));
       if (fileKey) {
         github.push({ label: 'FIGMA_LIBRARY secret' });
         steps.push({
@@ -961,13 +968,13 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     }
     if (add && !features.includes(add)) {
       features = FEATURES.filter((feature) => features.includes(feature) || feature === add);
-      pull.push({ label: 'process-rules.json', detail: `turn ${add} on` });
+      pull.push({ label: settingsFile.slice('.github/'.length), detail: `turn ${add} on` });
       // The pull request opens only once every step has finished, so settings never claim a half-set-up feature.
-      change(SETTINGS_PATH, `${JSON.stringify({ ...raw, features }, null, 2)}\n`, `turn ${add} on`);
+      change(settingsFile, `${JSON.stringify({ ...raw, features }, null, 2)}\n`, `turn ${add} on`);
     }
   } else {
     if (add) {
-      io.err(`onboard: there is no ${SETTINGS_PATH} to add to; run niyam onboard <owner> <agent> first`);
+      io.err(`onboard: there is no ${settingsFile} to add to; run niyam onboard <owner> <agent> first`);
       return 1;
     }
     features = chosen ?? [...FEATURES];
@@ -1003,8 +1010,8 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
       warnings.push(`personal account: ${typed.join(', ')} left off`);
       features = features.filter((feature) => !typed.includes(feature));
     }
-    pull.push({ label: 'process-rules.json', detail: `new, ${features.length} feature${features.length === 1 ? '' : 's'} on` });
-    change(SETTINGS_PATH, `${JSON.stringify({ owner, agent, features }, null, 2)}\n`, `owner ${owner} approves, agent ${agent} builds, with ${features.join(', ')} on`);
+    pull.push({ label: settingsFile.slice('.github/'.length), detail: `new, ${features.length} feature${features.length === 1 ? '' : 's'} on` });
+    change(settingsFile, `${JSON.stringify({ owner, agent, features }, null, 2)}\n`, `owner ${owner} approves, agent ${agent} builds, with ${features.join(', ')} on`);
   }
   const on = (feature: Feature): boolean => features.includes(feature);
   const workflowNeeded = on('pr-identity') || on('work-rules') || on('figma') || on('decisions') || on('review');
@@ -1093,11 +1100,11 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
   // The shared checks run only for features that need them.
   const workflowFrom = workflowPins(fileAt(WORKFLOW_PATH) ?? '')[0];
   const workflowFor = (branch: string): void => {
-    const update = workflowUpdate(fileAt(WORKFLOW_PATH), branch, version, on('figma'), schedule);
-    if (update.kind !== 'same') change(WORKFLOW_PATH, update.text, workflowWhat(update, version, on('figma'), SETTINGS_PATH));
+    const update = workflowUpdate(fileAt(WORKFLOW_PATH), branch, version, on('figma'), schedule, settingsFile);
+    if (update.kind !== 'same') change(WORKFLOW_PATH, update.text, workflowWhat(update, version, on('figma'), settingsFile));
   };
   if (workflowNeeded) {
-    const update = planned === undefined ? undefined : workflowUpdate(fileAt(WORKFLOW_PATH), planned, version, on('figma'), schedule);
+    const update = planned === undefined ? undefined : workflowUpdate(fileAt(WORKFLOW_PATH), planned, version, on('figma'), schedule, settingsFile);
     if (update === undefined) pull.push({ label: 'workflow', detail: fileAt(WORKFLOW_PATH) === undefined ? 'new' : 'write or update' });
     else if (update.kind !== 'same') pull.push({ label: 'workflow', detail: workflowDetail(update, version, on('figma')) });
   }
@@ -1105,7 +1112,7 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
   if (on('board')) {
     github.push({ label: 'board', detail: 'set up or check' });
     if (await byOrganisation()) github.push({ label: 'issue types', detail: 'org-wide, if missing' });
-    const projectTitle = (JSON.parse(fileAt(SETTINGS_PATH) as string) as { project?: unknown }).project;
+    const projectTitle = (JSON.parse(fileAt(settingsFile) as string) as { project?: unknown }).project;
     steps.push({
       label: 'board',
       owner: true,

@@ -3,7 +3,19 @@ import type { Sys } from './types.ts';
 import { GITHUB_API, GITHUB_HOST_RE, GITHUB_NOREPLY, GITHUB_SSH, GITHUB_SSH_443, GITHUB_WEB } from './host.ts';
 
 /** The adopting repo's settings file, written by `onboard`. */
-export const SETTINGS_PATH = '.github/process-rules.json';
+export const SETTINGS_PATH = '.github/niyam.json';
+/** Its name before niyam, still read where the new one is missing (P-50). */
+export const OLD_SETTINGS_PATH = '.github/process-rules.json';
+
+/** The settings file a repo at `root` has, relative to it: the new name, else the old one, else the new one. */
+export function settingsPathIn(sys: Sys, root: string): string {
+  return !sys.exists(`${root}/${SETTINGS_PATH}`) && sys.exists(`${root}/${OLD_SETTINGS_PATH}`) ? OLD_SETTINGS_PATH : SETTINGS_PATH;
+}
+
+/** Whether a repo at `root` has a settings file under either name. */
+export function hasSettings(sys: Sys, root: string): boolean {
+  return sys.exists(`${root}/${settingsPathIn(sys, root)}`);
+}
 /** What GH_TOKEN holds when the token store has none, so nothing falls back to the owner. */
 export const NO_TOKEN = 'process-rules-no-agent-token';
 export const API = GITHUB_API;
@@ -50,39 +62,40 @@ export interface Settings {
 
 /** Reads and checks the settings file at `root`; throws with the reason. */
 export function loadSettings(sys: Sys, root: string): Settings {
-  const path = `${root}/${SETTINGS_PATH}`;
+  const name = settingsPathIn(sys, root);
+  const path = `${root}/${name}`;
   if (!sys.exists(path)) {
     throw new Error(`${SETTINGS_PATH} not found in ${root}`);
   }
   const raw: unknown = JSON.parse(sys.read(path));
-  const owners = logins(raw, 'owner');
-  const agents = logins(raw, 'agent');
+  const owners = logins(raw, 'owner', name);
+  const agents = logins(raw, 'agent', name);
   const both = owners.find((owner) => anyLogin(agents, owner));
   if (both) {
-    throw new Error(`${SETTINGS_PATH}: ${both} is named as both owner and agent; they must be different accounts`);
+    throw new Error(`${name}: ${both} is named as both owner and agent; they must be different accounts`);
   }
-  const approvals = approvalsIn(raw);
+  const approvals = approvalsIn(raw, name);
   return { owners, agents, ...(approvals === undefined ? {} : { approvals }) };
 }
 
 /** The Approvals issue the settings name as `"approvals": N`, or undefined when they name none; anything but an issue number is refused. */
-function approvalsIn(raw: unknown): number | undefined {
+function approvalsIn(raw: unknown, file: string): number | undefined {
   const value = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>).approvals : undefined;
   if (value === undefined) return undefined;
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1) {
-    throw new Error(`${SETTINGS_PATH}: "approvals" must be the number of the repository's Approvals issue, such as 42`);
+    throw new Error(`${file}: "approvals" must be the number of the repository's Approvals issue, such as 42`);
   }
   return value;
 }
 
-function logins(raw: unknown, name: string): string[] {
+function logins(raw: unknown, name: string, file: string): string[] {
   const value =
     typeof raw === 'object' && raw !== null && name in raw
       ? (raw as Record<string, unknown>)[name]
       : undefined;
   const list = Array.isArray(value) ? (value as unknown[]) : [value];
   if (list.length === 0 || !list.every((login) => typeof login === 'string' && LOGIN.test(login))) {
-    throw new Error(`${SETTINGS_PATH}: "${name}" must be a GitHub login or a non-empty list of them`);
+    throw new Error(`${file}: "${name}" must be a GitHub login or a non-empty list of them`);
   }
   // A login listed twice, in any case, is one account.
   return (list as string[]).filter((login, i) => list.findIndex((other) => sameLogin(login, other as string)) === i);
@@ -103,14 +116,14 @@ export function agentsSetUp(sys: Sys): string[] {
  * the list, that one; with more, the one `machine` set up here. None set up,
  * or more than one, is a problem: never a guess.
  */
-export function agentHere(sys: Sys, agents: readonly string[]): { agent: string } | { problem: string } {
+export function agentHere(sys: Sys, agents: readonly string[], file: string = SETTINGS_PATH): { agent: string } | { problem: string } {
   if (agents.length === 1) return { agent: agents[0] as string };
   const here = agents.filter((agent) => anyLogin(agentsSetUp(sys), agent));
   if (here.length === 1) return { agent: here[0] as string };
   return {
     problem: here.length === 0
-      ? `${SETTINGS_PATH} names the agents ${either(agents)}, and niyam machine has set up none of them on this machine`
-      : `${SETTINGS_PATH} names the agents ${either(agents)}, and niyam machine has set up ${here.join(' and ')} on this machine, so which one this session works as cannot be told; remove the others' folders under ~/.config/process-rules`,
+      ? `${file} names the agents ${either(agents)}, and niyam machine has set up none of them on this machine`
+      : `${file} names the agents ${either(agents)}, and niyam machine has set up ${here.join(' and ')} on this machine, so which one this session works as cannot be told; remove the others' folders under ~/.config/process-rules`,
   };
 }
 
@@ -126,10 +139,10 @@ export function agentFrom(sys: Sys, named: string | undefined): string {
   }
   const top = sys.exec('git', ['rev-parse', '--show-toplevel'], { cwd: sys.cwd });
   const root = top.stdout.trim();
-  if (top.code !== 0 || !sys.exists(`${root}/${SETTINGS_PATH}`)) {
+  if (top.code !== 0 || !hasSettings(sys, root)) {
     throw new Error(`name the agent account after the command, or run it in a repo whose ${SETTINGS_PATH} names one`);
   }
-  const here = agentHere(sys, loadSettings(sys, root).agents);
+  const here = agentHere(sys, loadSettings(sys, root).agents, settingsPathIn(sys, root));
   if ('problem' in here) throw new Error(`${here.problem}; name the agent account after the command`);
   return here.agent;
 }
@@ -285,16 +298,28 @@ export function launcherScript(node: string, cli: string, command?: string): str
  * gh and git fail instead of using the owner's login. GH_CONFIG_DIR is empty
  * for the same reason.
  */
-export function sessionScript(agent: string, id: number, paths: Paths, store: TokenStore = KEYCHAIN): string {
+export function sessionScript(agent: string, id: number, paths: Paths, store: TokenStore = KEYCHAIN, read: string = store.readCommand(agent)): string {
   return [
     `# Written by process-rules machine. Makes this shell act as ${agent} on GitHub.`,
-    `export GH_TOKEN="$(${store.readCommand(agent)})"`,
+    `export GH_TOKEN="$(${read})"`,
     `[ -n "$GH_TOKEN" ] || export GH_TOKEN=${NO_TOKEN}`,
     // Inherited `git -c` and config-file injection could bring back a helper; askpass could prompt.
     `unset ${UNSET.join(' ')}`,
     ...identityVars(agent, id, paths).map(([name, value]) => `export ${name}=${quote(value)}`),
     '',
   ].join('\n');
+}
+
+/**
+ * Whether `script` is a session file `machine` writes for the agent: this
+ * release's, or an older release's that differs only in how it reads the
+ * token (before niyam, from the keychain service `process-rules`, which is
+ * still there). An older one still works; `doctor` says so, and `machine`
+ * rewrites it.
+ */
+export function sessionFileIs(script: string, agent: string, id: number, paths: Paths, store: TokenStore = KEYCHAIN): 'current' | 'older' | undefined {
+  if (script === sessionScript(agent, id, paths, store)) return 'current';
+  return (store.olderReadCommands?.(agent) ?? []).some((read) => script === sessionScript(agent, id, paths, store, read)) ? 'older' : undefined;
 }
 
 /** The environment `sessionScript` gives a shell, for running git as the agent from here. */

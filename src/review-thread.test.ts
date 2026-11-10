@@ -115,7 +115,7 @@ describe('reviewThread', () => {
   it('with two agents, answers as either on a pull request either opened, and refuses an owner', async () => {
     const team = (login: string, author: string): FakeSys => {
       const sys = session({ author: { login: author } });
-      sys.files.set(`${ROOT}/.github/process-rules.json`, JSON.stringify({ owner: ['example-owner', 'Second-Owner'], agent: [AGENT, 'OtherBot'] }));
+      sys.files.set(`${ROOT}/.github/niyam.json`, JSON.stringify({ owner: ['example-owner', 'Second-Owner'], agent: [AGENT, 'OtherBot'] }));
       sys.acceptToken('ghp_good', login);
       return sys;
     };

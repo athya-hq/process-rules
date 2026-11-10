@@ -19,30 +19,51 @@ export interface TokenStore {
   store(sys: Sys, agent: string, token: string): boolean;
   /** A shell command printing the agent's token, for the session file, which reads it on each use. */
   readCommand(agent: string): string;
+  /** The commands older releases wrote in the session file, which still read the token. */
+  olderReadCommands?(agent: string): string[];
+  /** Whether the token is held only under an older name, so `machine` copies it to the current one. */
+  onlyOlder?(sys: Sys, agent: string): boolean;
 }
 
-/** The keychain item holding the agent account's token: service, account = login. */
-export const KEYCHAIN_SERVICE = 'process-rules';
+/**
+ * The keychain item holding the agent account's token: service, account =
+ * login. Releases before niyam stored it under the service `process-rules`,
+ * which is still read and never deleted, so an older CLI on the Mac keeps
+ * working (P-50). While that entry is there, a new token is stored under
+ * both, so an older CLI never reads one `machine` replaced.
+ */
+export const KEYCHAIN_SERVICE = 'niyam';
+export const OLD_KEYCHAIN_SERVICE = 'process-rules';
 const SECURITY = '/usr/bin/security';
+
+function find(service: string, agent: string): string {
+  return `${SECURITY} find-generic-password -s ${service} -a ${agent} -w 2>/dev/null`;
+}
+
+function readFrom(sys: Sys, service: string, agent: string): string | undefined {
+  const result = sys.exec(SECURITY, ['find-generic-password', '-s', service, '-a', agent, '-w']);
+  const token = result.stdout.trim();
+  return result.code === 0 && token ? token : undefined;
+}
 
 /** The macOS keychain, through Apple's `security` command. */
 export const KEYCHAIN: TokenStore = {
   where: "this Mac's keychain",
   item: (agent) => `service ${KEYCHAIN_SERVICE}, account ${agent}`,
-  read(sys, agent) {
-    const result = sys.exec(SECURITY, ['find-generic-password', '-s', KEYCHAIN_SERVICE, '-a', agent, '-w']);
-    const token = result.stdout.trim();
-    return result.code === 0 && token ? token : undefined;
-  },
+  read: (sys, agent) => readFrom(sys, KEYCHAIN_SERVICE, agent) ?? readFrom(sys, OLD_KEYCHAIN_SERVICE, agent),
   store(sys, agent, token) {
     // Only characters the `security -i` prompt reads as one word.
     if (!/^[A-Za-z0-9_]+$/.test(token)) return false;
+    // While the old entry is there, a new token goes under both names, so an older CLI never reads a replaced one.
+    const services = readFrom(sys, OLD_KEYCHAIN_SERVICE, agent) === undefined ? [KEYCHAIN_SERVICE] : [KEYCHAIN_SERVICE, OLD_KEYCHAIN_SERVICE];
     const result = sys.exec(SECURITY, ['-i'], {
-      input: `add-generic-password -U -s ${KEYCHAIN_SERVICE} -a ${agent} -w ${token}\n`,
+      input: services.map((service) => `add-generic-password -U -s ${service} -a ${agent} -w ${token}\n`).join(''),
     });
-    return result.code === 0 && KEYCHAIN.read(sys, agent) === token;
+    return result.code === 0 && services.every((service) => readFrom(sys, service, agent) === token);
   },
-  readCommand: (agent) => `${SECURITY} find-generic-password -s ${KEYCHAIN_SERVICE} -a ${agent} -w 2>/dev/null`,
+  readCommand: (agent) => `${find(KEYCHAIN_SERVICE, agent)} || ${find(OLD_KEYCHAIN_SERVICE, agent)}`,
+  olderReadCommands: (agent) => [find(OLD_KEYCHAIN_SERVICE, agent)],
+  onlyOlder: (sys, agent) => readFrom(sys, KEYCHAIN_SERVICE, agent) === undefined && readFrom(sys, OLD_KEYCHAIN_SERVICE, agent) !== undefined,
 };
 
 /** Each platform's store, by Node's name for the platform. */

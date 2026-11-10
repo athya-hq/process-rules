@@ -1,4 +1,4 @@
-import { API, type Settings, anyLogin, loadSettings } from './agent.ts';
+import { API, type Settings, anyLogin, hasSettings, loadSettings } from './agent.ts';
 import { ownersAlone } from './edits.ts';
 import { approvedIn, batchAnswers, firstIssue } from './approvals.ts';
 import { isOn, notAdoptedLine, offLine } from './features.ts';
@@ -221,7 +221,7 @@ export function commentBodies(line: string, read: ReadFile): Text[] {
 /** The repository settings' owners for a command run in `cwd`: the nearest folder up that has them; none outside a client. */
 export function ownersAround(sys: Sys, cwd: string): string[] {
   for (let dir = cwd; ; dir = dir.replace(/\/[^/]*$/, '')) {
-    if (sys.exists(`${dir}/.github/process-rules.json`)) {
+    if (hasSettings(sys, dir)) {
       try {
         return loadSettings(sys, dir).owners;
       } catch {

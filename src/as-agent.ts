@@ -8,7 +8,7 @@ import {
   sessionEnv,
   sessionNames,
   sessionRecord,
-  sessionScript,
+  sessionFileIs,
 } from './agent.ts';
 import { cloudToken } from './cloud.ts';
 import { recordedAgent, reachesGitHub, refusal } from './guard.ts';
@@ -97,7 +97,7 @@ function macEnv(sys: Sys, agent: string): Env {
     return { problem: `${paths.session} is missing or cannot be read` };
   }
   const names = sessionNames(script);
-  if (!names || !sameLogin(names.agent, agent) || script !== sessionScript(names.agent, names.id, paths, store)) {
+  if (!names || !sameLogin(names.agent, agent) || !sessionFileIs(script, names.agent, names.id, paths, store)) {
     return { problem: `${paths.session} is out of date, or not the file niyam machine writes, for ${agent}` };
   }
   const token = store.read(sys, names.agent);

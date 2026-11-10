@@ -54,7 +54,7 @@ Commands:
 
 as-agent's command gets the session's agent identity, stdin, stdout and stderr, and its
 exit code is as-agent's; exit ${LOCKED} means the session does not work as the agent, and nothing ran.
-Without [agent], machine and doctor use the agent account .github/process-rules.json names
+Without [agent], machine and doctor use the agent account .github/niyam.json (or .github/process-rules.json) names
 in the repo around the working directory.
 onboard suggests the owner and agent the first time (or name them); after that it reads them from that file.
 Features: identity (always on), pr-identity, board, work-rules, figma, decisions, review.

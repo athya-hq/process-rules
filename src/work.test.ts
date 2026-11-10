@@ -842,15 +842,15 @@ describe('prWorkRules', () => {
 
     it('passes one changing only the files onboard writes, naming no slice', async () => {
       const sys = actions(onboardPull('Example-Org/Example-App'));
-      files(sys, [{ filename: '.github/process-rules.json', status: 'modified' }, { filename: '.claude/settings.json', status: 'added' }, { filename: '.github/workflows/process-rules.yml' }, { filename: '.github/process-rules/cloud-setup.sh', status: 'added' }]);
+      files(sys, [{ filename: '.github/niyam.json', status: 'modified' }, { filename: '.claude/settings.json', status: 'added' }, { filename: '.github/workflows/process-rules.yml' }, { filename: '.github/process-rules/cloud-setup.sh', status: 'added' }]);
       assert.deepEqual(await check(sys), { code: 0, out: ["✓ pr-work-rules: #42 is onboard's, changing only the files onboard writes, so it names no slice"], err: [] });
       assert.equal(sys.requests[0]?.token, 'ghs_run');
     });
 
     for (const [name, list] of [
-      ['changes another file', [{ filename: '.github/process-rules.json' }, { filename: 'src/app.ts' }]],
+      ['changes another file', [{ filename: '.github/niyam.json' }, { filename: 'src/app.ts' }]],
       // onboard leaves CODEOWNERS to the client, so a change to it is the work rules' to judge.
-      ...(['.github/CODEOWNERS', 'CODEOWNERS', 'docs/CODEOWNERS'] as const).map((filename) => [`changes ${filename}`, [{ filename: '.github/process-rules.json' }, { filename }]] as const),
+      ...(['.github/CODEOWNERS', 'CODEOWNERS', 'docs/CODEOWNERS'] as const).map((filename) => [`changes ${filename}`, [{ filename: '.github/niyam.json' }, { filename }]] as const),
       ['moves another file into one onboard writes', [{ filename: '.claude/settings.json', previous_filename: 'src/settings.json' }]],
       ['deletes one onboard writes', [{ filename: '.github/workflows/process-rules.yml', status: 'removed' }]],
     ] as const) {
@@ -1237,7 +1237,7 @@ describe('prePush', () => {
 
     it('moves nothing with the board feature off', async () => {
       const sys = session('Slice: #12');
-      sys.files.set(`${ROOT}/.github/process-rules.json`, JSON.stringify({ owner: OWNER, agent: AGENT, features: ['identity', 'work-rules'] }));
+      sys.files.set(`${ROOT}/.github/niyam.json`, JSON.stringify({ owner: OWNER, agent: AGENT, features: ['identity', 'work-rules'] }));
       const board = new RestBoard(sys);
       assert.deepEqual(await push(sys, pushing), { code: 0, err: [] });
       assert.deepEqual(moves(board), []);
@@ -1335,12 +1335,20 @@ describe('prMerged', () => {
 
   it('closes nothing with the work rules off, or before the repo adopts niyam', async () => {
     const off = actions(merged('Slice: #12'));
-    off.files.set(`${ROOT}/.github/process-rules.json`, JSON.stringify({ owner: OWNER, agent: AGENT, features: ['identity'] }));
-    assert.equal((await run(off)).out[0], 'pr-merged: work-rules is off in .github/process-rules.json; nothing to check');
+    off.files.set(`${ROOT}/.github/niyam.json`, JSON.stringify({ owner: OWNER, agent: AGENT, features: ['identity'] }));
+    assert.equal((await run(off)).out[0], 'pr-merged: work-rules is off in .github/niyam.json; nothing to check');
     const before = actions(merged('Slice: #12'));
-    before.files.delete(`${ROOT}/.github/process-rules.json`);
+    before.files.delete(`${ROOT}/.github/niyam.json`);
     assert.match((await run(before)).out[0] ?? '', /^pr-merged: /);
     assert.deepEqual([...writes(off), ...writes(before)], []);
+  });
+
+  it('reads the work rules off from .github/process-rules.json in a repo onboarded before niyam (P-50)', async () => {
+    const older = actions(merged('Slice: #12'));
+    older.files.delete(`${ROOT}/.github/niyam.json`);
+    older.files.set(`${ROOT}/.github/process-rules.json`, JSON.stringify({ owner: OWNER, agent: AGENT, features: ['identity'] }));
+    assert.match((await run(older)).out[0] ?? '', /^pr-merged: work-rules is off in /);
+    assert.deepEqual(writes(older), []);
   });
 
   it('closes nothing in a personal repository', async () => {
@@ -1474,7 +1482,7 @@ describe('propose', () => {
   }
   /** Settings that name #700 as the Approvals issue. */
   const withApprovals = (sys: FakeSys): void => {
-    sys.files.set(`${ROOT}/.github/process-rules.json`, JSON.stringify({ ...JSON.parse(SETTINGS), approvals: APPROVALS }));
+    sys.files.set(`${ROOT}/.github/niyam.json`, JSON.stringify({ ...JSON.parse(SETTINGS), approvals: APPROVALS }));
   };
   const BATCH = `example-owner answers all 2 with one comment on https://github.com/${SLUG}/issues/700, the Approvals issue, whose first line is this (deleting a number leaves that one waiting):`;
   const posted = (sys: FakeSys): string[] =>
@@ -1746,7 +1754,7 @@ describe('propose', () => {
 
   it('passes when the work rules are off', async () => {
     const { sys } = session();
-    sys.files.set(`${ROOT}/.github/process-rules.json`, JSON.stringify({ ...JSON.parse(SETTINGS), features: ['identity'] }));
+    sys.files.set(`${ROOT}/.github/niyam.json`, JSON.stringify({ ...JSON.parse(SETTINGS), features: ['identity'] }));
     const { code, out } = await run(sys);
     assert.equal(code, 0);
     assert.match(out[0] ?? '', /^propose: .*work-rules/);
@@ -1835,7 +1843,7 @@ describe('with two owners and two agents', () => {
     const actions = (login: string, body: string | null): FakeSys => {
       const sys = new FakeSys();
       sys.env = { GITHUB_EVENT_PATH: EVENT, GITHUB_REPOSITORY: SLUG, GH_TOKEN: 'ghs_run' };
-      sys.files.set(`${ROOT}/.github/process-rules.json`, TEAM_SETTINGS);
+      sys.files.set(`${ROOT}/.github/niyam.json`, TEAM_SETTINGS);
       sys.files.set(EVENT, JSON.stringify({ pull_request: { number: 40, body, user: { login }, head: { ref: 'work' } } }));
       github(sys, graph().issue);
       return sys;
@@ -1852,7 +1860,7 @@ describe('with two owners and two agents', () => {
   it('lets either agent push, and refuses an owner', async () => {
     const push = async (login: string): Promise<{ code: number; err: string[] }> => {
       const sys = new FakeSys();
-      sys.files.set(`${ROOT}/.github/process-rules.json`, TEAM_SETTINGS);
+      sys.files.set(`${ROOT}/.github/niyam.json`, TEAM_SETTINGS);
       sys.env = { PROCESS_RULES_AGENT: login, GH_TOKEN: 'ghp_good' };
       sys.execOverride = (call) => (call.args[0] === 'log' ? { code: 0, stdout: 'Slice: #12\n', stderr: '' } : undefined);
       github(sys, graph().issue);
@@ -1870,7 +1878,7 @@ describe('with two owners and two agents', () => {
 
   it('proposes as the second agent, asking both owners', async () => {
     const sys = new FakeSys();
-    sys.files.set(`${ROOT}/.github/process-rules.json`, TEAM_SETTINGS);
+    sys.files.set(`${ROOT}/.github/niyam.json`, TEAM_SETTINGS);
     sys.env = { PROCESS_RULES_AGENT: AGENT_2, GH_TOKEN: 'ghp_good' };
     sys.acceptToken('ghp_good', AGENT_2);
     github(sys, added().issue);
