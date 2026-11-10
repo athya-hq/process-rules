@@ -46,7 +46,10 @@
   },
   "permissions": {
     "allow": [
-      "Bash(process-rules review-thread *)"
+      "Bash(process-rules review-thread *)",
+      "mcp__ccd_pr__bind_pr",
+      "mcp__ccd_pr__get_status",
+      "mcp__ccd_pr__set_monitor"
     ]
   }
 }
