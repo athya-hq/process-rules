@@ -25,9 +25,10 @@ const VERSION_MS = 15_000;
  * veda-hq/niyam, and athya-hq/process-rules when that is not there yet; GitHub
  * forwards the old name once the repository has moved.
  */
-export async function newestRelease(sys: Sys): Promise<{ version: string; packaged: boolean } | { problem: string }> {
+export async function newestRelease(sys: Sys): Promise<{ version: string; packaged: boolean; repo: string } | { problem: string }> {
   let answer: { status: number; json: unknown } | undefined;
-  for (const repo of [PRODUCT, OLD_PRODUCT]) {
+  let repo = PRODUCT;
+  for (repo of [PRODUCT, OLD_PRODUCT]) {
     try {
       answer = await sys.http(`${API}/repos/${repo}/releases/latest`, { timeoutMs: ASK_MS });
     } catch (error) {
@@ -40,7 +41,7 @@ export async function newestRelease(sys: Sys): Promise<{ version: string; packag
   const version = typeof json?.tag_name === 'string' ? /^v(\d+\.\d+\.\d+)$/.exec(json.tag_name)?.[1] : undefined;
   if (version === undefined) return { problem: `the newest release's tag, ${JSON.stringify(json?.tag_name ?? null)}, is not vX.Y.Z` };
   const packaged = (json?.assets ?? []).some((asset) => asset.name === releaseAsset(version));
-  return { version, packaged };
+  return { version, packaged, repo };
 }
 
 /** One copy of a command on PATH, in PATH's order, with the version it prints, or why it printed none. */
@@ -143,7 +144,8 @@ export async function upgrade(sys: Sys, io: Output, running: string = packageVer
     io.err(`upgrade: the v${version} release has no ${releaseAsset(version)} yet; run ${UPGRADE} again once the Release workflow attaches it`);
     return 1;
   }
-  const url = releaseTarball(version);
+  // The repository that answered: before the transfer veda-hq/niyam has no releases to download from.
+  const url = `${GITHUB_WEB}/${newest.repo}/releases/download/v${version}/${releaseAsset(version)}`;
   io.out(renaming ? `upgrade: ${CLI} ${running}, from ${OLD_PACKAGE} to ${PACKAGE}` : `upgrade: ${CLI} ${running} → ${version}`);
   if (name === OLD_PACKAGE) io.out(`  pnpm remove -g ${OLD_PACKAGE}`);
   io.out(`  pnpm add -g ${url}`);
@@ -160,7 +162,8 @@ export async function upgrade(sys: Sys, io: Output, running: string = packageVer
     const said = `${install.stderr}\n${install.stdout}`.split('\n').map((line) => line.trimEnd()).filter(Boolean);
     for (const line of said.slice(-10)) io.err(`  ${line}`);
     if (removed !== undefined && install !== removed) {
-      const back = `${GITHUB_WEB}/${PRODUCT}/releases/download/v${running}/${tarballName(running, OLD_PACKAGE)}`;
+      // From the old repository, which has the bridge before the transfer and forwards to it after.
+      const back = `${GITHUB_WEB}/${OLD_PRODUCT}/releases/download/v${running}/${tarballName(running, OLD_PACKAGE)}`;
       const restored = sys.exec('pnpm', ['add', '-g', back], { timeoutMs: INSTALL_MS });
       io.err(restored.code === 0 ? `  ${OLD_PACKAGE} ${running} is installed again` : `  putting ${OLD_PACKAGE} ${running} back failed too (exit ${restored.code}); install it with pnpm add -g ${back}`);
     }

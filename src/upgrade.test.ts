@@ -300,7 +300,7 @@ describe("doctor's findings about the CLI", () => {
 });
 
 describe('upgrade from process-rules, the old name (P-49)', () => {
-  const BRIDGE = `https://github.com/veda-hq/niyam/releases/download/v${OLD}/athya-hq-process-rules-${OLD}.tgz`;
+  const BRIDGE = `https://github.com/athya-hq/process-rules/releases/download/v${OLD}/athya-hq-process-rules-${OLD}.tgz`;
   const pnpmCalls = (sys: FakeSys): string[] => sys.calls.filter((call) => call.command === 'pnpm' && call.args[0] !== 'bin').map((call) => call.args.join(' '));
   /** `machine()`, with pnpm's answer to `remove` and `add` replaced, each by its arguments. */
   const withPnpm = (sys: FakeSys, answer: (args: readonly string[]) => ExecResult | undefined): FakeSys => {
@@ -322,6 +322,7 @@ describe('upgrade from process-rules, the old name (P-49)', () => {
       sys.requests.map((request) => request.url.replace('https://api.github.com', '')),
       [LATEST, OLD_LATEST],
     );
+    assert.deepEqual(installs(sys), [['add', '-g', `https://github.com/athya-hq/process-rules/releases/download/v${NEW}/veda-hq-niyam-${NEW}.tgz`]], 'downloads from the repository that answered');
   });
 
   it('removes the old package first, since pnpm refuses two with the same bin, then adds niyam', async () => {
