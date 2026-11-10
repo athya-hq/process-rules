@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { type SpawnSyncReturns, spawnSync } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, describe, it } from 'node:test';
@@ -28,7 +28,8 @@ describe('cloudRepoScript', () => {
     assert.ok(script.includes(`-o "$dir/niyam.tgz" ${releaseTarball('9.8.7')}\n`));
     assert.equal(releaseTarball('9.8.7'), 'https://github.com/veda-hq/niyam/releases/download/v9.8.7/veda-hq-niyam-9.8.7.tgz');
     assert.equal(releaseTarball('0.6.1'), 'https://github.com/veda-hq/niyam/releases/download/v0.6.1/athya-hq-process-rules-0.6.1.tgz', 'a release before niyam: its old asset');
-    assert.ok(script.includes('ln -s /usr/local/bin/niyam /usr/local/bin/process-rules\n'), 'niyam and, until P-54, its old name both run it');
+    assert.ok(!script.includes('/usr/local/bin/process-rules '), 'since P-54 the old name is only removed');
+    assert.ok(script.includes('rm -f /usr/local/bin/niyam /usr/local/bin/process-rules\n'));
     assert.equal(cloudScriptVersion(script), '9.8.7');
     assert.equal(cloudScriptVersion('# process-rules 0.6.6 for Claude cloud sessions: Node'), '0.6.6', 'a file a release before P-53 wrote');
     assert.ok(script.includes(`echo "${SHA}  $dir/niyam.tgz" | sha256sum -c --quiet -\n`));
@@ -83,7 +84,7 @@ describe('cloudRepoScript', () => {
       );
       assert.equal(fetched, `https://nodejs.org/dist/v${CLOUD_NODE}/node-v${CLOUD_NODE}-linux-arm64.tar.xz\n${opt}\n${releaseTarball('9.8.7')}\n${opt}/cli-9.8.7\n`);
       assert.equal(existsSync(join(opt, 'from-setup')), false, 'not run by the Setup snippet');
-      assert.equal(readlinkSync(join(local, 'process-rules')), join(local, 'niyam'), 'the old name links to niyam');
+      assert.equal(existsSync(join(local, 'process-rules')), false, 'no old name since P-54');
     });
 
     it("replaces a release's before P-53, where niyam linked to process-rules", () => {
@@ -96,7 +97,7 @@ describe('cloudRepoScript', () => {
       assert.equal(result.status, 0, result.stderr);
       assert.equal(lstatSync(join(local, 'niyam')).isSymbolicLink(), false, 'niyam is a file of its own now');
       assert.match(readFileSync(join(local, 'niyam'), 'utf8'), /cli-9\.8\.7\/package\/dist\/cli\.js/);
-      assert.equal(readlinkSync(join(local, 'process-rules')), join(local, 'niyam'));
+      assert.equal(existsSync(join(local, 'process-rules')), false, 'the old command is gone');
     });
 
     it('keeps a Node already unpacked at its version, fetching the CLI alone', () => {

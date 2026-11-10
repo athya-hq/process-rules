@@ -1,4 +1,4 @@
-import { OLD_CLI } from './names.ts';
+import { CLI, OLD_CLI } from './names.ts';
 import {
   EXPIRY_WARNING_DAYS,
   account,
@@ -100,7 +100,7 @@ export async function doctor(sys: Sys, io: Output, named?: string): Promise<numb
       : runs.code !== 0
         ? { mark: '✗', text: `launcher does not run (${runs.stderr.trim() || `exit ${runs.code}`}); its node removed?`, fix: MACHINE }
         : OLD_LAUNCHER.test(sys.read(launcher))
-          ? { mark: '▲', text: `launcher runs ${OLD_CLI}, niyam's old command, which a later release removes`, fix: MACHINE }
+          ? { mark: '✗', text: `launcher runs ${OLD_CLI}, niyam's old command, which this release no longer installs, so hooks may find no CLI`, fix: `${CLI} upgrade, or ${MACHINE}` }
           : { mark: '✓', text: 'launcher' },
     ...(await installedFindings(sys)),
   );

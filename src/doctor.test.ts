@@ -293,12 +293,12 @@ describe('doctor', () => {
     assert.equal(sys.calls.find((c) => c.command === LAUNCHER)?.env?.PATH, '/usr/bin:/bin', 'runs it without the PATH of this shell');
   });
 
-  it("marks ▲ a launcher that runs the old process-rules command, which P-54 removes", async () => {
+  it('marks ✗ a launcher that runs the old process-rules command, which this release no longer installs (P-54)', async () => {
     const sys = healthy();
     sys.files.set(LAUNCHER, launcherScript('/opt/node/bin/node', '/x/dist/cli.js', '/home/u/Library/pnpm/bin/process-rules'));
-    assert.deepEqual(marked((await check(sys)).out, '▲'), ["▲  launcher runs process-rules, niyam's old command, which a later release removes → niyam machine"]);
+    assert.deepEqual(marked((await check(sys)).out, '✗'), ["✗  launcher runs process-rules, niyam's old command, which this release no longer installs, so hooks may find no CLI → niyam upgrade, or niyam machine"]);
     sys.files.set(LAUNCHER, launcherScript('/opt/node/bin/node', '/x/dist/cli.js', '/home/u/Library/pnpm/bin/niyam'));
-    assert.deepEqual(marked((await check(sys)).out, '▲'), []);
+    assert.deepEqual(marked((await check(sys)).out, '✗'), []);
   });
 
   it('names a launcher that fails without saying why', async () => {

@@ -1306,3 +1306,14 @@
     `PROCESS_RULES_AGENT`, the lock's text and placeholder token, the cloud
     setup path and the Setup paste, the settings and keychain fallbacks, and
     the bridge archive for 0.6.x's `upgrade`.
+- **2026-11-10 — Record: the process-rules command goes (P-54).** The owner
+  asked for it in chat with P-53, which moved every hook, the launcher and
+  the cloud setup to `niyam`. The package's only bin is `niyam`; the cloud
+  setup removes any `process-rules` from an older one and links none.
+  `doctor` marks ✗ a launcher that still runs `process-rules`, naming
+  `niyam upgrade`, which points it at `niyam` (P-53), or `niyam machine`.
+  The bridge archive `athya-hq-process-rules-<v>.tgz` keeps the bin
+  `process-rules`: a 0.6.x Mac's `process-rules upgrade` installs it, and its
+  launcher runs that command until `niyam upgrade` moves it. Rejected:
+  dropping the bridge's bin too (that Mac's hooks would lock out on the
+  upgrade); dropping the bridge (0.6.x's `upgrade` would find no release).

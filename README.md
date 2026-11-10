@@ -1188,7 +1188,7 @@ P-49 and P-50). What changed, and what still reads or runs the old name:
 | ---- | --- | ------------ |
 | Repository | veda-hq/niyam | athya-hq/process-rules, which GitHub forwards |
 | Package | `@veda-hq/niyam` | each release also attaches the same CLI as `athya-hq-process-rules-<version>.tgz`, for 0.6.x's `upgrade` |
-| Command | `niyam` | `process-rules`, a second bin until P-54; typed by the owner it also names `niyam`. Since P-53 the hooks, the launcher `machine` writes and the cloud setup run `niyam`, and `doctor` marks ▲ a launcher that still runs `process-rules` |
+| Command | `niyam` | none since P-54: only the bridge archive, for 0.6.x's `upgrade`, still installs `process-rules`. Since P-53 the hooks, the launcher `machine` writes and the cloud setup run `niyam`; `doctor` marks ✗ a launcher that still runs `process-rules`, and `niyam upgrade` points it at `niyam` |
 | Required checks | `niyam / Work rules`, `niyam / PR identity` (P-53) | `process-rules / …`; `owner-step required-checks` swaps them |
 | Settings file | `.github/niyam.json` | `.github/process-rules.json`, read where the new one is missing; `onboard` keeps a repo's existing file |
 | Keychain item | service `niyam` | service `process-rules`, read where the new one is missing; `machine` copies it to `niyam`, and while it is there a new token goes under both |
@@ -1207,7 +1207,7 @@ which replaces the old package in place; pnpm refuses a second global package
 with the same bin. Then `niyam upgrade` moves it to `@veda-hq/niyam`: it
 removes the old package, adds the new one, and puts the old one back if the add
 fails. pnpm keeps the `process-rules` command at the same path, so the
-launcher `machine` wrote keeps working until P-54 takes that command away.
+launcher `machine` wrote keeps working until `niyam upgrade` points it at `niyam`; since P-54 the package installs no `process-rules`.
 `niyam upgrade` and `niyam machine` point the launcher at `niyam`. Run `niyam machine` once afterwards to
 copy the token to the `niyam` keychain service and rewrite the session file;
 until then both still work.

@@ -3,7 +3,7 @@
  * the old names are still read, and still run, for at least one release.
  */
 
-/** The command, and the one it was before, which stays a second bin. */
+/** The command, and the one it was before, which only the bridge archive still installs (P-54). */
 export const CLI = 'niyam';
 export const OLD_CLI = 'process-rules';
 
