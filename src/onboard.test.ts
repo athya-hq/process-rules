@@ -327,6 +327,22 @@ describe('onboard', () => {
       assert.deepEqual(board.issues.map((issue) => issue.type), ['Work item', 'Slice', 'Slice', 'Brief']);
     });
 
+    it('signs in to nothing for a disabled type, which GitHub lists no issues by, and says so in the plan', async () => {
+      const { sys, board } = settled();
+      board.disabledTypes = ['Task'];
+      board.issues = [];
+      const { code, out } = await run(sys, []);
+      assert.equal(code, 0, out.join('\n'));
+      const at = out.findIndex((line) => line.startsWith('│    issue types '));
+      assert.deepEqual(out.slice(at, at + 2), [
+        '│    issue types  org-wide, the work model’s alone',
+        '│      disabled   Task: GitHub lists no issues by a disabled type, so onboard cannot tell whether any holds one',
+      ]);
+      const signed = out.findIndex((line) => line.startsWith('◇  Signed in as example-owner'));
+      assert.ok(signed === -1 || signed > at, out.join('\n'));
+      assert.deepEqual(board.disabledTypes, ['Task']);
+    });
+
     it('lists, in the dry run, what the agent sees, signing in to nothing', async () => {
       const { sys, board } = settled();
       const { code, out } = await run(sys, ['example-owner', AGENT, '--dry-run']);

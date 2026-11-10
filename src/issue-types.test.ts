@@ -147,7 +147,9 @@ describe('typesPlan', () => {
     assert.equal(typesChange(again), false);
     assert.equal(typesQuestion(again, 'example-app'), undefined);
     assert.equal(typesDetail(again), 'org-wide, the work model’s alone');
-    assert.deepEqual(typesLines(again), []);
+    // GitHub refuses to list issues by a disabled type, so the rerun says it cannot tell, not that none holds one.
+    assert.deepEqual(again.unlisted, ['Task', 'Bug', 'Feature']);
+    assert.deepEqual(typesLines(again), [{ label: '  disabled', detail: 'Task, Bug, Feature: GitHub lists no issues by a disabled type, so onboard cannot tell whether any holds one' }]);
 
     board.disabledTypes = ['Task', 'Feature'];
     board.issues.push({ repo: OTHER, number: 11, type: 'Bug' });
@@ -171,6 +173,61 @@ describe('typesPlan', () => {
     assert.deepEqual((await typesPlan(sys, OWNER_TOKEN, 'example-org')).retype.map((issue) => [issue.number, issue.to]), [[2, 'Brief']]);
     board.issues[0] = { repo: SLUG, number: 1, type: null, subIssues: 1 };
     assert.deepEqual((await typesPlan(sys, OWNER_TOKEN, 'example-org')).retype.map((issue) => [issue.number, issue.to]), [[2, 'Slice'], [1, 'Work item']]);
+  });
+});
+
+describe('disabled types GitHub will not list issues by', () => {
+  const refused = (type: string): { status: number; json: unknown } => ({
+    status: 422,
+    json: { message: 'Validation Failed', errors: [{ value: type, resource: 'Issue', field: 'type', code: 'invalid' }] },
+  });
+
+  it('leaves them disabled, saying it cannot tell whether an issue holds one, and asks GitHub once a type', async () => {
+    const { sys, board } = org();
+    board.disabledTypes = ['Task', 'Bug', 'Feature'];
+    board.issues = [{ repo: OTHER, number: 3, type: 'Task' }];
+    const plan = await typesPlan(sys, OWNER_TOKEN, 'example-org');
+    assert.deepEqual(plan.unlisted, ['Task', 'Bug', 'Feature']);
+    assert.deepEqual([plan.retype, plan.held, plan.disable, plan.kept], [[], [], [], []]);
+    assert.equal(typesChange(plan), false);
+    assert.equal(typesQuestion(plan, 'example-app'), undefined);
+    assert.equal(typesDetail(plan), 'org-wide, the work model’s alone');
+    assert.deepEqual(typesLines(plan), [{ label: '  disabled', detail: 'Task, Bug, Feature: GitHub lists no issues by a disabled type, so onboard cannot tell whether any holds one' }]);
+    for (const type of ['Task', 'Bug', 'Feature']) {
+      assert.equal(sys.requests.filter((request) => request.url.includes(`/issues?type=${type}&`)).length, 1, `${type} is asked of one repository`);
+    }
+
+    const { io, out } = capture();
+    assert.deepEqual(await applyTypes(sys, io, OWNER_TOKEN, plan), []);
+    assert.ok(!sys.requests.some((request) => request.method !== 'GET'), 'it changes nothing');
+    assert.deepEqual(out, [
+      '- Task, Bug, Feature stay disabled in example-org; GitHub lists no issues by a disabled type, so onboard cannot tell whether any holds one: enabled again, onboard retypes them',
+      '✓ issue types in example-org: Work item, Slice, State, Decision, Brief',
+    ]);
+  });
+
+  it('still retypes what an enabled type holds beside a disabled one', async () => {
+    const { sys, board } = org();
+    board.disabledTypes = ['Task'];
+    board.issues = [{ repo: OTHER, number: 4, type: 'Bug' }];
+    const plan = await typesPlan(sys, OWNER_TOKEN, 'example-org');
+    assert.deepEqual(plan.unlisted, ['Task']);
+    assert.deepEqual(plan.retype.map((issue) => `${issue.repo}#${issue.number} ${issue.from} → ${issue.to}`), [`${OTHER}#4 Bug → Brief`]);
+    assert.deepEqual(plan.disable.map((type) => type.name), ['Bug', 'Feature']);
+    assert.deepEqual(withinApproved(await typesPlan(sys, OWNER_TOKEN, 'example-org'), plan).unlisted, ['Task'], 'the run keeps what the plan said');
+  });
+
+  it('stops on a 422 for an enabled type', async () => {
+    const { sys } = org();
+    sys.route('GET', `/repos/${SLUG}/issues?type=Task&state=all&per_page=100&page=1`, refused('Task'));
+    await assert.rejects(typesPlan(sys, OWNER_TOKEN, 'example-org'), /^Error: cannot read https:\/\/api\.github\.com\/repos\/example-org\/example-app\/issues\?type=Task&state=all \(HTTP 422\)$/);
+  });
+
+  it('stops on any other failure for a disabled type', async () => {
+    const { sys, board } = org();
+    board.disabledTypes = ['Task'];
+    sys.route('GET', `/repos/${SLUG}/issues?type=Task&state=all&per_page=100&page=1`, { status: 403, json: null });
+    await assert.rejects(typesPlan(sys, OWNER_TOKEN, 'example-org'), /cannot read .*issues\?type=Task&state=all \(HTTP 403\)/);
   });
 });
 

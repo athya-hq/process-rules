@@ -1140,12 +1140,13 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     let approved: TypesPlan | undefined;
     if (await byOrganisation()) {
       const org = slug.split('/')[0] as string;
-      // The agent reads the organisation's types but only the repositories it can see. Where a type outside the
-      // work model exists, or an open issue with no type, the owner, who sees every repository, signs in before the
-      // plan, so the plan shows what the yes approves; the run changes nothing beyond it. A dry run signs in to
-      // nothing: it shows the agent's view.
+      // The agent reads the organisation's types but only the repositories it can see. Where an enabled type outside
+      // the work model exists, or an open issue with no type, the owner, who sees every repository, signs in before
+      // the plan, so the plan shows what the yes approves; the run changes nothing beyond it. A disabled one needs no
+      // sign-in: GitHub lists no issues by it, for the owner either. A dry run signs in to nothing: it shows the
+      // agent's view.
       approved = await typesPlan(sys, token, org).catch(() => undefined);
-      if (!dryRun && (approved === undefined || approved.others.length > 0 || approved.retype.length > 0)) {
+      if (!dryRun && (approved === undefined || approved.disable.length + approved.kept.length + approved.retype.length > 0)) {
         const mine = await ownerToken();
         if (!mine) return 1;
         approved = await typesPlan(sys, mine, org);

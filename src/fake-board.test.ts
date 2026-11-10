@@ -177,6 +177,10 @@ export class Board {
     const listed = /^https:\/\/api\.github\.com\/repos\/([^/]+\/[^/]+)\/issues\?type=([^&]+)&state=all&per_page=100&page=1$/.exec(url);
     if (listed && method === 'GET') {
       const name = decodeURIComponent(listed[2] as string);
+      // GitHub refuses to filter by a disabled type, as it did in veda-hq on 10 Nov 2026.
+      if (this.disabledTypes.some((had) => had.toLowerCase() === name.toLowerCase())) {
+        return { status: 422, json: { message: 'Validation Failed', errors: [{ value: name, resource: 'Issue', field: 'type', code: 'invalid' }] } };
+      }
       // GitHub filters by the type's name in any case.
       const rows = this.issues.filter((issue) => issue.repo === listed[1] && issue.type?.toLowerCase() === name.toLowerCase());
       return { status: 200, json: rows.map((issue) => this.issueJson(issue)) };

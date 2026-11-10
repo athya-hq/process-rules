@@ -44,6 +44,12 @@ export interface TypesPlan {
   org: string;
   /** Every type outside the work model, enabled or not, by name. */
   others: string[];
+  /**
+   * Disabled types outside the work model whose issues GitHub will not list:
+   * it refuses to filter by a disabled type (HTTP 422), so whether any issue
+   * still holds one, hidden, is not known. They stay disabled.
+   */
+  unlisted: string[];
   add: typeof ISSUE_TYPES;
   enable: OrgType[];
   retype: Retype[];
@@ -74,6 +80,15 @@ export function typeFor(parent: { number: string; type: string | undefined } | u
   return { to: 'Brief', why: parent ? `its parent #${parent.number} is neither a Work item nor a Slice, and it has no sub-issues` : 'it has no parent and no sub-issues' };
 }
 
+/** A read GitHub refused, with the HTTP status it answered. */
+export class Refused extends Error {
+  readonly status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
+}
+
 /** Every entry a REST list holds, reading 100 a page; none, when `gone` and GitHub answers 410 Gone. */
 export async function pages(sys: Sys, token: string, url: string, gone = false): Promise<unknown[]> {
   const entries: unknown[] = [];
@@ -81,7 +96,7 @@ export async function pages(sys: Sys, token: string, url: string, gone = false):
     const pageUrl = `${url}${url.includes('?') ? '&' : '?'}per_page=100&page=${page}`;
     const { status, json } = await sys.http(pageUrl, { token });
     if (gone && status === 410) return entries;
-    if (status !== 200 || !Array.isArray(json)) throw new Error(`cannot read ${url} (HTTP ${status})`);
+    if (status !== 200 || !Array.isArray(json)) throw new Refused(`cannot read ${url} (HTTP ${status})`, status);
     entries.push(...(json as unknown[]));
     if (json.length < 100) return entries;
   }
@@ -118,10 +133,22 @@ function asHolder(repo: string, row: unknown, from: string): Omit<Holder, 'archi
   };
 }
 
-/** The issues in a repository that hold the type, open and closed; pull requests have no type. */
-async function holding(sys: Sys, token: string, repo: string, type: string): Promise<Omit<Holder, 'archived'>[]> {
-  // GitHub answers 410 Gone for a repository with issues turned off, a fork's usual setting: it holds none to retype.
-  const rows = await pages(sys, token, `${API}/repos/${repo}/issues?type=${encodeURIComponent(type)}&state=all`, true);
+/**
+ * The issues in a repository that hold the type, open and closed; pull
+ * requests have no type. Undefined for a `disabled` type GitHub will not
+ * list issues by: it answers 422 Validation Failed to a filter naming a
+ * disabled type, which says nothing of whether an issue holds it. For an
+ * enabled type a 422 stays a failure.
+ */
+async function holding(sys: Sys, token: string, repo: string, type: string, disabled = false): Promise<Omit<Holder, 'archived'>[] | undefined> {
+  let rows: unknown[];
+  try {
+    // GitHub answers 410 Gone for a repository with issues turned off, a fork's usual setting: it holds none to retype.
+    rows = await pages(sys, token, `${API}/repos/${repo}/issues?type=${encodeURIComponent(type)}&state=all`, true);
+  } catch (error) {
+    if (disabled && error instanceof Refused && error.status === 422) return undefined;
+    throw error;
+  }
   return rows.flatMap((row) => {
     const name = (row as { type?: { name?: unknown } | null } | null)?.type?.name;
     // Only an issue GitHub shows holding the type, so a filter GitHub ignored retypes nothing.
@@ -175,8 +202,10 @@ export async function typesPlan(sys: Sys, token: string, org: string): Promise<T
   const types = await orgTypes(sys, token, org);
   const add = ISSUE_TYPES.filter((type) => !types.some((had) => same(had.name, type.name)));
   const enable = types.filter((type) => inModel(type.name) && !type.is_enabled);
-  // Disabled ones too, so a rerun finds an issue a type left behind when someone disabled it by hand.
+  // Disabled ones too, so a rerun finds an issue a type left behind when someone disabled it by hand, where GitHub
+  // lists them; it refuses to filter by a disabled type (422), and such a type is unlisted, not read as held by none.
   const others = types.filter((type) => !inModel(type.name));
+  const unlisted = new Set<string>();
   const holders: Holder[] = [];
   const exempt: { repo: string; number: number }[] = [];
   const repos = (await pages(sys, token, `${API}/orgs/${org}/repos?type=all`)).flatMap((entry) => {
@@ -185,7 +214,13 @@ export async function typesPlan(sys: Sys, token: string, org: string): Promise<T
     return typeof repo.full_name === 'string' && repo.has_issues !== false ? [{ slug: repo.full_name, archived: repo.archived === true }] : [];
   });
   for (const repo of repos) {
-    for (const type of others) holders.push(...(await holding(sys, token, repo.slug, type.name)).map((found) => ({ ...found, archived: repo.archived })));
+    for (const type of others) {
+      // GitHub's refusal is the type's, not the repository's, so an unlisted type is not asked of the others.
+      if (unlisted.has(type.name)) continue;
+      const found = await holding(sys, token, repo.slug, type.name, !type.is_enabled);
+      if (found === undefined) unlisted.add(type.name);
+      else holders.push(...found.map((issue) => ({ ...issue, archived: repo.archived })));
+    }
     const bare = await untyped(sys, token, repo.slug);
     const approvals = bare.length > 0 ? await approvalsOf(sys, token, repo.slug) : undefined;
     for (const found of bare) {
@@ -222,7 +257,19 @@ export async function typesPlan(sys: Sys, token: string, org: string): Promise<T
   for (const holder of holders) (holder.archived ? held : retype).push(await decide(holder));
   const extra = others.filter((type) => type.is_enabled);
   const kept = extra.filter((type) => held.some((issue) => same(issue.from, type.name)));
-  return { org, others: others.map((type) => type.name), add, enable, retype, held, disable: extra.filter((type) => !kept.includes(type)), kept, late: [], exempt };
+  return {
+    org,
+    others: others.map((type) => type.name),
+    unlisted: others.filter((type) => unlisted.has(type.name)).map((type) => type.name),
+    add,
+    enable,
+    retype,
+    held,
+    disable: extra.filter((type) => !kept.includes(type)),
+    kept,
+    late: [],
+    exempt,
+  };
 }
 
 /**
@@ -283,6 +330,9 @@ function issueRows(retype: Retype[]): { label: string; detail: string }[] {
   }));
 }
 
+/** Why onboard says nothing of the issues holding a disabled type. */
+const UNLISTED = 'GitHub lists no issues by a disabled type, so onboard cannot tell whether any holds one';
+
 /** What typesDetail counts, one line each, after the plan's issue types line, in the order the run does it. */
 export function typesLines(plan: TypesPlan): { label: string; detail: string }[] {
   return [
@@ -293,6 +343,7 @@ export function typesLines(plan: TypesPlan): { label: string; detail: string }[]
     ...(plan.retype.some(isBare) || plan.exempt.length > 0 ? [{ label: '  closed, no type', detail: 'left as they are' }] : []),
     ...(plan.disable.length > 0 ? [{ label: '  disable', detail: names(plan.disable) }] : []),
     ...(plan.kept.length > 0 ? [{ label: '  keep', detail: `${names(plan.kept)}: archived repos hold them` }] : []),
+    ...(plan.unlisted.length > 0 ? [{ label: '  disabled', detail: `${plan.unlisted.join(', ')}: ${UNLISTED}` }] : []),
   ];
 }
 
@@ -348,6 +399,9 @@ export async function applyTypes(sys: Sys, io: Output, token: string, plan: Type
   for (const issue of plan.held) io.out(`- ${issue.repo}#${issue.number} keeps ${issue.from}: ${issue.repo} is archived, which GitHub keeps read-only`);
   for (const issue of plan.late) io.out(`- ${issue.repo}#${issue.number} keeps ${issue.from}: onboard found it after showing its plan`);
   for (const issue of plan.exempt) io.out(`- ${issue.repo}#${issue.number} keeps no type: it is the Approvals issue its repository's settings name`);
+  if (plan.unlisted.length > 0) {
+    io.out(`- ${plan.unlisted.join(', ')} stay disabled in ${org}; ${UNLISTED}: enabled again, onboard retypes them`);
+  }
   if (plan.kept.length > 0) io.out(`- left ${names(plan.kept)} enabled in ${org}, since an issue onboard did not retype holds ${plan.kept.length === 1 ? 'it' : 'them'}`);
   io.out(`✓ issue types in ${org}: ${names(ISSUE_TYPES)}`);
   const archived = [...new Set(plan.held.map((issue) => issue.repo))];
@@ -380,7 +434,7 @@ export async function typesDrift(sys: Sys, token: string, org: string, slug: str
   const missing = ISSUE_TYPES.filter((type) => !types.some((had) => same(had.name, type.name) && had.is_enabled));
   const extra = types.filter((type) => !inModel(type.name) && type.is_enabled);
   const here: string[] = [];
-  for (const type of extra) here.push(...(await holding(sys, token, slug, type.name)).map((issue) => `#${issue.number} ${issue.from}`));
+  for (const type of extra) here.push(...((await holding(sys, token, slug, type.name)) ?? []).map((issue) => `#${issue.number} ${issue.from}`));
   const bare = (await untyped(sys, token, slug)).filter((issue) => issue.number !== approvals).map((issue) => `#${issue.number}`);
   if (missing.length === 0 && extra.length === 0 && bare.length === 0) return { mark: '✓', text: `issue types in ${org}: the work model’s alone, and every open issue here has one` };
   const parts = [

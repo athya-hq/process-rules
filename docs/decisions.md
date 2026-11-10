@@ -1162,3 +1162,23 @@
   client job (the asks job already writes to issues, so one line each in its
   trigger and its condition upgrades a 0.6.3 workflow); editing athya_mono's
   `rotate-secrets.yml` (the job types what it files).
+- **2026-11-10 — Record: a rerun of `onboard` goes through where the other
+  issue types are disabled (State #245 of P-05).** A fix, so no approval was
+  owed. `onboard` in veda-hq/niyam-sandbox disabled veda-hq's Task, Bug and
+  Feature; the next `onboard`, in veda-hq/niyam, stopped at the board step,
+  since GitHub answers `422 Validation Failed` (`field: type, code:
+  invalid`) to `/repos/{r}/issues?type=Task` once Task is disabled, and the
+  owner had to enable the three again to get past it. Now a 422 for a
+  disabled type outside the work model is read as "GitHub will not list its
+  issues": the type is asked of one repository, not every one, it stays
+  disabled, and the plan and the run say `onboard` cannot tell whether an
+  issue holds it, and that enabling it again lets `onboard` retype what
+  does. A 422 for an enabled type, and any other failure, still stops
+  `onboard`. A disabled type alone no longer signs the owner in before the
+  plan, since the owner cannot list its issues either. Rejected: reading the
+  422 as "none held" (GitHub keeps a disabled type, hidden, on its issues;
+  saying none holds it would be a claim nobody checked); GraphQL's
+  `filterBy: {type}` and search's `type:` (both give 0 for a disabled type
+  and for one that does not exist alike, so they cannot list hidden
+  holders); skipping disabled types unasked (if GitHub ever lists them, the
+  rerun finds them again).
