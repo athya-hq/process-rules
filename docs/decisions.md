@@ -1187,3 +1187,21 @@
   and for one that does not exist alike, so they cannot list hidden
   holders); skipping disabled types unasked (if GitHub ever lists them, the
   rerun finds them again).
+- **2026-11-10 — Record: `onboard` allows the pull request tools that turn
+  Auto-fix on (P-52, #249).** session-start tells each local agent session
+  to turn Auto-fix on with `set_monitor` after `gh pr create` (#142), but in
+  auto mode the classifier refused the call on veda-hq/niyam#247: the repo
+  did not allow it. athya_mono allowed it only because W-31 added the rules
+  by hand. The owner asked, in chat, that niyam own them. `onboard` now adds
+  `mcp__ccd_pr__bind_pr`, `mcp__ccd_pr__get_status` and
+  `mcp__ccd_pr__set_monitor` to `permissions.allow` in `.claude/settings.json`
+  beside the review-thread rule, in the text, adding only the ones missing
+  (none where `mcp__ccd_pr` or `mcp__ccd_pr__*` allows the whole server,
+  review) and leaving the rest of the file as it is; the plan says "Auto-fix rules",
+  or "allow rules" when the review-thread rule is added too, to keep its
+  line short. `doctor` warns (`▲`, not `✗`: the agent identity still works)
+  under "This repo" about an onboarded repo whose file lacks any, naming
+  them. The rules let a session bind a pull request, read its status and
+  set its monitor without a prompt; they give no new access to GitHub, and
+  the app still checks that the session opened the pull request as its own
+  login.

@@ -4,6 +4,7 @@ import {
   agentFrom,
   anyLogin,
   either,
+  hasSettings,
   loadSettings,
   repoAt,
   settingsPathIn,
@@ -23,7 +24,8 @@ import { featuresIn } from './features.ts';
 import { typesDrift } from './issue-types.ts';
 import { type Finding, closing, findingLines, heading, painter, tilde } from './layout.ts';
 import { exposure, exposureFindings, movedFindings, readDeclined, setAside } from './lockout.ts';
-import { CLOUD_SETUP_PATH, WORKFLOW_PATH } from './onboard-pull.ts';
+import { CLOUD_SETUP_PATH, HOOKS_PATH, WORKFLOW_PATH } from './onboard-pull.ts';
+import { missingAutoFixRules } from './onboard.ts';
 import { isOrganisation } from './owner-login.ts';
 import { repoRoot } from './session-start.ts';
 import { tokenStore, unsupported } from './token-store.ts';
@@ -154,15 +156,44 @@ async function typesFindings(sys: Sys, token: string | undefined): Promise<Findi
   }
 }
 
-/** Client hooks that reach GitHub outside `as-agent` where doctor runs, a Mac or a cloud session. */
+/**
+ * Client hooks that reach GitHub outside `as-agent` where doctor runs, a Mac
+ * or a cloud session, and the Auto-fix rules an onboarded repo's Claude Code
+ * settings lack.
+ */
 function repoFindings(sys: Sys): Finding[] {
-  return hooksHittingLock(sys).map(
-    (hook): Finding => ({
-      mark: '▲',
-      text: `${hook} reaches GitHub outside as-agent, so gets 401`,
-      fix: `run its gh or git via niyam as-agent --session <session_id> -- (exit ${LOCKED} when not the agent)`,
-    }),
-  );
+  return [
+    ...hooksHittingLock(sys).map(
+      (hook): Finding => ({
+        mark: '▲',
+        text: `${hook} reaches GitHub outside as-agent, so gets 401`,
+        fix: `run its gh or git via niyam as-agent --session <session_id> -- (exit ${LOCKED} when not the agent)`,
+      }),
+    ),
+    ...autoFixFindings(sys),
+  ];
+}
+
+/**
+ * Which of onboard's Auto-fix rules the repo's `.claude/settings.json`
+ * lacks, so the auto-mode classifier refuses an agent session turning
+ * Auto-fix on: checked in an onboarded repo whose file doctor can read.
+ */
+function autoFixFindings(sys: Sys): Finding[] {
+  let settings: unknown;
+  try {
+    // Where session-start looks, so a cloud session's CLI run from outside the clone still finds it.
+    const root = repoRoot(sys);
+    if (!hasSettings(sys, root) || !sys.exists(`${root}/${HOOKS_PATH}`)) return [];
+    settings = JSON.parse(sys.read(`${root}/${HOOKS_PATH}`)) as unknown;
+  } catch {
+    // Outside a clone, or a file doctor cannot read: onboard says what is wrong with it.
+    return [];
+  }
+  const missing = missingAutoFixRules(settings);
+  return missing.length === 0
+    ? []
+    : [{ mark: '▲', text: `${HOOKS_PATH} does not allow ${missing.join(', ')}, so agent sessions cannot turn Auto-fix on`, fix: ONBOARD }];
 }
 
 /** Prints the findings, grouped, and closes; exit 1 when any is broken. */

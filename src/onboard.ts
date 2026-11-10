@@ -146,6 +146,28 @@ export const GUARD_COMMAND =
  */
 export const REVIEW_THREAD_RULE = 'Bash(process-rules review-thread *)';
 
+/**
+ * The permission rules that let agent sessions turn the desktop app's
+ * Auto-fix on for the pull requests they open, as session-start's AUTO_FIX
+ * tells them to: bind the pull request, read its status, and set its
+ * monitor. Without them the auto-mode classifier refuses the calls. They
+ * reach the app only, not GitHub.
+ */
+export const AUTO_FIX_RULES = ['mcp__ccd_pr__bind_pr', 'mcp__ccd_pr__get_status', 'mcp__ccd_pr__set_monitor'] as const;
+
+/** The rules that allow every tool of the app's pull request server, AUTO_FIX_RULES among them. */
+const PR_SERVER_RULES = ['mcp__ccd_pr', 'mcp__ccd_pr__*'];
+
+/**
+ * Which of AUTO_FIX_RULES a settings file's `permissions.allow` lacks, in
+ * their order: none when it allows the whole server.
+ */
+export function missingAutoFixRules(settings: unknown): string[] {
+  const allow = (settings as { permissions?: { allow?: unknown } } | null)?.permissions?.allow;
+  if (Array.isArray(allow) && allow.some((rule) => PR_SERVER_RULES.includes(rule as string))) return [];
+  return AUTO_FIX_RULES.filter((rule) => !Array.isArray(allow) || !allow.includes(rule));
+}
+
 /** The hook commands older releases wrote, which onboard replaces with this release's. */
 export const OLDER_HOOK_COMMANDS = [
   `if [ "$CLAUDE_CODE_REMOTE" = true ]; then [ -z "$CLAUDE_ENV_FILE" ] || echo 'unset ${Object.keys(BASE_ENV).join(' ')}' >> "$CLAUDE_ENV_FILE"; else ` +
@@ -662,7 +684,7 @@ function hooksOf(settings: object, event: string): { command?: unknown }[] {
 /**
  * The client's Claude Code settings with this release's hooks and lock: each
  * entry an older release wrote swapped where it stands, a missing one added,
- * the lock's variables set in `env`, and REVIEW_THREAD_RULE allowed. Every edit is made in the text, so
+ * the lock's variables set in `env`, and REVIEW_THREAD_RULE and AUTO_FIX_RULES allowed. Every edit is made in the text, so
  * the rest of the file keeps its layout. Says what changed, for the question.
  */
 export function claudeSettings(before: string | undefined): { text: string; changes: string[]; labels: string[] } {
@@ -705,11 +727,18 @@ export function claudeSettings(before: string | undefined): { text: string; chan
       labels.push('lock');
     }
     const allow = (parsed() as { permissions?: { allow?: unknown } }).permissions?.allow;
-    if (!Array.isArray(allow) || !allow.includes(REVIEW_THREAD_RULE)) {
+    const review = !Array.isArray(allow) || !allow.includes(REVIEW_THREAD_RULE);
+    if (review) {
       text = appendToArray(text, ['permissions'], 'allow', REVIEW_THREAD_RULE);
       changes.push('allow process-rules review-thread without a prompt, so agent sessions answer review threads on their own pull requests');
-      labels.push('review rule');
     }
+    const lacking = missingAutoFixRules(parsed());
+    for (const rule of lacking) text = appendToArray(text, ['permissions'], 'allow', rule);
+    if (lacking.length > 0) {
+      changes.push(`allow ${lacking.join(', ')} without a prompt, so agent sessions turn Auto-fix on for their own pull requests`);
+    }
+    // One word for both, so the plan's line stays short.
+    if (review || lacking.length > 0) labels.push(!review ? 'Auto-fix rules' : lacking.length === 0 ? 'review rule' : 'allow rules');
   } catch (error) {
     throw new Error(`${HOOKS_PATH}: ${(error as Error).message}`);
   }

@@ -8,7 +8,7 @@ import { KEYCHAIN } from './token-store.ts';
 import { ISSUE_TYPES, RERUN } from './issue-types.ts';
 import { declinedPath, movedPath, ownerFixes } from './lockout.ts';
 import { CLOUD_SETUP_PATH, WORKFLOW_PATH } from './onboard-pull.ts';
-import { workflow } from './onboard.ts';
+import { AUTO_FIX_RULES, workflow } from './onboard.ts';
 import { AGENT, AGENT_ID, CLASSIC, FakeSys, HOME, KEY, NOW, ROOT, TOKEN, capture } from './fake.test.ts';
 import { packageVersion } from './version.ts';
 
@@ -88,7 +88,7 @@ describe('doctor', () => {
 
   it('groups client hooks that reach GitHub outside as-agent under This repo, and still passes', async () => {
     const sys = healthy();
-    sys.files.set('/repo/.claude/settings.json', JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: 'gh pr view' }] }] } }));
+    sys.files.set('/repo/.claude/settings.json', JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: 'gh pr view' }] }] }, permissions: { allow: [...AUTO_FIX_RULES] } }));
     const { code, out, err } = await check(sys);
     assert.deepEqual({ code, err }, { code: 0, err: [] });
     assert.deepEqual(out.slice(-5), [
@@ -98,6 +98,44 @@ describe('doctor', () => {
       '│',
       '└  1 to fix',
     ]);
+  });
+
+  it("names the Auto-fix rules the repo's Claude Code settings lack, and still passes", async () => {
+    const sys = healthy();
+    const settings = (allow: string[]): void => {
+      sys.files.set(`${ROOT}/.claude/settings.json`, JSON.stringify({ permissions: { allow } }));
+    };
+    settings(['Bash(pnpm test)']);
+    const fresh = await check(sys);
+    assert.deepEqual({ code: fresh.code, err: fresh.err }, { code: 0, err: [] });
+    assert.deepEqual(fresh.out.slice(-5), [
+      '│',
+      '◇  This repo',
+      `▲  .claude/settings.json does not allow ${AUTO_FIX_RULES.join(', ')}, so agent sessions cannot turn Auto-fix on → niyam onboard again`,
+      '│',
+      '└  1 to fix',
+    ]);
+    settings(['mcp__ccd_pr__get_status']);
+    assert.deepEqual(marked((await check(sys)).out, '▲'), [
+      '▲  .claude/settings.json does not allow mcp__ccd_pr__bind_pr, mcp__ccd_pr__set_monitor, so agent sessions cannot turn Auto-fix on → niyam onboard again',
+    ]);
+    settings([...AUTO_FIX_RULES]);
+    assert.equal((await check(sys)).out.at(-1), '└  All good');
+    settings(['mcp__ccd_pr__*']);
+    assert.equal((await check(sys)).out.at(-1), '└  All good', 'the whole server allowed');
+  });
+
+  it('says nothing about Auto-fix rules where the repo is not onboarded or its settings do not parse', async () => {
+    const sys = healthy();
+    sys.files.set(`${ROOT}/.claude/settings.json`, '{ not json');
+    assert.equal((await check(sys)).out.at(-1), '└  All good');
+    sys.files.set(`${ROOT}/.claude/settings.json`, '{}');
+    sys.files.delete(`${ROOT}/.github/niyam.json`);
+    assert.ok(!(await check(sys, AGENT)).out.some((line) => line.includes('Auto-fix')));
+    const outside = healthy();
+    outside.files.set(`${ROOT}/.claude/settings.json`, '{}');
+    outside.inRepo = false;
+    assert.ok(!(await check(outside, AGENT)).out.some((line) => line.includes('Auto-fix')));
   });
 
   it('gives the owner steps while the desktop app started before gh moved to the agent, and still passes', async () => {
@@ -552,9 +590,17 @@ describe('doctor in a Claude cloud session', () => {
     ]);
   });
 
+  it('names the Auto-fix rules the repo lacks, as on a Mac', async () => {
+    const sys = cloud();
+    sys.files.set(`${ROOT}/.claude/settings.json`, JSON.stringify({ permissions: { allow: ['mcp__ccd_pr__bind_pr', 'mcp__ccd_pr__get_status'] } }));
+    assert.deepEqual(marked((await check(sys)).out, '▲'), [
+      '▲  .claude/settings.json does not allow mcp__ccd_pr__set_monitor, so agent sessions cannot turn Auto-fix on → niyam onboard again',
+    ]);
+  });
+
   it('groups client hooks that reach GitHub outside as-agent under This repo, as on a Mac', async () => {
     const sys = cloud();
-    sys.files.set(`${ROOT}/.claude/settings.json`, JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: 'gh pr view' }] }] } }));
+    sys.files.set(`${ROOT}/.claude/settings.json`, JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: 'gh pr view' }] }] }, permissions: { allow: [...AUTO_FIX_RULES] } }));
     const { code, out } = await check(sys);
     assert.equal(code, 0);
     assert.deepEqual(out.slice(-5), [
