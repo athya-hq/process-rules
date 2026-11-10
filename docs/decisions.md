@@ -1196,7 +1196,8 @@
   `mcp__ccd_pr__bind_pr`, `mcp__ccd_pr__get_status` and
   `mcp__ccd_pr__set_monitor` to `permissions.allow` in `.claude/settings.json`
   beside the review-thread rule, in the text, adding only the ones missing
-  and leaving the rest of the file as it is; the plan says "Auto-fix rules",
+  (none where `mcp__ccd_pr` or `mcp__ccd_pr__*` allows the whole server,
+  review) and leaving the rest of the file as it is; the plan says "Auto-fix rules",
   or "allow rules" when the review-thread rule is added too, to keep its
   line short. `doctor` warns (`▲`, not `✗`: the agent identity still works)
   under "This repo" about an onboarded repo whose file lacks any, naming

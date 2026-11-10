@@ -345,7 +345,7 @@ Claude cloud sessions below).
    It writes `.github/niyam.json` (in a repo onboarded before niyam it keeps
    `.github/process-rules.json` and writes there), adds to `.claude/settings.json`
    the lock in `env`, a SessionStart hook running `process-rules
-   session-start`, a PreToolUse hook running `process-rules guard` and a
+   session-start`, a PreToolUse hook running `process-rules guard`, and
    `permissions.allow` rules for `process-rules review-thread` (hooks keep the
    old name, a bin of niyam, so adopters' settings need no change) and for
    the app's `mcp__ccd_pr__bind_pr`, `mcp__ccd_pr__get_status` and

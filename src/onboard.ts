@@ -155,9 +155,16 @@ export const REVIEW_THREAD_RULE = 'Bash(process-rules review-thread *)';
  */
 export const AUTO_FIX_RULES = ['mcp__ccd_pr__bind_pr', 'mcp__ccd_pr__get_status', 'mcp__ccd_pr__set_monitor'] as const;
 
-/** Which of AUTO_FIX_RULES a settings file's `permissions.allow` lacks, in their order. */
+/** The rules that allow every tool of the app's pull request server, AUTO_FIX_RULES among them. */
+const PR_SERVER_RULES = ['mcp__ccd_pr', 'mcp__ccd_pr__*'];
+
+/**
+ * Which of AUTO_FIX_RULES a settings file's `permissions.allow` lacks, in
+ * their order: none when it allows the whole server.
+ */
 export function missingAutoFixRules(settings: unknown): string[] {
   const allow = (settings as { permissions?: { allow?: unknown } } | null)?.permissions?.allow;
+  if (Array.isArray(allow) && allow.some((rule) => PR_SERVER_RULES.includes(rule as string))) return [];
   return AUTO_FIX_RULES.filter((rule) => !Array.isArray(allow) || !allow.includes(rule));
 }
 

@@ -121,6 +121,8 @@ describe('doctor', () => {
     ]);
     settings([...AUTO_FIX_RULES]);
     assert.equal((await check(sys)).out.at(-1), '└  All good');
+    settings(['mcp__ccd_pr__*']);
+    assert.equal((await check(sys)).out.at(-1), '└  All good', 'the whole server allowed');
   });
 
   it('says nothing about Auto-fix rules where the repo is not onboarded or its settings do not parse', async () => {
@@ -585,6 +587,14 @@ describe('doctor in a Claude cloud session', () => {
     sys.files.delete(`${ROOT}/.github/niyam.json`);
     assert.deepEqual(marked((await check(sys)).out, '✗'), [
       `✗  .github/niyam.json not found in ${ROOT}, so the agents are not known → niyam onboard again`,
+    ]);
+  });
+
+  it('names the Auto-fix rules the repo lacks, as on a Mac', async () => {
+    const sys = cloud();
+    sys.files.set(`${ROOT}/.claude/settings.json`, JSON.stringify({ permissions: { allow: ['mcp__ccd_pr__bind_pr', 'mcp__ccd_pr__get_status'] } }));
+    assert.deepEqual(marked((await check(sys)).out, '▲'), [
+      '▲  .claude/settings.json does not allow mcp__ccd_pr__set_monitor, so agent sessions cannot turn Auto-fix on → niyam onboard again',
     ]);
   });
 

@@ -182,13 +182,12 @@ function repoFindings(sys: Sys): Finding[] {
 function autoFixFindings(sys: Sys): Finding[] {
   let settings: unknown;
   try {
-    const top = sys.exec('git', ['rev-parse', '--show-toplevel'], { cwd: sys.cwd });
-    if (top.code !== 0) return [];
-    const root = top.stdout.trim();
+    // Where session-start looks, so a cloud session's CLI run from outside the clone still finds it.
+    const root = repoRoot(sys);
     if (!hasSettings(sys, root) || !sys.exists(`${root}/${HOOKS_PATH}`)) return [];
     settings = JSON.parse(sys.read(`${root}/${HOOKS_PATH}`)) as unknown;
   } catch {
-    // A file doctor cannot read: onboard says what is wrong with it.
+    // Outside a clone, or a file doctor cannot read: onboard says what is wrong with it.
     return [];
   }
   const missing = missingAutoFixRules(settings);

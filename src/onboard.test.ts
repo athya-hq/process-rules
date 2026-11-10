@@ -557,6 +557,13 @@ describe('onboard', () => {
     assert.deepEqual(claudeSettings(before), { text: before, changes: [], labels: [] });
   });
 
+  it('adds no Auto-fix rule where the whole pull request server is allowed', () => {
+    for (const server of ['mcp__ccd_pr', 'mcp__ccd_pr__*']) {
+      assert.deepEqual(claudeSettings(JSON.stringify({ ...CLAUDE, permissions: { allow: [REVIEW_THREAD_RULE, server] } })).changes, [], server);
+    }
+    assert.ok(claudeSettings(JSON.stringify({ ...CLAUDE, permissions: { allow: [REVIEW_THREAD_RULE, 'mcp__ccd_pr_*'] } })).labels.includes('Auto-fix rules'));
+  });
+
   it("adds only the Auto-fix rules a file lacks, after the client's own", () => {
     const { text, changes, labels } = claudeSettings(JSON.stringify({ ...CLAUDE, permissions: { allow: ['Bash(pnpm test)', REVIEW_THREAD_RULE, 'mcp__ccd_pr__get_status'] } }));
     assert.deepEqual(JSON.parse(text).permissions, {
