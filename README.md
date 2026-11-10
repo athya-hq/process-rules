@@ -1094,7 +1094,7 @@ release, attaching the CLI package it built and tested. Install that package on
 each machine with pnpm, once; nothing is built on install:
 
 ```bash
-pnpm add -g https://github.com/veda-hq/niyam/releases/download/v0.6.6/veda-hq-niyam-0.6.6.tgz
+pnpm add -g https://github.com/veda-hq/niyam/releases/download/v0.6.7/veda-hq-niyam-0.6.7.tgz
 ```
 
 The package puts two commands on `PATH`: `niyam`, and `process-rules`, its
