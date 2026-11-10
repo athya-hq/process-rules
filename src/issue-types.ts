@@ -399,16 +399,16 @@ interface IssueEvent {
   repository?: { owner?: { type?: string } };
 }
 
-/** Gives one issue with no type the work model's by typeFor, reading its parent's type; returns the line saying so. */
-async function giveType(sys: Sys, token: string, url: string, number: number, parentUrl: unknown, subIssues: unknown): Promise<string> {
-  let parent: { number: string; type: string | undefined } | undefined;
-  if (typeof parentUrl === 'string') {
-    const above = await sys.http(parentUrl, { token });
-    if (above.status !== 200) throw new Error(`cannot read the parent of #${number} (HTTP ${above.status})`);
-    const type = (above.json as { type?: { name?: unknown } | null } | null)?.type?.name;
-    parent = { number: parentUrl.split('/').at(-1) as string, type: typeof type === 'string' ? type : undefined };
-  }
-  const { to, why } = typeFor(parent, typeof subIssues === 'number' ? subIssues : 0);
+/** The type of the issue at `url`, as GitHub shows it now; undefined for none. */
+async function typeOf(sys: Sys, token: string, url: string, number: number): Promise<string | undefined> {
+  const above = await sys.http(url, { token });
+  if (above.status !== 200) throw new Error(`cannot read the parent of #${number} (HTTP ${above.status})`);
+  const type = (above.json as { type?: { name?: unknown } | null } | null)?.type?.name;
+  return typeof type === 'string' ? type : undefined;
+}
+
+/** Sets an issue's type, checking GitHub's answer; returns the line saying so. */
+async function setType(sys: Sys, token: string, url: string, number: number, { to, why }: { to: string; why: string }): Promise<string> {
   const { status, json } = await sys.http(url, { method: 'PATCH', token, body: { type: to } });
   const now = (json as { type?: { name?: unknown } | null } | null)?.type?.name;
   if (status !== 200 || typeof now !== 'string' || !same(now, to)) {
@@ -416,6 +416,27 @@ async function giveType(sys: Sys, token: string, url: string, number: number, pa
     throw new Error(`GitHub did not make #${number} a ${to} (HTTP ${status}); the owner runs niyam onboard, which adds and enables the work model's issue types`);
   }
   return `issue-type: #${number} had no type; now a ${to}: ${why}`;
+}
+
+/**
+ * The type each of `issues` gets, decided before any is set: a parent among
+ * them is read as the type it gets, as in typesPlan, so a child is not made
+ * a Brief for want of a type its parent is about to get.
+ */
+async function decideAll(sys: Sys, token: string, issues: Omit<Holder, 'archived'>[]): Promise<Map<string, { to: string; why: string }>> {
+  const byUrl = new Map(issues.map((issue) => [issue.url, issue]));
+  const decided = new Map<string, { to: string; why: string }>();
+  const decide = async (issue: Omit<Holder, 'archived'>): Promise<{ to: string; why: string }> => {
+    const known = decided.get(issue.url);
+    if (known) return known;
+    const above = issue.parent ? byUrl.get(issue.parent) : undefined;
+    const parentType = issue.parent ? (above ? (await decide(above)).to : await typeOf(sys, token, issue.parent, issue.number)) : undefined;
+    const type = typeFor(issue.parent ? { number: issue.parent.split('/').at(-1) as string, type: parentType } : undefined, issue.subIssues);
+    decided.set(issue.url, type);
+    return type;
+  };
+  for (const issue of issues) await decide(issue);
+  return decided;
 }
 
 /**
@@ -449,7 +470,8 @@ export async function issueType(sys: Sys, io: Output): Promise<number> {
       return 0;
     }
     const bare = (await untyped(sys, token, slug)).filter((issue) => issue.number !== approvals);
-    for (const issue of bare) io.out(await giveType(sys, token, issue.url, issue.number, issue.parent, issue.subIssues));
+    const types = await decideAll(sys, token, bare);
+    for (const issue of bare) io.out(await setType(sys, token, issue.url, issue.number, types.get(issue.url) as { to: string; why: string }));
     io.out(`issue-type: ${plural(bare.length, 'open issue')} with no type typed`);
     return 0;
   }
@@ -483,6 +505,9 @@ export async function issueType(sys: Sys, io: Output): Promise<number> {
     io.out(`issue-type: #${number} is a ${issue.type.name} already; nothing to do`);
     return 0;
   }
-  io.out(await giveType(sys, token, url, number, issue?.parent_issue_url, issue?.sub_issues_summary?.total));
+  const parentUrl = typeof issue?.parent_issue_url === 'string' ? issue.parent_issue_url : undefined;
+  const parent = parentUrl ? { number: parentUrl.split('/').at(-1) as string, type: await typeOf(sys, token, parentUrl, number) } : undefined;
+  const subIssues = issue?.sub_issues_summary?.total;
+  io.out(await setType(sys, token, url, number, typeFor(parent, typeof subIssues === 'number' ? subIssues : 0)));
   return 0;
 }

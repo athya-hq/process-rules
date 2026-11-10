@@ -476,6 +476,19 @@ describe('issueType', () => {
         'issue-type: 2 open issues with no type typed',
       ],
     });
+    // A child listed before its untyped parent is read as the parent's new type, not typed a Brief for want of one.
+    const family = job({ schedule: '41 * * * *' }, undefined, 'schedule');
+    family.route('GET', `/repos/${SLUG}/issues?type=none&state=open&per_page=100&page=1`, {
+      status: 200,
+      json: [row(12, { parent_issue_url: `https://api.github.com/repos/${SLUG}/issues/11` }), row(11, { sub_issues_summary: { total: 1 } })],
+    });
+    family.route('PATCH', `/repos/${SLUG}/issues/12`, { status: 200, json: { type: { name: 'Slice' } } });
+    family.route('PATCH', `/repos/${SLUG}/issues/11`, { status: 200, json: { type: { name: 'Work item' } } });
+    assert.deepEqual((await run(family)).out.slice(0, 2), [
+      'issue-type: #12 had no type; now a Slice: its parent #11 is a Work item',
+      'issue-type: #11 had no type; now a Work item: it has 1 sub-issue',
+    ]);
+    assert.ok(!family.requests.some((request) => request.method === 'GET' && request.url.endsWith('/issues/11')), 'a parent being typed is not asked of GitHub');
     const personal = job({ schedule: '41 * * * *' }, undefined, 'schedule');
     personal.ownerType = 'User';
     assert.deepEqual(await run(personal), { code: 0, out: ['issue-type: GitHub has issue types for organisations only; nothing to do'] });
