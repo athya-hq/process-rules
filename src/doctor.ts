@@ -11,7 +11,7 @@ import {
   keyPairProblem,
   launcherPath,
   pathsFor,
-  sessionScript,
+  sessionFileIs,
   signingKeys,
   tokenInfo,
 } from './agent.ts';
@@ -73,8 +73,12 @@ export async function doctor(sys: Sys, io: Output, named?: string): Promise<numb
     await remote('session file', async () => {
       if (!sys.exists(paths.session)) return { mark: '✗', text: 'session file missing', fix: MACHINE };
       if (found instanceof Error) throw found;
-      const script = sessionScript(agent, found.id, paths, store);
-      return sys.read(paths.session) === script ? { mark: '✓', text: 'session file' } : { mark: '✗', text: 'session file out of date', fix: MACHINE };
+      const is = sessionFileIs(sys.read(paths.session), agent, found.id, paths, store);
+      return is === 'current'
+        ? { mark: '✓', text: 'session file' }
+        : is === 'older'
+          ? { mark: '▲', text: 'session file from an older release; it still works', fix: MACHINE }
+          : { mark: '✗', text: 'session file out of date', fix: MACHINE };
     }),
   ];
 

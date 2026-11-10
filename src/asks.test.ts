@@ -129,7 +129,7 @@ describe('ownersAround', () => {
     const sys = new FakeSys();
     assert.deepEqual(ownersAround(sys, `${ROOT}/src/deep`), [OWNER]);
     assert.deepEqual(ownersAround(sys, '/elsewhere/x'), []);
-    sys.files.set(`${ROOT}/.github/process-rules.json`, '{"owner": 5}');
+    sys.files.set(`${ROOT}/.github/niyam.json`, '{"owner": 5}');
     assert.deepEqual(ownersAround(sys, ROOT), []);
   });
 });
@@ -156,7 +156,7 @@ function job(name: string, event: unknown, settings?: unknown): FakeSys {
   const sys = new FakeSys();
   sys.env = { GITHUB_EVENT_NAME: name, GITHUB_EVENT_PATH: EVENT, GITHUB_REPOSITORY: SLUG, GH_TOKEN: 'ghs_run' };
   sys.files.set(EVENT, JSON.stringify(event));
-  if (settings) sys.files.set(`${ROOT}/.github/process-rules.json`, JSON.stringify(settings));
+  if (settings) sys.files.set(`${ROOT}/.github/niyam.json`, JSON.stringify(settings));
   sys.route('POST', LABELS, { status: 200, json: [] });
   sys.route('DELETE', `${LABELS}/needs-owner`, { status: 200, json: [] });
   return sys;
@@ -531,9 +531,9 @@ describe('needsOwner', () => {
     sys.env = {};
     await assert.rejects(needsOwner(sys, capture().io), /needs-owner runs in GitHub Actions/);
     const bare = job('schedule', {});
-    bare.files.delete(`${ROOT}/.github/process-rules.json`);
-    assert.deepEqual((await runJob(bare)).out, ['needs-owner: the base branch has no .github/process-rules.json, so the repo is not adopted on its base yet; nothing to check']);
+    bare.files.delete(`${ROOT}/.github/niyam.json`);
+    assert.deepEqual((await runJob(bare)).out, ['needs-owner: the base branch has no .github/niyam.json, so the repo is not adopted on its base yet; nothing to check']);
     const off = job('schedule', {}, { owner: OWNER, agent: AGENT, features: ['identity', 'work-rules'] });
-    assert.deepEqual((await runJob(off)).out, ['needs-owner: board is off in .github/process-rules.json; nothing to check']);
+    assert.deepEqual((await runJob(off)).out, ['needs-owner: board is off in .github/niyam.json; nothing to check']);
   });
 });

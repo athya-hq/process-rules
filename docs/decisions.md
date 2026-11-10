@@ -1018,27 +1018,52 @@
   athya_mono's approved 0114 spec v5 holds it as W-39
   (athya-hq/athya_mono#3210): the repository moves to veda-hq/niyam and the
   package is `@veda-hq/niyam`. The owner approved the plan
-  (https://claude.ai/artifact/HEQyFtZsxHKDLrt6GqQtEq) with a 👍 on #226 and on
-  W-39. What people see is renamed: the package, the bin `niyam` with
-  `process-rules` kept as a second bin (typed by the owner, it names `niyam`;
-  hooks stay quiet), the messages, the README and the shared workflow's
-  default repository. The workflow pin `onboard` writes is
-  `veda-hq/niyam/.github/workflows/checks.yml`, and a pin of
-  `athya-hq/process-rules` counts and is moved. What adopters' committed files
-  and hooks name stays: the hook commands and launcher, the lock's text,
-  `~/.config/process-rules`, `PROCESS_RULES_AGENT`,
+  (https://claude.ai/artifact/HEQyFtZsxHKDLrt6GqQtEq) with a 👍 on #226, on
+  #227 (P-50, which changes what P-17's lock reads) and on W-39. What people
+  see is renamed: the package, the bin `niyam` with `process-rules` kept as a
+  second bin (typed by the owner, it names `niyam`; hooks stay quiet), the
+  messages, the README and the shared workflow's default repository. The
+  workflow pin `onboard` writes is `veda-hq/niyam/.github/workflows/checks.yml`,
+  and a pin of `athya-hq/process-rules` counts and is moved. What adopters'
+  committed files and hooks name stays: the hook commands and launcher, the
+  lock's text, `~/.config/process-rules`, `PROCESS_RULES_AGENT`,
   `.github/workflows/process-rules.yml` and its job ids (so the required
   checks keep their names and no ruleset changes), `process-rules-ref` and the
-  cloud setup path (no new Setup paste). The keychain service and the settings
-  file are P-50's, which the owner approves on its own. Releases attach the
-  CLI twice: `veda-hq-niyam-<v>.tgz`, and the same build named
-  `@athya-hq/process-rules` as `athya-hq-process-rules-<v>.tgz`, since 0.6.x's
-  `upgrade` looks for that name and pnpm refuses a second global package with
-  the bin `process-rules` (tried with pnpm 12.9.0). That bridge replaces the
-  old package in place; `niyam upgrade` then removes it and adds
-  `@veda-hq/niyam`, putting the old one back if the add fails. `upgrade` asks
-  veda-hq/niyam for releases and athya-hq/process-rules on a 404, so it works
-  before and after the transfer. Rejected: renaming the job ids, the workflow
-  file, the cloud path and `~/.config` now (each needs every adopter
-  re-onboarded, the job ids a ruleset edit in the same hour; a later slice);
-  publishing to npm now (tarballs as before; its own slice).
+  cloud setup path (no new Setup paste). P-50: the keychain service is
+  `niyam` and the settings file `.github/niyam.json`, each read first, the
+  old one where it is missing; `machine` copies the token and leaves the old
+  entry, `onboard` keeps a repo's existing settings file, and a session file
+  an older release wrote, which reads the old entry, still counts (`doctor`
+  marks it ▲). Releases attach the CLI twice: `veda-hq-niyam-<v>.tgz`, and the
+  same build named `@athya-hq/process-rules` as `athya-hq-process-rules-<v>.tgz`,
+  since 0.6.x's `upgrade` looks for that name and pnpm refuses a second global
+  package with the bin `process-rules` (tried with pnpm 12.9.0). That bridge
+  replaces the old package in place; `niyam upgrade` then removes it and adds
+  `@veda-hq/niyam`, putting the old one back if the add fails. `upgrade`
+  asks veda-hq/niyam for releases and athya-hq/process-rules on a 404, so it
+  works before and after the transfer. Rejected: renaming the job ids, the
+  workflow file, the cloud path and `~/.config` now (each needs every
+  adopter re-onboarded, the job ids a ruleset edit in the same hour; a later
+  slice); publishing to npm now (tarballs as before; its own slice).
+- **2026-11-10 — Record: the lock reads niyam names, old ones too (P-50).**
+  The owner approved #227 with a 👍 on its own, since the keychain service and
+  the settings file are what P-17's lock reads. The agent's token is stored
+  under the keychain service `niyam`; a token found only under
+  `process-rules` is still read, and `machine` copies it to `niyam`, leaving
+  the old entry for older CLIs on the Mac; while that entry is there, a token
+  `machine` stores goes under both names, so an older CLI never reads one it
+  replaced (review). The session file now reads
+  `niyam`, then `process-rules`; one an older release wrote, which reads the
+  old entry alone, still counts for session-start and as-agent, and `doctor`
+  marks it ▲ until `machine` rewrites it, so no session locks out after the
+  upgrade. The settings file is `.github/niyam.json`; session-start, the
+  guard, as-agent, doctor, the work rules and the shared checks read
+  `.github/process-rules.json` where it is missing, and name the file they
+  read, and the workflow's schedule comment names the file in use. `onboard`
+  writes `.github/niyam.json` in a repo that has neither and
+  keeps an existing `.github/process-rules.json`, which an older CLI on
+  another Mac still reads. Nothing else in P-17 or P-18 changes: the lock's
+  placeholder token, the SSH refusal, `~/.config/process-rules` and
+  `PROCESS_RULES_AGENT` stay. Rejected: moving the token (an older CLI would
+  lose it); renaming an adopter's settings file now (an older CLI's
+  session-start would lock out).

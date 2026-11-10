@@ -18,7 +18,7 @@ import { GUARD_COMMAND, HOOK_COMMAND, HOOKS_PATH, OLDER_HOOK_COMMANDS, OLDER_PRE
 import { BASE_ENV } from './agent.ts';
 import { actionsKey, sealedValue } from './fake-secrets.test.ts';
 
-const SETTINGS = `${ROOT}/.github/process-rules.json`;
+const SETTINGS = `${ROOT}/.github/niyam.json`;
 const HOOKS = `${ROOT}/${HOOKS_PATH}`;
 const WORKFLOW = `${ROOT}/${WORKFLOW_PATH}`;
 const PRE_PUSH = `${ROOT}/.git/hooks/pre-push`;
@@ -133,11 +133,11 @@ describe('onboard', () => {
       '│  example-org/example-app · owner example-owner · agent ExampleBot',
       '│',
       '◇  Pull request',
-      `│    process-rules.json  new, ${FEATURES.length} features on`,
-      '│    settings.json       new',
-      '│    workflow            new',
-      `│    cloud-setup.sh      new, installs v${packageVersion()}`,
-      '│    auto-merge          when checks pass',
+      `│    niyam.json      new, ${FEATURES.length} features on`,
+      '│    settings.json   new',
+      '│    workflow        new',
+      `│    cloud-setup.sh  new, installs v${packageVersion()}`,
+      '│    auto-merge      when checks pass',
       '│',
       '◇  GitHub — one sign-in as example-owner',
       '│    board        set up or check',
@@ -192,14 +192,14 @@ describe('onboard', () => {
     assert.ok(git.slice(6).every((c) => c.cwd === '/tmp/process-rules-2'), 'the pull request is made in a temporary repository');
     assert.deepEqual(git.at(-1)?.args, ['push', '-q', 'https://github.com/example-org/example-app.git', '+abc123:refs/heads/process-rules/onboard']);
     assert.ok(sys.removed.includes('/tmp/process-rules-2'), 'the temporary repository is deleted');
-    assert.deepEqual([...sys.committed.keys()], ['.github/process-rules.json', '.claude/settings.json', CLOUD_SETUP_PATH, '.github/workflows/process-rules.yml']);
+    assert.deepEqual([...sys.committed.keys()], ['.github/niyam.json', '.claude/settings.json', CLOUD_SETUP_PATH, '.github/workflows/process-rules.yml']);
     assert.equal(sys.committed.get(CLOUD_SETUP_PATH), cloudRepoScript(v, RELEASE_SHA256), 'the cloud setup file, at the pin, checked against the release');
     const pull = sys.requests.find((r) => r.method === 'POST' && r.url.endsWith(`${REPO}/pulls`));
     assert.equal(pull?.token, TOKEN, 'the agent opens the pull request');
     const { title, head, base, body } = pull?.body as { title: string; head: string; base: string; body: string };
     assert.deepEqual([title, head, base], [`chore(niyam): onboard at v${v}`, 'process-rules/onboard', 'main']);
     assert.deepEqual(git.at(-2)?.args.slice(-2), ['-m', `chore(niyam): onboard at v${v}`], 'the commit header is the title');
-    assert.match(body, /^- `\.github\/process-rules\.json`: owner example-owner approves, agent ExampleBot builds, with identity, .* on$/m);
+    assert.match(body, /^- `\.github\/niyam\.json`: owner example-owner approves, agent ExampleBot builds, with identity, .* on$/m);
     assert.match(body, /^- `\.github\/workflows\/process-rules\.yml`: write \.github\/workflows\/process-rules\.yml, which runs the shared niyam checks$/m);
     // The long explanations the terminal no longer prints.
     assert.ok(body.includes('\nDone at the terminal, outside this pull request:\n\n- board:\n  - issue types in example-org: Work item, Slice, State, Decision, Brief\n'), body);
@@ -330,7 +330,7 @@ describe('onboard', () => {
       // Only the sign-in tells which owner ran it, so it comes before the plan, and the pull request says why.
       assert.ok(out.indexOf('◇  Signed in as example-owner') < out.findIndex((line) => line.startsWith('◆')), out.join('\n'));
       assert.ok(out.includes('◇  GitHub — signed in as example-owner'), out.join('\n'));
-      assert.match(opened(sys)?.body ?? '', /^- onboard signed in before showing its plan: \.github\/process-rules\.json names several owners, and only the sign-in tells which one ran it\.$/m);
+      assert.match(opened(sys)?.body ?? '', /^- onboard signed in before showing its plan: \.github\/niyam\.json names several owners, and only the sign-in tells which one ran it\.$/m);
     });
 
     it('works as the second owner when the browser signs in as them, with one sign-in', async () => {
@@ -350,7 +350,7 @@ describe('onboard', () => {
       const someone = team();
       someone.acceptToken(OWNER_TOKEN, 'someone');
       assert.deepEqual((await run(someone, [])).err, [
-        'onboard: the browser signed in to GitHub as someone, but .github/process-rules.json names the owners example-owner or Second-Owner; sign in there as one of them and run it again',
+        'onboard: the browser signed in to GitHub as someone, but .github/niyam.json names the owners example-owner or Second-Owner; sign in there as one of them and run it again',
       ]);
       const failed = team();
       failed.ghToken = undefined;
@@ -370,12 +370,12 @@ describe('onboard', () => {
     it('refuses accounts the lists do not hold, and an agent it cannot tell', async () => {
       const outside = team();
       assert.deepEqual((await run(outside, ['someone', AGENT])).err, [
-        'onboard: .github/process-rules.json already names owner example-owner or Second-Owner and agent OtherBot or ExampleBot; edit or delete it to change them',
+        'onboard: .github/niyam.json already names owner example-owner or Second-Owner and agent OtherBot or ExampleBot; edit or delete it to change them',
       ]);
       const unset = team();
       unset.files.delete(pathsFor(HOME, AGENT).session);
       assert.deepEqual((await run(unset, [])).err, [
-        'onboard: .github/process-rules.json names the agents OtherBot or ExampleBot, and niyam machine has set up none of them on this machine; name the owner and the agent: niyam onboard <owner> <agent>',
+        'onboard: .github/niyam.json names the agents OtherBot or ExampleBot, and niyam machine has set up none of them on this machine; name the owner and the agent: niyam onboard <owner> <agent>',
       ]);
     });
   });
@@ -694,7 +694,7 @@ describe('onboard', () => {
       'accounts other than the settings name',
       ['someone', AGENT],
       (sys: FakeSys) => sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT })),
-      'onboard: .github/process-rules.json already names owner example-owner and agent ExampleBot; edit or delete it to change them',
+      'onboard: .github/niyam.json already names owner example-owner and agent ExampleBot; edit or delete it to change them',
     ],
     [
       'a Mac not set up for the agent',
@@ -1222,11 +1222,11 @@ describe('staged adoption', () => {
     const boardRequest = (r: { url: string; body?: unknown }): boolean =>
       (r.url.endsWith('/graphql') && !JSON.stringify(r.body).includes('enablePullRequestAutoMerge')) || r.url.includes('/labels') || r.url.includes('/issue-types');
     assert.ok(!sys.requests.some(boardRequest), 'no board');
-    assert.deepEqual(planned(out, 'Pull request'), ['process-rules.json: new, 1 feature on', 'settings.json: new', `cloud-setup.sh: new, installs v${packageVersion()}`, 'auto-merge: when checks pass']);
+    assert.deepEqual(planned(out, 'Pull request'), ['niyam.json: new, 1 feature on', 'settings.json: new', `cloud-setup.sh: new, installs v${packageVersion()}`, 'auto-merge: when checks pass']);
     assert.deepEqual(planned(out, 'GitHub'), [], 'no board, and the agent can push');
     assert.deepEqual(planned(out, 'This Mac'), ['pre-push hook: new']);
     assert.ok(out.includes(`└  ${PULL_URL}  merges itself when checks pass`));
-    assert.deepEqual([...sys.committed.keys()], ['.github/process-rules.json', '.claude/settings.json', CLOUD_SETUP_PATH]);
+    assert.deepEqual([...sys.committed.keys()], ['.github/niyam.json', '.claude/settings.json', CLOUD_SETUP_PATH]);
     assert.deepEqual(byHand(out), ["cloud sessions, once: claude.ai's GitHub as ExampleBot, Setup script from niyam cloud-setup, first"]);
     assert.deepEqual(sys.chosen, ['Go ahead?']);
   });
@@ -1246,9 +1246,22 @@ describe('staged adoption', () => {
       project: 'Example work',
       note: 'kept',
     });
-    assert.deepEqual(planned(out, 'Pull request'), ['process-rules.json: turn board on', `cloud-setup.sh: new, installs v${packageVersion()}`, 'auto-merge: when checks pass']);
+    assert.deepEqual(planned(out, 'Pull request'), ['niyam.json: turn board on', `cloud-setup.sh: new, installs v${packageVersion()}`, 'auto-merge: when checks pass']);
     assert.ok(planned(out, 'GitHub — one sign-in as example-owner').includes('board: set up or check'));
     assert.ok(!repo(sys).has(WORKFLOW), 'board alone needs no workflow');
+  });
+
+  it('keeps the settings file a repo onboarded before niyam has, under its old name (P-50)', async () => {
+    const sys = fresh();
+    const old = SETTINGS.replace('.github/niyam.json', '.github/process-rules.json');
+    sys.files.delete(SETTINGS);
+    sys.files.set(old, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity'], project: 'Example work' }));
+    sys.files.set(HOOKS, JSON.stringify(CLAUDE));
+    const { code, out } = await run(sys, ['--add', 'board']);
+    assert.equal(code, 0);
+    assert.deepEqual(JSON.parse(repo(sys).get(old) ?? '').features, ['identity', 'board']);
+    assert.equal(repo(sys).has(SETTINGS), false, 'writes no second settings file');
+    assert.equal(planned(out, 'Pull request')[0], 'process-rules.json: turn board on');
   });
 
   it('renames design to figma, takes the library key out of older settings and sets it as the FIGMA_LIBRARY secret', async () => {
@@ -1259,11 +1272,11 @@ describe('staged adoption', () => {
     const pair = await actionsKey(sys);
     const { code, out, err } = await run(sys);
     assert.deepEqual([code, err], [0, []]);
-    assert.deepEqual(planned(out, 'Pull request'), ['process-rules.json: design → figma, figma key out', 'workflow: new', `cloud-setup.sh: new, installs v${packageVersion()}`, 'auto-merge: when checks pass']);
+    assert.deepEqual(planned(out, 'Pull request'), ['niyam.json: design → figma, figma key out', 'workflow: new', `cloud-setup.sh: new, installs v${packageVersion()}`, 'auto-merge: when checks pass']);
     assert.deepEqual(planned(out, 'GitHub — one sign-in as example-owner'), ['FIGMA_LIBRARY secret']);
     assert.match(
       opened(sys)?.body ?? '',
-      /^- `\.github\/process-rules\.json`: rename the design feature to figma and take out "figma" and set its library key as the FIGMA_LIBRARY Actions secret$/m,
+      /^- `\.github\/niyam\.json`: rename the design feature to figma and take out "figma" and set its library key as the FIGMA_LIBRARY Actions secret$/m,
     );
     assert.deepEqual(JSON.parse(repo(sys).get(SETTINGS) ?? ''), { owner: 'example-owner', agent: AGENT, features: ['identity', 'figma'] });
     const sent = sealedValue(sys, pair);
@@ -1306,7 +1319,7 @@ describe('staged adoption', () => {
     sys.answers = ['n'];
     const { code, out } = await run(sys);
     assert.equal(code, 1);
-    assert.ok(planned(out, 'Pull request').includes('process-rules.json: design → figma'), out.join('\n'));
+    assert.ok(planned(out, 'Pull request').includes('niyam.json: design → figma'), out.join('\n'));
     assert.deepEqual(JSON.parse(repo(sys).get(SETTINGS) ?? '').features, ['identity', 'design']);
     assert.ok(changedNothing(sys));
   });
@@ -1389,8 +1402,8 @@ describe('staged adoption', () => {
   });
 
   for (const [name, args, change, message] of [
-    ['--features for a repo that has settings', ['--features', 'board'], (sys: FakeSys) => sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT })), 'onboard: .github/process-rules.json already lists its features; turn one more on with --add <feature>'],
-    ['--add with no settings', ['--add', 'board'], () => undefined, 'onboard: there is no .github/process-rules.json to add to; run niyam onboard <owner> <agent> first'],
+    ['--features for a repo that has settings', ['--features', 'board'], (sys: FakeSys) => sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT })), 'onboard: .github/niyam.json already lists its features; turn one more on with --add <feature>'],
+    ['--add with no settings', ['--add', 'board'], () => undefined, 'onboard: there is no .github/niyam.json to add to; run niyam onboard <owner> <agent> first'],
   ] as const) {
     it(`refuses ${name}`, async () => {
       const sys = fresh();
@@ -1525,7 +1538,7 @@ describe('the plan and its one question', () => {
     assert.deepEqual(sys.chosen, []);
     assert.equal(out[0], `◆  niyam onboard   v${packageVersion()}`);
     assert.deepEqual(planned(out, 'Pull request'), [
-      `process-rules.json: new, ${FEATURES.length} features on`,
+      `niyam.json: new, ${FEATURES.length} features on`,
       'settings.json: new',
       'workflow: new',
       `cloud-setup.sh: new, installs v${packageVersion()}`,
@@ -1544,7 +1557,7 @@ describe('the plan and its one question', () => {
     const { code, err } = await run(sys, ['--dry-run']);
     assert.deepEqual({ code, err }, {
       code: 1,
-      err: ['onboard: .github/process-rules.json names the owners example-owner or Second-Owner; name yours for a dry run, which signs in to nothing: niyam onboard <owner> --dry-run'],
+      err: ['onboard: .github/niyam.json names the owners example-owner or Second-Owner; name yours for a dry run, which signs in to nothing: niyam onboard <owner> --dry-run'],
     });
     assert.equal(signIns(sys), 0);
     const first = fresh();
@@ -1648,8 +1661,8 @@ describe("onboard's pull request", () => {
   for (const [step, said] of [
     ['init', 'onboard: git init failed: boom'],
     ['fetch', 'onboard: git fetch failed: boom'],
-    ['hash-object -w', 'onboard: storing .github/process-rules.json failed: boom'],
-    ['update-index', 'onboard: staging .github/process-rules.json failed: boom'],
+    ['hash-object -w', 'onboard: storing .github/niyam.json failed: boom'],
+    ['update-index', 'onboard: staging .github/niyam.json failed: boom'],
     ['write-tree', 'onboard: git write-tree failed: boom'],
     ['commit-tree', 'onboard: signing the commit failed: boom'],
     ['push -q https://github.com/example-org/example-app.git +', 'onboard: pushing as ExampleBot failed: boom'],
@@ -1667,10 +1680,10 @@ describe("onboard's pull request", () => {
 
   it('refuses a file the default branch has otherwise than this checkout, pushing nothing', async () => {
     const sys = fresh();
-    sys.tip = new Map([['.github/process-rules.json', '{"owner":"someone-else"}\n']]);
+    sys.tip = new Map([['.github/niyam.json', '{"owner":"someone-else"}\n']]);
     const { code, err } = await run(sys);
     assert.equal(code, 1);
-    assert.deepEqual(err, ['onboard: .github/process-rules.json on main is not what this checkout has; bring this checkout up to date with main and run onboard again', 'onboard: stopped at "pull request"; nothing after it was changed, and no pull request was opened']);
+    assert.deepEqual(err, ['onboard: .github/niyam.json on main is not what this checkout has; bring this checkout up to date with main and run onboard again', 'onboard: stopped at "pull request"; nothing after it was changed, and no pull request was opened']);
     assert.ok(!sys.calls.some((c) => c.args.join(' ').includes('refs/heads/process-rules/onboard')));
     assert.ok(sys.removed.includes('/tmp/process-rules-2'));
   });
@@ -1720,9 +1733,9 @@ describe("onboard's pull request", () => {
     await actionsKey(sys);
     const { code } = await run(sys, ['--add', 'board']);
     assert.equal(code, 0);
-    assert.deepEqual([...sys.committed.keys()], ['.github/process-rules.json']);
+    assert.deepEqual([...sys.committed.keys()], ['.github/niyam.json']);
     const { body } = sys.requests.find((r) => r.method === 'POST' && r.url.endsWith('/pulls'))?.body as { body: string };
-    assert.match(body, /^- `\.github\/process-rules\.json`: take out "figma" .*; turn board on$/m);
+    assert.match(body, /^- `\.github\/niyam\.json`: take out "figma" .*; turn board on$/m);
     assert.equal(signIns(sys), 1, 'one sign-in, for the secret and the board');
     const login = sys.calls.find((call) => call.command === 'gh' && call.args[1] === 'login')?.args ?? [];
     assert.equal(login[login.indexOf('-s') + 1], 'project,admin:org', "the sign-in for the secret asks for the board's scopes too");
@@ -1751,6 +1764,15 @@ describe('onboardArgs', () => {
 });
 
 describe('workflow', () => {
+  it("names the settings file in use above a schedule the settings set, the one before niyam included (P-50)", () => {
+    assert.match(workflow('main', '0.1.0', false, '5 4 * * 2'), /^ {2}# The decisions job: cron 5 4 \* \* 2, UTC, as "schedule" in \.github\/niyam\.json sets it\.$/m);
+    const older = workflow('main', '0.1.0', false, '5 4 * * 2', '.github/process-rules.json');
+    assert.match(older, /^ {2}# The decisions job: cron 5 4 \* \* 2, UTC, as "schedule" in \.github\/process-rules\.json sets it\.$/m);
+    assert.deepEqual(workflowUpdate(older, 'main', '0.1.0', false, '5 4 * * 2', '.github/process-rules.json'), { kind: 'same' });
+    const moved = workflowUpdate(older, 'main', '0.1.0', false, '6 4 * * 2', '.github/process-rules.json');
+    assert.match('text' in moved ? moved.text : '', /cron 6 4 \* \* 2, UTC, as "schedule" in \.github\/process-rules\.json sets it/);
+  });
+
   it('moves a pin of athya-hq/process-rules, the repo before niyam, to veda-hq/niyam at the new release', () => {
     const before = workflow('main', '0.6.1', false).replaceAll('veda-hq/niyam/', 'athya-hq/process-rules/');
     assert.deepEqual(workflowPins(before), Array(8).fill('0.6.1'), 'the old repo still counts as a pin');
@@ -1893,7 +1915,7 @@ describe('workflowUpdate', () => {
     assert.equal(code, 0);
     const text = repo(sys).get(WORKFLOW) ?? '';
     assert.equal(text, workflow('main', packageVersion(), true, '0 9 * * 1-5'));
-    assert.ok(text.includes(`  # The decisions job: cron 0 9 * * 1-5, UTC, as "schedule" in .github/process-rules.json sets it.\n  schedule:\n    - cron: '0 9 * * 1-5'\n`));
+    assert.ok(text.includes(`  # The decisions job: cron 0 9 * * 1-5, UTC, as "schedule" in .github/niyam.json sets it.\n  schedule:\n    - cron: '0 9 * * 1-5'\n`));
     assert.ok(workflow('main', packageVersion(), true).includes("  # The weekly decisions job: Mondays, 06:17 UTC.\n  schedule:\n    - cron: '17 6 * * 1'\n"));
   });
 
@@ -1916,7 +1938,7 @@ describe('workflowUpdate', () => {
     const { code, out } = await run(sys, []);
     assert.equal(code, 0);
     assert.deepEqual(planned(out, 'Pull request'), ['workflow: schedule → 30 5 * * 2', 'auto-merge: when checks pass']);
-    assert.ok(opened(sys)?.body.includes(`\n- \`${WORKFLOW_PATH}\`: in ${WORKFLOW_PATH}, run the weekly decisions job on the schedule .github/process-rules.json sets, cron 30 5 * * 2 UTC, leaving the rest as it is\n`));
+    assert.ok(opened(sys)?.body.includes(`\n- \`${WORKFLOW_PATH}\`: in ${WORKFLOW_PATH}, run the weekly decisions job on the schedule .github/niyam.json sets, cron 30 5 * * 2 UTC, leaving the rest as it is\n`));
     assert.equal(repo(sys).get(WORKFLOW), workflow('main', packageVersion(), true, '30 5 * * 2').replace('name: process-rules\n', 'name: process-rules\n# Our own note.\n'));
   });
 

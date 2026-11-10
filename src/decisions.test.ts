@@ -212,7 +212,7 @@ describe('decisionsWeekly', () => {
   it('with two owners and two agents, runs a check any of them wrote and last edited, and no one else\'s', async () => {
     const team = (author: string, editor: string): FakeSys => {
       const sys = weekly([decision(14, 'Check: `true`', author)], {}, [], { 14: editor });
-      sys.files.set(`${ROOT}/.github/process-rules.json`, JSON.stringify({ owner: ['example-owner', 'Second-Owner'], agent: [AGENT, 'OtherBot'] }));
+      sys.files.set(`${ROOT}/.github/niyam.json`, JSON.stringify({ owner: ['example-owner', 'Second-Owner'], agent: [AGENT, 'OtherBot'] }));
       return sys;
     };
     assert.equal((await run(team('Second-Owner', 'otherbot'))).out[0], '#14: holds');

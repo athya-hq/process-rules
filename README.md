@@ -42,7 +42,8 @@ need no keychain and work as before, and `doctor` runs its cloud checks there
 one token-store interface (`src/token-store.ts`), so a Linux or Windows store
 can be added there when an adopter needs one.
 
-The adopting repo names its accounts in `.github/process-rules.json`:
+The adopting repo names its accounts in `.github/niyam.json` (in a repo
+onboarded before niyam, `.github/process-rules.json`, which is still read):
 
 ```json
 { "owner": "example-owner", "agent": "ExampleBot" }
@@ -66,7 +67,7 @@ an adopting repo the name can be left out), needs no client repo. It makes the
 agent's signing key (`~/.ssh/<agent, lowercased>_signing`), opens GitHub's
 classic-token page with the scopes filled in (`repo`, `workflow`, `read:org`,
 `project`, `write:ssh_signing_key`) and reads the token through a hidden prompt
-into the keychain (service `process-rules`), refusing a fine-grained token,
+into the keychain (service `niyam`), refusing a fine-grained token,
 missing scopes or no expiry. It then registers the key as the agent's signing key, writes
 `~/.config/process-rules/<agent, lowercased>/session.sh`, and writes the
 launcher `~/.config/process-rules/bin/process-rules`, which the Claude Code
@@ -333,7 +334,8 @@ Claude cloud sessions below).
    spinner while it works, and ends with the pull request and a short "By
    hand:" list of what GitHub's API cannot do.
 
-   It writes `.github/process-rules.json`, adds to `.claude/settings.json`
+   It writes `.github/niyam.json` (in a repo onboarded before niyam it keeps
+   `.github/process-rules.json` and writes there), adds to `.claude/settings.json`
    the lock in `env`, a SessionStart hook running `process-rules
    session-start`, a PreToolUse hook running `process-rules guard` and a
    `permissions.allow` rule for `process-rules review-thread` (hooks keep the
@@ -429,7 +431,7 @@ Claude cloud sessions below).
    a feature that is off; they apply from the next pull request.
 
 The shared checks run five jobs. **Settings** validates
-`.github/process-rules.json`, and fails when a job's `process-rules-ref`
+`.github/niyam.json`, else `.github/process-rules.json`, and fails when a job's `process-rules-ref`
 names another release than the `checks.yml@` line it calls (see Releases and
 upgrading). **PR identity** runs on pull requests: every
 commit that claims the agent (its login or its no-reply address) must be
@@ -789,7 +791,7 @@ exit "$status"
 
 `niyam as-agent --session <session_id> -- <command> [args...]` runs
 the command only when session-start recorded, for that session id, that the
-session works as one of the agents `.github/process-rules.json` names, the
+session works as one of the agents the settings file names, the
 record the guard reads. On a Mac the command gets what the session file
 gives a shell: the agent's identity, the lock's variables removed, and
 `GH_TOKEN` read from the keychain as it starts. In a cloud session it gets
@@ -994,13 +996,15 @@ MIT
 ## Renamed from process-rules
 
 process-rules became niyam in the release after 0.6.3 (docs/decisions.md,
-P-49). What changed, and what still reads or runs the old name:
+P-49 and P-50). What changed, and what still reads or runs the old name:
 
 | What | Now | The old name |
 | ---- | --- | ------------ |
 | Repository | veda-hq/niyam | athya-hq/process-rules, which GitHub forwards |
 | Package | `@veda-hq/niyam` | each release also attaches the same CLI as `athya-hq-process-rules-<version>.tgz`, for 0.6.x's `upgrade` |
 | Command | `niyam` | `process-rules`, a second bin; typed by the owner it also names `niyam` |
+| Settings file | `.github/niyam.json` | `.github/process-rules.json`, read where the new one is missing; `onboard` keeps a repo's existing file |
+| Keychain item | service `niyam` | service `process-rules`, read where the new one is missing; `machine` copies it to `niyam`, and while it is there a new token goes under both |
 | Workflow pin | `veda-hq/niyam/.github/workflows/checks.yml@v…` | `athya-hq/process-rules/…`, which `onboard` moves |
 
 Unchanged, because adopters' committed files and hooks name them: the hook
@@ -1008,8 +1012,7 @@ commands and launcher (`~/.config/process-rules/bin/process-rules`), the lock
 in `.claude/settings.json`'s `env`, `PROCESS_RULES_AGENT`,
 `~/.config/process-rules/`, `.github/workflows/process-rules.yml` and its job
 ids (so the required checks `process-rules / Work rules` and `process-rules /
-PR identity` keep their names), `process-rules-ref`, the settings file
-`.github/process-rules.json` and the keychain service `process-rules`, and
+PR identity` keep their names), `process-rules-ref`, and
 `.github/process-rules/cloud-setup.sh` (so the cloud Setup script needs no new
 paste).
 
@@ -1018,4 +1021,6 @@ which replaces the old package in place; pnpm refuses a second global package
 with the same bin. Then `niyam upgrade` moves it to `@veda-hq/niyam`: it
 removes the old package, adds the new one, and puts the old one back if the add
 fails. pnpm keeps the `process-rules` command at the same path, so the
-launcher `machine` wrote keeps working.
+launcher `machine` wrote keeps working. Run `niyam machine` once afterwards to
+copy the token to the `niyam` keychain service and rewrite the session file;
+until then both still work.

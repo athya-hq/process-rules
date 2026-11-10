@@ -120,6 +120,9 @@ export async function machine(sys: Sys, io: Output, args: readonly string[] = []
   } else {
     mac.push({ label: 'token', detail: `classic, in ${store.where.replace(/^this Mac's /, 'the ')} (new)` });
   }
+  // A token that stays but sits only under the old keychain name is copied to the new one; the old entry stays for older CLIs.
+  const copyToken = token !== undefined && store.onlyOlder?.(sys, agent) === true;
+  if (copyToken) mac.push({ label: 'token', detail: `copied to ${store.item(agent)}` });
 
   // The key on GitHub: a new key is registered; an existing one unless GitHub lists it.
   const listedNow = async (): Promise<boolean> => {
@@ -219,6 +222,14 @@ export async function machine(sys: Sys, io: Output, args: readonly string[] = []
     });
     if (!stored.ok) return 1;
     token = entered;
+  } else if (copyToken) {
+    const kept = token;
+    const copied = await runStep(sys, io, paint, `token copied to ${store.item(agent)}`, async (out) => {
+      if (store.store(sys, agent, kept)) return true;
+      out.err(`machine: ${store.where} did not take the token under ${store.item(agent)}; the old entry still works`);
+      return false;
+    });
+    if (!copied.ok) return 1;
   }
 
   if (register) {

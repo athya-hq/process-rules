@@ -5,6 +5,7 @@ import { launcherPath, launcherScript, pathsFor, sessionScript } from './agent.t
 import { AGENT, AGENT_ID, CLASSIC, CLI, FakeSys, HOME, NODE, KEY, PRIVATE_KEY, PUBLIC_KEY, TOKEN, capture } from './fake.test.ts';
 import { declinedPath, movedPath, ownerFixes, readMoved } from './lockout.ts';
 import { TOKEN_PAGE, machine, machineArgs, tokenInstructions } from './machine.ts';
+import { KEYCHAIN } from './token-store.ts';
 
 const SESSION = `${HOME}/.config/process-rules/examplebot/session.sh`;
 const LAUNCHER = launcherPath(HOME);
@@ -177,6 +178,38 @@ describe('machine', () => {
     });
     assert.deepEqual([sys.chosen, sys.asked], [[], []]);
     assert.ok(!sys.calls.some((c) => c.command === 'ssh-keygen' && c.args[0] !== '-y'));
+  });
+
+  describe('a Mac set up before niyam (P-50)', () => {
+    const OLD_READ = `/usr/bin/security find-generic-password -s process-rules -a ${AGENT} -w 2>/dev/null`;
+    /** done(), with the token under the old keychain service alone and the session file an older release wrote. */
+    const before = (): FakeSys => {
+      const sys = done();
+      const token = sys.keychain.get(`niyam/${AGENT}`) as string;
+      sys.keychain.delete(`niyam/${AGENT}`);
+      sys.keychain.set(`process-rules/${AGENT}`, token);
+      sys.files.set(SESSION, sessionScript(AGENT, AGENT_ID, pathsFor(HOME, AGENT), KEYCHAIN, OLD_READ));
+      return sys;
+    };
+
+    it('copies the token to the niyam service, keeping the old entry, and rewrites the session file', async () => {
+      const sys = before();
+      const token = sys.keychain.get(`process-rules/${AGENT}`);
+      const { code, out } = await setUp(sys, '--yes');
+      assert.equal(code, 0);
+      assert.ok(out.some((line) => new RegExp(`token\\s+copied to service niyam, account ${AGENT}`).test(line)), out.join('\n'));
+      assert.ok(out.some((line) => /session file\s+updated/.test(line)), out.join('\n'));
+      assert.equal(sys.keychain.get(`niyam/${AGENT}`), token);
+      assert.equal(sys.keychain.get(`process-rules/${AGENT}`), token, 'older CLIs still read the old entry');
+      assert.equal(sys.files.get(SESSION), sessionScript(AGENT, AGENT_ID, pathsFor(HOME, AGENT)));
+    });
+
+    it('stops, saying the old entry still works, when the keychain does not take the copy', async () => {
+      const sys = before();
+      sys.execOverride = (call) => (call.args[0] === '-i' ? { code: 1, stdout: '', stderr: '' } : undefined);
+      const { code, err } = await setUp(sys, '--yes');
+      assert.deepEqual({ code, err }, { code: 1, err: [`machine: this Mac's keychain did not take the token under service niyam, account ${AGENT}; the old entry still works`] });
+    });
   });
 
   it("plans locking the owner's credentials away, and leaves keys with their fix", async () => {
@@ -371,7 +404,7 @@ describe('machine', () => {
     it(`uses GitHub's spelling of the login typed as ${typed}`, async () => {
       const sys = fresh();
       assert.equal((await setUp(sys, typed)).code, 0);
-      assert.deepEqual([...sys.keychain.keys()], [`process-rules/${AGENT}`]);
+      assert.deepEqual([...sys.keychain.keys()], [`niyam/${AGENT}`]);
       assert.equal(sys.files.get(SESSION), sessionScript(AGENT, AGENT_ID, pathsFor(HOME, AGENT)));
     });
   }

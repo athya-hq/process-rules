@@ -1,4 +1,4 @@
-import { API, SETTINGS_PATH } from './agent.ts';
+import { API, SETTINGS_PATH, hasSettings, settingsPathIn } from './agent.ts';
 import type { HttpResult, Sys } from './types.ts';
 
 /**
@@ -39,17 +39,17 @@ export function featuresIn(raw: unknown): Feature[] {
 }
 
 /** A line for each feature the parsed settings list by an older name, saying what it is now. */
-export function renamedLines(raw: unknown): string[] {
+export function renamedLines(raw: unknown, file: string = SETTINGS_PATH): string[] {
   const listed = (raw as { features?: unknown } | null)?.features;
   if (!Array.isArray(listed)) return [];
   return listed.flatMap((name) =>
-    typeof name === 'string' && RENAMED.has(name.trim()) ? [`${SETTINGS_PATH} lists "${name.trim()}", which is now named "${RENAMED.get(name.trim())}"; run niyam onboard to rename it`] : [],
+    typeof name === 'string' && RENAMED.has(name.trim()) ? [`${file} lists "${name.trim()}", which is now named "${RENAMED.get(name.trim())}"; run niyam onboard to rename it`] : [],
   );
 }
 
 /** Whether the settings at `root` turn `feature` on. */
 export function isOn(sys: Sys, root: string, feature: Feature): boolean {
-  return featuresIn(JSON.parse(sys.read(`${root}/${SETTINGS_PATH}`))).includes(feature);
+  return featuresIn(JSON.parse(sys.read(`${root}/${settingsPathIn(sys, root)}`))).includes(feature);
 }
 
 /**
@@ -102,7 +102,7 @@ export async function isPersonal(sys: Sys, slug: string, token: string): Promise
  * feature that is off. Undefined when the settings are there.
  */
 export function notAdoptedLine(sys: Sys, root: string, command: string): string | undefined {
-  if (sys.exists(`${root}/${SETTINGS_PATH}`)) return undefined;
+  if (hasSettings(sys, root)) return undefined;
   return `${command}: the base branch has no ${SETTINGS_PATH}, so the repo is not adopted on its base yet; nothing to check`;
 }
 
