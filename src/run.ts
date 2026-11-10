@@ -43,8 +43,10 @@ Commands:
   needs-owner      Run by the shared workflow: an ask labels its issue needs-owner; the owner's answer takes it off
   reviews-due      For the review routine: open decisions whose review date has come, as JSON lines
   pre-push         Run by the pre-push git hook: the same rules before an agent session pushes
-  propose <issue>...
-                   As the agent: ask the owner to approve, with a 👍, a slice added late or a dropped state;
+  propose <issue>... [--page <url>]
+                   As the agent: ask the owner to approve, with a 👍, a slice added late or a dropped state,
+                   in a short comment linking the published page that argues it (--page is needed
+                   whenever a proposal is still to be posted; a rerun that only links needs none);
                    with an Approvals issue, it prints the first line of one comment there answering them all
   review-thread <thread-id> [--reply <text>] [--resolve]
                    As the agent: answer a review thread on one of its own pull requests here
@@ -62,6 +64,31 @@ machine and onboard print one plan and ask once; --yes goes ahead without asking
 
 /** The commands the owner runs at a terminal: run as process-rules, they also name niyam. Hooks and workflows stay quiet. */
 const OWNER_COMMANDS = new Set(['machine', 'doctor', 'onboard', 'upgrade', 'cloud-setup', 'help', '--help', '-h', undefined]);
+
+/**
+ * propose's issue numbers, one or several, and the page its comments link
+ * (`--page <url>` or `--page=<url>`, once); throws on anything else, naming
+ * the first argument that is not an issue number.
+ */
+export function proposeArgs(args: readonly string[]): { numbers: number[]; page?: string } {
+  const issues: string[] = [];
+  let page: string | undefined;
+  for (let at = 0; at < args.length; at++) {
+    const arg = args[at] as string;
+    const inline = arg.startsWith('--page=') ? arg.slice('--page='.length) : undefined;
+    if (arg !== '--page' && inline === undefined) {
+      issues.push(arg);
+      continue;
+    }
+    if (page !== undefined) throw new Error('propose takes one --page: one page argues every proposal of the run');
+    const value = inline ?? args[++at];
+    if (!value || value.startsWith('-')) throw new Error("propose --page needs the published page's link");
+    page = value;
+  }
+  const notIssue = issues.length === 0 ? '' : issues.find((arg) => !/^#?0*[1-9]\d*$/.test(arg));
+  if (notIssue !== undefined) throw new Error(`propose needs an issue number${notIssue === '' ? '' : `, not "${notIssue}"`}`);
+  return { numbers: issues.map((arg) => Number(arg.replace('#', ''))), ...(page === undefined ? {} : { page }) };
+}
 
 /** Runs one command and returns its exit code: 0 done, 1 failed, 2 bad usage. `invokedAs` is the bin that ran it. */
 export async function run(
@@ -81,22 +108,15 @@ export async function run(
     io.err(USAGE);
     return 2;
   }
-  if (command === 'onboard' || command === 'machine' || command === 'review-thread' || command === 'as-agent') {
+  if (command === 'onboard' || command === 'machine' || command === 'review-thread' || command === 'as-agent' || command === 'propose') {
     // Their options are checked here, so a bad one is bad usage (exit 2).
     try {
-      (command === 'onboard' ? onboardArgs : command === 'machine' ? machineArgs : command === 'as-agent' ? asAgentArgs : threadArgs)(rest);
+      (command === 'onboard' ? onboardArgs : command === 'machine' ? machineArgs : command === 'as-agent' ? asAgentArgs : command === 'propose' ? proposeArgs : threadArgs)(rest);
     } catch (error) {
       io.err(`niyam: ${error instanceof Error ? error.message : String(error)}`);
       io.err(USAGE);
       return 2;
     }
-  }
-  // One issue number or several, each checked; the first that is not one is named.
-  const notIssue = command === 'propose' ? (rest.length === 0 ? '' : rest.find((arg) => !/^#?0*[1-9]\d*$/.test(arg))) : undefined;
-  if (notIssue !== undefined) {
-    io.err(`niyam: propose needs an issue number${notIssue === '' ? '' : `, not "${notIssue}"`}`);
-    io.err(USAGE);
-    return 2;
   }
   switch (command) {
     case undefined:
@@ -148,7 +168,10 @@ export async function run(
       try {
         if (command === 'upgrade') return await upgrade(await sys(), io);
         if (command === 'review-thread') return await reviewThread(await sys(), io, rest);
-        if (command === 'propose') return await propose(await sys(), io, rest.map((arg) => Number(arg.replace('#', ''))));
+        if (command === 'propose') {
+          const { numbers, page } = proposeArgs(rest);
+          return await propose(await sys(), io, numbers, page);
+        }
         if (command === 'reviews-due') return await reviewsDue(await sys(), io);
         if (command === 'decisions-weekly') return await decisionsWeekly(await sys(), io);
         if (command === 'needs-owner') return await needsOwner(await sys(), io);
