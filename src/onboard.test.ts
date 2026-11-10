@@ -327,7 +327,7 @@ describe('onboard', () => {
       assert.deepEqual(board.issues.map((issue) => issue.type), ['Work item', 'Slice', 'Slice', 'Brief']);
     });
 
-    it('signs in to nothing for a disabled type, which GitHub lists no issues by, and says so in the plan', async () => {
+    it('goes through for a disabled type, which GitHub lists no issues by, signing in before the plan, and says so in it', async () => {
       const { sys, board } = settled();
       board.disabledTypes = ['Task'];
       board.issues = [];
@@ -338,8 +338,9 @@ describe('onboard', () => {
         '│    issue types  org-wide, the work model’s alone',
         '│      disabled   Task: GitHub lists no issues by a disabled type, so onboard cannot tell whether any holds one',
       ]);
+      // The agent cannot see every repository, so the owner, whose sign-in the board step needs anyway, reads them first.
       const signed = out.findIndex((line) => line.startsWith('◇  Signed in as example-owner'));
-      assert.ok(signed === -1 || signed > at, out.join('\n'));
+      assert.ok(signed !== -1 && signed < at, out.join('\n'));
       assert.deepEqual(board.disabledTypes, ['Task']);
     });
 

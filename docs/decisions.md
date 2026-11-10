@@ -1173,9 +1173,14 @@
   issues": the type is asked of one repository, not every one, it stays
   disabled, and the plan and the run say `onboard` cannot tell whether an
   issue holds it, and that enabling it again lets `onboard` retype what
-  does. A 422 for an enabled type, and any other failure, still stops
-  `onboard`. A disabled type alone no longer signs the owner in before the
-  plan, since the owner cannot list its issues either. Rejected: reading the
+  does. Only a 422 whose errors all name the `type` field counts; another
+  422 (GitHub's spam refusal, say), a 422 for an enabled type, and any
+  other failure fail the read as before. The owner still signs in before
+  the plan wherever a type outside the work model exists, disabled too:
+  the sign-in is the run's one, which the board step needs anyway, and the
+  agent cannot see every repository, so without it an open issue with no
+  type in one it cannot see would be found only after the plan (review).
+  Rejected: reading the
   422 as "none held" (GitHub keeps a disabled type, hidden, on its issues;
   saying none holds it would be a claim nobody checked); GraphQL's
   `filterBy: {type}` and search's `type:` (both give 0 for a disabled type

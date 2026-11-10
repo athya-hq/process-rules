@@ -80,12 +80,14 @@ export function typeFor(parent: { number: string; type: string | undefined } | u
   return { to: 'Brief', why: parent ? `its parent #${parent.number} is neither a Work item nor a Slice, and it has no sub-issues` : 'it has no parent and no sub-issues' };
 }
 
-/** A read GitHub refused, with the HTTP status it answered. */
+/** A read GitHub refused, with the HTTP status and body it answered. */
 export class Refused extends Error {
   readonly status: number;
-  constructor(message: string, status: number) {
+  readonly json: unknown;
+  constructor(message: string, status: number, json: unknown) {
     super(message);
     this.status = status;
+    this.json = json;
   }
 }
 
@@ -96,7 +98,7 @@ export async function pages(sys: Sys, token: string, url: string, gone = false):
     const pageUrl = `${url}${url.includes('?') ? '&' : '?'}per_page=100&page=${page}`;
     const { status, json } = await sys.http(pageUrl, { token });
     if (gone && status === 410) return entries;
-    if (status !== 200 || !Array.isArray(json)) throw new Refused(`cannot read ${url} (HTTP ${status})`, status);
+    if (status !== 200 || !Array.isArray(json)) throw new Refused(`cannot read ${url} (HTTP ${status})`, status, json);
     entries.push(...(json as unknown[]));
     if (json.length < 100) return entries;
   }
@@ -133,12 +135,19 @@ function asHolder(repo: string, row: unknown, from: string): Omit<Holder, 'archi
   };
 }
 
+/** Whether a 422's body is GitHub's refusal of the `type` filter, not another validation failure such as spam. */
+function refusesType(json: unknown): boolean {
+  const errors = (json as { errors?: unknown } | null)?.errors;
+  return Array.isArray(errors) && errors.length > 0 && errors.every((error) => (error as { field?: unknown } | null)?.field === 'type');
+}
+
 /**
  * The issues in a repository that hold the type, open and closed; pull
  * requests have no type. Undefined for a `disabled` type GitHub will not
- * list issues by: it answers 422 Validation Failed to a filter naming a
- * disabled type, which says nothing of whether an issue holds it. For an
- * enabled type a 422 stays a failure.
+ * list issues by: it answers 422 Validation Failed, its error on the `type`
+ * field, to a filter naming a disabled type, which says nothing of whether
+ * an issue holds it. Any other 422, and every 422 for an enabled type, stays
+ * a failure.
  */
 async function holding(sys: Sys, token: string, repo: string, type: string, disabled = false): Promise<Omit<Holder, 'archived'>[] | undefined> {
   let rows: unknown[];
@@ -146,7 +155,7 @@ async function holding(sys: Sys, token: string, repo: string, type: string, disa
     // GitHub answers 410 Gone for a repository with issues turned off, a fork's usual setting: it holds none to retype.
     rows = await pages(sys, token, `${API}/repos/${repo}/issues?type=${encodeURIComponent(type)}&state=all`, true);
   } catch (error) {
-    if (disabled && error instanceof Refused && error.status === 422) return undefined;
+    if (disabled && error instanceof Refused && error.status === 422 && refusesType(error.json)) return undefined;
     throw error;
   }
   return rows.flatMap((row) => {

@@ -826,11 +826,12 @@ issues that hold it and shows it again if it is enabled. `onboard` disables
 rather than deletes, so a type can come back; GitHub does not say what
 deleting one does to its issues. A rerun cannot check a type that is
 disabled: GitHub refuses to list issues by one (HTTP 422), for the owner
-too, so the plan says `disabled  Task, Bug, Feature: GitHub lists no issues
-by a disabled type, so onboard cannot tell whether any holds one`, never
-that none does, and the type stays disabled; enabled again, `onboard`
-retypes what holds it and disables it once more. A disabled type alone signs
-no one in before the plan. A 422 for an enabled type still stops `onboard`.
+too, so the plan names each such type on a `disabled` row (as `disabled
+Task, Bug, Feature: GitHub lists no issues by a disabled type, so onboard
+cannot tell whether any holds one`), never saying none holds it, and the
+type stays disabled; enabled again, `onboard` retypes what holds it and
+disables it once more. Any other refusal, a 422 for an enabled type
+included, still fails the read.
 An issue in an archived repository cannot be
 changed, so it keeps its type, that type stays enabled, and "By hand:" says
 to unarchive the repository and run `onboard` again. A repository with issues

@@ -223,6 +223,16 @@ describe('disabled types GitHub will not list issues by', () => {
     await assert.rejects(typesPlan(sys, OWNER_TOKEN, 'example-org'), /^Error: cannot read https:\/\/api\.github\.com\/repos\/example-org\/example-app\/issues\?type=Task&state=all \(HTTP 422\)$/);
   });
 
+  it('stops on a 422 for a disabled type that is not the type filter refused', async () => {
+    const { sys, board } = org();
+    board.disabledTypes = ['Task'];
+    sys.route('GET', `/repos/${SLUG}/issues?type=Task&state=all&per_page=100&page=1`, {
+      status: 422,
+      json: { message: 'Validation Failed', errors: [{ resource: 'Issue', code: 'unprocessable', field: 'data', message: 'was submitted too quickly' }] },
+    });
+    await assert.rejects(typesPlan(sys, OWNER_TOKEN, 'example-org'), /cannot read .*issues\?type=Task&state=all \(HTTP 422\)/);
+  });
+
   it('stops on any other failure for a disabled type', async () => {
     const { sys, board } = org();
     board.disabledTypes = ['Task'];
