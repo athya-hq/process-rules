@@ -274,6 +274,18 @@ export function launcherPath(home: string): string {
 }
 
 /**
+ * A launcher an older `machine` wrote, which runs the package manager's
+ * `process-rules` command, not niyam's (P-53): the command's folder, quoted.
+ */
+export const OLD_LAUNCHER = /^exec '([^'\n]*)\/process-rules' "\$@"$/m;
+
+/** The launcher with its command moved from `process-rules` to the `niyam` beside it; undefined when it runs another. */
+export function repointedLauncher(text: string): { text: string; command: string } | undefined {
+  const dir = OLD_LAUNCHER.exec(text)?.[1];
+  return dir === undefined ? undefined : { text: text.replace(OLD_LAUNCHER, `exec '${dir}/niyam' "$@"`), command: `${dir}/niyam` };
+}
+
+/**
  * The launcher's lines: the CLI run with the node that ran `machine`, found
  * by its real path, not a per-shell one such as a version manager's. With the
  * package manager's command for the CLI it runs that, which stays put across

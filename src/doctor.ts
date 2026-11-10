@@ -13,6 +13,7 @@ import {
   checkToken,
   keyBody,
   keyPairProblem,
+  OLD_LAUNCHER,
   launcherPath,
   pathsFor,
   sessionFileIs,
@@ -36,8 +37,6 @@ import { installedFindings } from './upgrade.ts';
 import { packageVersion } from './version.ts';
 
 const MACHINE = 'niyam machine';
-/** A launcher an older machine wrote, which runs the package manager's process-rules command, not niyam (P-53). */
-const OLD_LAUNCHER = new RegExp(`^exec '[^'\\n]*/${OLD_CLI}' "\\$@"$`, 'm');
 
 /** Runs a check that reads GitHub; a failed read is that check's ✗, fixed by asking again. */
 async function remote(name: string, check: () => Promise<Finding>): Promise<Finding> {

@@ -1,4 +1,4 @@
-import { API } from './agent.ts';
+import { API, launcherPath, repointedLauncher } from './agent.ts';
 import { LAST_OLD_RELEASE, releaseAsset } from './cloud.ts';
 import { type Finding, tilde } from './layout.ts';
 import { CLI, OLD_CLI, OLD_PACKAGE, OLD_PRODUCT, PACKAGE, PRODUCT, tarballName } from './names.ts';
@@ -140,7 +140,7 @@ export async function upgrade(sys: Sys, io: Output, running: string = packageVer
         : `upgrade: this is ${CLI} ${running}, newer than the newest release, ${version}; upgrade never moves back`,
     );
     // The release, not a newer build run from elsewhere, is what PATH should hold.
-    return pathCheck(sys, io, version, undefined, `install it with pnpm add -g ${url}`);
+    return Math.max(repoint(sys, io), pathCheck(sys, io, version, undefined, `install it with pnpm add -g ${url}`));
   }
   if (!newest.packaged) {
     io.err(`upgrade: the v${version} release has no ${releaseAsset(version)} yet; run ${UPGRADE} again once the Release workflow attaches it`);
@@ -169,7 +169,26 @@ export async function upgrade(sys: Sys, io: Output, running: string = packageVer
     }
     return 1;
   }
-  return pathCheck(sys, io, version, pnpmBin(sys));
+  return Math.max(repoint(sys, io), pathCheck(sys, io, version, pnpmBin(sys)));
+}
+
+/**
+ * Points a launcher an older `machine` wrote, which runs pnpm's
+ * process-rules, at the niyam beside it, which a release after P-53 alone
+ * installs: without it the hooks would find no CLI and lock GitHub out.
+ * Exit 1 when it runs process-rules and no niyam is there to run.
+ */
+function repoint(sys: Sys, io: Output): number {
+  const launcher = launcherPath(sys.home);
+  const moved = sys.exists(launcher) ? repointedLauncher(sys.read(launcher)) : undefined;
+  if (moved === undefined) return 0;
+  if (!sys.exists(moved.command)) {
+    io.err(`upgrade: the launcher ${tilde(sys.home, launcher)} runs ${OLD_CLI}, and no ${moved.command} is there to run instead; run ${CLI} machine`);
+    return 1;
+  }
+  sys.write(launcher, moved.text, 0o755);
+  io.out(`upgrade: the launcher ${tilde(sys.home, launcher)} now runs ${tilde(sys.home, moved.command)}, not ${OLD_CLI}`);
+  return 0;
 }
 
 /** The folder pnpm puts global commands in, or undefined when pnpm will not say. */

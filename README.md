@@ -1208,6 +1208,6 @@ with the same bin. Then `niyam upgrade` moves it to `@veda-hq/niyam`: it
 removes the old package, adds the new one, and puts the old one back if the add
 fails. pnpm keeps the `process-rules` command at the same path, so the
 launcher `machine` wrote keeps working until P-54 takes that command away.
-Run `niyam machine` once afterwards, which points the launcher at `niyam`, to
+`niyam upgrade` and `niyam machine` point the launcher at `niyam`. Run `niyam machine` once afterwards to
 copy the token to the `niyam` keychain service and rewrite the session file;
 until then both still work.

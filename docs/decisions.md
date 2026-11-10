@@ -1281,7 +1281,9 @@
     first (0.6.x's `niyam` was a link to `process-rules`, which the write
     would follow), and links `process-rules` to it until P-54. `machine`
     points the launcher at the package manager's `niyam`; `doctor` marks ▲
-    one that runs `process-rules`.
+    one that runs `process-rules`. `niyam upgrade` points such a launcher at
+    the `niyam` beside it, so upgrading to P-54, which installs no
+    `process-rules`, cannot leave the hooks without a CLI.
   - Checks take a reusable workflow's caller job's `name:`, so each job gets
     one (`niyam`, `niyam-weekly`, `niyam-merged`, `niyam-asks`) and keeps its
     id. The ids, the workflow's file name and `process-rules-ref` stay:
