@@ -504,6 +504,26 @@ describe('owner-step required-checks', () => {
     assert.match(out.join('\n'), /✓ the ruleset main requires process-rules \/ PR identity, Secret scans, process-rules \/ Work rules/);
   });
 
+  it('writes nothing after a Ctrl-C that came during the read before the write', async () => {
+    const made = rulesWorld([checks('process-rules / PR identity')]);
+    let reads = 0;
+    const inner = made.sys.execOverride;
+    made.sys.execOverride = (call) => {
+      if (call.args[1] === 'repos/veda-hq/niyam/rulesets/5' && !call.args.includes('PUT')) reads++;
+      return inner(call);
+    };
+    // The handler runs at the next pause: the one after the read before the write.
+    made.sys.sleep = () => {
+      if (reads === 2) made.sys.interrupt();
+      return Promise.resolve();
+    };
+    const { io, out } = capture();
+    assert.equal(await ownerStep(made.sys, io, ['required-checks', 'veda-hq/niyam', 'main']), 130);
+    assert.match(out.join('\n'), /✗ make the ruleset main of veda-hq\/niyam also require process-rules \/ Work rules: not done, stopped by Ctrl-C/);
+    assert.ok(!made.api.some((call) => call.args.includes('PUT')));
+    cleaned(made.sys, out);
+  });
+
   it('changes nothing when every check is required already', async () => {
     const made = rulesWorld([checks('process-rules / Work rules', 'process-rules / PR identity')]);
     const { io, out } = capture();

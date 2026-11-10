@@ -172,8 +172,11 @@ function holdsToken(sys: Sys, dir: string): boolean {
 interface Change {
   /** What it will do, as the plan says it. */
   plan: string;
-  /** Does it and checks the result: what is now so, or throws why not. */
-  apply(): string;
+  /**
+   * Does it and checks the result: what is now so, or throws why not.
+   * `checkpoint` stops it, before a write, when a Ctrl-C came during a read.
+   */
+  apply(checkpoint: () => Promise<void>): string | Promise<string>;
 }
 
 /** What a step found on GitHub: the changes to make, and lines shown before them, such as a before and after. */
@@ -397,8 +400,9 @@ function requiredChecks(gh: Gh, { repo, ruleset }: Extract<Step, { step: 'requir
     changes: [
       {
         plan: `make the ruleset ${before.name} of ${repo} also require ${missing.join(', ')}`,
-        apply: () => {
+        apply: async (checkpoint) => {
           const current = read();
+          await checkpoint();
           must(gh.api(`repos/${repo}/rulesets/${id}`, { method: 'PUT', body: { rules: withChecks(current.rules) } }), `updating the ruleset ${before.name}`);
           const now = read();
           const lacking = checks.filter((check) => !contexts(now.rules).includes(check));
@@ -544,6 +548,10 @@ async function signedIn(
     return skipped;
   }
   let code = skipped;
+  const checkpoint = async (): Promise<void> => {
+    await settle(sys);
+    if (interrupted()) throw new Interrupted();
+  };
   for (const change of found.changes) {
     // Each gh call runs to its end before a Ctrl-C's handler can: the event loop runs it here.
     await settle(sys);
@@ -553,8 +561,12 @@ async function signedIn(
       continue;
     }
     try {
-      results.push({ mark: '✓', text: change.apply() });
+      results.push({ mark: '✓', text: await change.apply(checkpoint) });
     } catch (error) {
+      if (error instanceof Interrupted) {
+        results.push({ mark: '✗', text: `${change.plan}: not done, stopped by Ctrl-C` });
+        continue;
+      }
       await settle(sys);
       results.push({ mark: '✗', text: `${change.plan}: ${interrupted() ? 'stopped by Ctrl-C; check it on GitHub' : message(error)}` });
       code = 1;
