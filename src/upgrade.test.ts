@@ -325,6 +325,15 @@ describe('upgrade from process-rules, the old name (P-49)', () => {
     assert.deepEqual(installs(sys), [['add', '-g', `https://github.com/athya-hq/process-rules/releases/download/v${NEW}/veda-hq-niyam-${NEW}.tgz`]], 'downloads from the repository that answered');
   });
 
+  it('names the repository that answered in its install hint too', async () => {
+    const sys = machine({ [PNPM_BIN]: OLD });
+    sys.route('GET', LATEST, { status: 404, json: { message: 'Not Found' } });
+    sys.route('GET', OLD_LATEST, { status: 200, json: { tag_name: `v${NEW}`, assets: [{ name: `veda-hq-niyam-${NEW}.tgz` }] } });
+    const { code, err } = await upgraded(sys, NEW);
+    assert.equal(code, 1);
+    assert.match(err.at(-1) ?? '', new RegExp(`pnpm add -g https://github\\.com/athya-hq/process-rules/releases/download/v${NEW}/veda-hq-niyam-${NEW}\\.tgz`));
+  });
+
   it('removes the old package first, since pnpm refuses two with the same bin, then adds niyam', async () => {
     const sys = machine();
     const { code, out } = await fromOld(sys);

@@ -1,5 +1,5 @@
 import { API } from './agent.ts';
-import { LAST_OLD_RELEASE, releaseAsset, releaseTarball } from './cloud.ts';
+import { LAST_OLD_RELEASE, releaseAsset } from './cloud.ts';
 import { type Finding, tilde } from './layout.ts';
 import { CLI, OLD_CLI, OLD_PACKAGE, OLD_PRODUCT, PACKAGE, PRODUCT, tarballName } from './names.ts';
 import { CLOUD_SETUP_PATH } from './onboard-pull.ts';
@@ -130,6 +130,8 @@ export async function upgrade(sys: Sys, io: Output, running: string = packageVer
     return 1;
   }
   const { version } = newest;
+  // The repository that answered: before the transfer veda-hq/niyam has no releases to download from.
+  const url = `${GITHUB_WEB}/${newest.repo}/releases/download/v${version}/${releaseAsset(version)}`;
   const renaming = name === OLD_PACKAGE && version === running && isNewer(version, LAST_OLD_RELEASE);
   if (!isNewer(version, running) && !renaming) {
     io.out(
@@ -138,14 +140,12 @@ export async function upgrade(sys: Sys, io: Output, running: string = packageVer
         : `upgrade: this is ${CLI} ${running}, newer than the newest release, ${version}; upgrade never moves back`,
     );
     // The release, not a newer build run from elsewhere, is what PATH should hold.
-    return pathCheck(sys, io, version, undefined, `install it with pnpm add -g ${releaseTarball(version)}`);
+    return pathCheck(sys, io, version, undefined, `install it with pnpm add -g ${url}`);
   }
   if (!newest.packaged) {
     io.err(`upgrade: the v${version} release has no ${releaseAsset(version)} yet; run ${UPGRADE} again once the Release workflow attaches it`);
     return 1;
   }
-  // The repository that answered: before the transfer veda-hq/niyam has no releases to download from.
-  const url = `${GITHUB_WEB}/${newest.repo}/releases/download/v${version}/${releaseAsset(version)}`;
   io.out(renaming ? `upgrade: ${CLI} ${running}, from ${OLD_PACKAGE} to ${PACKAGE}` : `upgrade: ${CLI} ${running} → ${version}`);
   if (name === OLD_PACKAGE) io.out(`  pnpm remove -g ${OLD_PACKAGE}`);
   io.out(`  pnpm add -g ${url}`);
