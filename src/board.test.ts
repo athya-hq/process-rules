@@ -363,13 +363,20 @@ describe('setUpBoard', () => {
     const views = settledViews();
     views[0] = { ...views[0]!, visible: ['Title', 'Assignees', 'Status', 'Linked pull requests', 'Sub-issues progress'] };
     board.project = { fields: [...BUILT_IN, ...FIELDS.map((f) => f.name)], linked: true, views, grouped: true };
-    await setUp(sys, ['y', 'y', 'y']);
+    const { out, byHand } = await setUp(sys, ['y', 'y', 'y']);
     assert.ok(sys.asked.includes('Set up the views Needs you in "example-app work"?'));
     assert.deepEqual(board.project.views?.[0]?.visible, ['Title', 'Status', 'Linked pull requests', 'Sub-issues progress', 'Parent issue']);
     assert.deepEqual(board.project.views?.slice(1), settledViews().slice(1));
+    // The column list could not name Type, so the owner is told how to show it again.
+    const again = `Needs you's columns were set through GitHub's API, which cannot see a Type column, so one shown there may be gone; in ${URL}: Needs you: add the Type column (+ at the right of the headers → Type, then Save)`;
+    assert.ok(out.includes(again));
+    assert.deepEqual(byHand, [`Type on Needs you again → ${URL}`]);
+    // A rerun sends no columns, so a Type the owner adds stays.
     const operations = board.operations.length;
-    await setUp(sys, ['y', 'y']);
+    const rerun = await setUp(sys, ['y', 'y']);
     assert.ok(!board.operations.slice(operations).some((o) => o.includes('ProjectV2View')));
+    assert.ok(!rerun.out.includes(again));
+    assert.deepEqual(rerun.byHand, []);
   });
 
   it('changes no columns of a view whose fields are right but whose filter is not', async () => {
@@ -378,8 +385,11 @@ describe('setUpBoard', () => {
     const views = settledViews();
     views[3] = { ...views[3]!, filter: 'is:open', visible: ['Title', 'Status', 'Labels'] };
     board.project = { fields: [...BUILT_IN, ...FIELDS.map((f) => f.name)], linked: true, views, grouped: true };
-    await setUp(sys, ['y', 'y', 'y']);
+    const { byHand } = await setUp(sys, ['y', 'y', 'y']);
     assert.deepEqual(board.project.views?.[3], { ...settledViews()[3]!, visible: ['Title', 'Status', 'Labels'] });
+    const update = sys.requests.find((r) => String((r.body as { query?: string } | undefined)?.query).includes('updateProjectV2View'));
+    assert.equal((update?.body as { variables: { configuration: unknown } }).variables.configuration, null);
+    assert.deepEqual(byHand, []);
   });
 
   it('renames the default view to the first view the Project lacks, with no other change', async () => {

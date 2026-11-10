@@ -78,11 +78,19 @@ const GROUPING = [
  */
 const ARCHIVE_FILTER = 'is:closed updated:<@today-7d';
 
+/**
+ * How the owner shows Type on Needs you. GitHub's API can neither read nor
+ * set the issue-type column: GraphQL lists no such field, REST cannot update
+ * a view, and updateProjectV2View refuses its id ("Visible fields must be
+ * available in the view.").
+ */
+const TYPE_STEP = 'Needs you: add the Type column (+ at the right of the headers → Type, then Save)';
+
 /** What GitHub's API cannot set on a Project not copied from the template, so the owner does it by hand. */
 export function viewsChecklist(url: string): string[] {
   return [
     `Finish the Project ${url} by hand (GitHub's API cannot):`,
-    '  [ ] Needs you: show Type',
+    `  [ ] ${TYPE_STEP}`,
     '  [ ] Work items: group by Step',
     '  [ ] Decisions: group by Decision',
     `  [ ] Workflows → Auto-archive items: ${ARCHIVE_FILTER}`,
@@ -316,14 +324,22 @@ export async function setUpBoard(
   }
   io.out(`✓ fields: ${FIELDS.map((f) => f.name).join(', ')}`);
 
-  if (!(await setUpViews(sys, token, confirm, project.id, title))) return stopped(io, 'views');
+  const reset = await setUpViews(sys, token, confirm, project.id, title);
+  if (!reset) return stopped(io, 'views');
   io.out(`✓ views: ${VIEWS.map((v) => v.name).join(', ')}`);
   const done = await finished(sys, token, project.id);
   const byHand: string[] = [];
   if (!done.grouped) {
     for (const line of viewsChecklist(project.url)) io.out(line);
     byHand.push(`Type on Needs you, group 2 views, auto-archive → ${project.url}`);
-  } else io.out(`- Board shows slices and briefs; Done keeps one until the Auto-archive items workflow archives it, with the template's filter ${ARCHIVE_FILTER}, which GitHub's API can neither read nor set`);
+  } else {
+    if (reset.includes('Needs you')) {
+      // The column list sent could not name Type, so a Type the owner showed may be gone.
+      io.out(`Needs you's columns were set through GitHub's API, which cannot see a Type column, so one shown there may be gone; in ${project.url}: ${TYPE_STEP}`);
+      byHand.push(`Type on Needs you again → ${project.url}`);
+    }
+    io.out(`- Board shows slices and briefs; Done keeps one until the Auto-archive items workflow archives it, with the template's filter ${ARCHIVE_FILTER}, which GitHub's API can neither read nor set`);
+  }
   if (done.off.length > 0) {
     io.out(`Turn on the workflows ${done.off.join(', ')} in ${project.url} → Workflows (GitHub's API cannot)`);
     byHand.push(`turn on ${done.off.length} project workflow${done.off.length === 1 ? '' : 's'} → ${project.url}/workflows`);
@@ -515,8 +531,10 @@ const VIEW = 'id name layout filter configuration { visibleFields(first: 50) { n
 /**
  * Makes the Project's views, or updates the view that already has the name,
  * so a rerun makes no duplicates; the default view becomes the first view it
- * would otherwise make. Every change waits for one yes. Returns false when
- * that yes was not given.
+ * would otherwise make. Every change waits for one yes. Returns the names of
+ * the views whose columns it sent, or undefined when that yes was not given.
+ * A view whose columns are right is never sent them, so a rerun keeps a Type
+ * column the owner added, which GitHub's API cannot see.
  */
 export async function setUpViews(
   sys: Sys,
@@ -524,7 +542,7 @@ export async function setUpViews(
   confirm: (question: string, step: BoardStep) => Promise<boolean>,
   projectId: string,
   title: string,
-): Promise<boolean> {
+): Promise<string[] | undefined> {
   const read = (await graphql(
     sys,
     token,
@@ -540,10 +558,11 @@ export async function setUpViews(
     if (!view && spare) [view, spare] = [spare, undefined];
     return { spec, view };
   }).filter(({ spec, view }) => !view || !settled(view, spec, fieldIds));
-  if (changes.length === 0) return true;
+  if (changes.length === 0) return [];
   const renamed = changes.find((step) => step.view?.name === DEFAULT_VIEW);
   const question = `Set up the views ${changes.map((step) => step.spec.name).join(', ')} in "${title}"${renamed ? ` (renaming "${DEFAULT_VIEW}" to "${renamed.spec.name}")` : ''}?`;
-  if (!(await confirm(question, 'views'))) return false;
+  if (!(await confirm(question, 'views'))) return undefined;
+  const sent: string[] = [];
 
   for (const { spec, view: had } of changes) {
     const view =
@@ -568,8 +587,9 @@ export async function setUpViews(
         configuration: visible ? { visibleFieldIds: visible } : null,
       },
     );
+    if (visible) sent.push(spec.name);
   }
-  return true;
+  return sent;
 }
 
 function visibleNames(view: View): string[] {
@@ -580,8 +600,8 @@ function visibleNames(view: View): string[] {
  * The ids of the fields the view should show, in its order, when they differ
  * from what it shows: less the fields the spec hides, with the ones it shows.
  * Undefined when the view's fields are already right. GitHub's API reads no
- * Type column and cannot show one, so sending these drops a Type the owner
- * showed by hand; a settled view is never sent them.
+ * Type column and cannot show one, so sending these may drop a Type the
+ * owner showed by hand; a settled view is never sent them.
  */
 function columns(view: View, spec: ViewSpec, fieldIds: Map<string | undefined, string | undefined>): string[] | undefined {
   const visible = visibleNames(view);

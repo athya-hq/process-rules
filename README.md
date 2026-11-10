@@ -364,8 +364,13 @@ Claude cloud sessions below).
    Project of that title made before the template is left as it is: the plan's
    yes does not replace it. When GitHub refuses the copy, or for such an
    older Project, `onboard` adds the fields and makes or updates the views
-   itself, and "By hand:" links the Project for the two things GitHub's API
-   cannot set: the grouping and the auto-archive workflow. On any Project it
+   itself, and "By hand:" links the Project for the three things GitHub's API
+   cannot set: the Type column on Needs you (`+` at the right of the
+   headers → Type, then Save), the grouping, and the auto-archive workflow.
+   GitHub's API cannot even see a Type column, so `onboard` sends a view's
+   columns only when they differ from what it asks for: a rerun keeps Type.
+   When it does set Needs you's columns, it says Type may be gone and how to
+   add it again. On any Project it
    adds an option a field lacks, such as Step's Done on one made before it,
    sending each option it keeps with its id, so no item loses its value. The Board keeps a
    closed slice or brief in Done until that workflow archives it, with the
