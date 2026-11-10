@@ -1,3 +1,4 @@
+import { CLI } from './names.ts';
 import {
   API,
   EXPIRY_WARNING_DAYS,
@@ -296,7 +297,7 @@ export async function machine(sys: Sys, io: Output, args: readonly string[] = []
  */
 function cliCommand(sys: Sys, launcher: string): string | undefined {
   if (!sys.runtime.cli.includes('/node_modules/')) return undefined;
-  const found = sys.exec('/bin/sh', ['-c', 'command -v process-rules']);
+  const found = sys.exec('/bin/sh', ['-c', `command -v ${CLI}`]);
   const command = found.stdout.trim();
   return found.code === 0 && command.startsWith('/') && command !== launcher ? command : undefined;
 }

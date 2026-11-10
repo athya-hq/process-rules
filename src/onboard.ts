@@ -1,4 +1,4 @@
-import { OLD_PRODUCT, PRODUCT } from './names.ts';
+import { CLI, OLD_CLI, OLD_PRODUCT, PRODUCT } from './names.ts';
 import {
   API,
   BASE_ENV,
@@ -49,13 +49,13 @@ export { HOOKS_PATH, WORKFLOW_PATH } from './onboard-pull.ts';
  */
 export const PRE_PUSH_HOOK = [
   '#!/bin/sh',
-  '# Written by process-rules onboard: before an agent session pushes, that it pushes as the agent, then the work rules.',
+  '# Written by niyam onboard: before an agent session pushes, that it pushes as the agent, then the work rules.',
   '# Anyone else\'s push goes ahead. Without the CLI nothing can check an agent session\'s push, so it is refused.',
   '[ -z "$PROCESS_RULES_AGENT" ] && [ "$CLAUDECODE" != 1 ] && exit 0',
   'cli="$HOME/.config/process-rules/bin/process-rules"',
-  '[ -x "$cli" ] || cli=process-rules',
+  '[ -x "$cli" ] || cli=niyam',
   'if ! command -v "$cli" >/dev/null 2>&1; then',
-  '  echo "process-rules: the CLI is not installed, so this agent push cannot be checked" >&2',
+  '  echo "niyam: the CLI is not installed, so this agent push cannot be checked" >&2',
   '  exit 1',
   'fi',
   'exec "$cli" pre-push "$@"',
@@ -64,6 +64,20 @@ export const PRE_PUSH_HOOK = [
 
 /** The pre-push hooks older releases wrote, which onboard replaces with this release's. */
 export const OLDER_PRE_PUSH_HOOKS = [
+  [
+    '#!/bin/sh',
+    '# Written by process-rules onboard: before an agent session pushes, that it pushes as the agent, then the work rules.',
+    '# Anyone else\'s push goes ahead. Without the CLI nothing can check an agent session\'s push, so it is refused.',
+    '[ -z "$PROCESS_RULES_AGENT" ] && [ "$CLAUDECODE" != 1 ] && exit 0',
+    'cli="$HOME/.config/process-rules/bin/process-rules"',
+    '[ -x "$cli" ] || cli=process-rules',
+    'if ! command -v "$cli" >/dev/null 2>&1; then',
+    '  echo "process-rules: the CLI is not installed, so this agent push cannot be checked" >&2',
+    '  exit 1',
+    'fi',
+    'exec "$cli" pre-push "$@"',
+    '',
+  ].join('\n'),
   [
     '#!/bin/sh',
     '# Written by process-rules onboard: before an agent session pushes, that it pushes as the agent, then the work rules.',
@@ -110,8 +124,10 @@ export function prePushHook(sys: Sys, root: string): { path: string; file: strin
   return { path, file, state: /^\s*(?:exec\s+)?(?:"\$cli"|process-rules|niyam)\s+pre-push\b/m.test(text) ? 'ours' : 'own' };
 }
 
-/** How a hook finds the CLI: the launcher `machine` writes, else whatever PATH has. */
-const FIND_CLI = 'cli="$HOME/.config/process-rules/bin/process-rules"; [ -x "$cli" ] || cli=process-rules; ';
+/** How a hook finds the CLI: the launcher `machine` writes, else niyam on PATH. */
+const FIND_CLI = 'cli="$HOME/.config/process-rules/bin/process-rules"; [ -x "$cli" ] || cli=niyam; ';
+/** How hooks before P-53 found it: the launcher, else process-rules on PATH. */
+const OLD_FIND_CLI = 'cli="$HOME/.config/process-rules/bin/process-rules"; [ -x "$cli" ] || cli=process-rules; ';
 
 /**
  * What the client's SessionStart hook runs, on a Mac and in a Claude cloud
@@ -122,7 +138,7 @@ const FIND_CLI = 'cli="$HOME/.config/process-rules/bin/process-rules"; [ -x "$cl
 export const HOOK_COMMAND =
   FIND_CLI +
   'if said=$("$cli" session-start 2>&1); then printf \'%s\\n\' "$said"; ' +
-  'else printf \'%s\\n\' "process-rules: STOP. process-rules session-start did not run here ($said), so this session cannot be given the agent identity and GitHub is locked out of it. Do not push, fetch, or run gh in this session; tell the owner."; fi';
+  'else printf \'%s\\n\' "niyam: STOP. niyam session-start did not run here ($said), so this session cannot be given the agent identity and GitHub is locked out of it. Do not push, fetch, or run gh in this session; tell the owner."; fi';
 
 /**
  * What the client's PreToolUse hook runs before each Bash command: `guard`
@@ -137,14 +153,16 @@ export const GUARD_COMMAND =
   'printf \'%s\' "$cmd" | grep -Eq \'(^|[^[:alnum:]_-])(gh|git)([^[:alnum:]_-]|$)\' || exit 0; ' +
   FIND_CLI +
   'printf \'%s\' "$input" | "$cli" guard && exit 0; [ $? -eq 2 ] && exit 2; ' +
-  'echo "process-rules: refused, because the process-rules CLI did not run here to check this command. Do not work around it; tell the owner." >&2; exit 2';
+  'echo "niyam: refused, because the niyam CLI did not run here to check this command. Do not work around it; tell the owner." >&2; exit 2';
 
 /**
  * The permission rule that lets agent sessions answer review threads on
  * their own pull requests without a prompt: only the CLI command that does
  * that and checks it, not `gh api`, whose rules cannot hold its arguments.
  */
-export const REVIEW_THREAD_RULE = 'Bash(process-rules review-thread *)';
+export const REVIEW_THREAD_RULE = 'Bash(niyam review-thread *)';
+/** The rule before P-53, under the old command, which onboard replaces. */
+export const OLDER_REVIEW_THREAD_RULE = 'Bash(process-rules review-thread *)';
 
 /**
  * The permission rules that let agent sessions turn the desktop app's
@@ -170,8 +188,11 @@ export function missingAutoFixRules(settings: unknown): string[] {
 
 /** The hook commands older releases wrote, which onboard replaces with this release's. */
 export const OLDER_HOOK_COMMANDS = [
+  OLD_FIND_CLI +
+    'if said=$("$cli" session-start 2>&1); then printf \'%s\\n\' "$said"; ' +
+    'else printf \'%s\\n\' "process-rules: STOP. process-rules session-start did not run here ($said), so this session cannot be given the agent identity and GitHub is locked out of it. Do not push, fetch, or run gh in this session; tell the owner."; fi',
   `if [ "$CLAUDE_CODE_REMOTE" = true ]; then [ -z "$CLAUDE_ENV_FILE" ] || echo 'unset ${Object.keys(BASE_ENV).join(' ')}' >> "$CLAUDE_ENV_FILE"; else ` +
-    FIND_CLI +
+    OLD_FIND_CLI +
     'if said=$("$cli" session-start 2>&1); then printf \'%s\\n\' "$said"; ' +
     'else printf \'%s\\n\' "process-rules: STOP. process-rules session-start did not run here ($said), so this session cannot be given the agent identity and GitHub is locked out of it. Do not push, fetch, or run gh in this session; tell the owner."; fi; fi',
   'command -v process-rules >/dev/null 2>&1 && process-rules session-start || ' +
@@ -183,11 +204,17 @@ export const OLDER_HOOK_COMMANDS = [
 
 /** The guard commands older releases wrote, which onboard replaces with this release's. */
 export const OLDER_GUARD_COMMANDS = [
+  'input=$(cat); ' +
+    'cmd=$(printf \'%s\' "$input" | sed -nE \'s/.*"command"[[:space:]]*:[[:space:]]*"(([^"\\\\]|\\\\.)*)".*/\\1/p\'); ' +
+    'printf \'%s\' "$cmd" | grep -Eq \'(^|[^[:alnum:]_-])(gh|git)([^[:alnum:]_-]|$)\' || exit 0; ' +
+    OLD_FIND_CLI +
+    'printf \'%s\' "$input" | "$cli" guard && exit 0; [ $? -eq 2 ] && exit 2; ' +
+    'echo "process-rules: refused, because the process-rules CLI did not run here to check this command. Do not work around it; tell the owner." >&2; exit 2',
   '[ "$CLAUDE_CODE_REMOTE" = true ] && exit 0; input=$(cat); ' +
     // The command alone, not the rest of the input, such as its description and paths.
     'cmd=$(printf \'%s\' "$input" | sed -nE \'s/.*"command"[[:space:]]*:[[:space:]]*"(([^"\\\\]|\\\\.)*)".*/\\1/p\'); ' +
     'printf \'%s\' "$cmd" | grep -Eq \'(^|[^[:alnum:]_-])(gh|git)([^[:alnum:]_-]|$)\' || exit 0; ' +
-    FIND_CLI +
+    OLD_FIND_CLI +
     'printf \'%s\' "$input" | "$cli" guard && exit 0; [ $? -eq 2 ] && exit 2; ' +
     'echo "process-rules: refused, because the process-rules CLI did not run here to check this command. Do not work around it; tell the owner." >&2; exit 2',
 ];
@@ -261,6 +288,7 @@ function asksJob(version: string, secrets: string[]): string[] {
     ASKS_COMMENT,
     ASKS_TYPE_COMMENT,
     '  process-rules-asks:',
+    jobName('process-rules-asks'),
     '    if: >-',
     ...ASKS_COMMENT_IF,
     ASKS_LABEL_IF,
@@ -280,6 +308,7 @@ function mergedJob(version: string, secrets: string[]): string[] {
   return [
     '  # A merged pull request closes the slice it names, which moves it to Done on the board.',
     '  process-rules-merged:',
+    jobName('process-rules-merged'),
     // Into the default branch alone, and from this repository: a fork's run gets a read-only token.
     '    if: >-',
     "      github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged &&",
@@ -338,12 +367,28 @@ function addAsksJob(before: string, version: string, figma: boolean): string | u
   return `${text.replace(/\n*$/, '\n')}\n${asksJob(version, figma ? FIGMA_SECRETS : []).join('\n')}`;
 }
 
+/** The workflow's first line, naming the release it pins: `name` is niyam, or process-rules in what releases before P-53 wrote. */
+const headerLine = (name: string, version: string): string => `# Written by ${name} onboard: the shared ${name} checks at v${version}.`;
+
+/**
+ * Each job's `name:`, which GitHub puts before the shared checks' own in a
+ * check's name, as in `niyam / Work rules`; before P-53 the job ids alone
+ * named them, `process-rules / Work rules`. The ids stay, as ever.
+ */
+export const JOB_NAMES: Record<string, string> = {
+  'process-rules': CLI,
+  'process-rules-weekly': `${CLI}-weekly`,
+  'process-rules-merged': `${CLI}-merged`,
+  'process-rules-asks': `${CLI}-asks`,
+};
+const jobName = (id: string): string => `    name: ${JOB_NAMES[id]}`;
+
 /** The workflow's head, down to its jobs, which every template shares; `asks` adds the needs-owner job's triggers. */
-function workflowHead(branch: string, version: string, comments: string[], schedule = DEFAULT_SCHEDULE, types = TRIGGER_TYPES, asks = true, settings: string = SETTINGS_PATH): string[] {
+function workflowHead(branch: string, version: string, comments: string[], schedule = DEFAULT_SCHEDULE, types = TRIGGER_TYPES, asks = true, settings: string = SETTINGS_PATH, name = CLI): string[] {
   return [
-    `# Written by process-rules onboard: the shared process-rules checks at v${version}.`,
+    headerLine(name, version),
     ...comments,
-    'name: process-rules',
+    `name: ${name}`,
     '',
     'on:',
     '  pull_request:',
@@ -424,11 +469,13 @@ export function workflow(branch: string, version: string, figma: boolean, schedu
     ),
     '  # Pull request and push runs: read-only.',
     '  process-rules:',
+    jobName('process-rules'),
     READ_ONLY_IF,
     ...callChecks(version, secrets),
     '',
     '  # The weekly run alone writes to issues: it comments and opens undo issues.',
     '  process-rules-weekly:',
+    jobName('process-rules-weekly'),
     WEEKLY_IF,
     '    permissions:',
     '      contents: read',
@@ -448,7 +495,7 @@ export function workflow(branch: string, version: string, figma: boolean, schedu
 export function olderWorkflows(branch: string, version: string): string[] {
   return [
     [
-      ...workflowHead(branch, version, ['# To upgrade, change the version on both lines that name it.'], DEFAULT_SCHEDULE, OLDER_TRIGGER_TYPES, false),
+      ...workflowHead(branch, version, ['# To upgrade, change the version on both lines that name it.'], DEFAULT_SCHEDULE, OLDER_TRIGGER_TYPES, false, SETTINGS_PATH, OLD_CLI),
       '  process-rules:',
       '    # Write to issues for this job only: the weekly run comments and opens undo issues.',
       '    permissions:',
@@ -465,7 +512,20 @@ const escape = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\
 /** A call of the shared workflow, at this repository or the one it moved from (GitHub forwards it), and its version. */
 const CHECKS_PIN = new RegExp(`((?:${escape(PRODUCT)}|${escape(OLD_PRODUCT)})/\\.github/workflows/checks\\.yml@v)([^\\s'"#]+)`, 'g');
 const REF_PIN = /^(\s+process-rules-ref:\s*['"]?v)([^\s'"#]+)/gm;
-const HEADER_PIN = /^(# Written by process-rules onboard: the shared process-rules checks at v)(\S+?)(\.?)$/m;
+const HEADER_PIN = /^(# Written by (?:niyam|process-rules) onboard: the shared (?:niyam|process-rules) checks at v)(\S+?)(\.?)$/m;
+
+/**
+ * A workflow as releases before P-53 wrote it, with niyam's names: the
+ * workflow's `name: process-rules` becomes niyam, and each job id onboard
+ * writes gains the `name:` JOB_NAMES gives it, unless the client named it.
+ */
+function withNames(text: string): string {
+  let out = text.replace(/^name: process-rules[ \t]*$/m, `name: ${CLI}`);
+  for (const id of Object.keys(JOB_NAMES)) {
+    out = out.replace(new RegExp(`^( {2}${escape(id)}:[ \\t]*\\n)(?! {4}name:)`, 'm'), (line: string) => `${line}${jobName(id)}\n`);
+  }
+  return out;
+}
 
 /** The versions a workflow pins: each `checks.yml@v…`, then each `process-rules-ref: v…`. */
 export function workflowPins(text: string): string[] {
@@ -514,7 +574,7 @@ export function workflowUpdate(
 ):
   | { kind: 'same' }
   | { kind: 'write' | 'replace-older' | 'replace'; text: string; from?: string }
-  | { kind: 'repin'; text: string; from?: string; branch?: string; schedule?: string; secrets?: true; merged?: true; asks?: true; authors?: true; types?: true } {
+  | { kind: 'repin'; text: string; from?: string; branch?: string; schedule?: string; secrets?: true; merged?: true; asks?: true; authors?: true; types?: true; names?: true } {
   const wanted = workflow(branch, version, figma, schedule, settings);
   if (before === undefined) return { kind: 'write', text: wanted };
   if (before === wanted) return { kind: 'same' };
@@ -553,11 +613,12 @@ export function workflowUpdate(
           .replace(olderLabelIf, `\n${ASKS_LABEL_IF}\n${ASKS_TYPE_IF}\n`)
           .replace(`${ASKS_COMMENT}\n  process-rules-asks:`, `${ASKS_COMMENT}\n${ASKS_TYPE_COMMENT}\n  process-rules-asks:`)
       : before;
-    const pinned = typed
+    const named = withNames(typed);
+    const pinned = named
       .replace(OLDER_ASKS_COMMENT_IF.join('\n'), ASKS_COMMENT_IF.join('\n'))
       .replace(CHECKS_PIN, () => `${PRODUCT}/.github/workflows/checks.yml@v${version}`)
       .replace(REF_PIN, (_, head: string) => `${head}${version}`)
-      .replace(HEADER_PIN, (_, head: string, _old: string, dot: string) => `${head}${version}${dot}`)
+      .replace(HEADER_PIN, (_, _head: string, _old: string, dot: string) => `# Written by ${CLI} onboard: the shared ${CLI} checks at v${version}${dot}`)
       .replace(PUSH_BRANCH, (line: string, head: string, quote: string, _old: string, tail: string) =>
         moved ? `${head}${flowScalar(branch, quote)}${tail}` : line,
       )
@@ -568,9 +629,31 @@ export function workflowUpdate(
     const text = pinned.replace(SECRETS_AFTER_REF, (_, ref: string) => `${ref}${secrets}`);
     if (text === before) return { kind: 'same' };
     const stale = pins.find((pin) => pin !== version);
-    return { kind: 'repin', text, ...(stale ? { from: stale } : {}), ...(moved ? { branch } : {}), ...(rescheduled ? { schedule } : {}), ...(text !== pinned ? { secrets: true as const } : {}), ...(authors ? { authors: true as const } : {}), ...(types ? { types: true as const } : {}) };
+    return { kind: 'repin', text, ...(stale ? { from: stale } : {}), ...(moved ? { branch } : {}), ...(rescheduled ? { schedule } : {}), ...(text !== pinned ? { secrets: true as const } : {}), ...(authors ? { authors: true as const } : {}), ...(types ? { types: true as const } : {}), ...(named !== typed ? { names: true as const } : {}) };
   }
   return { kind: 'replace', text: wanted };
+}
+
+/**
+ * The names of the repository's rulesets that require a check under its
+ * name before P-53, `process-rules / …`; none where GitHub will not say,
+ * as for a private repository on a plan without rulesets.
+ */
+async function oldNamedRulesets(sys: Sys, slug: string, token: string): Promise<string[]> {
+  const ask = async (path: string): Promise<unknown> => {
+    const answer = await sys.http(`${API}/repos/${slug}/${path}`, { token }).catch(() => undefined);
+    return answer?.status === 200 ? answer.json : undefined;
+  };
+  const listed = await ask('rulesets?includes_parents=false&per_page=100');
+  const names: string[] = [];
+  for (const one of Array.isArray(listed) ? (listed as { id?: unknown; name?: unknown }[]) : []) {
+    const rules = ((await ask(`rulesets/${String(one.id)}`)) as { rules?: unknown } | undefined)?.rules;
+    const old = (Array.isArray(rules) ? (rules as { type?: unknown; parameters?: { required_status_checks?: { context?: unknown }[] } }[]) : []).some(
+      (rule) => rule.type === 'required_status_checks' && (rule.parameters?.required_status_checks ?? []).some((check) => typeof check.context === 'string' && check.context.startsWith(`${OLD_CLI} / `)),
+    );
+    if (old && typeof one.name === 'string') names.push(/^[\w.-]+$/.test(one.name) ? one.name : `'${one.name.replaceAll("'", "'\\''")}'`);
+  }
+  return names;
 }
 
 /** A niyam release a repository pins, and where. */
@@ -697,7 +780,7 @@ export function claudeSettings(before: string | undefined): { text: string; chan
   const first: unknown = parsed();
   if (typeof first !== 'object' || first === null || Array.isArray(first)) throw new Error(`${HOOKS_PATH} is not a JSON object`);
   const hooks: [string, string, readonly string[], string, Record<string, unknown>][] = [
-    ['SessionStart', HOOK_COMMAND, OLDER_HOOK_COMMANDS, 'the SessionStart hook that runs process-rules session-start', {}],
+    ['SessionStart', HOOK_COMMAND, OLDER_HOOK_COMMANDS, 'the SessionStart hook that runs niyam session-start', {}],
     ['PreToolUse', GUARD_COMMAND, OLDER_GUARD_COMMANDS, "the PreToolUse hook that refuses gh and git's remote commands outside the agent identity", { matcher: 'Bash' }],
   ];
   try {
@@ -726,11 +809,17 @@ export function claudeSettings(before: string | undefined): { text: string; chan
       changes.push(`set ${named} in env, so GitHub is locked out until session-start gives the agent identity`);
       labels.push('lock');
     }
+    // The rule under the old command becomes niyam's, in its place, unless niyam's is there already.
     const allow = (parsed() as { permissions?: { allow?: unknown } }).permissions?.allow;
-    const review = !Array.isArray(allow) || !allow.includes(REVIEW_THREAD_RULE);
-    if (review) {
+    const has = Array.isArray(allow) && allow.includes(REVIEW_THREAD_RULE);
+    const renamed = has ? { text, replaced: 0 } : replaceValues(text, ['permissions', 'allow', '*'], (value) => (value === OLDER_REVIEW_THREAD_RULE ? REVIEW_THREAD_RULE : undefined));
+    const review = !has && renamed.replaced === 0;
+    if (renamed.replaced > 0) {
+      text = renamed.text;
+      changes.push(`replace ${OLDER_REVIEW_THREAD_RULE} with ${REVIEW_THREAD_RULE}, the CLI's own name`);
+    } else if (review) {
       text = appendToArray(text, ['permissions'], 'allow', REVIEW_THREAD_RULE);
-      changes.push('allow process-rules review-thread without a prompt, so agent sessions answer review threads on their own pull requests');
+      changes.push('allow niyam review-thread without a prompt, so agent sessions answer review threads on their own pull requests');
     }
     const lacking = missingAutoFixRules(parsed());
     for (const rule of lacking) text = appendToArray(text, ['permissions'], 'allow', rule);
@@ -738,7 +827,7 @@ export function claudeSettings(before: string | undefined): { text: string; chan
       changes.push(`allow ${lacking.join(', ')} without a prompt, so agent sessions turn Auto-fix on for their own pull requests`);
     }
     // One word for both, so the plan's line stays short.
-    if (review || lacking.length > 0) labels.push(!review ? 'Auto-fix rules' : lacking.length === 0 ? 'review rule' : 'allow rules');
+    if (review || renamed.replaced > 0 || lacking.length > 0) labels.push(!(review || renamed.replaced > 0) ? 'Auto-fix rules' : lacking.length === 0 ? 'review rule' : 'allow rules');
   } catch (error) {
     throw new Error(`${HOOKS_PATH}: ${(error as Error).message}`);
   }
@@ -814,6 +903,7 @@ function workflowDetail(update: Exclude<ReturnType<typeof workflowUpdate>, { kin
       ...(update.asks ? ['needs-owner job'] : []),
       ...(update.authors ? ['needs-owner job only for owners, members and collaborators'] : []),
       ...(update.types ? ['issue types for new issues'] : []),
+      ...(update.names ? ['niyam check names'] : []),
     ].join(', ') || `header → v${version}`
   );
 }
@@ -836,6 +926,7 @@ function workflowWhat(update: Exclude<ReturnType<typeof workflowUpdate>, { kind:
     ...(update.asks ? ["add a job that labels an issue needs-owner where the agent asks the owner, and takes it off at the owner's approved label, Decision: comment or (hourly) 👍"] : []),
     ...(update.authors ? ['start the needs-owner job only on a comment by the owner, a member or a collaborator'] : []),
     ...(update.types ? ["start the needs-owner job when an issue is opened or reopened too, which gives one with no type the work model's"] : []),
+    ...(update.names ? [`name the workflow and its jobs niyam, so its checks read ${CLI} / Work rules, not ${OLD_CLI} / Work rules`] : []),
   ];
   return `in ${WORKFLOW_PATH}, ${parts.join(' and ') || `set the version in its header comment to v${version}`}, leaving the rest as it is`;
 }
@@ -1162,6 +1253,14 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     const update = planned === undefined ? undefined : workflowUpdate(fileAt(WORKFLOW_PATH), planned, version, on('figma'), schedule, settingsFile);
     if (update === undefined) pull.push({ label: 'workflow', detail: fileAt(WORKFLOW_PATH) === undefined ? 'new' : 'write or update' });
     else if (update.kind !== 'same') pull.push({ label: 'workflow', detail: workflowDetail(update, version, on('figma')) });
+    // Since P-53 the checks report as niyam / …: a ruleset still requiring process-rules / … holds this pull request
+    // and every one after it until the owner swaps the names, which only the owner's account can do.
+    for (const ruleset of await oldNamedRulesets(sys, slug, token)) {
+      byHand.push(`${CLI} owner-step required-checks ${slug} ${ruleset} → while the pull request is open`);
+      later.push(
+        `The ruleset ${ruleset} requires the checks as ${OLD_CLI} / …, which this pull request reports as ${CLI} / …: while it is open, run \`${CLI} owner-step required-checks ${slug} ${ruleset}\`, which requires them under the new names; it merges after. Pull requests opened before then report the old names until they merge the default branch.`,
+      );
+    }
   }
 
   if (on('board')) {
@@ -1200,7 +1299,7 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
 
   // Every adopter: the identity guard holds where the Claude Code hooks did not run.
   const hook = prePushHook(sys, root);
-  const hookLine = 'process-rules pre-push "$@"';
+  const hookLine = `${CLI} pre-push "$@"`;
   if (hook.state === 'missing' || hook.state === 'older') {
     mac.push({ label: 'pre-push hook', detail: hook.state === 'older' ? 'older one replaced' : 'new' });
     steps.push({

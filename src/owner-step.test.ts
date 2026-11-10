@@ -382,10 +382,11 @@ describe('owner-step', () => {
 });
 
 const encoded = (text: string): { status: number; json: unknown } => ({ status: 200, json: { content: Buffer.from(text).toString('base64') } });
-/** A client's workflow as onboard writes it, its process-rules job calling the shared checks. */
+/** A client's workflow as onboard writes it, its process-rules job, named niyam, calling the shared checks. */
 const WORKFLOW = [
   'jobs:',
   '  process-rules:',
+  '    name: niyam',
   "    if: github.event_name == 'pull_request'",
   '    # the shared checks',
   '    uses: veda-hq/niyam/.github/workflows/checks.yml@v0.6.6',
@@ -425,15 +426,15 @@ describe('owner-step required-checks', () => {
   };
 
   it("adds the checks the repository's features turn on, keeping every other check and rule, and shows the before and after", async () => {
-    const made = rulesWorld([{ type: 'deletion' }, checks('Typecheck, test, build', 'process-rules / PR identity')]);
+    const made = rulesWorld([{ type: 'deletion' }, checks('Typecheck, test, build', 'niyam / PR identity')]);
     const { io, out, err } = capture();
     assert.equal(await ownerStep(made.sys, io, ['required-checks', 'veda-hq/niyam', 'MAIN']), 0);
     const text = out.join('\n');
-    assert.match(text, /\.github\/niyam\.json turns on the checks process-rules \/ PR identity, process-rules \/ Work rules/);
-    assert.match(text, /before: Typecheck, test, build, process-rules \/ PR identity\n {2}after: {2}Typecheck, test, build, process-rules \/ PR identity, process-rules \/ Work rules/);
-    assert.match(text, /make the ruleset main of veda-hq\/niyam also require process-rules \/ Work rules/);
-    assert.match(text, /✓ the ruleset main requires Typecheck, test, build, process-rules \/ PR identity, process-rules \/ Work rules/);
-    assert.deepEqual(made.now(), [{ type: 'deletion' }, checks('Typecheck, test, build', 'process-rules / PR identity', 'process-rules / Work rules')]);
+    assert.match(text, /\.github\/niyam\.json turns on the checks niyam \/ PR identity, niyam \/ Work rules/);
+    assert.match(text, /before: Typecheck, test, build, niyam \/ PR identity\n {2}after: {2}Typecheck, test, build, niyam \/ PR identity, niyam \/ Work rules/);
+    assert.match(text, /make the ruleset main of veda-hq\/niyam also require niyam \/ Work rules/);
+    assert.match(text, /✓ the ruleset main requires Typecheck, test, build, niyam \/ PR identity, niyam \/ Work rules/);
+    assert.deepEqual(made.now(), [{ type: 'deletion' }, checks('Typecheck, test, build', 'niyam / PR identity', 'niyam / Work rules')]);
     cleaned(made.sys, out);
     noLeak(made.sys, out, err);
   });
@@ -445,7 +446,7 @@ describe('owner-step required-checks', () => {
     });
     const { io, out } = capture();
     assert.equal(await ownerStep(made.sys, io, ['required-checks', 'veda-hq/niyam', '5']), 0);
-    assert.match(out.join('\n'), /before: none\n {2}after: {2}process-rules \/ PR identity, process-rules \/ Work rules, process-rules \/ Design frames/);
+    assert.match(out.join('\n'), /before: none\n {2}after: {2}niyam \/ PR identity, niyam \/ Work rules, niyam \/ Design frames/);
     assert.deepEqual((made.now()[1] as { parameters: { required_status_checks: unknown[] } }).parameters.required_status_checks.length, 3);
   });
 
@@ -455,18 +456,18 @@ describe('owner-step required-checks', () => {
     const { io, out } = capture();
     assert.equal(await ownerStep(made.sys, io, ['required-checks', 'veda-hq/niyam', 'main']), 1);
     const text = out.join('\n');
-    assert.match(text, /make the ruleset main of veda-hq\/niyam also require process-rules \/ PR identity\n/);
-    assert.match(text, /✗ not adding process-rules \/ Work rules: the shared checks \.github\/workflows\/process-rules\.yml calls run no Work rules job, so it would never report and would hold every pull request → niyam onboard there, then run this again/);
-    assert.match(text, /✓ the ruleset main requires process-rules \/ PR identity/);
+    assert.match(text, /make the ruleset main of veda-hq\/niyam also require niyam \/ PR identity\n/);
+    assert.match(text, /✗ not adding niyam \/ Work rules: the shared checks \.github\/workflows\/process-rules\.yml calls run no Work rules job, so it would never report and would hold every pull request → niyam onboard there, then run this again/);
+    assert.match(text, /✓ the ruleset main requires niyam \/ PR identity/);
 
     // Its own checks, called by path, as niyam's repository does; a check required already needs no job.
-    const own = rulesWorld([checks('process-rules / Work rules')], {
+    const own = rulesWorld([checks('niyam / Work rules')], {
       'GET repos/veda-hq/niyam/contents/.github/workflows/process-rules.yml': encoded(WORKFLOW.replace('veda-hq/niyam/.github/workflows/checks.yml@v0.6.6', './.github/workflows/checks.yml')),
       'GET repos/veda-hq/niyam/contents/.github/workflows/checks.yml': encoded(SHARED),
     });
     const second = capture();
     assert.equal(await ownerStep(own.sys, second.io, ['required-checks', 'veda-hq/niyam', 'main']), 0);
-    assert.match(second.out.join('\n'), /✓ the ruleset main requires process-rules \/ Work rules, process-rules \/ PR identity/);
+    assert.match(second.out.join('\n'), /✓ the ruleset main requires niyam \/ Work rules, niyam \/ PR identity/);
 
     const cases: [Record<string, Reply>, RegExp][] = [
       [{ 'GET repos/veda-hq/niyam/contents/.github/workflows/process-rules.yml': { status: 404, json: { message: 'Not Found' } } }, /veda-hq\/niyam has no \.github\/workflows\/process-rules\.yml on its default branch/],
@@ -478,17 +479,17 @@ describe('owner-step required-checks', () => {
       const one = rulesWorld([checks()], extra);
       const said = capture();
       assert.equal(await ownerStep(one.sys, said.io, ['required-checks', 'veda-hq/niyam', 'main']), 1, String(why));
-      assert.match(said.out.join('\n'), new RegExp(`✗ not adding process-rules / PR identity: (?:.*)${why.source}`));
+      assert.match(said.out.join('\n'), new RegExp(`✗ not adding niyam / PR identity: (?:.*)${why.source}`));
       assert.deepEqual(one.sys.chosen, []);
       assert.ok(!one.api.some((call) => call.args.includes('PUT')));
     }
   });
 
   it('keeps an edit made to the ruleset while the owner read the plan', async () => {
-    const made = rulesWorld([checks('process-rules / PR identity')]);
+    const made = rulesWorld([checks('niyam / PR identity')]);
     made.sys.choose = () => {
       // Someone adds a rule and a check before the yes.
-      const edited = [{ type: 'deletion' }, checks('process-rules / PR identity', 'Secret scans')];
+      const edited = [{ type: 'deletion' }, checks('niyam / PR identity', 'Secret scans')];
       made.sys.execOverride = ((inner) => (call) => (call.args[1] === 'repos/veda-hq/niyam/rulesets/5' && !call.args.includes('PUT') && !putDone ? { code: 0, stdout: JSON.stringify({ id: 5, name: 'main', rules: edited }), stderr: '' } : inner(call)))(made.sys.execOverride);
       return Promise.resolve(true);
     };
@@ -500,12 +501,12 @@ describe('owner-step required-checks', () => {
     };
     const { io, out } = capture();
     assert.equal(await ownerStep(made.sys, io, ['required-checks', 'veda-hq/niyam', 'main']), 0);
-    assert.deepEqual(made.now(), [{ type: 'deletion' }, checks('process-rules / PR identity', 'Secret scans', 'process-rules / Work rules')]);
-    assert.match(out.join('\n'), /✓ the ruleset main requires process-rules \/ PR identity, Secret scans, process-rules \/ Work rules/);
+    assert.deepEqual(made.now(), [{ type: 'deletion' }, checks('niyam / PR identity', 'Secret scans', 'niyam / Work rules')]);
+    assert.match(out.join('\n'), /✓ the ruleset main requires niyam \/ PR identity, Secret scans, niyam \/ Work rules/);
   });
 
   it('writes nothing after a Ctrl-C that came during the read before the write', async () => {
-    const made = rulesWorld([checks('process-rules / PR identity')]);
+    const made = rulesWorld([checks('niyam / PR identity')]);
     let reads = 0;
     const inner = made.sys.execOverride;
     made.sys.execOverride = (call) => {
@@ -519,13 +520,13 @@ describe('owner-step required-checks', () => {
     };
     const { io, out } = capture();
     assert.equal(await ownerStep(made.sys, io, ['required-checks', 'veda-hq/niyam', 'main']), 130);
-    assert.match(out.join('\n'), /✗ make the ruleset main of veda-hq\/niyam also require process-rules \/ Work rules: not done, stopped by Ctrl-C/);
+    assert.match(out.join('\n'), /✗ make the ruleset main of veda-hq\/niyam also require niyam \/ Work rules: not done, stopped by Ctrl-C/);
     assert.ok(!made.api.some((call) => call.args.includes('PUT')));
     cleaned(made.sys, out);
   });
 
   it('changes nothing when every check is required already', async () => {
-    const made = rulesWorld([checks('process-rules / Work rules', 'process-rules / PR identity')]);
+    const made = rulesWorld([checks('niyam / Work rules', 'niyam / PR identity')]);
     const { io, out } = capture();
     assert.equal(await ownerStep(made.sys, io, ['required-checks', 'veda-hq/niyam', 'main']), 0);
     assert.match(out.join('\n'), /✓ nothing to change: the ruleset main requires every check \.github\/niyam\.json turns on/);
@@ -542,7 +543,7 @@ describe('owner-step required-checks', () => {
       [rulesWorld([], { 'GET repos/veda-hq/niyam/contents/.github/niyam.json': { status: 200, json: {} } }), 'main', /✗ GitHub did not give veda-hq\/niyam's \.github\/niyam\.json/],
       [rulesWorld([], { 'GET repos/veda-hq/niyam/contents/.github/niyam.json': { status: 502, json: { message: 'Bad Gateway' } } }), 'main', /✗ reading veda-hq\/niyam's \.github\/niyam\.json: gh: Bad Gateway/],
       [rulesWorld([], { 'GET repos/veda-hq/niyam/contents/.github/niyam.json': encoded('{') }), 'main', /✗ veda-hq\/niyam's \.github\/niyam\.json is not JSON/],
-      [rulesWorld([checks()], {}, (body) => body.rules.map(() => checks())), 'main', /✗ make the ruleset .*: GitHub shows the ruleset without process-rules \/ PR identity, process-rules \/ Work rules afterwards/],
+      [rulesWorld([checks()], {}, (body) => body.rules.map(() => checks())), 'main', /✗ make the ruleset .*: GitHub shows the ruleset without niyam \/ PR identity, niyam \/ Work rules afterwards/],
       [rulesWorld([{ type: 'deletion' }, checks()], {}, (body) => body.rules.slice(1)), 'main', /GitHub shows the ruleset's other rules changed afterwards; check it at https:\/\/github\.com\/veda-hq\/niyam\/rules\/5/],
     ];
     for (const [made, ruleset, why] of cases) {
@@ -550,6 +551,48 @@ describe('owner-step required-checks', () => {
       assert.equal(await ownerStep(made.sys, io, ['required-checks', 'veda-hq/niyam', ruleset]), 1, String(why));
       assert.match(out.join('\n'), why);
       cleaned(made.sys, out);
+    }
+  });
+
+  /** The workflow as releases before P-53 wrote it: the job's id alone names its checks. */
+  const UNNAMED = WORKFLOW.replace('    name: niyam\n', '');
+  const NOT_FOUND = { status: 404, json: { message: 'Not Found' } };
+
+  it('requires each check under its niyam name in place of its process-rules one, once the workflow on the default branch reports it', async () => {
+    const made = rulesWorld([{ type: 'deletion' }, checks('Typecheck, test, build', 'process-rules / Work rules', 'process-rules / PR identity')]);
+    const { io, out } = capture();
+    assert.equal(await ownerStep(made.sys, io, ['required-checks', 'veda-hq/niyam', 'main']), 0, out.join('\n'));
+    const text = out.join('\n');
+    assert.match(text, /make the ruleset main of veda-hq\/niyam require niyam \/ Work rules in place of process-rules \/ Work rules, niyam \/ PR identity in place of process-rules \/ PR identity/);
+    assert.match(text, /before: Typecheck, test, build, process-rules \/ Work rules, process-rules \/ PR identity\n {2}after: {2}Typecheck, test, build, niyam \/ Work rules, niyam \/ PR identity/);
+    assert.deepEqual(made.now(), [{ type: 'deletion' }, checks('Typecheck, test, build', 'niyam / Work rules', 'niyam / PR identity')], 'each in its place, its app kept');
+  });
+
+  it("renames while onboard's pull request is open, its branch naming the job niyam, and adds a check turned on beside it", async () => {
+    const made = rulesWorld([checks('process-rules / PR identity')], {
+      'GET repos/veda-hq/niyam/contents/.github/workflows/process-rules.yml': encoded(UNNAMED),
+      'GET repos/veda-hq/niyam/branches/process-rules%2Fonboard': { status: 200, json: {} },
+      'GET repos/veda-hq/niyam/contents/.github/workflows/process-rules.yml?ref=process-rules%2Fonboard': encoded(WORKFLOW),
+    });
+    const { io, out } = capture();
+    assert.equal(await ownerStep(made.sys, io, ['required-checks', 'veda-hq/niyam', 'main']), 0, out.join('\n'));
+    assert.match(out.join('\n'), /require niyam \/ PR identity in place of process-rules \/ PR identity, and make the ruleset main of veda-hq\/niyam also require niyam \/ Work rules/);
+    assert.deepEqual(made.now(), [checks('niyam / PR identity', 'niyam / Work rules')]);
+  });
+
+  it('renames nothing, and adds nothing, while the workflow reports only the old names', async () => {
+    for (const branch of [NOT_FOUND, { status: 200, json: {} }]) {
+      const made = rulesWorld([checks('process-rules / PR identity')], {
+        'GET repos/veda-hq/niyam/contents/.github/workflows/process-rules.yml': encoded(UNNAMED),
+        'GET repos/veda-hq/niyam/branches/process-rules%2Fonboard': branch,
+        'GET repos/veda-hq/niyam/contents/.github/workflows/process-rules.yml?ref=process-rules%2Fonboard': encoded(UNNAMED),
+      });
+      const { io, out } = capture();
+      await ownerStep(made.sys, io, ['required-checks', 'veda-hq/niyam', 'main']);
+      const text = out.join('\n');
+      assert.match(text, /✗ not adding niyam \/ Work rules: \.github\/workflows\/process-rules\.yml reports its checks as process-rules \/ …, on the default branch and with no process-rules\/onboard branch naming them niyam, so it would never report and would hold every pull request → niyam onboard there, then run this again while its pull request is open/);
+      assert.ok(!made.api.some((call) => call.args.includes('PUT')), text);
+      assert.deepEqual(made.now(), [checks('process-rules / PR identity')]);
     }
   });
 });

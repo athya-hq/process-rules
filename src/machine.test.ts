@@ -443,13 +443,13 @@ describe('machine', () => {
     assert.deepEqual(sys.opened, [], 'nothing after it');
   });
 
-  it('writes the launcher, which runs the package manager\'s command for an installed CLI with this node', async () => {
+  it('writes the launcher, which runs the package manager\'s niyam command for an installed CLI with this node', async () => {
     const sys = fresh();
     sys.runtime = { node: NODE, cli: INSTALLED };
     sys.execOverride = (call) =>
-      call.command === '/bin/sh' ? { code: 0, stdout: '/home/u/Library/pnpm/bin/process-rules\n', stderr: '' } : undefined;
+      call.command === '/bin/sh' && call.args.join(' ') === '-c command -v niyam' ? { code: 0, stdout: '/home/u/Library/pnpm/bin/niyam\n', stderr: '' } : undefined;
     assert.equal((await setUp(sys)).code, 0);
-    assert.equal(sys.files.get(LAUNCHER), launcherScript(NODE, INSTALLED, '/home/u/Library/pnpm/bin/process-rules'));
+    assert.equal(sys.files.get(LAUNCHER), launcherScript(NODE, INSTALLED, '/home/u/Library/pnpm/bin/niyam'));
     assert.equal(sys.modes.get(LAUNCHER), 0o755);
     assert.match(sys.files.get(LAUNCHER) ?? '', /^PATH='\/opt\/node\/bin':"\$PATH"$/m);
     assert.ok(sys.dirs.includes(`${HOME}/.config/process-rules/bin`));

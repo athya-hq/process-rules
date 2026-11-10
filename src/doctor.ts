@@ -1,3 +1,4 @@
+import { OLD_CLI } from './names.ts';
 import {
   EXPIRY_WARNING_DAYS,
   account,
@@ -35,6 +36,8 @@ import { installedFindings } from './upgrade.ts';
 import { packageVersion } from './version.ts';
 
 const MACHINE = 'niyam machine';
+/** A launcher an older machine wrote, which runs the package manager's process-rules command, not niyam (P-53). */
+const OLD_LAUNCHER = new RegExp(`^exec '[^'\\n]*/${OLD_CLI}' "\\$@"$`, 'm');
 
 /** Runs a check that reads GitHub; a failed read is that check's ✗, fixed by asking again. */
 async function remote(name: string, check: () => Promise<Finding>): Promise<Finding> {
@@ -97,7 +100,9 @@ export async function doctor(sys: Sys, io: Output, named?: string): Promise<numb
       ? { mark: '✗', text: 'launcher missing, so hooks need node on PATH', fix: MACHINE }
       : runs.code !== 0
         ? { mark: '✗', text: `launcher does not run (${runs.stderr.trim() || `exit ${runs.code}`}); its node removed?`, fix: MACHINE }
-        : { mark: '✓', text: 'launcher' },
+        : OLD_LAUNCHER.test(sys.read(launcher))
+          ? { mark: '▲', text: `launcher runs ${OLD_CLI}, niyam's old command, which a later release removes`, fix: MACHINE }
+          : { mark: '✓', text: 'launcher' },
     ...(await installedFindings(sys)),
   );
   const { left, kept } = setAside(exposure(sys, agent), readDeclined(sys, agent));

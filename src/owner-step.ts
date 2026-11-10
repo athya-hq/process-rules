@@ -3,8 +3,8 @@ import { type Feature, featuresIn } from './features.ts';
 import { GITHUB_HOST, GITHUB_WEB } from './host.ts';
 import { ISSUE_TYPES } from './issue-types.ts';
 import type { Finding } from './layout.ts';
-import { CLI } from './names.ts';
-import { WORKFLOW_PATH } from './onboard-pull.ts';
+import { CLI, OLD_CLI } from './names.ts';
+import { ONBOARD_BRANCH, WORKFLOW_PATH } from './onboard-pull.ts';
 import { signInLines } from './owner-login.ts';
 import { agentSession } from './push-identity.ts';
 import type { Output, Sys } from './types.ts';
@@ -15,14 +15,16 @@ export const REVOKE = `${GITHUB_WEB}/settings/applications`;
 export const FOLDER_PREFIX = 'niyam-owner-step-';
 /** The labels the auto-mode classifier keeps agents from changing, so the owner changes them. */
 export const OWNER_LABELS = ['approved', 'do-not-merge'] as const;
-/** The checks of each feature, as the client's workflow names them (job `process-rules`, then the job's name). */
+/** The start of each check FEATURE_CHECKS names: the client workflow's job, by the `name: niyam` onboard gives it since P-53. */
+const CHECK_PREFIX = `${CLI} / `;
+/** The same before P-53, when the job's id, `process-rules`, named it. */
+const OLD_CHECK_PREFIX = `${OLD_CLI} / `;
+/** The checks of each feature, as the client's workflow names them (its read-only job, then the shared checks' job). */
 export const FEATURE_CHECKS: Partial<Record<Feature, string>> = {
-  'pr-identity': 'process-rules / PR identity',
-  'work-rules': 'process-rules / Work rules',
-  figma: 'process-rules / Design frames',
+  'pr-identity': `${CHECK_PREFIX}PR identity`,
+  'work-rules': `${CHECK_PREFIX}Work rules`,
+  figma: `${CHECK_PREFIX}Design frames`,
 };
-/** The start of each check FEATURE_CHECKS names: the client workflow's job. */
-const CHECK_PREFIX = 'process-rules / ';
 /** GitHub Actions' app, which reports the workflow's checks. */
 const ACTIONS_APP = 15368;
 /** How long one gh call gets. */
@@ -295,8 +297,8 @@ interface Rule {
 }
 
 /** A file of `repo` on its default branch, or undefined when GitHub has none; throws when GitHub will not say. */
-function fileIn(gh: Gh, repo: string, path: string): string | undefined {
-  const answer = gh.api(`repos/${repo}/contents/${path}`);
+function fileIn(gh: Gh, repo: string, path: string, ref?: string): string | undefined {
+  const answer = gh.api(`repos/${repo}/contents/${path}${ref ? `?ref=${encodeURIComponent(ref)}` : ''}`);
   if (!answer.ok && /404|not found/i.test(answer.problem)) return undefined;
   const content = (must(answer, `reading ${repo}'s ${path}`) as { content?: unknown } | null)?.content;
   if (typeof content !== 'string') throw new Error(`GitHub did not give ${repo}'s ${path}`);
@@ -347,6 +349,20 @@ function workflowJobs(gh: Gh, repo: string): Set<string> | { problem: string } {
   return new Set([...text.matchAll(/^ {4}name:\s*['"]?([^'"#\r\n]*?)['"]?\s*$/gm)].map((match) => match[1] as string));
 }
 
+/** A workflow whose read-only job carries onboard's `name: niyam`, so its checks report as `niyam / …`. */
+const NAMED_JOB = new RegExp(`^ {2}process-rules:[ \\t]*\\r?\\n {4}name:[ \\t]*['"]?${CLI}['"]?[ \\t]*\\r?$`, 'm');
+
+/**
+ * Whether the repository's workflow reports its checks as `niyam / …`: on
+ * its default branch, or on onboard's branch, whose pull request then
+ * waits for the ruleset to require those names.
+ */
+function reportsNewNames(gh: Gh, repo: string): boolean {
+  if (NAMED_JOB.test(fileIn(gh, repo, WORKFLOW_PATH) ?? '')) return true;
+  const answer = gh.api(`repos/${repo}/branches/${encodeURIComponent(ONBOARD_BRANCH)}`);
+  return answer.ok && NAMED_JOB.test(fileIn(gh, repo, WORKFLOW_PATH, ONBOARD_BRANCH) ?? '');
+}
+
 /**
  * The ruleset's required checks, with the checks of the features the
  * repository's settings turn on added; every other check and rule stays as
@@ -369,29 +385,46 @@ function requiredChecks(gh: Gh, { repo, ruleset }: Extract<Step, { step: 'requir
   const others = (rules: Rule[]): string => JSON.stringify(rules.filter((rule) => rule.type !== 'required_status_checks'));
   const before = read();
   const { file, checks: turnedOn } = wantedChecks(gh, repo);
-  const had = contexts(before.rules);
+  const required = contexts(before.rules);
+  // Since P-53 the workflow names its job niyam. A check only reports under the name the workflow gives it,
+  // so each one required under the old name moves to the new one once the workflow reports that, and none is added before.
+  const old = required.filter((check) => check.startsWith(OLD_CHECK_PREFIX));
+  const reports = turnedOn.some((check) => !required.includes(check)) || old.length > 0 ? reportsNewNames(gh, repo) : true;
+  const renamed = (check: string): string => (reports && check.startsWith(OLD_CHECK_PREFIX) ? `${CHECK_PREFIX}${check.slice(OLD_CHECK_PREFIX.length)}` : check);
+  const swaps = reports ? old.map((check) => ({ from: check, to: renamed(check) })) : [];
+  const had = [...new Set(required.map(renamed))];
   const jobs = turnedOn.some((check) => !had.includes(check)) ? workflowJobs(gh, repo) : new Set<string>();
-  const runs = (check: string): boolean => had.includes(check) || (jobs instanceof Set && jobs.has(check.slice(CHECK_PREFIX.length)));
+  const runs = (check: string): boolean => had.includes(check) || (reports && jobs instanceof Set && jobs.has(check.slice(CHECK_PREFIX.length)));
   const checks = turnedOn.filter(runs);
+  const why = (check: string): string =>
+    'problem' in jobs
+      ? jobs.problem
+      : !reports
+        ? `${WORKFLOW_PATH} reports its checks as ${OLD_CHECK_PREFIX}…, on the default branch and with no ${ONBOARD_BRANCH} branch naming them niyam`
+        : `the shared checks ${WORKFLOW_PATH} calls run no ${check.slice(CHECK_PREFIX.length)} job`;
   const skipped = turnedOn
     .filter((check) => !runs(check))
     .map((check): Finding => ({
       mark: '✗',
-      text: `not adding ${check}: ${'problem' in jobs ? jobs.problem : `the shared checks ${WORKFLOW_PATH} calls run no ${check.slice(CHECK_PREFIX.length)} job`}, so it would never report and would hold every pull request`,
-      fix: `${CLI} onboard there, then run this again`,
+      text: `not adding ${check}: ${why(check)}, so it would never report and would hold every pull request`,
+      fix: reports || 'problem' in jobs ? `${CLI} onboard there, then run this again` : `${CLI} onboard there, then run this again while its pull request is open`,
     }));
   const missing = checks.filter((check) => !had.includes(check));
   const after = [...had, ...missing];
   const list = (names: string[]): string => (names.length === 0 ? 'none' : names.join(', '));
-  const notes = [`${file} turns on the checks ${list(turnedOn)}`, `before: ${list(had)}`, `after:  ${list(after)}`];
-  if (missing.length === 0) return { changes: [], notes, skipped, already: `the ruleset ${before.name} requires every check ${file} turns on` };
+  const notes = [`${file} turns on the checks ${list(turnedOn)}`, `before: ${list(required)}`, `after:  ${list(after)}`];
+  if (missing.length === 0 && swaps.length === 0) return { changes: [], notes, skipped, already: `the ruleset ${before.name} requires every check ${file} turns on` };
   // Built on the ruleset as it is just before the write, so an edit made while the owner read the plan is kept.
   const withChecks = (current: Rule[]): Rule[] => {
-    const added = checks.filter((check) => !contexts(current).includes(check)).map((context) => ({ context, integration_id: ACTIONS_APP }));
+    // Each old name in its place under the new one, its app kept; a second copy of a name goes.
+    const moved = (list: { context: string; integration_id?: number }[]): { context: string; integration_id?: number }[] =>
+      list.map((check) => ({ ...check, context: renamed(check.context) })).filter((check, at, all) => all.findIndex((one) => one.context === check.context) === at);
+    const kept = moved(current.find((rule) => rule.type === 'required_status_checks')?.parameters?.required_status_checks ?? []).map((check) => check.context);
+    const added = checks.filter((check) => !kept.includes(check)).map((context) => ({ context, integration_id: ACTIONS_APP }));
     return current.some((rule) => rule.type === 'required_status_checks')
       ? current.map((rule) =>
           rule.type === 'required_status_checks'
-            ? { ...rule, parameters: { ...rule.parameters, required_status_checks: [...(rule.parameters?.required_status_checks ?? []), ...added] } }
+            ? { ...rule, parameters: { ...rule.parameters, required_status_checks: [...moved(rule.parameters?.required_status_checks ?? []), ...added] } }
             : rule,
         )
       : [...current, { type: 'required_status_checks', parameters: { strict_required_status_checks_policy: false, do_not_enforce_on_create: false, required_status_checks: added } }];
@@ -399,14 +432,19 @@ function requiredChecks(gh: Gh, { repo, ruleset }: Extract<Step, { step: 'requir
   return {
     changes: [
       {
-        plan: `make the ruleset ${before.name} of ${repo} also require ${missing.join(', ')}`,
+        plan: [
+          ...(swaps.length > 0 ? [`make the ruleset ${before.name} of ${repo} require ${swaps.map(({ from, to }) => `${to} in place of ${from}`).join(', ')}`] : []),
+          ...(missing.length > 0 ? [`make the ruleset ${before.name} of ${repo} also require ${missing.join(', ')}`] : []),
+        ].join(', and '),
         apply: async (checkpoint) => {
           const current = read();
           await checkpoint();
           must(gh.api(`repos/${repo}/rulesets/${id}`, { method: 'PUT', body: { rules: withChecks(current.rules) } }), `updating the ruleset ${before.name}`);
           const now = read();
-          const lacking = checks.filter((check) => !contexts(now.rules).includes(check));
+          const lacking = [...checks, ...swaps.map(({ to }) => to)].filter((check) => !contexts(now.rules).includes(check));
           if (lacking.length > 0) throw new Error(`GitHub shows the ruleset without ${lacking.join(', ')} afterwards`);
+          const left = swaps.filter(({ from }) => contexts(now.rules).includes(from));
+          if (left.length > 0) throw new Error(`GitHub shows the ruleset still requiring ${left.map(({ from }) => from).join(', ')} afterwards`);
           if (others(now.rules) !== others(current.rules)) throw new Error(`GitHub shows the ruleset's other rules changed afterwards; check it at ${GITHUB_WEB}/${repo}/rules/${id}`);
           return `the ruleset ${now.name} requires ${list(contexts(now.rules))}`;
         },

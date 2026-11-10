@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { type SpawnSyncReturns, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, describe, it } from 'node:test';
@@ -22,14 +22,16 @@ describe('cloudRepoScript', () => {
   const script = cloudRepoScript('9.8.7', SHA);
 
   it('installs Node and that release of the CLI, each checked, and puts niyam on PATH', () => {
-    assert.match(script, /^#!\/bin\/bash\n# process-rules 9\.8\.7 for Claude cloud sessions/);
+    assert.match(script, /^#!\/bin\/bash\n# niyam 9\.8\.7 for Claude cloud sessions/);
     assert.ok(script.includes(`node=${CLOUD_NODE}\n`));
     assert.ok(script.includes('https://nodejs.org/dist/v$node/node-v$node-linux-$arch.tar.xz'));
-    assert.ok(script.includes(`-o "$dir/process-rules.tgz" ${releaseTarball('9.8.7')}\n`));
+    assert.ok(script.includes(`-o "$dir/niyam.tgz" ${releaseTarball('9.8.7')}\n`));
     assert.equal(releaseTarball('9.8.7'), 'https://github.com/veda-hq/niyam/releases/download/v9.8.7/veda-hq-niyam-9.8.7.tgz');
     assert.equal(releaseTarball('0.6.1'), 'https://github.com/veda-hq/niyam/releases/download/v0.6.1/athya-hq-process-rules-0.6.1.tgz', 'a release before niyam: its old asset');
-    assert.ok(script.includes('ln -sf /usr/local/bin/process-rules /usr/local/bin/niyam\n'), 'niyam and its old name both run it');
-    assert.ok(script.includes(`echo "${SHA}  $dir/process-rules.tgz" | sha256sum -c --quiet -\n`));
+    assert.ok(script.includes('ln -s /usr/local/bin/niyam /usr/local/bin/process-rules\n'), 'niyam and, until P-54, its old name both run it');
+    assert.equal(cloudScriptVersion(script), '9.8.7');
+    assert.equal(cloudScriptVersion('# process-rules 0.6.6 for Claude cloud sessions: Node'), '0.6.6', 'a file a release before P-53 wrote');
+    assert.ok(script.includes(`echo "${SHA}  $dir/niyam.tgz" | sha256sum -c --quiet -\n`));
     assert.ok(script.includes(`at the version ${WORKFLOW_PATH} pins`));
     assert.equal(spawnSync('bash', ['-n', '-c', script]).status, 0, 'bash reads it');
   });
@@ -42,13 +44,14 @@ describe('cloudRepoScript', () => {
      * Runs the script in a folder of its own, with curl, tar, uname and sha256sum stood in: sha256sum exits
      * `checked`, and `node`, when given, is a Node already unpacked that answers its version so.
      */
-    function setup(name: string, checked: number, options: { node?: string; env?: Record<string, string> } = {}) {
+    function setup(name: string, checked: number, options: { node?: string; env?: Record<string, string>; before?: (local: string) => void } = {}) {
       const root = join(dir, name);
       const bin = join(root, 'bin');
       const local = join(root, 'local');
       const opt = join(root, 'opt');
       mkdirSync(bin, { recursive: true });
       mkdirSync(local);
+      options.before?.(local);
       const log = join(root, 'fetched');
       writeFileSync(join(bin, 'curl'), '#!/bin/sh\nwhile [ $# -gt 0 ]; do case "$1" in -o) out=$2; shift ;; https*) url=$1 ;; esac; shift; done\necho "$url" > "$out"\n', { mode: 0o755 });
       writeFileSync(join(bin, 'tar'), `#!/bin/sh\ncat "$3" >> "${log}"\necho "$5" >> "${log}"\n`, { mode: 0o755 });
@@ -64,7 +67,7 @@ describe('cloudRepoScript', () => {
         .replaceAll(CLOUD_DIR, opt)
         .replaceAll('/usr/local/bin/process-rules', join(local, 'process-rules'))
         .replaceAll('/usr/local/bin/niyam', join(local, 'niyam'))
-        .replace('process-rules version', 'true');
+        .replace('niyam version', 'true');
       const result = spawnSync('bash', ['-c', runnable], { encoding: 'utf8', env: { PATH: `${bin}:/usr/bin:/bin`, ...options.env } });
       const read = (path: string): string => (existsSync(path) ? readFileSync(path, 'utf8') : '');
       return { result, opt, local, fetched: read(log), checked: read(join(root, 'checked')) };
@@ -73,19 +76,33 @@ describe('cloudRepoScript', () => {
     it('writes a niyam that runs the CLI with that Node, once each matches its sha256', () => {
       const { result, opt, local, fetched, checked } = setup('good', 0);
       assert.deepEqual({ status: result.status, stdout: result.stdout, stderr: result.stderr }, { status: 0, stdout: '', stderr: '' });
-      assert.equal(checked, `${CLOUD_NODE_SHA256.arm64}  ${opt}/node.tar.xz\n${SHA}  ${opt}/process-rules.tgz\n`);
+      assert.equal(checked, `${CLOUD_NODE_SHA256.arm64}  ${opt}/node.tar.xz\n${SHA}  ${opt}/niyam.tgz\n`);
       assert.equal(
         readFileSync(join(local, 'niyam'), 'utf8'),
         `#!/bin/sh\nexec ${opt}/node-v${CLOUD_NODE}-linux-arm64/bin/node ${opt}/cli-9.8.7/package/dist/cli.js "$@"\n`,
       );
       assert.equal(fetched, `https://nodejs.org/dist/v${CLOUD_NODE}/node-v${CLOUD_NODE}-linux-arm64.tar.xz\n${opt}\n${releaseTarball('9.8.7')}\n${opt}/cli-9.8.7\n`);
       assert.equal(existsSync(join(opt, 'from-setup')), false, 'not run by the Setup snippet');
+      assert.equal(readlinkSync(join(local, 'process-rules')), join(local, 'niyam'), 'the old name links to niyam');
+    });
+
+    it("replaces a release's before P-53, where niyam linked to process-rules", () => {
+      const { result, local } = setup('older', 0, {
+        before: (dir) => {
+          writeFileSync(join(dir, 'process-rules'), '#!/bin/sh\nexec old\n', { mode: 0o755 });
+          symlinkSync(join(dir, 'process-rules'), join(dir, 'niyam'));
+        },
+      });
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(lstatSync(join(local, 'niyam')).isSymbolicLink(), false, 'niyam is a file of its own now');
+      assert.match(readFileSync(join(local, 'niyam'), 'utf8'), /cli-9\.8\.7\/package\/dist\/cli\.js/);
+      assert.equal(readlinkSync(join(local, 'process-rules')), join(local, 'niyam'));
     });
 
     it('keeps a Node already unpacked at its version, fetching the CLI alone', () => {
       const { result, opt, fetched, checked } = setup('kept', 0, { node: `v${CLOUD_NODE}` });
       assert.equal(result.status, 0, result.stderr);
-      assert.equal(checked, `${SHA}  ${opt}/process-rules.tgz\n`);
+      assert.equal(checked, `${SHA}  ${opt}/niyam.tgz\n`);
       assert.equal(fetched, `${releaseTarball('9.8.7')}\n${opt}/cli-9.8.7\n`);
       const other = setup('other', 0, { node: 'v22.0.0' });
       assert.match(other.fetched, /^https:\/\/nodejs\.org\//, 'another Node is fetched again');
