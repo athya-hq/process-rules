@@ -1,5 +1,6 @@
-import { API, OLD_SETTINGS_PATH, SETTINGS_PATH, loadSettings } from './agent.ts';
-import { isOn, notAdoptedLine, offLine } from './features.ts';
+import { API, OLD_SETTINGS_PATH, SETTINGS_PATH, loadSettings, settingsPathIn } from './agent.ts';
+import { HOURLY, isOn, notAdoptedLine, offLine } from './features.ts';
+import { isOrganisation } from './owner-login.ts';
 import type { Finding } from './layout.ts';
 import type { Output, Sys } from './types.ts';
 
@@ -393,16 +394,38 @@ export async function typesDrift(sys: Sys, token: string, org: string, slug: str
 
 interface IssueEvent {
   action?: string;
+  schedule?: string;
   issue?: { number?: number };
   repository?: { owner?: { type?: string } };
 }
 
+/** Gives one issue with no type the work model's by typeFor, reading its parent's type; returns the line saying so. */
+async function giveType(sys: Sys, token: string, url: string, number: number, parentUrl: unknown, subIssues: unknown): Promise<string> {
+  let parent: { number: string; type: string | undefined } | undefined;
+  if (typeof parentUrl === 'string') {
+    const above = await sys.http(parentUrl, { token });
+    if (above.status !== 200) throw new Error(`cannot read the parent of #${number} (HTTP ${above.status})`);
+    const type = (above.json as { type?: { name?: unknown } | null } | null)?.type?.name;
+    parent = { number: parentUrl.split('/').at(-1) as string, type: typeof type === 'string' ? type : undefined };
+  }
+  const { to, why } = typeFor(parent, typeof subIssues === 'number' ? subIssues : 0);
+  const { status, json } = await sys.http(url, { method: 'PATCH', token, body: { type: to } });
+  const now = (json as { type?: { name?: unknown } | null } | null)?.type?.name;
+  if (status !== 200 || typeof now !== 'string' || !same(now, to)) {
+    // GitHub refuses a type the organisation lacks or has disabled, and drops one silently where the token may not set it.
+    throw new Error(`GitHub did not make #${number} a ${to} (HTTP ${status}); the owner runs niyam onboard, which adds and enables the work model's issue types`);
+  }
+  return `issue-type: #${number} had no type; now a ${to}: ${why}`;
+}
+
 /**
- * The issue-type job, run by the shared workflow when an issue is opened or
- * reopened: an issue with no type gets the work model's by the rule onboard
+ * The issue-type job, run by the shared workflow. When an issue is opened or
+ * reopened, an issue with no type gets the work model's by the rule onboard
  * applies (see typeFor), read from GitHub when the job runs, so a parent set
- * since the issue was opened counts. An issue with a type, and the Approvals
- * issue the settings name, are left as they are.
+ * as the issue was made counts. GitHub starts no run for an issue a
+ * workflow's own token opens, such as a monthly reminder, so the hourly
+ * sweep types every open issue here with none. An issue with a type, and the
+ * Approvals issue the settings name, are left as they are.
  */
 export async function issueType(sys: Sys, io: Output): Promise<number> {
   const { GITHUB_EVENT_NAME: name, GITHUB_EVENT_PATH: eventPath, GITHUB_REPOSITORY: slug, GH_TOKEN: token } = sys.env;
@@ -415,10 +438,21 @@ export async function issueType(sys: Sys, io: Output): Promise<number> {
     return 0;
   }
   if (!isOn(sys, sys.cwd, 'board')) {
-    io.out(offLine('issue-type', 'board'));
+    io.out(offLine('issue-type', 'board', `in ${settingsPathIn(sys, sys.cwd)}`));
     return 0;
   }
   const event = JSON.parse(sys.read(eventPath)) as IssueEvent;
+  const { approvals } = loadSettings(sys, sys.cwd);
+  if (name === 'schedule' && event.schedule === HOURLY) {
+    if (!(await isOrganisation(sys, slug.split('/')[0] as string))) {
+      io.out('issue-type: GitHub has issue types for organisations only; nothing to do');
+      return 0;
+    }
+    const bare = (await untyped(sys, token, slug)).filter((issue) => issue.number !== approvals);
+    for (const issue of bare) io.out(await giveType(sys, token, issue.url, issue.number, issue.parent, issue.subIssues));
+    io.out(`issue-type: ${plural(bare.length, 'open issue')} with no type typed`);
+    return 0;
+  }
   const number = event.issue?.number;
   if (name !== 'issues' || (event.action !== 'opened' && event.action !== 'reopened') || typeof number !== 'number') {
     io.out(`issue-type: nothing to do on a ${name} event${event.action ? ` (${event.action})` : ''}`);
@@ -428,36 +462,27 @@ export async function issueType(sys: Sys, io: Output): Promise<number> {
     io.out(`issue-type: GitHub has issue types for organisations only; #${number} is left as it is`);
     return 0;
   }
-  if (loadSettings(sys, sys.cwd).approvals === number) {
+  if (approvals === number) {
     io.out(`issue-type: #${number} is the Approvals issue, which keeps no type`);
     return 0;
   }
   const url = `${API}/repos/${slug}/issues/${number}`;
   const read = await sys.http(url, { token });
   if (read.status !== 200) throw new Error(`cannot read #${number} (HTTP ${read.status})`);
-  const issue = read.json as { type?: { name?: unknown } | null; pull_request?: unknown; parent_issue_url?: unknown; sub_issues_summary?: { total?: unknown } } | null;
+  const issue = read.json as { state?: unknown; type?: { name?: unknown } | null; pull_request?: unknown; parent_issue_url?: unknown; sub_issues_summary?: { total?: unknown } } | null;
   if (issue?.pull_request) {
     io.out(`issue-type: #${number} is a pull request, which has no type`);
+    return 0;
+  }
+  // Closed since the event, as a queued run may find it: a closed issue with no type is left as it is.
+  if (issue?.state !== 'open') {
+    io.out(`issue-type: #${number} is not open; left as it is`);
     return 0;
   }
   if (typeof issue?.type?.name === 'string') {
     io.out(`issue-type: #${number} is a ${issue.type.name} already; nothing to do`);
     return 0;
   }
-  let parent: { number: string; type: string | undefined } | undefined;
-  if (typeof issue?.parent_issue_url === 'string') {
-    const above = await sys.http(issue.parent_issue_url, { token });
-    if (above.status !== 200) throw new Error(`cannot read the parent of #${number} (HTTP ${above.status})`);
-    const type = (above.json as { type?: { name?: unknown } | null } | null)?.type?.name;
-    parent = { number: issue.parent_issue_url.split('/').at(-1) as string, type: typeof type === 'string' ? type : undefined };
-  }
-  const { to, why } = typeFor(parent, typeof issue?.sub_issues_summary?.total === 'number' ? issue.sub_issues_summary.total : 0);
-  const { status, json } = await sys.http(url, { method: 'PATCH', token, body: { type: to } });
-  const now = (json as { type?: { name?: unknown } | null } | null)?.type?.name;
-  if (status !== 200 || typeof now !== 'string' || !same(now, to)) {
-    // GitHub refuses a type the organisation lacks or has disabled, and drops one silently where the token may not set it.
-    throw new Error(`GitHub did not make #${number} a ${to} (HTTP ${status}); the owner runs niyam onboard, which adds and enables the work model's issue types`);
-  }
-  io.out(`issue-type: #${number} had no type; now a ${to}: ${why}`);
+  io.out(await giveType(sys, token, url, number, issue?.parent_issue_url, issue?.sub_issues_summary?.total));
   return 0;
 }

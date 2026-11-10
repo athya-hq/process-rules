@@ -833,19 +833,24 @@ default GitHub adds later. Disabling a type needs an organisation owner
 (`admin:org`); retyping an issue needs write access to its repository. Both
 come from the owner's sign-in for the run.
 
-**New issues get a type as they open.** With `board` on, the client
-workflow's `process-rules-asks` job also starts when an issue is opened or
-reopened, and runs `niyam issue-type`, which gives an issue with no type one
-by the same rule, read from GitHub when the job runs, so a parent set as the
-issue was made counts. An issue opened with a type, the Approvals issue, and
-a repository a personal account owns are left alone. The job's
+**New issues get a type as they open.** With `board` on, `onboard` writes
+the client workflow (for `board` alone too), whose `process-rules-asks` job
+also starts when an issue is opened or reopened, and runs `niyam
+issue-type`, which gives an issue with no type one by the same rule, read
+from GitHub when the job runs, so a parent set as the issue was made counts.
+GitHub starts no run for an issue a workflow's own `GITHUB_TOKEN` opens, such
+as a monthly reminder a client's workflow files, so the job also runs on the
+asks job's hourly cron and types every open issue in the repository with
+none: such an issue has its type within the hour. An issue opened with a
+type, one closed since, the Approvals issue, and a repository a personal
+account owns are left alone. A workflow whose `issues:` trigger the client
+changed keeps it, so there the job starts hourly alone. The job's
 `issues: write` sets the type: GitHub's `type` on an issue takes write access
 to issues, as the weekly job's undo issues, opened as Briefs by that token,
 show. Issue events never come from a fork, and the job reads its settings
 from the default branch and runs the CLI from the release the workflow pins,
 so an issue's author, whoever opens it, changes nothing but that issue's
-type. This covers issues a workflow of the client's own opens, such as a
-monthly reminder, as well as people's. An issue made as a Brief and only
+type. An issue made as a Brief and only
 later made a sub-issue keeps Brief: no event starts the job then, so retype
 it by hand.
 

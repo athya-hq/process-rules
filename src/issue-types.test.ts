@@ -416,7 +416,7 @@ describe('issueType', () => {
   it("gives an issue opened with no type the work model's, read when the job runs", async () => {
     for (const action of ['opened', 'reopened']) {
       const sys = job(opened(7, action));
-      sys.route('GET', URL, { status: 200, json: { number: 7, type: null, parent_issue_url: `https://api.github.com/repos/${SLUG}/issues/2`, sub_issues_summary: { total: 0 } } });
+      sys.route('GET', URL, { status: 200, json: { number: 7, state: 'open', type: null, parent_issue_url: `https://api.github.com/repos/${SLUG}/issues/2`, sub_issues_summary: { total: 0 } } });
       sys.route('GET', `/repos/${SLUG}/issues/2`, { status: 200, json: { number: 2, type: { name: 'Work item' } } });
       sys.route('PATCH', URL, { status: 200, json: { number: 7, type: { name: 'Slice' } } });
       assert.deepEqual(await run(sys), { code: 0, out: ['issue-type: #7 had no type; now a Slice: its parent #2 is a Work item'] });
@@ -427,17 +427,20 @@ describe('issueType', () => {
 
   it('gives an issue with no parent and no sub-issues a Brief', async () => {
     const sys = job(opened());
-    sys.route('GET', URL, { status: 200, json: { number: 7, type: null } });
+    sys.route('GET', URL, { status: 200, json: { number: 7, state: 'open', type: null } });
     sys.route('PATCH', URL, { status: 200, json: { number: 7, type: { name: 'Brief' } } });
     assert.deepEqual((await run(sys)).out, ['issue-type: #7 had no type; now a Brief: it has no parent and no sub-issues']);
   });
 
   it('leaves an issue with a type, the Approvals issue, a pull request, a personal repository and other events alone', async () => {
     const typed = job(opened());
-    typed.route('GET', URL, { status: 200, json: { number: 7, type: { name: 'Decision' } } });
+    typed.route('GET', URL, { status: 200, json: { number: 7, state: 'open', type: { name: 'Decision' } } });
     assert.deepEqual((await run(typed)).out, ['issue-type: #7 is a Decision already; nothing to do']);
+    const closed = job(opened());
+    closed.route('GET', URL, { status: 200, json: { number: 7, state: 'closed', type: null } });
+    assert.deepEqual((await run(closed)).out, ['issue-type: #7 is not open; left as it is']);
     const pull = job(opened());
-    pull.route('GET', URL, { status: 200, json: { number: 7, type: null, pull_request: {} } });
+    pull.route('GET', URL, { status: 200, json: { number: 7, state: 'open', type: null, pull_request: {} } });
     assert.deepEqual((await run(pull)).out, ['issue-type: #7 is a pull request, which has no type']);
     const cases: [FakeSys, string][] = [
       [job(opened(3)), 'issue-type: #3 is the Approvals issue, which keeps no type'],
@@ -455,19 +458,43 @@ describe('issueType', () => {
     assert.match((await run(bare)).out[0] ?? '', /^issue-type: the base branch has no \.github\/niyam\.json/);
   });
 
+  it('types, hourly, every open issue here with no type but the Approvals issue, as a workflow token opens issues no run sees', async () => {
+    const sys = job({ schedule: '41 * * * *' }, undefined, 'schedule');
+    const row = (number: number, extra: object = {}) => ({ number, url: `https://api.github.com/repos/${SLUG}/issues/${number}`, type: null, ...extra });
+    sys.route('GET', `/repos/${SLUG}/issues?type=none&state=open&per_page=100&page=1`, {
+      status: 200,
+      json: [row(3), row(8), row(9, { parent_issue_url: `https://api.github.com/repos/${SLUG}/issues/2` }), row(10, { pull_request: {} })],
+    });
+    sys.route('GET', `/repos/${SLUG}/issues/2`, { status: 200, json: { number: 2, type: { name: 'Slice' } } });
+    sys.route('PATCH', `/repos/${SLUG}/issues/8`, { status: 200, json: { type: { name: 'Brief' } } });
+    sys.route('PATCH', `/repos/${SLUG}/issues/9`, { status: 200, json: { type: { name: 'State' } } });
+    assert.deepEqual(await run(sys), {
+      code: 0,
+      out: [
+        'issue-type: #8 had no type; now a Brief: it has no parent and no sub-issues',
+        'issue-type: #9 had no type; now a State: its parent #2 is a Slice',
+        'issue-type: 2 open issues with no type typed',
+      ],
+    });
+    const personal = job({ schedule: '41 * * * *' }, undefined, 'schedule');
+    personal.ownerType = 'User';
+    assert.deepEqual(await run(personal), { code: 0, out: ['issue-type: GitHub has issue types for organisations only; nothing to do'] });
+    assert.deepEqual((await run(job({ schedule: '17 6 * * 1' }, undefined, 'schedule'))).out, ['issue-type: nothing to do on a schedule event']);
+  });
+
   it('fails, saying why, when GitHub does not set the type or cannot be read', async () => {
     const refused = job(opened());
-    refused.route('GET', URL, { status: 200, json: { number: 7, type: null } });
+    refused.route('GET', URL, { status: 200, json: { number: 7, state: 'open', type: null } });
     refused.route('PATCH', URL, { status: 422, json: null });
     await assert.rejects(issueType(refused, capture().io), /GitHub did not make #7 a Brief \(HTTP 422\); the owner runs niyam onboard/);
     // GitHub drops a type silently where the token may not set it.
     const dropped = job(opened());
-    dropped.route('GET', URL, { status: 200, json: { number: 7, type: null } });
+    dropped.route('GET', URL, { status: 200, json: { number: 7, state: 'open', type: null } });
     dropped.route('PATCH', URL, { status: 200, json: { number: 7, type: null } });
     await assert.rejects(issueType(dropped, capture().io), /GitHub did not make #7 a Brief \(HTTP 200\)/);
     await assert.rejects(issueType(job(opened()), capture().io), /cannot read #7 \(HTTP 404\)/);
     const orphan = job(opened());
-    orphan.route('GET', URL, { status: 200, json: { number: 7, type: null, parent_issue_url: `https://api.github.com/repos/${SLUG}/issues/2` } });
+    orphan.route('GET', URL, { status: 200, json: { number: 7, state: 'open', type: null, parent_issue_url: `https://api.github.com/repos/${SLUG}/issues/2` } });
     await assert.rejects(issueType(orphan, capture().io), /cannot read the parent of #7 \(HTTP 404\)/);
     const outside = job(opened());
     outside.env = {};

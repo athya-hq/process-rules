@@ -1355,9 +1355,10 @@ describe('staged adoption', () => {
       project: 'Example work',
       note: 'kept',
     });
-    assert.deepEqual(planned(out, 'Pull request'), ['niyam.json: turn board on', `cloud-setup.sh: new, installs v${packageVersion()}`, 'auto-merge: when checks pass']);
+    assert.deepEqual(planned(out, 'Pull request'), ['niyam.json: turn board on', 'workflow: new', `cloud-setup.sh: new, installs v${packageVersion()}`, 'auto-merge: when checks pass']);
     assert.ok(planned(out, 'GitHub — signed in as example-owner').includes('board: set up or check'));
-    assert.ok(!repo(sys).has(WORKFLOW), 'board alone needs no workflow');
+    // The board's Needs you labels and the type of each new issue come from the workflow's asks job.
+    assert.equal(repo(sys).get(WORKFLOW), workflow('main', packageVersion(), false));
   });
 
   it('keeps the settings file a repo onboarded before niyam has, under its old name (P-50)', async () => {
@@ -1842,7 +1843,7 @@ describe("onboard's pull request", () => {
     await actionsKey(sys);
     const { code } = await run(sys, ['--add', 'board']);
     assert.equal(code, 0);
-    assert.deepEqual([...sys.committed.keys()], ['.github/niyam.json']);
+    assert.deepEqual([...sys.committed.keys()], ['.github/niyam.json', WORKFLOW_PATH]);
     const { body } = sys.requests.find((r) => r.method === 'POST' && r.url.endsWith('/pulls'))?.body as { body: string };
     assert.match(body, /^- `\.github\/niyam\.json`: take out "figma" .*; turn board on$/m);
     assert.equal(signIns(sys), 1, 'one sign-in, for the secret and the board');
@@ -1926,7 +1927,9 @@ describe('workflow', () => {
   });
 });
 
-const ASKS_WHAT = "add a job that labels an issue needs-owner where the agent asks the owner, and takes it off at the owner's approved label, Decision: comment or (hourly) 👍";
+/** What adding the needs-owner job says, which also types each new issue. */
+const ASKS_WHAT =
+  "add a job that labels an issue needs-owner where the agent asks the owner, and takes it off at the owner's approved label, Decision: comment or (hourly) 👍 and start the needs-owner job when an issue is opened or reopened too, which gives one with no type the work model's";
 
 /** The three-job workflow releases before the needs-owner job wrote, from this release's. */
 function threeJobs(version: string, figma: boolean, schedule?: string): string {
@@ -2131,7 +2134,7 @@ describe('workflowUpdate', () => {
 
   it('adds the merged job to a two-job workflow, moving its pins and keeping what the client changed', () => {
     for (const figma of [true, false]) {
-      assert.deepEqual(workflowUpdate(twoJobs('0.5.6', figma), 'main', '0.5.16', figma), { kind: 'repin', text: workflow('main', '0.5.16', figma), from: '0.5.6', merged: true, asks: true });
+      assert.deepEqual(workflowUpdate(twoJobs('0.5.6', figma), 'main', '0.5.16', figma), { kind: 'repin', text: workflow('main', '0.5.16', figma), from: '0.5.6', merged: true, asks: true, types: true });
     }
     const own = twoJobs('0.5.6', true)
       .replace('# The weekly job is split out so pull request and push runs stay read-only.\n', '')
@@ -2149,7 +2152,7 @@ describe('workflowUpdate', () => {
     sys.files.set(CLOUD, CLOUD_FILE);
     sys.files.set(WORKFLOW, twoJobs('0.5.6', false));
     const { out } = await run(sys);
-    assert.deepEqual(planned(out, 'Pull request'), [`workflow: pins → v${packageVersion()}, merged job, needs-owner job`, 'auto-merge: when checks pass']);
+    assert.deepEqual(planned(out, 'Pull request'), [`workflow: pins → v${packageVersion()}, merged job, needs-owner job, issue types for new issues`, 'auto-merge: when checks pass']);
     assert.equal(out[0], `◆  niyam onboard   v0.5.6 → v${packageVersion()}`);
     assert.ok(opened(sys)?.body.includes(`\n- \`${WORKFLOW_PATH}\`: in ${WORKFLOW_PATH}, move the version pins from v0.5.6 to v${packageVersion()} and add a job that closes the slice a merged pull request names, the one pull request run that writes to issues and ${ASKS_WHAT}, leaving the rest as it is\n`));
     assert.equal(repo(sys).get(WORKFLOW), workflow('main', packageVersion(), false));
@@ -2157,10 +2160,10 @@ describe('workflowUpdate', () => {
 
   it('adds the needs-owner job to a three-job workflow, moving its pins and keeping what the client changed', () => {
     for (const figma of [true, false]) {
-      assert.deepEqual(workflowUpdate(threeJobs('0.5.26', figma), 'main', '0.5.27', figma), { kind: 'repin', text: workflow('main', '0.5.27', figma), from: '0.5.26', asks: true });
+      assert.deepEqual(workflowUpdate(threeJobs('0.5.26', figma), 'main', '0.5.27', figma), { kind: 'repin', text: workflow('main', '0.5.27', figma), from: '0.5.26', asks: true, types: true });
     }
-    assert.deepEqual(workflowUpdate(threeJobs('0.5.27', true), 'main', '0.5.27', true), { kind: 'repin', text: workflow('main', '0.5.27', true), asks: true });
-    assert.deepEqual(workflowUpdate(threeJobs('0.5.26', true, '0 9 * * 1-5'), 'main', '0.5.27', true, '0 9 * * 1-5'), { kind: 'repin', text: workflow('main', '0.5.27', true, '0 9 * * 1-5'), from: '0.5.26', asks: true });
+    assert.deepEqual(workflowUpdate(threeJobs('0.5.27', true), 'main', '0.5.27', true), { kind: 'repin', text: workflow('main', '0.5.27', true), asks: true, types: true });
+    assert.deepEqual(workflowUpdate(threeJobs('0.5.26', true, '0 9 * * 1-5'), 'main', '0.5.27', true, '0 9 * * 1-5'), { kind: 'repin', text: workflow('main', '0.5.27', true, '0 9 * * 1-5'), from: '0.5.26', asks: true, types: true });
     const own = threeJobs('0.5.26', true).replace(/^# The weekly and merged jobs[^\n]*\n/m, '').replace('name: process-rules\n', 'name: process-rules\n# Our own note.\n');
     const update = workflowUpdate(own, 'main', '0.5.27', true);
     assert.ok(update.kind === 'repin' && update.asks);
@@ -2217,7 +2220,7 @@ describe('workflowUpdate', () => {
     sys.files.set(CLOUD, CLOUD_FILE);
     sys.files.set(WORKFLOW, threeJobs(packageVersion(), false));
     const { out } = await run(sys);
-    assert.deepEqual(planned(out, 'Pull request'), ['workflow: needs-owner job', 'auto-merge: when checks pass']);
+    assert.deepEqual(planned(out, 'Pull request'), ['workflow: needs-owner job, issue types for new issues', 'auto-merge: when checks pass']);
     assert.ok(opened(sys)?.body.includes(`\n- \`${WORKFLOW_PATH}\`: in ${WORKFLOW_PATH}, ${ASKS_WHAT}, leaving the rest as it is\n`));
     assert.equal(repo(sys).get(WORKFLOW), workflow('main', packageVersion(), false));
   });

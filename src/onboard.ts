@@ -513,7 +513,8 @@ export function workflowUpdate(
   const withAsks = split && merged && !asks && pins.length === 6 && from !== undefined ? addAsksJob(before, from, figma) : undefined;
   if (withAsks !== undefined) {
     const update = workflowUpdate(withAsks, branch, version, figma, schedule, settings);
-    return { ...(update.kind === 'repin' ? update : { text: withAsks }), kind: 'repin', asks: true };
+    // The asks job it adds also types each new issue, so the plan says so.
+    return { ...(update.kind === 'repin' ? update : { text: withAsks }), kind: 'repin', asks: true, types: true };
   }
   if (split && merged && asks && pins.length === 8) {
     const moved = pushed !== undefined && pushed !== branch;
@@ -1039,7 +1040,7 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     change(settingsFile, `${JSON.stringify({ owner, agent, features }, null, 2)}\n`, `owner ${owner} approves, agent ${agent} builds, with ${features.join(', ')} on`);
   }
   const on = (feature: Feature): boolean => features.includes(feature);
-  const workflowNeeded = on('pr-identity') || on('work-rules') || on('figma') || on('decisions') || on('review');
+  const workflowNeeded = on('pr-identity') || on('board') || on('work-rules') || on('figma') || on('decisions') || on('review');
 
   const existing = fileAt(HOOKS_PATH);
   // Worked out before the plan, so a file onboard cannot edit is refused before any question.

@@ -280,10 +280,14 @@ jobs:
   issue-type:
     name: Issue type
     # An issue opened or reopened with no type gets the work model's. Issue events never come from a fork.
-    if: github.event_name == 'issues' && (github.event.action == 'opened' || github.event.action == 'reopened')
+    # GitHub starts no run for an issue a workflow's own token opens, so the hourly sweep types those.
+    if: >-
+      (github.event_name == 'issues' && (github.event.action == 'opened' || github.event.action == 'reopened')) ||
+      (github.event_name == 'schedule' && github.event.schedule == '41 * * * *')
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    # The caller's permissions: the client's process-rules-asks job grants issues: write, which sets an issue's type.
+    # The caller's permissions: the client's process-rules-asks job grants issues: write, which sets an issue's type,
+    # on these events and the hourly cron alike.
     steps:
       # The settings come from the default branch: an issue cannot rename the Approvals issue it is judged against.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

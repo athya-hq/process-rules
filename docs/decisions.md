@@ -1131,8 +1131,8 @@
 - **2026-11-10 — Record: open issues with no type get one.** The record
   above left issues with no type at all as another question for the owner,
   who answered it: 38 open issues across athya-hq had none (sub-issues of a
-  Work item, coordinator notes, chat approval records, a monthly secret
-  rotation reminder a workflow of athya_mono's files, old bugs), and the
+  Work item, coordinator notes, chat approval records, the monthly secret
+  rotation reminders athya_mono's own workflow files, old bugs), and the
   owner wants them typed as a proper solution, in the same run. Now
   `onboard`'s issue types step also lists each repository's open issues with
   `type=none` and types them by the same rule, under the plan's one yes, which
@@ -1144,9 +1144,15 @@
   every issue it types, consecutive ones typed alike on one row, rather than
   the first ten. To keep them from coming back, the client workflow's
   `process-rules-asks` job, which already has `issues: write`, also starts
-  on an issue opened or reopened, and the shared workflow's new `Issue type`
-  job runs `niyam issue-type`, which types an issue with no type by the same
-  rule; the `needs-owner` job now runs on the `labeled` issue event alone.
+  on an issue opened or reopened (unless the client changed its `issues:`
+  trigger, which `onboard` leaves as it is), and the shared workflow's new
+  `Issue type` job runs `niyam issue-type`, which types an issue with no
+  type by the same rule. GitHub starts no run for an issue a workflow's own
+  `GITHUB_TOKEN` opens, as athya_mono's reminder workflow does, so the job
+  also runs on the asks job's hourly cron and types every open issue there
+  with none. The `needs-owner` job now runs on the `labeled` issue event
+  alone. `onboard` now writes the workflow for `board` alone too, whose
+  Needs you labels and issue types come from it.
   `issues: write` sets an issue's type: the weekly job's undo issues
   (process-rules-sandbox#15, athya_mono#2514) were opened as Briefs by that
   token. `doctor` warns of open issues with no type here. Rejected: a rule
