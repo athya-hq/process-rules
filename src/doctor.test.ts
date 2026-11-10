@@ -300,7 +300,7 @@ describe('doctor', () => {
       const personal = healthy();
       personal.ownerType = 'User';
       const off = healthy();
-      off.files.set(`${ROOT}/.github/process-rules.json`, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity', 'work-rules'] }));
+      off.files.set(`${ROOT}/.github/niyam.json`, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity', 'work-rules'] }));
       const outside = healthy();
       outside.inRepo = false;
       for (const sys of [personal, off, outside]) {
