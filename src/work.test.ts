@@ -8,7 +8,7 @@ import { after, describe, it } from 'node:test';
 import type { Settings } from './agent.ts';
 import { RestBoard } from './fake-board.test.ts';
 import { AGENT, FakeSys, ROOT, SETTINGS, capture } from './fake.test.ts';
-import { prMerged, prePush, prWorkRules, propose, section, sliceProblems, slicesNamed } from './work.ts';
+import { prMerged, prePush, prWorkRules, propose, section, sliceProblems, slicesNamed, statesNamed } from './work.ts';
 
 const SLUG = 'example-org/example-app';
 const OWNER = 'example-owner';
@@ -174,6 +174,12 @@ describe('slicesNamed', () => {
   it('reads "Slice: #N" lines and issue links, once each', () => {
     assert.deepEqual(slicesNamed('Intro\nSlice: #12\nslice:  https://github.com/a/b/issues/7 \nSlice: #12\nnot Slice: #9'), [12, 7]);
     assert.deepEqual(slicesNamed('Fixes #12'), []);
+  });
+});
+
+describe('statesNamed', () => {
+  it('reads each "State: #N" line, by number or link, without repeats, and not prose', () => {
+    assert.deepEqual(statesNamed('Builds State #30 of P-01.\nSlice: #12\nState: #31\nstate:  https://github.com/a/b/issues/32 \nState: #31'), [31, 32]);
   });
 });
 
@@ -751,14 +757,61 @@ describe('prWorkRules', () => {
     assert.equal(sys.requests[0]?.token, 'ghs_run');
   });
 
-  it('passes a fix: a pull request naming the closed slice it fixes, with a State filed under it after approval', async () => {
+  /** Slice #12 closed, with State #31 filed under it after approval to fix it, and #30, an earlier State, delivered. */
+  function fixed(): ReturnType<typeof graph> {
     const g = graph();
     g.issue.state = 'closed';
     g.issue.closed_at = LATER;
-    g.states.push({ number: 31, title: 'Fix: the thing on narrow pages', type: { name: 'State' }, state_reason: null, closed_at: null, comments: [] });
-    const sys = actions(agentPull('Fixes state #31.\n\nSlice: #12'));
-    github(sys, g.issue);
+    g.states.push(
+      { number: 30, title: 'The thing', type: { name: 'State' }, state: 'closed', state_reason: 'completed', closed_at: LATER, comments: [] },
+      { number: 31, title: 'Fix: the thing on narrow pages', type: { name: 'State' }, state: 'open', state_reason: null, closed_at: null, comments: [] },
+    );
+    return g;
+  }
+
+  it('passes a fix: a pull request naming the closed slice it fixes, and the State filed under it after approval', async () => {
+    const sys = actions(agentPull('Fixes the thing on narrow pages.\n\nSlice: #12\nState: #31'));
+    github(sys, fixed().issue);
     assert.deepEqual(await check(sys), { code: 0, out: ['✓ pr-work-rules: #40 builds slice #12, which may be built'], err: [] });
+  });
+
+  for (const [name, body] of [
+    ['names no State', 'Fixes state #31.\n\nSlice: #12'],
+    ['names only a State delivered already', 'Slice: #12\nState: #30'],
+  ] as const) {
+    it(`refuses a fix for a closed slice that ${name}, so the merge could not close it`, async () => {
+      const sys = actions(agentPull(body));
+      github(sys, fixed().issue);
+      assert.deepEqual(await check(sys), {
+        code: 1,
+        out: [],
+        err: ['✗ #12 is closed, so this pull request is a fix: file it as a State under #12 and name it with a line "State: #N"', 'pr-work-rules: refused by the work rules'],
+      });
+    });
+  }
+
+  it('refuses a "State:" line naming anything but a State under the slice', async () => {
+    const g = graph();
+    g.states.push({ number: 33, title: 'A note', type: { name: 'Task' }, state: 'open', state_reason: null, closed_at: null, comments: [] });
+    const sys = actions(agentPull('Slice: #12\nState: #33\nState: #99'));
+    github(sys, g.issue);
+    const { code, err } = await check(sys);
+    assert.equal(code, 1);
+    assert.deepEqual(err, [
+      '✗ #33 is not a State under slice #12; a "State: #N" line names a State sub-issue of the slice the pull request builds',
+      '✗ #99 is not a State under slice #12; a "State: #N" line names a State sub-issue of the slice the pull request builds',
+      'pr-work-rules: refused by the work rules',
+    ]);
+  });
+
+  it('passes an open slice with or without a "State:" line', async () => {
+    const g = graph();
+    g.states.push({ number: 31, title: 'The thing', type: { name: 'State' }, state: 'open', state_reason: null, closed_at: null, comments: [] });
+    for (const body of ['Slice: #12', 'Slice: #12\nState: #31']) {
+      const sys = actions(agentPull(body));
+      github(sys, g.issue);
+      assert.equal((await check(sys)).code, 0);
+    }
   });
 
   it('refuses an agent pull request whose slice may not be built', async () => {
@@ -1313,6 +1366,68 @@ describe('prMerged', () => {
 
   it('needs the Actions environment', async () => {
     await assert.rejects(run(new FakeSys()), /pr-merged runs in GitHub Actions/);
+  });
+
+  describe('the States it names', () => {
+    const STATE = `/repos/${SLUG}/issues/31`;
+    /** Slice #12, closed, and State #31 under it as `state` says, its writes routed. */
+    function delivering(body: string, state: Node = {}): FakeSys {
+      const sys = actions(merged(body));
+      const g = graph();
+      g.issue.state = 'closed';
+      g.states.push({ number: 31, title: 'Fix: the thing on narrow pages', type: { name: 'State' }, state: 'open', state_reason: null, closed_at: null, comments: [], ...state });
+      github(sys, g.issue);
+      sys.route('POST', `${STATE}/comments`, { status: 201, json: {} });
+      sys.route('PATCH', STATE, { status: 200, json: {} });
+      return sys;
+    }
+
+    it('closes each State under the slice a "State: #N" line names, with a comment linking the pull request', async () => {
+      const sys = delivering('Fixes the thing on narrow pages.\n\nSlice: #12\nState: #31');
+      assert.deepEqual(await run(sys), { code: 0, out: ['✓ #12 is closed already; commented that it was built in #40', '✓ #31: closed, built in #40'] });
+      assert.deepEqual(writes(sys), [
+        ['POST', `${ISSUE}/comments`, { body: 'Built in #40, merged into main.' }, 'ghs_run'],
+        ['POST', `${STATE}/comments`, { body: 'Built in #40, merged into main.' }, 'ghs_run'],
+        ['PATCH', STATE, { state: 'closed', state_reason: 'completed' }, 'ghs_run'],
+      ]);
+    });
+
+    it('leaves a State named only in prose open, as before', async () => {
+      const sys = delivering('Builds State #31 of P-01.\n\nSlice: #12');
+      assert.deepEqual((await run(sys)).out, ['✓ #12 is closed already; commented that it was built in #40']);
+      assert.deepEqual(writes(sys).filter((write) => String((write as string[])[1]).startsWith(STATE)), []);
+    });
+
+    it('comments once on a State GitHub closed already', async () => {
+      const sys = delivering('Closes #31\n\nSlice: #12\nState: #31', { state: 'closed', state_reason: 'completed', closed_at: LATEST });
+      assert.deepEqual((await run(sys)).out[1], '✓ #31 is closed already; commented that it was built in #40');
+      const again = delivering('Slice: #12\nState: #31', { state: 'closed', state_reason: 'completed', closed_at: LATEST, comments: [comment('Built in #40, merged into main.', LATEST, 'github-actions[bot]')] });
+      assert.deepEqual((await run(again)).out[1], '✓ #31 is closed already and says it was built in #40');
+      assert.deepEqual(writes(again).filter((write) => String((write as string[])[1]).startsWith(STATE)), []);
+    });
+
+    it('leaves a State dropped as not planned, one under a slice the pull request does not name, and an issue that is not a State', async () => {
+      const dropped = delivering('Slice: #12\nState: #31', { state: 'closed', state_reason: 'not_planned', closed_at: LATEST });
+      assert.deepEqual((await run(dropped)).out[1], '- #31 was closed as not planned; left as it is');
+      const elsewhere = delivering('Slice: #12\nState: #31');
+      elsewhere.route('GET', `${STATE}/parent`, { status: 200, json: { number: 13, type: { name: 'Slice' }, url: `https://api.github.com/repos/${SLUG}/issues/13` } });
+      assert.deepEqual((await run(elsewhere)).out[1], '- #31 is not a State under a slice #40 names; left as it is');
+      const orphan = delivering('Slice: #12\nState: #31');
+      orphan.route('GET', `${STATE}/parent`, { status: 404, json: { message: 'No parent issue found' } });
+      assert.deepEqual((await run(orphan)).out[1], '- #31 is not a State under a slice #40 names; left as it is');
+      const other = delivering('Slice: #12\nState: #31\nState: #99', { type: { name: 'Task' } });
+      assert.deepEqual((await run(other)).out.slice(1), ['- #31 is not a State in example-org/example-app; left as it is', '- #99 is not a State in example-org/example-app; left as it is']);
+      assert.deepEqual([dropped, elsewhere, orphan, other].flatMap((sys) => writes(sys).filter((write) => String((write as string[])[1]).startsWith(STATE))), []);
+    });
+
+    it("fails when it cannot read a State's parent, or GitHub refuses the close", async () => {
+      const unread = delivering('Slice: #12\nState: #31');
+      unread.route('GET', `${STATE}/parent`, { status: 502, json: null });
+      await assert.rejects(run(unread), /^Error: cannot close #31: could not read #31's parent \(HTTP 502\)$/);
+      const refused = delivering('Slice: #12\nState: #31');
+      refused.route('PATCH', STATE, { status: 403, json: { message: 'Resource not accessible by integration' } });
+      await assert.rejects(run(refused), /cannot close #31: Resource not accessible by integration; the client workflow needs a job with issues: write/);
+    });
   });
 });
 

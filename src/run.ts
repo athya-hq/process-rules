@@ -36,7 +36,7 @@ Commands:
                    For a client's hook: run one command as the session's agent, or nothing (exit ${LOCKED})
   pr-identity      Run by the shared workflow: agent commits Verified and pushed by the agent
   pr-work-rules    Run by the shared workflow: an agent pull request builds one slice it may build
-  pr-merged        Run by the shared workflow: a merged pull request closes the slice it names
+  pr-merged        Run by the shared workflow: a merged pull request closes the slice and States it names
   pr-design        Run by the shared workflow: each state of the slice links a frame from the design library
   decisions-weekly Run by the shared workflow weekly: decision checks, undo issues, expiring labels
   needs-owner      Run by the shared workflow: an ask labels its issue needs-owner; the owner's answer takes it off

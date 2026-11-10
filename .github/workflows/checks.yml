@@ -211,7 +211,7 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
-      # The slice the pull request names is closed, which moves it to Done on the board.
+      # The slice the pull request names is closed, which moves it to Done on the board, and so is each State of it the pull request names.
       - run: node .process-rules/src/cli.ts pr-merged
         env:
           GH_TOKEN: ${{ github.token }}

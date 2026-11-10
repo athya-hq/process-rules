@@ -991,3 +991,25 @@
   through contacts nothing. `show -n`, and `add` whose last fetch flag is
   `--no-fetch`, do not count either (review). Rejected: a doctor-only list
   (the guard and doctor would disagree on what reaches GitHub).
+- **2026-11-10 — Record: a merged pull request closes the State it names
+  (State #224 of P-45).** Five States stayed open after the pull requests
+  that delivered them merged: #176 (#177), #171 (#172), #161 (#162), #198
+  (#199) and #195 (#196), each shown in the owner's Needs you view until the
+  coordinator closed it by hand. Each was a fix filed, as the README says, as
+  a State under a slice closed already; each pull request named the slice
+  with `Slice: #N` and the State only in prose ("Builds State #176 of
+  P-40"), so the merged job commented on the closed slice and nothing named
+  the State. Now a pull request names each State it delivers with a line
+  `State: #N`, and the merged job closes each one under a slice it names as
+  completed, with the slice's "Built in #PR" comment. The work rules refuse a
+  `State:` line naming anything but a State under the slice, and an agent
+  pull request for a closed slice that names no open State of it, so a fix
+  cannot merge with its State unnamed. That is a new refusal on every
+  adopting repository's agent pull requests for closed slices; the README
+  already filed every fix as a State, so it asks for one line more. Only the
+  pull request's description carries `State:` lines: pre-push reads commit
+  trailers for the slice alone. Rejected: closing every open State of the
+  named slice on merge (a slice often has States not built yet, filed ahead,
+  and one pull request delivers one); reading States from prose (the five
+  wrote it five ways); relying on "Closes #N" (nothing checks it is there,
+  and it closes any issue, not only a State of the slice).
