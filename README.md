@@ -151,6 +151,11 @@ off. So after `gh pr create`, when the app's `ccd_pr` tools are there and
 `get_status` shows `auto_fix` off, the session turns it on with
 `set_monitor`. The app checks that the session opened the pull request and
 that its `gh` login wrote it, which holds for the agent's own pull requests.
+In auto mode the classifier refuses those calls unless the repo's
+`.claude/settings.json` allows them, so `onboard` adds `mcp__ccd_pr__bind_pr`,
+`mcp__ccd_pr__get_status` and `mcp__ccd_pr__set_monitor` to its
+`permissions.allow`, and `doctor` warns under "This repo" (`▲`) about each
+one an onboarded repo's file lacks. They reach the app only, not GitHub.
 
 Before each Bash command, the client's PreToolUse hook runs `process-rules
 guard`: a command running `gh` or a git command that reaches a remote (push,
@@ -341,8 +346,11 @@ Claude cloud sessions below).
    `.github/process-rules.json` and writes there), adds to `.claude/settings.json`
    the lock in `env`, a SessionStart hook running `process-rules
    session-start`, a PreToolUse hook running `process-rules guard` and a
-   `permissions.allow` rule for `process-rules review-thread` (hooks keep the
-   old name, a bin of niyam, so adopters' settings need no change), and
+   `permissions.allow` rules for `process-rules review-thread` (hooks keep the
+   old name, a bin of niyam, so adopters' settings need no change) and for
+   the app's `mcp__ccd_pr__bind_pr`, `mcp__ccd_pr__get_status` and
+   `mcp__ccd_pr__set_monitor`, which turn Auto-fix on (a rerun adds only
+   the ones missing), and
    writes `.github/workflows/process-rules.yml`, which calls this repository's
    shared checks (`.github/workflows/checks.yml`) from two jobs: `process-rules`
    on pull requests and pushes, read-only, and `process-rules-weekly` on the
@@ -1012,7 +1020,7 @@ runs the repo's file (`▲` without `/opt/process-rules/from-setup`). GitHub
 checks that the account the proxy acts as is one of the settings' agents,
 and that `session-start` gave the session that identity (`✗` otherwise:
 `gh` and git stay locked out). This repo lists hooks that reach GitHub
-outside `as-agent`, as on a Mac. It installs nothing; on Linux outside a
+outside `as-agent` and the Auto-fix rules missing, as on a Mac. It installs nothing; on Linux outside a
 cloud session, `doctor` still refuses.
 
 ### Releases and upgrading
