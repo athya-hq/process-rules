@@ -244,7 +244,7 @@ describe('doctor', () => {
     const { code, out } = await check(sys);
     assert.equal(code, 0);
     assert.deepEqual(marked(out, '▲'), [
-      '▲  an owner-step folder left behind holds a GitHub token: /var/folders/xy/T/niyam-owner-step-ab → rm -rf /var/folders/xy/T/niyam-owner-step-ab, then revoke the GitHub CLI token at https://github.com/settings/applications',
+      '▲  an owner-step folder left behind holds a GitHub token: /var/folders/xy/T/niyam-owner-step-ab → with no owner-step running, rm -rf /var/folders/xy/T/niyam-owner-step-ab, then revoke the GitHub CLI token at https://github.com/settings/applications',
     ]);
     assert.ok(!out.join('\n').includes('gho_left'));
   });

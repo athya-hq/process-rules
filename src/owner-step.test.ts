@@ -44,7 +44,7 @@ const types = (enabled: Record<string, boolean>): { status: number; json: unknow
 
 /** What a run must never do with the token: put it in a command's arguments, its output, or a file outside the throwaway folder. */
 function noLeak(sys: FakeSys, out: string[], err: string[]): void {
-  for (const call of sys.calls) assert.ok(!call.args.join(' ').includes(SECRET), `token in argv: ${call.command} ${call.args.join(' ')}`);
+  for (const call of sys.calls) assert.ok(!JSON.stringify({ args: call.args, env: call.env, input: call.input }).includes(SECRET), `token in a command's arguments, environment or input: ${call.command}`);
   for (const line of [...out, ...err]) assert.ok(!line.includes(SECRET), `token printed: ${line}`);
   for (const [path, data] of sys.files) if (data.includes(SECRET)) assert.ok(path.startsWith(`${DIR}/`), `token written to ${path}`);
 }
@@ -484,6 +484,26 @@ describe('owner-step required-checks', () => {
     }
   });
 
+  it('keeps an edit made to the ruleset while the owner read the plan', async () => {
+    const made = rulesWorld([checks('process-rules / PR identity')]);
+    made.sys.choose = () => {
+      // Someone adds a rule and a check before the yes.
+      const edited = [{ type: 'deletion' }, checks('process-rules / PR identity', 'Secret scans')];
+      made.sys.execOverride = ((inner) => (call) => (call.args[1] === 'repos/veda-hq/niyam/rulesets/5' && !call.args.includes('PUT') && !putDone ? { code: 0, stdout: JSON.stringify({ id: 5, name: 'main', rules: edited }), stderr: '' } : inner(call)))(made.sys.execOverride);
+      return Promise.resolve(true);
+    };
+    let putDone = false;
+    const inner = made.sys.execOverride;
+    made.sys.execOverride = (call) => {
+      if (call.args.includes('PUT')) putDone = true;
+      return inner(call);
+    };
+    const { io, out } = capture();
+    assert.equal(await ownerStep(made.sys, io, ['required-checks', 'veda-hq/niyam', 'main']), 0);
+    assert.deepEqual(made.now(), [{ type: 'deletion' }, checks('process-rules / PR identity', 'Secret scans', 'process-rules / Work rules')]);
+    assert.match(out.join('\n'), /✓ the ruleset main requires process-rules \/ PR identity, Secret scans, process-rules \/ Work rules/);
+  });
+
   it('changes nothing when every check is required already', async () => {
     const made = rulesWorld([checks('process-rules / Work rules', 'process-rules / PR identity')]);
     const { io, out } = capture();
@@ -535,8 +555,8 @@ describe('owner-step folders', () => {
     sys.files.set(`${ROOT}/process-rules-ef/hosts.yml`, 'oauth_token: x');
     const found = leftBehind(sys);
     assert.deepEqual(found, [
-      { mark: '▲', text: `an owner-step folder left behind holds a GitHub token: ${ROOT}/${FOLDER_PREFIX}ab`, fix: `rm -rf ${ROOT}/${FOLDER_PREFIX}ab, then revoke the GitHub CLI token at ${REVOKE}` },
-      { mark: '▲', text: `an owner-step folder left behind: ${ROOT}/${FOLDER_PREFIX}cd`, fix: `rm -rf ${ROOT}/${FOLDER_PREFIX}cd` },
+      { mark: '▲', text: `an owner-step folder left behind holds a GitHub token: ${ROOT}/${FOLDER_PREFIX}ab`, fix: `with no owner-step running, rm -rf ${ROOT}/${FOLDER_PREFIX}ab, then revoke the GitHub CLI token at ${REVOKE}` },
+      { mark: '▲', text: `an owner-step folder left behind: ${ROOT}/${FOLDER_PREFIX}cd`, fix: `with no owner-step running, rm -rf ${ROOT}/${FOLDER_PREFIX}cd` },
     ]);
     assert.ok(!JSON.stringify(found).includes(SECRET));
   });

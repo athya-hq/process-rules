@@ -382,25 +382,28 @@ function requiredChecks(gh: Gh, { repo, ruleset }: Extract<Step, { step: 'requir
   const list = (names: string[]): string => (names.length === 0 ? 'none' : names.join(', '));
   const notes = [`${file} turns on the checks ${list(turnedOn)}`, `before: ${list(had)}`, `after:  ${list(after)}`];
   if (missing.length === 0) return { changes: [], notes, skipped, already: `the ruleset ${before.name} requires every check ${file} turns on` };
-  const added = missing.map((context) => ({ context, integration_id: ACTIONS_APP }));
-  const hasRule = before.rules.some((rule) => rule.type === 'required_status_checks');
-  const rules: Rule[] = hasRule
-    ? before.rules.map((rule) =>
-        rule.type === 'required_status_checks'
-          ? { ...rule, parameters: { ...rule.parameters, required_status_checks: [...(rule.parameters?.required_status_checks ?? []), ...added] } }
-          : rule,
-      )
-    : [...before.rules, { type: 'required_status_checks', parameters: { strict_required_status_checks_policy: false, do_not_enforce_on_create: false, required_status_checks: added } }];
+  // Built on the ruleset as it is just before the write, so an edit made while the owner read the plan is kept.
+  const withChecks = (current: Rule[]): Rule[] => {
+    const added = checks.filter((check) => !contexts(current).includes(check)).map((context) => ({ context, integration_id: ACTIONS_APP }));
+    return current.some((rule) => rule.type === 'required_status_checks')
+      ? current.map((rule) =>
+          rule.type === 'required_status_checks'
+            ? { ...rule, parameters: { ...rule.parameters, required_status_checks: [...(rule.parameters?.required_status_checks ?? []), ...added] } }
+            : rule,
+        )
+      : [...current, { type: 'required_status_checks', parameters: { strict_required_status_checks_policy: false, do_not_enforce_on_create: false, required_status_checks: added } }];
+  };
   return {
     changes: [
       {
         plan: `make the ruleset ${before.name} of ${repo} also require ${missing.join(', ')}`,
         apply: () => {
-          must(gh.api(`repos/${repo}/rulesets/${id}`, { method: 'PUT', body: { rules } }), `updating the ruleset ${before.name}`);
+          const current = read();
+          must(gh.api(`repos/${repo}/rulesets/${id}`, { method: 'PUT', body: { rules: withChecks(current.rules) } }), `updating the ruleset ${before.name}`);
           const now = read();
           const lacking = checks.filter((check) => !contexts(now.rules).includes(check));
           if (lacking.length > 0) throw new Error(`GitHub shows the ruleset without ${lacking.join(', ')} afterwards`);
-          if (others(now.rules) !== others(before.rules)) throw new Error(`GitHub shows the ruleset's other rules changed afterwards; check it at ${GITHUB_WEB}/${repo}/rules/${id}`);
+          if (others(now.rules) !== others(current.rules)) throw new Error(`GitHub shows the ruleset's other rules changed afterwards; check it at ${GITHUB_WEB}/${repo}/rules/${id}`);
           return `the ruleset ${now.name} requires ${list(contexts(now.rules))}`;
         },
       },
@@ -573,8 +576,9 @@ function message(error: unknown): string {
 }
 
 /**
- * doctor's findings on owner-step folders left behind, which only a run
- * killed outright leaves: ▲ for each, with the fix, and whether gh's token
+ * doctor's findings on owner-step folders left behind, which a run killed
+ * outright or a delete that failed leaves; a run going on now has one too,
+ * so each finding says to delete it only when none is running: ▲ for each, with the fix, and whether gh's token
  * is still in it. It reads nothing more of them than that.
  */
 export function leftBehind(sys: Sys): Finding[] {
@@ -586,7 +590,7 @@ export function leftBehind(sys: Sys): Finding[] {
       const dir = `${root}/${name}`;
       const token = holdsToken(sys, dir);
       return token
-        ? { mark: '▲', text: `an owner-step folder left behind holds a GitHub token: ${dir}`, fix: `rm -rf ${dir}, then revoke the GitHub CLI token at ${REVOKE}` }
-        : { mark: '▲', text: `an owner-step folder left behind: ${dir}`, fix: `rm -rf ${dir}` };
+        ? { mark: '▲', text: `an owner-step folder left behind holds a GitHub token: ${dir}`, fix: `with no owner-step running, rm -rf ${dir}, then revoke the GitHub CLI token at ${REVOKE}` }
+        : { mark: '▲', text: `an owner-step folder left behind: ${dir}`, fix: `with no owner-step running, rm -rf ${dir}` };
     });
 }

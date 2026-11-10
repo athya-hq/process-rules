@@ -1073,14 +1073,17 @@ It checks that the signed-in login owns the organisation, or the repository
 there. Then it prints exactly what it will change and asks for a yes; the
 sign-in and the reads change nothing. It makes each change, reads it back,
 and marks it `✓` or `✗`. Whatever happens, an error or Ctrl-C included, it
-deletes the folder, which holds the token's only copy. It does not run
+tries to delete the folder, which holds the token's only copy, and marks that
+`✗`, with the `rm -rf` to run, when the delete fails. It does not run
 `gh auth logout`, which deletes gh's keychain entries for the host whatever
 `GH_CONFIG_DIR` says, and which cannot revoke the token anyway. The token
 stays valid on GitHub until it is revoked, so the command ends with the link
 to do that: https://github.com/settings/applications. Exit 0 when every change was made, or none
-was needed or wanted; 1 otherwise; 130 after a Ctrl-C. `doctor` marks `▲`
-any owner-step folder left behind, which only a killed run leaves, and says
-whether it still holds a token. Each step lives here with tests; a new step
+was needed or wanted, and no check was skipped; 1 otherwise, a `required-checks`
+run that skipped a check included, even after a no; 130 after a Ctrl-C.
+`doctor` marks `▲` any owner-step folder left behind, which a killed run or a
+failed delete leaves, and says whether it still holds a token. A run going on
+now has one too, so delete it only when no owner-step is running. Each step lives here with tests; a new step
 is a slice the owner approves.
 
 ### Releases and upgrading

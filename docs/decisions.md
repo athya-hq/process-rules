@@ -1220,8 +1220,9 @@
     `GH_CONFIG_DIR`, `GH_PAGER=cat`, the token variables unset, and
     `gh auth login -p https --skip-ssh-key -w -s <scope> --insecure-storage`,
     through a pipe so gh cannot prompt to set up git. Every call is `gh api`
-    in that folder, so the CLI never reads the token, and none runs unless
-    the folder's `hosts.yml` holds a token. gh's own lookup falls back to the
+    in that folder, and none runs unless the folder's `hosts.yml` holds a
+    token. niyam reads that file only to check that a token is there; it
+    never takes the token out of it or passes it to anything. gh's own lookup falls back to the
     keychain when the config has none (gh 2.103.3, `AuthConfig.ActiveToken`),
     and the owner's normal login must never be used.
   - It checks the login owns the organisation (an active admin) or the
