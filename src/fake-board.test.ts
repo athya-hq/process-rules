@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 
-import { FIELDS, VIEWS } from './board.ts';
+import { FIELDS, STEPS, VIEWS } from './board.ts';
 import type { FakeSys } from './fake.test.ts';
 import type { HttpResult } from './types.ts';
 
@@ -54,6 +54,8 @@ export interface FakeProject {
   /** Whether its views are grouped as the template's are. */
   grouped?: boolean;
   items?: FakeItem[];
+  /** A single-select field's options, by name, when they differ from the template's. */
+  options?: Record<string, string[]>;
   title?: string;
   closed?: boolean;
   /** How many reads of a copy's fields come back before its custom fields arrive. */
@@ -75,7 +77,7 @@ function dataType(name: string): string {
 
 /** A single-select field's options, by name. */
 function options(name: string): string[] | undefined {
-  return { Status: ['Todo', 'In progress', 'Done'], Step: ['Frame', 'Specify', 'Slice', 'Build'], Decision: ['Needs owner', 'Tripped', 'Decided by the routine'] }[name];
+  return { Status: ['Todo', 'In progress', 'Done'], Step: STEPS, Decision: ['Needs owner', 'Tripped', 'Decided by the routine'] }[name];
 }
 
 /** GitHub as the owner's `gh` sees it: an organisation with none of the board yet, and the process-rules template. */
@@ -137,6 +139,7 @@ export class Board {
         'addProjectV2DraftIssue',
         'addProjectV2ItemById',
         'updateProjectV2ItemFieldValue',
+        'updateProjectV2Field(',
         'updateProjectV2(',
         'createProjectV2Field',
         'createProjectV2View',
@@ -193,6 +196,15 @@ export class Board {
         if (project.pending !== undefined && project.pending < 0) delete project.pending;
         return data({ node: { fields: { nodes: [...project.fields.map((name) => ({ name })), {}] } } });
       }
+      case 'updateProjectV2Field(': {
+        const project = this.project!;
+        const name = String(variables.field).slice(2);
+        const sent = variables.options as { id?: string; name: string }[];
+        // GitHub keeps an option's identity, and the items' values of it, only when it is sent with its id.
+        for (const option of project.options?.[name] ?? options(name) ?? []) assert.ok(sent.some((had) => had.id === `O_${name}_${option}` && had.name === option), `${option} sent without its id`);
+        (project.options ??= {})[name] = sent.map((option) => option.name);
+        return data({ updateProjectV2Field: { projectV2Field: { name } } });
+      }
       case 'createProjectV2Field':
         this.at(variables.project).fields.push(String(variables.name));
         return data({ createProjectV2Field: { projectV2Field: { name: variables.name } } });
@@ -229,7 +241,8 @@ export class Board {
       }
       case 'options {': {
         const project = this.at(variables.id);
-        const field = (name: string) => ({ id: `F_${name}`, name, ...(options(name) ? { options: options(name)!.map((option) => ({ id: `O_${name}_${option}`, name: option })) } : {}) });
+        const held = (name: string) => project.options?.[name] ?? options(name);
+        const field = (name: string) => ({ id: `F_${name}`, name, ...(held(name) ? { options: held(name)!.map((option) => ({ id: `O_${name}_${option}`, name: option, color: 'GRAY', description: '' })) } : {}) });
         return data({ node: { fields: { nodes: [...project.fields.map(field), {}] } } });
       }
       case 'addProjectV2ItemById':
@@ -300,6 +313,11 @@ export interface RestItem {
   repo?: string;
   kind?: 'Issue' | 'PullRequest' | 'DraftIssue';
   archived?: boolean;
+  /** The issue's type, when not the one RestBoard's workItems give it. */
+  type?: string | null;
+  state?: 'open' | 'closed';
+  /** Its sub-issues: how many, and how many closed. */
+  subIssues?: { total: number; completed: number };
   values: Record<string, string>;
 }
 
@@ -313,7 +331,7 @@ export interface RestProject {
 }
 
 export const STATUS_OPTIONS = ['Todo', 'In Progress', 'Done'];
-export const STEP_OPTIONS = ['Frame', 'Specify', 'Slice', 'Build'];
+export const STEP_OPTIONS = [...STEPS];
 
 /** The app's board: slice #12 in Todo under work item #10 at Slice, beside work item #20 with no Step and #21 at Frame. */
 export function restProject(): RestProject {
@@ -331,13 +349,14 @@ export function restProject(): RestProject {
 }
 
 /**
- * GitHub's REST API for Projects as an agent's push sees it, with the
- * repository's open Work items, newest first; every other request goes to
+ * GitHub's REST API for Projects as an agent's push sees it, each item
+ * holding its issue's type, state and sub-issues; every other request goes to
  * the GitHub the fake already answers. Pages are `perPage` long, each naming
  * the next in its Link header.
  */
 export class RestBoard {
   projects: RestProject[] = [restProject()];
+  /** The issues that are Work items, where an item names no type; any other is a Slice. */
   workItems = [21, 20, 10];
   perPage = 100;
   /** The writes it took: Project, item and field ids, and the option id. */
@@ -388,12 +407,6 @@ export class RestBoard {
   private answer(url: string, method: string, body: unknown): HttpResult | undefined {
     const parsed = new globalThis.URL(url);
     const path = parsed.pathname;
-    if (method === 'GET' && path === `/repos/${SLUG}/issues` && parsed.searchParams.get('state') === 'open') {
-      assert.equal(parsed.searchParams.get('type'), 'Work item');
-      // A pull request and an issue of another type, which the list leaves out.
-      const issues = [...this.workItems.map((number) => ({ number, state: 'open', type: { name: 'Work item' } })), { number: 30, state: 'open', type: null, pull_request: {} }, { number: 31, state: 'open', type: { name: 'Slice' } }];
-      return this.page(url, issues);
-    }
     const base = `/${this.kind}/example-org/projectsV2`;
     if (method === 'GET' && path === base) {
       return this.page(url, this.projects.map((project) => ({ number: project.number, title: project.title, state: project.closed ? 'closed' : 'open', closed_at: project.closed ? '2026-11-01T00:00:00Z' : null })));
@@ -417,7 +430,16 @@ export class RestBoard {
         id: 100 + index,
         content_type: item.kind ?? 'Issue',
         archived_at: item.archived ? '2026-11-01T00:00:00Z' : null,
-        content: item.kind === 'DraftIssue' ? { title: 'a draft' } : { number: item.issue, repository_url: `https://api.github.com/repos/${item.repo ?? SLUG}` },
+        content:
+          item.kind === 'DraftIssue'
+            ? { title: 'a draft' }
+            : {
+                number: item.issue,
+                repository_url: `https://api.github.com/repos/${item.repo ?? SLUG}`,
+                state: item.state ?? 'open',
+                type: item.type === null ? null : { name: item.type ?? (this.workItems.includes(item.issue) ? 'Work item' : 'Slice') },
+                sub_issues_summary: { total: item.subIssues?.total ?? 0, completed: item.subIssues?.completed ?? 0, percent_completed: 0 },
+              },
         fields: [
           { id: this.fieldId(project, 'Title'), name: 'Title', data_type: 'title', value: { raw: 'a title' } },
           ...Object.keys(project.fields)

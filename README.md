@@ -351,7 +351,8 @@ Claude cloud sessions below).
    `needs-owner`, `mechanical`, `veto`, `expiring`, `cannot-run-here`), and a
    Project "<repo> work" linked to the repo. It makes that Project by copying
    the product's public [process-rules template](https://github.com/orgs/athya-hq/projects/4),
-   which holds the fields Step, Decision and Review date and the views Needs
+   which holds the fields Step (Frame, Specify, Slice, Build, Done), Decision
+   and Review date and the views Needs
    you (`label:needs-owner is:open`), Board (`type:Slice,Brief`, by Status,
    showing linked pull requests), Work items (`type:"Work item"`, grouped by Step), Decisions
    (`type:Decision`, grouped by Decision) and Reviews due (`"Review
@@ -364,7 +365,9 @@ Claude cloud sessions below).
    yes does not replace it. When GitHub refuses the copy, or for such an
    older Project, `onboard` adds the fields and makes or updates the views
    itself, and "By hand:" links the Project for the two things GitHub's API
-   cannot set: the grouping and the auto-archive workflow. The Board keeps a
+   cannot set: the grouping and the auto-archive workflow. On any Project it
+   adds an option a field lacks, such as Step's Done on one made before it,
+   sending each option it keeps with its id, so no item loses its value. The Board keeps a
    closed slice or brief in Done until that workflow archives it, with the
    filter `is:closed updated:<@today-7d`: a week. A view's filter cannot do
    this, since GitHub's Project filters join different fields with AND alone
@@ -470,8 +473,17 @@ refusal says why.
 the work rules let it build, pre-push moves the board on, as the agent, on
 every open Project of the repository's owner that holds the issues: the
 slice's Status to In Progress; its work item's Step to Build, since its first
-slice has started; and any open Work item with no Step to Frame, where a new
-one starts. A workflow's `GITHUB_TOKEN` cannot write to a Project, so the
+slice has started; and every other Work item of the repository to the Step
+GitHub's facts give it. A closed work item is at Done; an open one is at
+least Frame, where a new one starts, at least Slice once it has sub-issues,
+and at least Build once one of them is closed. Nothing on GitHub marks
+Specify, so the owner sets it by hand and it stays. A Step moves only
+forward, except that a reopened work item leaves Done, and an option the
+owner added to Step is left alone; so the Work items view groups no closed
+work item under a working Step, and none under "No Step". The items it reads
+hold their issues, so this reads no issue on its own. A Project whose Step
+has no Done, made before it, gets one line saying so, and `onboard` adds the
+option, keeping every item's Step. A workflow's `GITHUB_TOKEN` cannot write to a Project, so the
 agent's push does this, with the agent token's `project` scope, with `board`
 on. It uses GitHub's REST API for Projects alone, so it works through a
 Claude cloud session's GitHub proxy, which refuses GraphQL.

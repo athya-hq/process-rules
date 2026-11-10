@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { FIELDS, ISSUE_TYPES, LABELS, VIEWS, boardStarted, setUpBoard, viewsChecklist } from './board.ts';
-import { BUILT_IN, Board, COPY_URL, OWNER_TOKEN, RestBoard, SLUG, STATUS_OPTIONS, URL, defaultView, settledViews } from './fake-board.test.ts';
+import { FIELDS, ISSUE_TYPES, LABELS, VIEWS, boardStarted, boardSwept, setUpBoard, stepDue, viewsChecklist } from './board.ts';
+import { BUILT_IN, Board, COPY_URL, OWNER_TOKEN, RestBoard, SLUG, STATUS_OPTIONS, STEP_OPTIONS, URL, defaultView, settledViews } from './fake-board.test.ts';
 import type { FakeItem } from './fake-board.test.ts';
 import { FakeSys, capture } from './fake.test.ts';
 
@@ -53,7 +53,7 @@ describe('setUpBoard', () => {
       project: 'P_1',
       name: 'Step',
       type: 'SINGLE_SELECT',
-      options: ['Frame', 'Specify', 'Slice', 'Build'].map((name) => ({ name, color: 'GRAY', description: '' })),
+      options: ['Frame', 'Specify', 'Slice', 'Build', 'Done'].map((name) => ({ name, color: 'GRAY', description: '' })),
     });
     const date = sys.requests.find((r) => (r.body as { variables?: { name?: string } } | undefined)?.variables?.name === 'Review date');
     assert.deepEqual((date?.body as { variables: { type: string; options: unknown } }).variables.type, 'DATE');
@@ -79,6 +79,43 @@ describe('setUpBoard', () => {
     assert.equal(url, URL);
     assert.deepEqual(sys.asked, []);
     assert.ok(!board.operations.includes('createProjectV2('));
+  });
+
+  it('adds an option a field made before it lacks, sending each kept option with its id', async () => {
+    const sys = new FakeSys();
+    const board = new Board(sys);
+    board.issueTypes = ISSUE_TYPES.map((t) => t.name);
+    board.labels = LABELS.map((l) => l.name);
+    board.project = { fields: [...BUILT_IN, ...FIELDS.map((f) => f.name)], linked: true, views: settledViews(), grouped: true, options: { Step: ['Frame', 'Specify', 'Slice', 'build'] } };
+    const { err } = await setUp(sys, ['y']);
+    assert.deepEqual(err, []);
+    assert.deepEqual(sys.asked, ['Add the option Done to the field Step in "example-app work"?']);
+    assert.deepEqual(board.project.options, { Step: ['Frame', 'Specify', 'Slice', 'build', 'Done'] });
+    const sent = sys.requests.find((r) => String((r.body as { query?: string } | undefined)?.query).includes('updateProjectV2Field('));
+    assert.deepEqual((sent?.body as { variables: unknown }).variables, {
+      field: 'F_Step',
+      options: [
+        ...['Frame', 'Specify', 'Slice', 'build'].map((name) => ({ id: `O_Step_${name}`, name, color: 'GRAY', description: '' })),
+        { name: 'Done', color: 'GRAY', description: '' },
+      ],
+    });
+    // A rerun finds the option there and asks nothing.
+    sys.asked = [];
+    await setUp(sys, []);
+    assert.deepEqual(sys.asked, []);
+  });
+
+  it('stops when the owner says no to an option', async () => {
+    const sys = new FakeSys();
+    const board = new Board(sys);
+    board.issueTypes = ISSUE_TYPES.map((t) => t.name);
+    board.labels = LABELS.map((l) => l.name);
+    board.project = { fields: [...BUILT_IN, ...FIELDS.map((f) => f.name)], linked: true, views: settledViews(), grouped: true, options: { Step: ['Frame'], Decision: ['Tripped'] } };
+    const { url, err } = await setUp(sys, ['n']);
+    assert.equal(url, undefined);
+    assert.deepEqual(sys.asked, ['Add the options Specify, Slice, Build, Done to the field Step and Needs owner, Decided by the routine to the field Decision in "example-app work"?']);
+    assert.deepEqual(err, ['onboard: stopped at "fields"; nothing after it was changed, and no pull request was opened']);
+    assert.ok(!board.operations.includes('updateProjectV2Field('));
   });
 
   it('names only the issue types the organisation lacks, saying they reach every repository in it', async () => {
@@ -461,6 +498,90 @@ describe('boardStarted', () => {
     slice(list);
     new RestBoard(list).refuse = (method, path) => (path === '/orgs/example-org/projectsV2' ? { status: 200, json: { message: 'not a list' } } : undefined);
     await assert.rejects(boardStarted(list, 'tok', SLUG, 12), { message: "GitHub's REST API did not answer a list (/orgs/example-org/projectsV2?per_page=100)" });
+  });
+
+  it('moves every work item to the Step its facts give, forward only, and a closed one to Done', async () => {
+    const sys = new FakeSys();
+    slice(sys);
+    const board = new RestBoard(sys);
+    board.workItems = [10, 20, 21, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51];
+    board.projects[0]!.items.push(
+      // Closed: Done, whatever Step it had.
+      { issue: 40, state: 'closed', subIssues: { total: 3, completed: 3 }, values: { Step: 'Frame' } },
+      { issue: 41, state: 'closed', values: {} },
+      { issue: 42, state: 'closed', values: { Step: 'Done' } },
+      // Open with slices filed: Slice; with one closed: Build.
+      { issue: 43, subIssues: { total: 9, completed: 0 }, values: { Step: 'Frame' } },
+      { issue: 44, subIssues: { total: 2, completed: 1 }, values: { Step: 'Specify' } },
+      // Never back: an owner's Specify, or Build before any slice closed, stays.
+      { issue: 45, values: { Step: 'Specify' } },
+      { issue: 46, subIssues: { total: 2, completed: 0 }, values: { Step: 'Build' } },
+      // Reopened: leaves Done for where its facts put it.
+      { issue: 47, subIssues: { total: 1, completed: 0 }, values: { Step: 'Done' } },
+      // An option the owner added stays, open or closed.
+      { issue: 48, state: 'closed', values: { Step: 'Parked' } },
+      // Not a Work item: no Step.
+      { issue: 49, type: 'Brief', state: 'closed', values: {} },
+      { issue: 50, type: null, values: {} },
+      // Archived: off the board.
+      { issue: 51, archived: true, state: 'closed', values: { Step: 'Build' } },
+    );
+    board.projects[0]!.fields.Step = [...STEP_OPTIONS, 'Parked'];
+    assert.deepEqual(await boardStarted(sys, 'tok', SLUG, 12), [
+      '✓ board: slice #12 is In Progress in "example-app work"',
+      '✓ board: work item #10 is at Step Build in "example-app work"',
+      '✓ board: work item #47 is at Step Slice in "example-app work"',
+      '✓ board: work item #44 is at Step Build in "example-app work"',
+      '✓ board: work item #43 is at Step Slice in "example-app work"',
+      '✓ board: work item #41 had no Step; it is at Done in "example-app work"',
+      '✓ board: work item #40 is closed; it is at Step Done in "example-app work"',
+      '✓ board: work item #20 had no Step; it is at Frame in "example-app work"',
+    ]);
+    const steps = Object.fromEntries(board.projects[0]!.items.map((item) => [item.issue, item.values.Step]));
+    assert.deepEqual(steps, { 12: undefined, 10: 'Build', 20: 'Frame', 21: 'Frame', 40: 'Done', 41: 'Done', 42: 'Done', 43: 'Slice', 44: 'Build', 45: 'Specify', 46: 'Build', 47: 'Slice', 48: 'Parked', 49: undefined, 50: undefined, 51: 'Build' });
+    // The items hold their issues, so no issue is read on its own.
+    assert.ok(!sys.requests.some((r) => /\/issues(\?|\/(?!12\b))/.test(r.url)));
+  });
+
+  it('says once for each Project whose Step lacks an option a move needs, and makes the other moves', async () => {
+    const sys = new FakeSys();
+    slice(sys);
+    const board = new RestBoard(sys);
+    board.workItems = [10, 20, 21, 40, 41];
+    board.projects[0]!.fields.Step = ['Frame', 'Specify', 'Slice', 'Build'];
+    board.projects[0]!.items.push({ issue: 40, state: 'closed', values: { Step: 'Build' } }, { issue: 41, state: 'closed', values: {} });
+    assert.deepEqual(await boardStarted(sys, 'tok', SLUG, 12), [
+      '✓ board: slice #12 is In Progress in "example-app work"',
+      '✓ board: work item #10 is at Step Build in "example-app work"',
+      '✓ board: work item #20 had no Step; it is at Frame in "example-app work"',
+      '! board: Step in "example-app work" has no option Done, so work items that belong there stay where they are; process-rules onboard adds it',
+    ]);
+  });
+
+  it('sweeps the board without a slice', async () => {
+    const sys = new FakeSys();
+    const board = new RestBoard(sys);
+    board.workItems = [10, 20, 21, 40];
+    board.projects[0]!.items.push({ issue: 40, state: 'closed', values: { Step: 'Frame' } });
+    assert.deepEqual(await boardSwept(sys, 'tok', SLUG), [
+      '✓ board: work item #40 is closed; it is at Step Done in "example-app work"',
+      '✓ board: work item #20 had no Step; it is at Frame in "example-app work"',
+    ]);
+    // Work item #10 is at Slice with no slice closed: it stays.
+    assert.equal(board.projects[0]!.items[1]!.values.Step, 'Slice');
+  });
+
+  it('gives the Step the facts put a work item at, or none when it stays', () => {
+    const open = (value: string | undefined, total = 0, completed = 0) => ({ value, state: 'open', subIssues: { total, completed } });
+    assert.equal(stepDue(open(undefined)), 'Frame');
+    assert.equal(stepDue(open('frame', 1)), 'Slice');
+    assert.equal(stepDue(open('Slice', 1, 1)), 'Build');
+    assert.equal(stepDue(open('Specify'), true), 'Build');
+    assert.equal(stepDue(open('Build')), undefined);
+    assert.equal(stepDue(open('Done')), 'Frame');
+    assert.equal(stepDue({ ...open('Build'), state: 'closed' }), 'Done');
+    assert.equal(stepDue({ ...open('done'), state: 'closed' }), undefined);
+    assert.equal(stepDue({ ...open('Parked'), state: 'closed' }), undefined);
   });
 
   it('reads nothing more for a closed slice', async () => {
