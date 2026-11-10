@@ -1044,10 +1044,16 @@ niyam owner-step required-checks <owner/repo> <ruleset id or name>
 - `label` adds or removes `approved` or `do-not-merge` on an issue or pull
   request. It refuses a label the repository does not have.
 - `required-checks` makes the ruleset also require the checks of the features
-  the repository's settings turn on, read from its default branch:
-  `process-rules / PR identity` for `pr-identity`, `process-rules / Work rules`
-  for `work-rules` and `process-rules / Design frames` for `figma`. It keeps
-  every other check and rule, removes none, and shows the before and after.
+  the repository's settings turn on, read from its default branch
+  (`.github/niyam.json`, or `.github/process-rules.json` where that is
+  missing): `process-rules / PR identity` for `pr-identity`,
+  `process-rules / Work rules` for `work-rules` and `process-rules / Design
+  frames` for `figma`. It adds a check only when the repository's
+  `.github/workflows/process-rules.yml` has a `process-rules` job calling
+  shared checks that run that job, at the version it pins. A required check
+  that never reports would hold every pull request, so any other check is a
+  `✗` saying why. It keeps every other check and rule, removes none, and
+  shows the before and after.
 
 It refuses in an agent session (`PROCESS_RULES_AGENT` set, or `CLAUDECODE=1`)
 and without a terminal. It makes a new folder in the user's temporary folder
@@ -1067,9 +1073,11 @@ It checks that the signed-in login owns the organisation, or the repository
 there. Then it prints exactly what it will change and asks for a yes; the
 sign-in and the reads change nothing. It makes each change, reads it back,
 and marks it `✓` or `✗`. Whatever happens, an error or Ctrl-C included, it
-runs `gh auth logout` and deletes the folder. It ends with the link to revoke
-the GitHub CLI token, https://github.com/settings/applications, because
-`gh auth logout` cannot revoke it. Exit 0 when every change was made, or none
+deletes the folder, which holds the token's only copy. It does not run
+`gh auth logout`, which deletes gh's keychain entries for the host whatever
+`GH_CONFIG_DIR` says, and which cannot revoke the token anyway. The token
+stays valid on GitHub until it is revoked, so the command ends with the link
+to do that: https://github.com/settings/applications. Exit 0 when every change was made, or none
 was needed or wanted; 1 otherwise; 130 after a Ctrl-C. `doctor` marks `▲`
 any owner-step folder left behind, which only a killed run leaves, and says
 whether it still holds a token. Each step lives here with tests; a new step

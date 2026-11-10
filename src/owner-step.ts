@@ -4,6 +4,7 @@ import { GITHUB_HOST, GITHUB_WEB } from './host.ts';
 import { ISSUE_TYPES } from './issue-types.ts';
 import type { Finding } from './layout.ts';
 import { CLI } from './names.ts';
+import { WORKFLOW_PATH } from './onboard-pull.ts';
 import { signInLines } from './owner-login.ts';
 import { agentSession } from './push-identity.ts';
 import type { Output, Sys } from './types.ts';
@@ -20,10 +21,14 @@ export const FEATURE_CHECKS: Partial<Record<Feature, string>> = {
   'work-rules': 'process-rules / Work rules',
   figma: 'process-rules / Design frames',
 };
+/** The start of each check FEATURE_CHECKS names: the client workflow's job. */
+const CHECK_PREFIX = 'process-rules / ';
 /** GitHub Actions' app, which reports the workflow's checks. */
 const ACTIONS_APP = 15368;
 /** How long one gh call gets. */
 const GH_MS = 60_000;
+/** How long the event loop gets between gh calls, for a Ctrl-C's handler. */
+const SETTLE_MS = 20;
 
 /** One owner step, as its arguments name it. */
 export type Step =
@@ -177,6 +182,8 @@ interface Found {
   notes: string[];
   /** Said when there is nothing to change. */
   already: string;
+  /** What it will not change, and why: each a ✗. */
+  skipped: Finding[];
 }
 
 /** Throws unless gh's answer is fine, naming what was asked. */
@@ -237,7 +244,7 @@ function issueTypes(gh: Gh, org: string): Found {
       });
     }
   }
-  return { changes, notes: [], already: `${org} has every work model issue type, enabled: ${ISSUE_TYPES.map((type) => type.name).join(', ')}` };
+  return { changes, notes: [], skipped: [], already: `${org} has every work model issue type, enabled: ${ISSUE_TYPES.map((type) => type.name).join(', ')}` };
 }
 
 /** The label added to or taken off one issue or pull request. */
@@ -255,7 +262,7 @@ function label(gh: Gh, { repo, number, action, label: name }: Extract<Step, { st
   const first = issue();
   const title = first.title ? ` "${first.title}"` : '';
   const has = first.labels.some((one) => same(one, name));
-  if (has === (action === 'add')) return { changes: [], notes: [], already: `${where} ${has ? 'has' : 'does not have'} the label ${name}` };
+  if (has === (action === 'add')) return { changes: [], notes: [], skipped: [], already: `${where} ${has ? 'has' : 'does not have'} the label ${name}` };
   return {
     changes: [
       {
@@ -274,6 +281,7 @@ function label(gh: Gh, { repo, number, action, label: name }: Extract<Step, { st
       },
     ],
     notes: [],
+    skipped: [],
     already: '',
   };
 }
@@ -283,23 +291,57 @@ interface Rule {
   parameters?: { required_status_checks?: { context: string; integration_id?: number }[]; [key: string]: unknown };
 }
 
-/** The checks the repository's niyam settings, on its default branch, turn on. */
+/** A file of `repo` on its default branch, or undefined when GitHub has none; throws when GitHub will not say. */
+function fileIn(gh: Gh, repo: string, path: string): string | undefined {
+  const answer = gh.api(`repos/${repo}/contents/${path}`);
+  if (!answer.ok && /404|not found/i.test(answer.problem)) return undefined;
+  const content = (must(answer, `reading ${repo}'s ${path}`) as { content?: unknown } | null)?.content;
+  if (typeof content !== 'string') throw new Error(`GitHub did not give ${repo}'s ${path}`);
+  return Buffer.from(content, 'base64').toString('utf8');
+}
+
+/**
+ * The checks the repository's settings, on its default branch, turn on: the
+ * file loadSettings reads, .github/niyam.json, or .github/process-rules.json
+ * where that is missing.
+ */
 function wantedChecks(gh: Gh, repo: string): { file: string; checks: string[] } {
   for (const file of [SETTINGS_PATH, OLD_SETTINGS_PATH]) {
-    const answer = gh.api(`repos/${repo}/contents/${file}`);
-    if (!answer.ok) continue;
-    const content = (answer.json as { content?: unknown } | null)?.content;
-    if (typeof content !== 'string') throw new Error(`GitHub did not give ${repo}'s ${file}`);
+    const text = fileIn(gh, repo, file);
+    if (text === undefined) continue;
     let settings: unknown;
     try {
-      settings = JSON.parse(Buffer.from(content, 'base64').toString('utf8'));
+      settings = JSON.parse(text);
     } catch {
       throw new Error(`${repo}'s ${file} is not JSON`);
     }
-    const features = featuresIn(settings);
-    return { file, checks: features.flatMap((feature) => FEATURE_CHECKS[feature] ?? []) };
+    return { file, checks: featuresIn(settings).flatMap((feature) => FEATURE_CHECKS[feature] ?? []) };
   }
   throw new Error(`${repo} has no ${SETTINGS_PATH} on its default branch, so its checks are not known; run ${CLI} onboard there first`);
+}
+
+/** The shared checks workflow a client's `process-rules` job calls: `owner/repo/.github/workflows/checks.yml@ref`, or `./` for the repository's own. */
+const CALLS_CHECKS = /^\s+uses:\s*['"]?(?:([\w.-]+\/[\w.-]+)\/|\.\/)\.github\/workflows\/checks\.yml(?:@([^\s'"#]+))?/m;
+
+/**
+ * The names of the jobs the repository's workflow runs as `process-rules`,
+ * on its default branch: those of the shared checks workflow its
+ * `process-rules` job calls, at the version it pins; or why none can be
+ * known. A check whose job is not there would never report, and a ruleset
+ * requiring it would hold every pull request.
+ */
+function workflowJobs(gh: Gh, repo: string): Set<string> | { problem: string } {
+  const workflow = fileIn(gh, repo, WORKFLOW_PATH);
+  if (workflow === undefined) return { problem: `${repo} has no ${WORKFLOW_PATH} on its default branch` };
+  const job = /^ {2}process-rules:[ \t]*\r?\n((?:(?: {3,}|[ \t]*#|[ \t]*\r?$).*\r?\n?)*)/m.exec(workflow)?.[1];
+  const calls = job === undefined ? null : CALLS_CHECKS.exec(job);
+  if (!calls) return { problem: `${WORKFLOW_PATH} has no process-rules job calling the shared checks` };
+  const [, from = repo, ref] = calls;
+  const answer = gh.api(`repos/${from}/contents/.github/workflows/checks.yml${ref ? `?ref=${encodeURIComponent(ref)}` : ''}`);
+  const content = (answer.json as { content?: unknown } | null)?.content;
+  if (!answer.ok || typeof content !== 'string') return { problem: `GitHub did not give the shared checks ${from}${ref ? `@${ref}` : ''} that ${WORKFLOW_PATH} calls (${answer.problem})` };
+  const text = Buffer.from(content, 'base64').toString('utf8');
+  return new Set([...text.matchAll(/^ {4}name:\s*['"]?([^'"#\r\n]*?)['"]?\s*$/gm)].map((match) => match[1] as string));
 }
 
 /**
@@ -323,13 +365,23 @@ function requiredChecks(gh: Gh, { repo, ruleset }: Extract<Step, { step: 'requir
   const contexts = (rules: Rule[]): string[] => rules.find((rule) => rule.type === 'required_status_checks')?.parameters?.required_status_checks?.map((check) => check.context) ?? [];
   const others = (rules: Rule[]): string => JSON.stringify(rules.filter((rule) => rule.type !== 'required_status_checks'));
   const before = read();
-  const { file, checks } = wantedChecks(gh, repo);
+  const { file, checks: turnedOn } = wantedChecks(gh, repo);
   const had = contexts(before.rules);
+  const jobs = turnedOn.some((check) => !had.includes(check)) ? workflowJobs(gh, repo) : new Set<string>();
+  const runs = (check: string): boolean => had.includes(check) || (jobs instanceof Set && jobs.has(check.slice(CHECK_PREFIX.length)));
+  const checks = turnedOn.filter(runs);
+  const skipped = turnedOn
+    .filter((check) => !runs(check))
+    .map((check): Finding => ({
+      mark: '✗',
+      text: `not adding ${check}: ${'problem' in jobs ? jobs.problem : `the shared checks ${WORKFLOW_PATH} calls run no ${check.slice(CHECK_PREFIX.length)} job`}, so it would never report and would hold every pull request`,
+      fix: `${CLI} onboard there, then run this again`,
+    }));
   const missing = checks.filter((check) => !had.includes(check));
   const after = [...had, ...missing];
   const list = (names: string[]): string => (names.length === 0 ? 'none' : names.join(', '));
-  const notes = [`${file} turns on the checks ${list(checks)}`, `before: ${list(had)}`, `after:  ${list(after)}`];
-  if (missing.length === 0) return { changes: [], notes, already: `the ruleset ${before.name} requires every check ${file} turns on` };
+  const notes = [`${file} turns on the checks ${list(turnedOn)}`, `before: ${list(had)}`, `after:  ${list(after)}`];
+  if (missing.length === 0) return { changes: [], notes, skipped, already: `the ruleset ${before.name} requires every check ${file} turns on` };
   const added = missing.map((context) => ({ context, integration_id: ACTIONS_APP }));
   const hasRule = before.rules.some((rule) => rule.type === 'required_status_checks');
   const rules: Rule[] = hasRule
@@ -354,6 +406,7 @@ function requiredChecks(gh: Gh, { repo, ruleset }: Extract<Step, { step: 'requir
       },
     ],
     notes,
+    skipped,
     already: '',
   };
 }
@@ -375,8 +428,10 @@ function about(step: Step): string {
  * login owns the repository or organisation, reads what is there, prints
  * exactly what it will change and asks for a yes; then it makes each
  * change, checks it and marks it ✓ or ✗. Whatever happens, a Ctrl-C
- * included, it signs gh out and deletes the folder, and it ends with the
- * link to revoke the token on GitHub. Exit 0 when every change is made, or
+ * included, it deletes the folder, the token's only copy; it never runs
+ * `gh auth logout`, which deletes gh's keychain entries for the host
+ * whatever GH_CONFIG_DIR says. It ends with the link to revoke the token,
+ * which stays valid on GitHub until revoked. Exit 0 when every change is made, or
  * none is needed or wanted; 1 otherwise; 130 after a Ctrl-C.
  */
 export async function ownerStep(sys: Sys, io: Output, args: readonly string[]): Promise<number> {
@@ -391,7 +446,7 @@ export async function ownerStep(sys: Sys, io: Output, args: readonly string[]): 
   }
   const scopes = stepScopes(step);
   io.out(`owner-step ${step.step}: ${about(step)}`);
-  io.out(`  One browser sign-in to a throwaway gh (scopes ${scopes.join(', ')}, beside gh's own), signed out and deleted afterwards.`);
+  io.out(`  One browser sign-in to a throwaway gh (scopes ${scopes.join(', ')}, beside gh's own), its folder deleted afterwards.`);
   io.out('  Nothing changes until you say yes.');
 
   const dir = sys.tempDir(`${folderRoot(sys)}/${FOLDER_PREFIX}`);
@@ -399,18 +454,20 @@ export async function ownerStep(sys: Sys, io: Output, args: readonly string[]): 
   let cleaned: Finding | undefined;
   let interrupted = false;
   // Synchronous, and once: a Ctrl-C's handler and the finally below both call it.
+  // Not `gh auth logout`: it deletes gh's keychain entries for the host, whatever GH_CONFIG_DIR says (gh 2.103.3).
   const cleanUp = (): Finding => {
     if (cleaned) return cleaned;
-    const signedIn = holdsToken(sys, dir);
-    const out = signedIn ? sys.exec('gh', ['auth', 'logout', '-h', GITHUB_HOST], { env, timeoutMs: GH_MS }) : undefined;
-    sys.remove(dir);
-    const left = sys.exists(dir);
-    cleaned =
-      left
-        ? { mark: '✗', text: `could not delete the throwaway gh folder ${dir}`, fix: `rm -rf ${dir}` }
-        : out && out.code !== 0
-          ? { mark: '✓', text: `deleted the throwaway gh folder and the token in it (gh auth logout said: ${out.stderr.trim().split('\n')[0] || `exit ${out.code}`})` }
-          : { mark: '✓', text: signedIn ? 'signed out of the throwaway gh and deleted its folder' : 'deleted the throwaway gh folder' };
+    const token = holdsToken(sys, dir);
+    let left = true;
+    try {
+      sys.remove(dir);
+      left = sys.exists(dir);
+    } catch {
+      // Said below: the folder is still there.
+    }
+    cleaned = left
+      ? { mark: '✗', text: `could not delete the throwaway gh folder ${dir}${token ? ', which holds the token' : ''}`, fix: `rm -rf ${dir}` }
+      : { mark: '✓', text: token ? 'deleted the throwaway gh folder and the token in it' : 'deleted the throwaway gh folder' };
     return cleaned;
   };
   const off = sys.onInterrupt(() => {
@@ -422,12 +479,15 @@ export async function ownerStep(sys: Sys, io: Output, args: readonly string[]): 
   try {
     code = await signedIn(sys, io, step, scopes, dir, env, results, () => interrupted);
   } catch (error) {
+    // A Ctrl-C that killed a gh call is handled once the event loop runs again.
+    await settle(sys);
     code = error instanceof Interrupted || interrupted ? 130 : 1;
     results.push({ mark: '✗', text: code === 130 ? 'stopped by Ctrl-C; nothing changed' : message(error) });
   } finally {
+    await settle(sys);
     off();
     for (const result of [...results, cleanUp()]) io.out(`${result.mark} ${result.text}${result.fix ? ` → ${result.fix}` : ''}`);
-    io.out(`Revoke the GitHub CLI token on GitHub, if you like: ${REVOKE}`);
+    io.out(`The GitHub CLI token stays valid on GitHub until you revoke it: ${REVOKE}`);
   }
   // A folder left behind fails the run, whatever else did.
   return cleanUp().mark === '✗' && code === 0 ? 1 : code;
@@ -466,9 +526,11 @@ async function signedIn(
 
   const found = step.step === 'issue-types' ? issueTypes(gh, step.org) : step.step === 'label' ? label(gh, step) : requiredChecks(gh, step);
   for (const note of found.notes) io.out(`  ${note}`);
+  results.push(...found.skipped);
+  const skipped = found.skipped.length > 0 ? 1 : 0;
   if (found.changes.length === 0) {
-    results.push({ mark: '✓', text: `nothing to change: ${found.already}` });
-    return 0;
+    if (!skipped) results.push({ mark: '✓', text: `nothing to change: ${found.already}` });
+    return skipped;
   }
   io.out(`  owner-step will ${found.changes.length === 1 ? 'make this change' : `make these ${found.changes.length} changes`}:`);
   for (const change of found.changes) io.out(`    ${change.plan}`);
@@ -476,10 +538,12 @@ async function signedIn(
   if (interrupted()) throw new Interrupted();
   if (!yes) {
     results.push({ mark: '✓', text: 'nothing changed: you said no' });
-    return 0;
+    return skipped;
   }
-  let code = 0;
+  let code = skipped;
   for (const change of found.changes) {
+    // Each gh call runs to its end before a Ctrl-C's handler can: the event loop runs it here.
+    await settle(sys);
     if (interrupted()) {
       results.push({ mark: '✗', text: `${change.plan}: not done, stopped by Ctrl-C` });
       code = 130;
@@ -488,11 +552,18 @@ async function signedIn(
     try {
       results.push({ mark: '✓', text: change.apply() });
     } catch (error) {
+      await settle(sys);
       results.push({ mark: '✗', text: `${change.plan}: ${interrupted() ? 'stopped by Ctrl-C; check it on GitHub' : message(error)}` });
-      code = interrupted() ? 130 : 1;
+      code = 1;
     }
   }
-  return code;
+  await settle(sys);
+  return interrupted() ? 130 : code;
+}
+
+/** Lets the event loop run, so a Ctrl-C that came during a gh call reaches its handler. */
+function settle(sys: Sys): Promise<void> {
+  return sys.sleep(SETTLE_MS);
 }
 
 class Interrupted extends Error {}

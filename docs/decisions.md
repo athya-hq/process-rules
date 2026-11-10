@@ -1229,9 +1229,20 @@
     state and prints the exact changes, and asks the one yes only then: the
     sign-in and the reads change nothing, so the yes still comes before any
     change. Each change is read back and marked ✓ or ✗.
+  - It does not run `gh auth logout`, though #240 says it signs out. In gh
+    2.103.3, `AuthConfig.Logout` deletes the keychain entries `gh:github.com`
+    for the login and for "" whatever `GH_CONFIG_DIR` says, so logout could
+    delete a gh login the owner keeps in the keychain. The owner's rule is
+    that the command never touches the keychain or the owner's own login,
+    and the coordinator chose that over the logout. With `--insecure-storage`
+    the token's only copy is in the folder, so deleting it signs out locally.
+    The token stays valid on GitHub until revoked, as it would after a
+    logout, and the closing line links where to revoke it.
   - Cleanup is synchronous and runs once, from `finally` and from a SIGINT
-    handler `Sys.onInterrupt` adds. A Ctrl-C stops the changes not yet made
-    and exits 130.
+    handler `Sys.onInterrupt` adds. A gh call runs synchronously, so its
+    Ctrl-C reaches the handler only once the event loop runs. Before each
+    change, and after a failed one, the command waits a few milliseconds
+    for that, so a Ctrl-C stops the changes not yet made and exits 130.
   - The folder sits in macOS's per-user temporary folder (`getconf
     DARWIN_USER_TEMP_DIR`), which is the same whatever TMPDIR a shell sets,
     so `doctor`, run from an agent session too, finds one a killed run left.
@@ -1241,10 +1252,17 @@
   - `label` takes `approved` and `do-not-merge` alone, and refuses a label
     the repository lacks, since adding an unknown name would create it.
   - `required-checks` follows the README's rule: it adds the checks of the
-    features the repository's settings turn on and removes none. It sends
+    features the repository's settings turn on and removes none. The
+    settings come from the file `loadSettings` reads: `.github/niyam.json`,
+    then `.github/process-rules.json`. On the coordinator's ask, a check is
+    added only when the repository's workflow runs its job: a `process-rules`
+    job calling shared checks that have a job of that name at the pinned
+    version. A required check that never reports would hold every pull
+    request, so the others are `✗` lines saying why. It sends
     back the ruleset's whole `rules` list as read, changing only the
     contexts, and checks that the other rules are unchanged afterwards.
   - Nothing in P-17 or P-18 changes. `signInOnce` (P-35) only shares its
     line handler.
   - Rejected: reading the token into the CLI to call the API (it would be in
-    memory and in reach of a bug that prints it); a `--yes` flag.
+    memory and in reach of a bug that prints it); a `--yes` flag;
+    `gh auth logout` (above).
