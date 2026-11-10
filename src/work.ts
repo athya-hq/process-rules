@@ -694,12 +694,15 @@ export async function prMerged(sys: Sys, io: Output): Promise<number> {
   }
   const slices = slicesNamed(pull.body ?? '');
   if (slices.length === 0) io.out(`pr-merged: #${pull.number} names no slice; nothing to close`);
+  // The slices named that are Slices: a State is closed only under one of them.
+  const built: number[] = [];
   for (const slice of slices) {
     const issue = await readIssue(sys, token, slug, slice);
     if (issue?.type?.name !== 'Slice') {
       io.out(`- #${slice} is not a Slice in ${slug}; left as it is`);
       continue;
     }
+    built.push(slice);
     // GitHub closes a slice itself when the pull request also says "Closes #N"; the slice still gets its comment, once.
     await closeBuilt(sys, io, token, issue, pull);
   }
@@ -711,7 +714,7 @@ export async function prMerged(sys: Sys, io: Output): Promise<number> {
     }
     const { parent, problem } = await parentOf(sys, token, issue);
     if (problem) throw new Error(`cannot close #${number}: ${problem}`);
-    if (!parent || !slices.includes(parent.number)) {
+    if (!parent || !built.includes(parent.number)) {
       io.out(`- #${number} is not a State under a slice #${pull.number} names; left as it is`);
       continue;
     }

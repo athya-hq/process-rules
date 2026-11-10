@@ -1415,9 +1415,12 @@ describe('prMerged', () => {
       const orphan = delivering('Slice: #12\nState: #31');
       orphan.route('GET', `${STATE}/parent`, { status: 404, json: { message: 'No parent issue found' } });
       assert.deepEqual((await run(orphan)).out[1], '- #31 is not a State under a slice #40 names; left as it is');
+      const unsliced = delivering('Slice: #12\nState: #31');
+      unsliced.route('GET', ISSUE, { status: 200, json: { number: 12, type: { name: 'Task' }, state: 'closed', url: `https://api.github.com${ISSUE}` } });
+      assert.deepEqual((await run(unsliced)).out, ['- #12 is not a Slice in example-org/example-app; left as it is', '- #31 is not a State under a slice #40 names; left as it is']);
       const other = delivering('Slice: #12\nState: #31\nState: #99', { type: { name: 'Task' } });
       assert.deepEqual((await run(other)).out.slice(1), ['- #31 is not a State in example-org/example-app; left as it is', '- #99 is not a State in example-org/example-app; left as it is']);
-      assert.deepEqual([dropped, elsewhere, orphan, other].flatMap((sys) => writes(sys).filter((write) => String((write as string[])[1]).startsWith(STATE))), []);
+      assert.deepEqual([dropped, elsewhere, orphan, unsliced, other].flatMap((sys) => writes(sys).filter((write) => String((write as string[])[1]).startsWith(STATE))), []);
     });
 
     it("fails when it cannot read a State's parent, or GitHub refuses the close", async () => {

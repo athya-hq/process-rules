@@ -992,7 +992,7 @@
   `--no-fetch`, do not count either (review). Rejected: a doctor-only list
   (the guard and doctor would disagree on what reaches GitHub).
 - **2026-11-10 — Record: a merged pull request closes the State it names
-  (State #224 of P-45).** Five States stayed open after the pull requests
+  (State #224 of P-07).** Five States stayed open after the pull requests
   that delivered them merged: #176 (#177), #171 (#172), #161 (#162), #198
   (#199) and #195 (#196), each shown in the owner's Needs you view until the
   coordinator closed it by hand. Each was a fix filed, as the README says, as
