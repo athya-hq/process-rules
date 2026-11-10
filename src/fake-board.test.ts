@@ -129,7 +129,6 @@ export class Board {
       status: 200,
       json: this.issueTypes.map((name, index) => ({ id: index + 1, name, description: `${name} issues`, color: 'gray', is_enabled: !this.disabledTypes.includes(name) })),
     }));
-    sys.route('GET', '/orgs/example-org/repos?type=all&per_page=100&page=1', () => ({ status: 200, json: this.orgRepos }));
     // A board made later answers first, as its routes replace an earlier one's.
     sys.handlers.unshift((method, url, body) => this.typed(method, url, body));
     sys.route('POST', '/orgs/example-org/issue-types', () => {
@@ -159,6 +158,12 @@ export class Board {
 
   /** Issue types by id, issues by type, one issue, and an issue's new type. */
   typed(method: string, url: string, body: unknown): HttpResult | undefined {
+    // The organisation's repositories, 100 a page.
+    const repos = /^https:\/\/api\.github\.com\/orgs\/example-org\/repos\?type=all&per_page=100&page=(\d+)$/.exec(url);
+    if (repos && method === 'GET') {
+      const page = Number(repos[1]);
+      return { status: 200, json: this.orgRepos.slice((page - 1) * 100, page * 100) };
+    }
     const type = /^https:\/\/api\.github\.com\/orgs\/example-org\/issue-types\/(\d+)$/.exec(url);
     if (type && method === 'PUT') {
       const name = this.issueTypes[Number(type[1]) - 1];

@@ -324,11 +324,11 @@ export class FakeSys implements Sys {
       this.routes.get(wanted) ??
       (url.includes('/users/')
         ? [...this.routes].find(([key]) => key.toLowerCase() === wanted.toLowerCase())?.[1]
-        : undefined) ??
-      this.handlers.reduce<HttpResult | undefined>((found, handler) => found ?? handler(method, url, options.body), undefined);
-    // A route may throw, as fetch rejects when its time runs out.
+        : undefined);
+    // A route or a handler may throw, as fetch rejects when its time runs out.
     try {
-      return Promise.resolve(typeof route === 'function' ? route() : route ?? this.unrouted(url));
+      const handled = route ?? this.handlers.reduce<HttpResult | undefined>((found, handler) => found ?? handler(method, url, options.body), undefined);
+      return Promise.resolve(typeof handled === 'function' ? handled() : handled ?? this.unrouted(url));
     } catch (error) {
       return Promise.reject(error as Error);
     }

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { ISSUE_TYPES, applyTypes, typesChange, typesDetail, typesLines, typesPlan, typesQuestion } from './issue-types.ts';
+import { ISSUE_TYPES, applyTypes, typesChange, typesDetail, typesLines, typesPlan, typesQuestion, withinApproved } from './issue-types.ts';
 import { Board, OWNER_TOKEN, SLUG } from './fake-board.test.ts';
 import { FakeSys, capture } from './fake.test.ts';
 
@@ -98,7 +98,7 @@ describe('typesPlan', () => {
     assert.deepEqual(plan.held, [{ repo: OTHER, number: 2, from: 'Bug', to: 'Brief', why: 'it has no parent and no sub-issues' }]);
     assert.deepEqual(plan.kept.map((type) => type.name), ['Bug']);
     assert.deepEqual(plan.disable.map((type) => type.name), ['Task', 'Feature']);
-    assert.equal(typesDetail(plan), 'org-wide: retype 1, disable 2');
+    assert.equal(typesDetail(plan), 'org-wide: retype 1, disable 2, keep 1');
     assert.deepEqual(typesLines(plan).at(-1), { label: '  keep', detail: 'Bug: archived repos hold them' });
 
     const { io, out } = capture();
@@ -106,8 +106,8 @@ describe('typesPlan', () => {
     assert.deepEqual(board.disabledTypes, ['Task', 'Feature']);
     assert.ok(!sys.requests.some((request) => request.method === 'PATCH' && request.url.includes(OTHER)));
     assert.ok(out.includes(`- ${OTHER}#2 keeps Bug: ${OTHER} is archived, which GitHub keeps read-only`));
-    assert.ok(out.includes('- left Bug enabled in example-org, since an issue in an archived repository holds it'));
-    assert.deepEqual(byHand, [`issue types: unarchive ${OTHER}, then niyam onboard again, to retype ${OTHER}#2 and disable Bug`]);
+    assert.ok(out.includes('- left Bug enabled in example-org, since an issue onboard did not retype holds it'));
+    assert.deepEqual(byHand, [`issue types: unarchive ${OTHER}, then niyam onboard again, to retype ${OTHER}#2`]);
   });
 
   it('adds the work model types missing and enables those disabled, and reads no repository when no other type exists', async () => {
@@ -168,6 +168,42 @@ describe('typesPlan', () => {
       { repo: SLUG, number: 2, type: 'Task', parent: 1 },
     ];
     assert.equal((await typesPlan(sys, OWNER_TOKEN, 'example-org')).retype[0]?.to, 'Brief');
+  });
+});
+
+describe('withinApproved', () => {
+  it('changes nothing the approved plan did not show, keeping the type a later issue holds', async () => {
+    const { sys, board } = org();
+    board.issues = [{ repo: SLUG, number: 1, type: 'Task' }];
+    const approved = await typesPlan(sys, OWNER_TOKEN, 'example-org');
+    board.issues.push({ repo: OTHER, number: 2, type: 'Task' }, { repo: OTHER, number: 3, type: 'Bug', subIssues: 1 });
+    board.issues[0] = { repo: SLUG, number: 1, type: 'Task', subIssues: 1 };
+    const plan = withinApproved(await typesPlan(sys, OWNER_TOKEN, 'example-org'), approved);
+    assert.deepEqual(plan.retype, []);
+    assert.deepEqual(plan.late.map((issue) => `${issue.repo}#${issue.number} ${issue.to}`), [`${SLUG}#1 Work item`, `${OTHER}#2 Brief`, `${OTHER}#3 Work item`]);
+    assert.deepEqual(plan.disable.map((type) => type.name), ['Feature']);
+    assert.deepEqual(plan.kept.map((type) => type.name), ['Task', 'Bug']);
+    const { io, out } = capture();
+    const byHand = await applyTypes(sys, io, OWNER_TOKEN, plan);
+    assert.deepEqual(board.disabledTypes, ['Feature']);
+    assert.ok(!sys.requests.some((request) => request.method === 'PATCH'));
+    assert.ok(out.includes(`- ${OTHER}#2 keeps Task: onboard found it after showing its plan`));
+    assert.deepEqual(byHand, [`issue types: niyam onboard again, to retype ${SLUG}#1, ${OTHER}#2, ${OTHER}#3, found after the plan`]);
+  });
+
+  it('rejects as GitHub does when a call fails', async () => {
+    const { sys } = org();
+    sys.handlers.unshift(() => {
+      throw new Error('connection dropped');
+    });
+    await assert.rejects(typesPlan(sys, OWNER_TOKEN, 'example-org'), /connection dropped/);
+  });
+
+  it('reads past a full page of repositories', async () => {
+    const { sys, board } = org();
+    board.orgRepos = Array.from({ length: 101 }, (_, index) => ({ full_name: `example-org/repo-${index + 1}` }));
+    board.issues = [{ repo: 'example-org/repo-101', number: 1, type: 'Task' }];
+    assert.deepEqual((await typesPlan(sys, OWNER_TOKEN, 'example-org')).retype.map((issue) => issue.repo), ['example-org/repo-101']);
   });
 });
 

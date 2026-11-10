@@ -790,10 +790,14 @@ repositories, a work model type from GitHub's facts about it:
 An issue whose parent is being retyped is read as the parent's new type, so
 a Task with Task sub-issues becomes a Work item with Slices. The plan names
 each issue it retypes (the first ten; the pull request's description names
-them all) and each type it disables, and the one yes covers them. The plan
-reads as the agent, which sees the repositories it can read; the board step
-reads again as the owner, who sees every repository, and retypes by the same
-rule. It retypes every issue first and disables a type only then, so no
+them all) and each type it disables, and the one yes covers them. The agent
+reads the organisation's types, but only the repositories it can see, so
+where a type outside the work model exists, `onboard` signs you in before the
+plan and reads every repository as you: the plan shows what the yes
+approves. The run reads again and changes nothing beyond it: an issue found
+only after the plan keeps its type, that type stays enabled, and "By hand:"
+says to run `onboard` again. A dry run signs in to nothing, so it lists what
+the agent can see. It retypes every issue first and disables a type only then, so no
 issue is left holding a disabled type: GitHub hides a disabled type on the
 issues that hold it and shows it again if it is enabled. `onboard` disables
 rather than deletes, so a type can come back; GitHub does not say what

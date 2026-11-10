@@ -1102,8 +1102,11 @@
   GitHub shows holding the type, so a filter GitHub ignored retypes nothing.
   An issue in an archived repository, which GitHub keeps read-only, keeps
   its type, and that type stays enabled until the owner unarchives it and
-  reruns. `doctor` warns when an enabled type outside the work model, or a
-  missing work model type, appears again. Rejected: deleting the types
+  reruns. Where a type outside the work model exists, the owner signs in
+  before the plan, since the agent sees only the repositories it can read,
+  and the run changes nothing beyond the plan shown (review). `doctor` warns
+  when an enabled type outside the work model, or a missing work model type,
+  appears again. Rejected: deleting the types
   (unknown effect on issues, no way back); search (capped, lagging);
   retyping as the agent before the owner's run (the owner approves the
   organisation-wide change once, from one plan); typing the issues with no

@@ -21,7 +21,7 @@ import {
   tokenInfo,
 } from './agent.ts';
 import { setUpBoard } from './board.ts';
-import { typesDetail, typesLines, typesPlan } from './issue-types.ts';
+import { type TypesPlan, typesDetail, typesLines, typesPlan } from './issue-types.ts';
 import { type OwnerToken, asOwner, isOrganisation, ownerScopes, signInOnce } from './owner-login.ts';
 import { appendToArray, replaceValues, setMember } from './jsonedit.ts';
 import { HOURLY } from './asks.ts';
@@ -1112,11 +1112,20 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
 
   if (on('board')) {
     github.push({ label: 'board', detail: 'set up or check' });
+    let approved: TypesPlan | undefined;
     if (await byOrganisation()) {
-      // Read as the agent, which sees the organisation's types and the repositories it can read; the board step
-      // reads again as the owner, who sees every repository, and retypes by the same rule.
-      const plan = await typesPlan(sys, token, slug.split('/')[0] as string).catch(() => undefined);
-      if (plan) github.push({ label: 'issue types', detail: typesDetail(plan) }, ...typesLines(plan));
+      const org = slug.split('/')[0] as string;
+      // The agent reads the organisation's types but only the repositories it can see. Where a type outside the
+      // work model exists, the owner, who sees every repository, signs in before the plan, so the plan shows what
+      // the yes approves; the run changes nothing beyond it. A dry run signs in to nothing: it shows the agent's view.
+      approved = await typesPlan(sys, token, org).catch(() => undefined);
+      if (!dryRun && (approved === undefined || approved.others.length > 0)) {
+        const mine = await ownerToken();
+        if (!mine) return 1;
+        approved = await typesPlan(sys, mine, org);
+        notes.push('- onboard signed in before showing its plan: the organisation has issue types outside the work model, and only the owner sees every repository whose issues hold one.');
+      }
+      if (approved) github.push({ label: 'issue types', detail: typesDetail(approved) }, ...typesLines(approved));
       else github.push({ label: 'issue types', detail: 'org-wide, read once signed in' });
     }
     const projectTitle = (JSON.parse(fileAt(settingsFile) as string) as { project?: unknown }).project;
@@ -1126,7 +1135,7 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
       async run(out, mine) {
         // The plan's one yes covers each step of the board but replacing a Project made before the template, which
         // moves its items and closes it: that is left to the owner, with what the template would have set.
-        const board = await setUpBoard(sys, out, (_, step) => Promise.resolve(step !== 'replace'), slug, owner, mine as string, typeof projectTitle === 'string' ? projectTitle : undefined);
+        const board = await setUpBoard(sys, out, (_, step) => Promise.resolve(step !== 'replace'), slug, owner, mine as string, typeof projectTitle === 'string' ? projectTitle : undefined, approved);
         byHand.unshift(...(board?.byHand ?? []));
         later.unshift(...(board?.byHand ?? []).map((line) => `On the board: ${line}.`));
         return board !== undefined;

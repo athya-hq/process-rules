@@ -42,7 +42,8 @@ function fresh(): FakeSys {
   sys.route('GET', '/users/example-org', { status: 200, json: { login: 'example-org', type: 'Organization' } });
   sys.route('GET', REPO, PUSH);
   sys.route('GET', `${REPO}/commits/abc123`, VERIFIED);
-  new Board(sys);
+  // An organisation with no issue types yet, so the owner signs in after the plan; GitHub's defaults have their own tests.
+  new Board(sys).issueTypes = [];
   // Settings, hook, workflow, pre-push hook; issue types, labels, Project; test commit; and spares.
   sys.answers = Array<string>(12).fill('y');
   return sys;
@@ -141,9 +142,8 @@ describe('onboard', () => {
       '│',
       '◇  GitHub — one sign-in as example-owner',
       '│    board        set up or check',
-      '│    issue types  org-wide: add 5, disable 2',
+      '│    issue types  org-wide: add 5',
       '│      add        Work item, Slice, State, Decision, Brief',
-      '│      disable    Task, Bug',
       '│',
       '◇  This Mac',
       '│    pre-push hook  new',
@@ -204,7 +204,7 @@ describe('onboard', () => {
     assert.match(body, /^- `\.github\/niyam\.json`: owner example-owner approves, agent ExampleBot builds, with identity, .* on$/m);
     assert.match(body, /^- `\.github\/workflows\/process-rules\.yml`: write \.github\/workflows\/process-rules\.yml, which runs the shared niyam checks$/m);
     // The long explanations the terminal no longer prints.
-    assert.ok(body.includes('\nDone at the terminal, outside this pull request:\n\n- board:\n  - disabled the issue types Task, Bug in example-org, outside the work model, once no issue held them; not deleted, so they can be enabled again\n  - issue types in example-org: Work item, Slice, State, Decision, Brief\n'), body);
+    assert.ok(body.includes('\nDone at the terminal, outside this pull request:\n\n- board:\n  - issue types in example-org: Work item, Slice, State, Decision, Brief\n'), body);
     assert.ok(body.includes(`\n  - Project "example-app work": ${COPY_URL}\n  - fields: Step, Decision, Review date\n`), body);
     assert.ok(body.includes('\n- pre-push hook:\n  - wrote the pre-push git hook .git/hooks/pre-push, which checks an agent session pushes to GitHub as the agent, and the work rules\n'), body);
     assert.ok(body.includes('\n  - committer: ExampleBot; verified: true (valid)\n  - GitHub shows the test commit Verified by ExampleBot\n'), body);
@@ -285,6 +285,42 @@ describe('onboard', () => {
       const before = sys.requests.findIndex((r) => r.method === 'PATCH');
       assert.ok(sys.requests.slice(0, before).some((r) => r.url.includes('/issues?type=Task') && r.token === TOKEN), 'the plan reads as the agent');
       assert.ok(sys.requests.filter((r) => r.method === 'PATCH' || r.method === 'PUT').every((r) => r.token === OWNER_TOKEN), 'the owner changes them');
+    });
+
+    it('shows the owner the issues only the owner can see, signing in before the plan', async () => {
+      const { sys, board } = settled();
+      board.orgRepos = [{ full_name: 'example-org/example-app' }, { full_name: 'example-org/hidden' }];
+      board.issues.push({ repo: 'example-org/hidden', number: 3, type: 'Task' });
+      // The agent sees only example-app.
+      sys.route('GET', '/orgs/example-org/repos?type=all&per_page=100&page=1', () =>
+        sys.requests.at(-1)?.token === OWNER_TOKEN ? { status: 200, json: board.orgRepos } : { status: 200, json: [{ full_name: 'example-org/example-app' }] },
+      );
+      const { code, out } = await run(sys, []);
+      assert.equal(code, 0);
+      const signed = out.findIndex((line) => line.startsWith('◇  Signed in as example-owner'));
+      const plan = out.findIndex((line) => line.startsWith('◇  GitHub — signed in as example-owner'));
+      assert.ok(signed !== -1 && signed < plan, out.join('\n'));
+      assert.ok(out.includes('│      hidden#3        Task → Brief'), out.join('\n'));
+      assert.deepEqual(board.issues.map((issue) => issue.type), ['Brief', 'Brief']);
+    });
+
+    it('lists, in the dry run, what the agent sees, signing in to nothing', async () => {
+      const { sys, board } = settled();
+      const { code, out } = await run(sys, ['example-owner', AGENT, '--dry-run']);
+      assert.equal(code, 0);
+      assert.ok(out.includes('│      example-app#12  Task → Brief'), out.join('\n'));
+      assert.ok(!sys.requests.some((r) => r.token === OWNER_TOKEN));
+      assert.equal(board.issues[0]?.type, 'Task');
+    });
+
+    it('stops before the plan when the owner does not sign in', async () => {
+      const { sys, board } = settled();
+      sys.ghToken = undefined;
+      const { code, err } = await run(sys, []);
+      assert.equal(code, 1);
+      assert.deepEqual(err, ['onboard: the GitHub sign-in in the browser did not finish']);
+      assert.deepEqual(sys.chosen, [], 'no plan was asked about');
+      assert.equal(board.issues[0]?.type, 'Task');
     });
 
     it('says it reads them once signed in when the agent cannot', async () => {
@@ -1283,10 +1319,12 @@ describe('staged adoption', () => {
     const sys = fresh();
     sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity'], project: 'Example work', note: 'kept' }));
     sys.files.set(HOOKS, JSON.stringify(CLAUDE));
+    // GitHub's default Task and Bug, so the owner signs in before the plan.
     const board = new Board(sys);
     const { code, out } = await run(sys, ['--add', 'board']);
     assert.equal(code, 0);
     assert.deepEqual(board.titles, ['Example work']);
+    assert.deepEqual(board.disabledTypes, ['Task', 'Bug']);
     assert.deepEqual(JSON.parse(repo(sys).get(SETTINGS) ?? ''), {
       owner: 'example-owner',
       agent: AGENT,
@@ -1295,7 +1333,7 @@ describe('staged adoption', () => {
       note: 'kept',
     });
     assert.deepEqual(planned(out, 'Pull request'), ['niyam.json: turn board on', `cloud-setup.sh: new, installs v${packageVersion()}`, 'auto-merge: when checks pass']);
-    assert.ok(planned(out, 'GitHub — one sign-in as example-owner').includes('board: set up or check'));
+    assert.ok(planned(out, 'GitHub — signed in as example-owner').includes('board: set up or check'));
     assert.ok(!repo(sys).has(WORKFLOW), 'board alone needs no workflow');
   });
 

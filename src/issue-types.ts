@@ -37,14 +37,18 @@ export interface Retype {
  */
 export interface TypesPlan {
   org: string;
+  /** Every type outside the work model, enabled or not, by name. */
+  others: string[];
   add: typeof ISSUE_TYPES;
   enable: OrgType[];
   retype: Retype[];
   /** Issues in archived repositories, which GitHub keeps read-only, so they keep their type. */
   held: Retype[];
   disable: OrgType[];
-  /** Enabled types outside the work model an issue in an archived repository holds, so left enabled. */
+  /** Enabled types outside the work model an issue onboard does not retype holds, so left enabled. */
   kept: OrgType[];
+  /** Issues found holding another type after the plan the owner approved was shown, so not retyped this run. */
+  late: Retype[];
 }
 
 const same = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCase();
@@ -161,7 +165,19 @@ export async function typesPlan(sys: Sys, token: string, org: string): Promise<T
   for (const holder of holders) (holder.archived ? held : retype).push(await decide(holder));
   const extra = others.filter((type) => type.is_enabled);
   const kept = extra.filter((type) => held.some((issue) => same(issue.from, type.name)));
-  return { org, add, enable, retype, held, disable: extra.filter((type) => !kept.includes(type)), kept };
+  return { org, others: others.map((type) => type.name), add, enable, retype, held, disable: extra.filter((type) => !kept.includes(type)), kept, late: [] };
+}
+
+/**
+ * The plan read again at the run, cut to what the owner approved: an issue
+ * the approved plan did not retype as now is left, and so is the type it
+ * holds, so nothing is changed that the owner did not see.
+ */
+export function withinApproved(fresh: TypesPlan, approved: TypesPlan): TypesPlan {
+  const seen = (issue: Retype): boolean => approved.retype.some((had) => had.repo === issue.repo && had.number === issue.number && had.to === issue.to);
+  const late = fresh.retype.filter((issue) => !seen(issue));
+  const disable = fresh.disable.filter((type) => approved.disable.some((had) => had.id === type.id) && !late.some((issue) => same(issue.from, type.name)));
+  return { ...fresh, retype: fresh.retype.filter(seen), disable, kept: [...fresh.kept, ...fresh.disable.filter((type) => !disable.includes(type))], late };
 }
 
 /** Whether the plan changes anything. */
@@ -180,6 +196,7 @@ export function typesDetail(plan: TypesPlan): string {
     ...(plan.enable.length > 0 ? [`enable ${plan.enable.length}`] : []),
     ...(plan.retype.length > 0 ? [`retype ${plan.retype.length}`] : []),
     ...(plan.disable.length > 0 ? [`disable ${plan.disable.length}`] : []),
+    ...(plan.kept.length > 0 ? [`keep ${plan.kept.length}`] : []),
   ];
   return parts.length > 0 ? `org-wide: ${parts.join(', ')}` : 'org-wide, the work model’s alone';
 }
@@ -247,10 +264,14 @@ export async function applyTypes(sys: Sys, io: Output, token: string, plan: Type
     io.out(`✓ disabled the issue types ${names(plan.disable)} in ${org}, outside the work model, once no issue held them; not deleted, so they can be enabled again`);
   }
   for (const issue of plan.held) io.out(`- ${issue.repo}#${issue.number} keeps ${issue.from}: ${issue.repo} is archived, which GitHub keeps read-only`);
-  if (plan.kept.length > 0) io.out(`- left ${names(plan.kept)} enabled in ${org}, since an issue in an archived repository holds ${plan.kept.length === 1 ? 'it' : 'them'}`);
+  for (const issue of plan.late) io.out(`- ${issue.repo}#${issue.number} keeps ${issue.from}: onboard found it after showing its plan`);
+  if (plan.kept.length > 0) io.out(`- left ${names(plan.kept)} enabled in ${org}, since an issue onboard did not retype holds ${plan.kept.length === 1 ? 'it' : 'them'}`);
   io.out(`✓ issue types in ${org}: ${names(ISSUE_TYPES)}`);
   const archived = [...new Set(plan.held.map((issue) => issue.repo))];
-  return archived.length > 0 ? [`issue types: unarchive ${archived.join(', ')}, then niyam onboard again, to retype ${plan.held.map((issue) => `${issue.repo}#${issue.number}`).join(', ')} and disable ${names(plan.kept)}`] : [];
+  return [
+    ...(archived.length > 0 ? [`issue types: unarchive ${archived.join(', ')}, then niyam onboard again, to retype ${plan.held.map((issue) => `${issue.repo}#${issue.number}`).join(', ')}`] : []),
+    ...(plan.late.length > 0 ? [`issue types: niyam onboard again, to retype ${plan.late.map((issue) => `${issue.repo}#${issue.number}`).join(', ')}, found after the plan`] : []),
+  ];
 }
 
 /** Sets a type enabled or disabled, sending its name, description and colour back, since GitHub's PUT takes them all. */

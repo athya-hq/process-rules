@@ -1,5 +1,5 @@
 import { API } from './agent.ts';
-import { applyTypes, pages, typesPlan, typesQuestion } from './issue-types.ts';
+import { type TypesPlan, applyTypes, pages, typesPlan, typesQuestion, withinApproved } from './issue-types.ts';
 import type { Output, Sys } from './types.ts';
 
 export { ISSUE_TYPES } from './issue-types.ts';
@@ -141,6 +141,8 @@ export async function setUpBoard(
   token: string,
   /** The Project's title; `<repo> work` when the settings name none. */
   projectTitle?: string,
+  /** The issue types plan the owner approved, when shown before: the run changes nothing beyond it. */
+  approved?: TypesPlan,
 ): Promise<BoardSetUp | undefined> {
   const found = await sys.http(`${API}/repos/${slug}`, { token });
   const raw = found.json as { node_id?: unknown; name?: unknown; owner?: { login?: unknown; type?: unknown } } | null;
@@ -158,7 +160,8 @@ export async function setUpBoard(
   const typesByHand: string[] = [];
   if (repo.organisation) {
     // Read again as the owner, who sees every repository in the organisation, not only those the agent can.
-    const plan = await typesPlan(sys, token, repo.ownerLogin);
+    const read = await typesPlan(sys, token, repo.ownerLogin);
+    const plan = approved ? withinApproved(read, approved) : read;
     const question = typesQuestion(plan, repo.name);
     if (question !== undefined && !(await confirm(question, 'issue types'))) return stopped(io, 'issue types');
     typesByHand.push(...(await applyTypes(sys, io, token, plan)));
