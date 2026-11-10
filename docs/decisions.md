@@ -1128,3 +1128,31 @@
   the old body to 500 characters (it still argues in the comment and links
   no page); reading the page link from the slice body (a page link in a
   slice is evidence, not the ask's page).
+- **2026-11-10 — Record: open issues with no type get one.** The record
+  above left issues with no type at all as another question for the owner,
+  who answered it: 38 open issues across athya-hq had none (sub-issues of a
+  Work item, coordinator notes, chat approval records, a monthly secret
+  rotation reminder a workflow of athya_mono's files, old bugs), and the
+  owner wants them typed as a proper solution, in the same run. Now
+  `onboard`'s issue types step also lists each repository's open issues with
+  `type=none` and types them by the same rule, under the plan's one yes, which
+  gains one more fact: a sub-issue of a Slice is a State. Closed issues with
+  no type are left as they are, as the plan says. A repository's Approvals
+  issue, named by `"approvals"` in its settings on the default branch, keeps
+  no type, as the plan says: a standing record, never closed, that no work
+  model type fits, and one the work rules find by number. The plan now shows
+  every issue it types, consecutive ones typed alike on one row, rather than
+  the first ten. To keep them from coming back, the client workflow's
+  `process-rules-asks` job, which already has `issues: write`, also starts
+  on an issue opened or reopened, and the shared workflow's new `Issue type`
+  job runs `niyam issue-type`, which types an issue with no type by the same
+  rule; the `needs-owner` job now runs on the `labeled` issue event alone.
+  `issues: write` sets an issue's type: the weekly job's undo issues
+  (process-rules-sandbox#15, athya_mono#2514) were opened as Briefs by that
+  token. `doctor` warns of open issues with no type here. Rejected: a rule
+  reading titles or labels (none that the CLI writes says Decision; #813's
+  title says "decision" but carries no `Review:` field); typing the Approvals
+  issue a Brief (it would read as a request a pull request closes); a fifth
+  client job (the asks job already writes to issues, so one line each in its
+  trigger and its condition upgrades a 0.6.3 workflow); editing athya_mono's
+  `rotate-secrets.yml` (the job types what it files).

@@ -729,7 +729,10 @@ closes a merged pull request's slice, and runs on closed pull requests; a
 workflow with those three jobs alone gets the `process-rules-asks` job, with
 the comment and label triggers and the hourly cron it runs on, and the weekly
 job leaves that cron alone; a 0.5.28 `process-rules-asks` job, which any
-commenter's ask started, starts on an owner's, member's or collaborator's alone; a
+commenter's ask started, starts on an owner's, member's or collaborator's alone;
+a 0.6.3 one, which the approved label alone of the issue events started, starts
+on an issue opened or reopened too (see Issue types), unless the client changed
+its `issues:` trigger; a
 workflow already split into its jobs keeps everything but its version pins, which move to the
 new release, the one branch pushes run on, which follows a changed default
 branch, and the one cron the weekly job runs on, which follows a changed
@@ -790,19 +793,33 @@ issue that holds one, open or closed, in any of the organisation's
 repositories, a work model type from GitHub's facts about it:
 
 - a sub-issue of a Work item becomes a Slice;
+- a sub-issue of a Slice becomes a State, an experience state of that slice;
 - an issue with sub-issues becomes a Work item;
 - any other becomes a Brief.
 
+Each open issue with no type at all, in any of the organisation's
+repositories, gets one by the same rule, under the same yes. A repository's
+Approvals issue, the one its settings (`.github/niyam.json`, or
+`.github/process-rules.json`, on its default branch) name as `"approvals":
+N`, is left with no type, and the plan says so: it is a standing record the
+owner answers batches on, never closed, which none of the five fits, and the
+work rules find it by its number, not its type. A closed issue with no type
+is left as it is, and the plan says that too. No rule reads a title or a
+label: the CLI writes neither for a Decision, so a Decision is typed by hand.
+
 An issue whose parent is being retyped is read as the parent's new type, so
 a Task with Task sub-issues becomes a Work item with Slices. The plan names
-each issue it retypes (the first ten; the pull request's description names
-them all) and each type it disables, and the one yes covers them. The agent
+every issue it types, a run of consecutive ones in a repository that one
+rule types alike on one row (the question names the first ten), and each
+type it disables, and the one yes covers them. The agent
 reads the organisation's types, but only the repositories it can see, so
-where a type outside the work model exists, `onboard` signs you in before the
+where a type outside the work model exists, or an issue to type, `onboard`
+signs you in before the
 plan and reads every repository as you: the plan shows what the yes
 approves. The run reads again and changes nothing beyond it: an issue found
-only after the plan keeps its type, that type stays enabled, and "By hand:"
-says to run `onboard` again. A dry run signs in to nothing, so it lists what
+only after the plan keeps its type, or its lack of one, that type stays
+enabled, and "By hand:" says to run `onboard` again. A dry run signs in to
+nothing, so it lists what
 the agent can see. It retypes every issue first and disables a type only then, so no
 issue is left holding a disabled type: GitHub hides a disabled type on the
 issues that hold it and shows it again if it is enabled. `onboard` disables
@@ -816,11 +833,27 @@ default GitHub adds later. Disabling a type needs an organisation owner
 (`admin:org`); retyping an issue needs write access to its repository. Both
 come from the owner's sign-in for the run.
 
+**New issues get a type as they open.** With `board` on, the client
+workflow's `process-rules-asks` job also starts when an issue is opened or
+reopened, and runs `niyam issue-type`, which gives an issue with no type one
+by the same rule, read from GitHub when the job runs, so a parent set as the
+issue was made counts. An issue opened with a type, the Approvals issue, and
+a repository a personal account owns are left alone. The job's
+`issues: write` sets the type: GitHub's `type` on an issue takes write access
+to issues, as the weekly job's undo issues, opened as Briefs by that token,
+show. Issue events never come from a fork, and the job reads its settings
+from the default branch and runs the CLI from the release the workflow pins,
+so an issue's author, whoever opens it, changes nothing but that issue's
+type. This covers issues a workflow of the client's own opens, such as a
+monthly reminder, as well as people's. An issue made as a Brief and only
+later made a sub-issue keeps Brief: no event starts the job then, so retype
+it by hand.
+
 `doctor` on a Mac, in a repository whose settings turn the board on, warns (`▲`)
 when the organisation has an enabled type outside the work model or lacks
 one of the work model's, naming the issues in this repository that hold
-another type; the fix is the owner running `onboard` again. Issues with no
-type are left as they are.
+another type, and when an open issue here has no type, but the Approvals
+issue; the fix is the owner running `onboard` again.
 
 ### Hooks that call GitHub
 
