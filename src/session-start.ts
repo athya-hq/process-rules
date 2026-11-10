@@ -4,6 +4,7 @@ import {
   anyLogin,
   either,
   loadSettings,
+  settingsPathIn,
   lockScript,
   pathsFor,
   sameLogin,
@@ -189,8 +190,11 @@ async function cloudStart(sys: Sys): Promise<Said> {
 function start(sys: Sys): Said {
   let settings: Settings | undefined;
   let settingsProblem = '';
+  let file: string | undefined;
   try {
-    settings = loadSettings(sys, repoRoot(sys));
+    const root = repoRoot(sys);
+    file = settingsPathIn(sys, root);
+    settings = loadSettings(sys, root);
   } catch (error) {
     settingsProblem = message(error);
   }
@@ -212,7 +216,7 @@ function start(sys: Sys): Said {
     line: `niyam: GitHub is locked out of this session: ${reason}. Do not work around the lock; ${fix}.`,
   });
   if (!settings) return locked(settingsProblem, `tell ${owner}`);
-  const here = agentHere(sys, settings.agents);
+  const here = agentHere(sys, settings.agents, file);
   if ('problem' in here) return locked(here.problem, `ask ${owner} to run niyam machine <agent> for one of them`);
   const { agent } = here;
   const paths = pathsFor(sys.home, agent);

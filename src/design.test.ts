@@ -270,6 +270,18 @@ describe('prDesign', () => {
     ]);
   });
 
+  it('reads older settings from .github/process-rules.json in a repo onboarded before niyam, naming that file (P-50)', async () => {
+    const sys = actions([state(30, LINK)]);
+    delete sys.env.FIGMA_LIBRARY;
+    sys.files.delete(`${ROOT}/.github/niyam.json`);
+    sys.files.set(`${ROOT}/.github/process-rules.json`, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity', 'design'], figma: { library: 'LIB1' } }));
+    assert.deepEqual((await check(sys)).out, [
+      '::warning::.github/process-rules.json lists "design", which is now named "figma"; run niyam onboard to rename it',
+      '::warning::.github/process-rules.json names the Figma library; move it to the FIGMA_LIBRARY Actions secret and take the top-level "figma" object out of the settings (the figma feature stays)',
+      '✓ pr-design: 1 state of #12, each a frame built from the design library',
+    ]);
+  });
+
   it('is off when the figma feature is', async () => {
     const sys = actions([]);
     sys.files.set(`${ROOT}/.github/niyam.json`, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity'] }));

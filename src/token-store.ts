@@ -29,7 +29,8 @@ export interface TokenStore {
  * The keychain item holding the agent account's token: service, account =
  * login. Releases before niyam stored it under the service `process-rules`,
  * which is still read and never deleted, so an older CLI on the Mac keeps
- * working (P-50).
+ * working (P-50). While that entry is there, a new token is stored under
+ * both, so an older CLI never reads one `machine` replaced.
  */
 export const KEYCHAIN_SERVICE = 'niyam';
 export const OLD_KEYCHAIN_SERVICE = 'process-rules';
@@ -53,10 +54,12 @@ export const KEYCHAIN: TokenStore = {
   store(sys, agent, token) {
     // Only characters the `security -i` prompt reads as one word.
     if (!/^[A-Za-z0-9_]+$/.test(token)) return false;
+    // While the old entry is there, a new token goes under both names, so an older CLI never reads a replaced one.
+    const services = readFrom(sys, OLD_KEYCHAIN_SERVICE, agent) === undefined ? [KEYCHAIN_SERVICE] : [KEYCHAIN_SERVICE, OLD_KEYCHAIN_SERVICE];
     const result = sys.exec(SECURITY, ['-i'], {
-      input: `add-generic-password -U -s ${KEYCHAIN_SERVICE} -a ${agent} -w ${token}\n`,
+      input: services.map((service) => `add-generic-password -U -s ${service} -a ${agent} -w ${token}\n`).join(''),
     });
-    return result.code === 0 && readFrom(sys, KEYCHAIN_SERVICE, agent) === token;
+    return result.code === 0 && services.every((service) => readFrom(sys, service, agent) === token);
   },
   readCommand: (agent) => `${find(KEYCHAIN_SERVICE, agent)} || ${find(OLD_KEYCHAIN_SERVICE, agent)}`,
   olderReadCommands: (agent) => [find(OLD_KEYCHAIN_SERVICE, agent)],

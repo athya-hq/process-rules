@@ -153,6 +153,16 @@ describe('agentHere', () => {
     assert.deepEqual(agentHere(sys, [AGENT, 'OtherBot']), { agent: 'OtherBot' });
   });
 
+  it('names the settings file the repo has, the one before niyam included (P-50)', () => {
+    const sys = withSettings({}, ['ThirdBot']);
+    const here = agentHere(sys, [AGENT, 'OtherBot'], '.github/process-rules.json');
+    assert.ok('problem' in here && here.problem.startsWith('.github/process-rules.json names the agents'), JSON.stringify(here));
+    const older = new FakeSys();
+    older.files.delete(`${ROOT}/${SETTINGS_PATH}`);
+    older.files.set(`${ROOT}/${OLD_SETTINGS_PATH}`, JSON.stringify({ owner: 'example-owner', agent: [AGENT, 'OtherBot'] }));
+    assert.throws(() => agentFrom(older, undefined), /\.github\/process-rules\.json names the agents/);
+  });
+
   it('refuses when none of the agents is set up here', () => {
     const sys = withSettings({}, ['ThirdBot']);
     assert.deepEqual(agentHere(sys, [AGENT, 'OtherBot']), {

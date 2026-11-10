@@ -54,8 +54,12 @@ describe('checks.yml', () => {
     });
 
     it('names the new file when neither is there, and the file it read when that is wrong', () => {
-      assert.equal(repoWith({}).stdout.trim(), '::error file=.github/niyam.json::.github/niyam.json is missing; run niyam onboard');
-      assert.match(repoWith({ 'process-rules.json': '[]' }).stdout, /^::error file=\.github\/process-rules\.json::/);
+      const missing = repoWith({});
+      assert.equal(missing.status, 1);
+      assert.equal(missing.stdout.trim(), '::error file=.github/niyam.json::.github/niyam.json is missing; run niyam onboard');
+      const wrong = repoWith({ 'process-rules.json': '[]' });
+      assert.equal(wrong.status, 1);
+      assert.match(wrong.stdout, /^::error file=\.github\/process-rules\.json::/);
     });
   });
 

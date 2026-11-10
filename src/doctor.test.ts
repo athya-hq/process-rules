@@ -274,6 +274,10 @@ describe('doctor', () => {
 
   it('warns of a session file a release before niyam wrote, which still works (P-50)', async () => {
     const sys = healthy();
+    // A Mac set up before niyam: the token under the old keychain service alone.
+    const token = sys.keychain.get(`niyam/${AGENT}`) as string;
+    sys.keychain.delete(`niyam/${AGENT}`);
+    sys.keychain.set(`process-rules/${AGENT}`, token);
     sys.files.set(SESSION, sessionScript(AGENT, AGENT_ID, pathsFor(HOME, AGENT), KEYCHAIN, '/usr/bin/security find-generic-password -s process-rules -a ExampleBot -w 2>/dev/null'));
     const { code, out } = await check(sys);
     assert.equal(code, 0);

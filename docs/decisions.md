@@ -1016,25 +1016,6 @@
 - **2026-11-10 — Record: process-rules becomes niyam (P-49).** The owner
   chose the name niyam (नियम, rule) on 2026-11-03 and said go on 2026-11-10;
   athya_mono's approved 0114 spec v5 holds it as W-39
-- **2026-11-10 — Record: the lock reads niyam names, old ones too (P-50).**
-  The owner approved #227 with a 👍 on its own, since the keychain service and
-  the settings file are what P-17's lock reads. The agent's token is stored
-  under the keychain service `niyam`; a token found only under
-  `process-rules` is still read, and `machine` copies it to `niyam`, leaving
-  the old entry for older CLIs on the Mac. The session file now reads
-  `niyam`, then `process-rules`; one an older release wrote, which reads the
-  old entry alone, still counts for session-start and as-agent, and `doctor`
-  marks it ▲ until `machine` rewrites it, so no session locks out after the
-  upgrade. The settings file is `.github/niyam.json`; session-start, the
-  guard, as-agent, doctor, the work rules and the shared checks read
-  `.github/process-rules.json` where it is missing, and name the file they
-  read. `onboard` writes `.github/niyam.json` in a repo that has neither and
-  keeps an existing `.github/process-rules.json`, which an older CLI on
-  another Mac still reads. Nothing else in P-17 or P-18 changes: the lock's
-  placeholder token, the SSH refusal, `~/.config/process-rules` and
-  `PROCESS_RULES_AGENT` stay. Rejected: moving the token (an older CLI would
-  lose it); renaming an adopter's settings file now (an older CLI's
-  session-start would lock out).
   (athya-hq/athya_mono#3210): the repository moves to veda-hq/niyam and the
   package is `@veda-hq/niyam`. The owner approved the plan
   (https://claude.ai/artifact/HEQyFtZsxHKDLrt6GqQtEq) with a 👍 on #226, on
@@ -1064,3 +1045,25 @@
   workflow file, the cloud path and `~/.config` now (each needs every
   adopter re-onboarded, the job ids a ruleset edit in the same hour; a later
   slice); publishing to npm now (tarballs as before; its own slice).
+- **2026-11-10 — Record: the lock reads niyam names, old ones too (P-50).**
+  The owner approved #227 with a 👍 on its own, since the keychain service and
+  the settings file are what P-17's lock reads. The agent's token is stored
+  under the keychain service `niyam`; a token found only under
+  `process-rules` is still read, and `machine` copies it to `niyam`, leaving
+  the old entry for older CLIs on the Mac; while that entry is there, a token
+  `machine` stores goes under both names, so an older CLI never reads one it
+  replaced (review). The session file now reads
+  `niyam`, then `process-rules`; one an older release wrote, which reads the
+  old entry alone, still counts for session-start and as-agent, and `doctor`
+  marks it ▲ until `machine` rewrites it, so no session locks out after the
+  upgrade. The settings file is `.github/niyam.json`; session-start, the
+  guard, as-agent, doctor, the work rules and the shared checks read
+  `.github/process-rules.json` where it is missing, and name the file they
+  read, and the workflow's schedule comment names the file in use. `onboard`
+  writes `.github/niyam.json` in a repo that has neither and
+  keeps an existing `.github/process-rules.json`, which an older CLI on
+  another Mac still reads. Nothing else in P-17 or P-18 changes: the lock's
+  placeholder token, the SSH refusal, `~/.config/process-rules` and
+  `PROCESS_RULES_AGENT` stay. Rejected: moving the token (an older CLI would
+  lose it); renaming an adopter's settings file now (an older CLI's
+  session-start would lock out).

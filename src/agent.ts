@@ -116,14 +116,14 @@ export function agentsSetUp(sys: Sys): string[] {
  * the list, that one; with more, the one `machine` set up here. None set up,
  * or more than one, is a problem: never a guess.
  */
-export function agentHere(sys: Sys, agents: readonly string[]): { agent: string } | { problem: string } {
+export function agentHere(sys: Sys, agents: readonly string[], file: string = SETTINGS_PATH): { agent: string } | { problem: string } {
   if (agents.length === 1) return { agent: agents[0] as string };
   const here = agents.filter((agent) => anyLogin(agentsSetUp(sys), agent));
   if (here.length === 1) return { agent: here[0] as string };
   return {
     problem: here.length === 0
-      ? `${SETTINGS_PATH} names the agents ${either(agents)}, and niyam machine has set up none of them on this machine`
-      : `${SETTINGS_PATH} names the agents ${either(agents)}, and niyam machine has set up ${here.join(' and ')} on this machine, so which one this session works as cannot be told; remove the others' folders under ~/.config/process-rules`,
+      ? `${file} names the agents ${either(agents)}, and niyam machine has set up none of them on this machine`
+      : `${file} names the agents ${either(agents)}, and niyam machine has set up ${here.join(' and ')} on this machine, so which one this session works as cannot be told; remove the others' folders under ~/.config/process-rules`,
   };
 }
 
@@ -142,7 +142,7 @@ export function agentFrom(sys: Sys, named: string | undefined): string {
   if (top.code !== 0 || !hasSettings(sys, root)) {
     throw new Error(`name the agent account after the command, or run it in a repo whose ${SETTINGS_PATH} names one`);
   }
-  const here = agentHere(sys, loadSettings(sys, root).agents);
+  const here = agentHere(sys, loadSettings(sys, root).agents, settingsPathIn(sys, root));
   if ('problem' in here) throw new Error(`${here.problem}; name the agent account after the command`);
   return here.agent;
 }

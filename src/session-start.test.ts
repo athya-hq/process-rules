@@ -74,6 +74,10 @@ describe('sessionStart', () => {
 
   it('gives the agent identity with a session file a release before niyam wrote, which reads the old keychain entry (P-50)', async () => {
     const sys = ready();
+    // A Mac set up before niyam: the token under the old keychain service alone.
+    const token = sys.keychain.get(`niyam/${AGENT}`) as string;
+    sys.keychain.delete(`niyam/${AGENT}`);
+    sys.keychain.set(`process-rules/${AGENT}`, token);
     const older = sessionScript(AGENT, AGENT_ID, pathsFor(HOME, AGENT), KEYCHAIN, '/usr/bin/security find-generic-password -s process-rules -a ExampleBot -w 2>/dev/null');
     sys.files.set(SESSION, older);
     const { code, out, env } = await start(sys);

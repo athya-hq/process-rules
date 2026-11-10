@@ -334,7 +334,8 @@ Claude cloud sessions below).
    spinner while it works, and ends with the pull request and a short "By
    hand:" list of what GitHub's API cannot do.
 
-   It writes `.github/process-rules.json`, adds to `.claude/settings.json`
+   It writes `.github/niyam.json` (in a repo onboarded before niyam it keeps
+   `.github/process-rules.json` and writes there), adds to `.claude/settings.json`
    the lock in `env`, a SessionStart hook running `process-rules
    session-start`, a PreToolUse hook running `process-rules guard` and a
    `permissions.allow` rule for `process-rules review-thread` (hooks keep the
@@ -430,7 +431,7 @@ Claude cloud sessions below).
    a feature that is off; they apply from the next pull request.
 
 The shared checks run five jobs. **Settings** validates
-`.github/process-rules.json`, and fails when a job's `process-rules-ref`
+`.github/niyam.json`, else `.github/process-rules.json`, and fails when a job's `process-rules-ref`
 names another release than the `checks.yml@` line it calls (see Releases and
 upgrading). **PR identity** runs on pull requests: every
 commit that claims the agent (its login or its no-reply address) must be
@@ -790,7 +791,7 @@ exit "$status"
 
 `niyam as-agent --session <session_id> -- <command> [args...]` runs
 the command only when session-start recorded, for that session id, that the
-session works as one of the agents `.github/process-rules.json` names, the
+session works as one of the agents the settings file names, the
 record the guard reads. On a Mac the command gets what the session file
 gives a shell: the agent's identity, the lock's variables removed, and
 `GH_TOKEN` read from the keychain as it starts. In a cloud session it gets
@@ -1003,7 +1004,7 @@ P-49 and P-50). What changed, and what still reads or runs the old name:
 | Package | `@veda-hq/niyam` | each release also attaches the same CLI as `athya-hq-process-rules-<version>.tgz`, for 0.6.x's `upgrade` |
 | Command | `niyam` | `process-rules`, a second bin; typed by the owner it also names `niyam` |
 | Settings file | `.github/niyam.json` | `.github/process-rules.json`, read where the new one is missing; `onboard` keeps a repo's existing file |
-| Keychain item | service `niyam` | service `process-rules`, read where the new one is missing; `machine` copies it to `niyam` and leaves it |
+| Keychain item | service `niyam` | service `process-rules`, read where the new one is missing; `machine` copies it to `niyam`, and while it is there a new token goes under both |
 | Workflow pin | `veda-hq/niyam/.github/workflows/checks.yml@v…` | `athya-hq/process-rules/…`, which `onboard` moves |
 
 Unchanged, because adopters' committed files and hooks name them: the hook

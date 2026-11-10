@@ -76,10 +76,26 @@ describe('the keychain before niyam (P-50)', () => {
     assert.equal(KEYCHAIN.onlyOlder?.(sys, AGENT), false);
   });
 
-  it('stores under niyam alone, leaving the old entry for older CLIs', () => {
+  it('stores under niyam alone when there is no old entry', () => {
+    const sys = withEntries({});
+    assert.equal(KEYCHAIN.store(sys, AGENT, 'ghp_new'), true);
+    assert.deepEqual(Object.fromEntries(sys.keychain), { 'niyam/ExampleBot': 'ghp_new' });
+  });
+
+  it('keeps an old entry in step, so an older CLI never reads a token machine replaced', () => {
     const sys = withEntries({ 'process-rules': 'ghp_old' });
-    assert.equal(KEYCHAIN.store(sys, AGENT, 'ghp_old'), true);
-    assert.deepEqual(Object.fromEntries(sys.keychain), { 'process-rules/ExampleBot': 'ghp_old', 'niyam/ExampleBot': 'ghp_old' });
+    assert.equal(KEYCHAIN.store(sys, AGENT, 'ghp_new'), true);
+    assert.deepEqual(Object.fromEntries(sys.keychain), { 'process-rules/ExampleBot': 'ghp_new', 'niyam/ExampleBot': 'ghp_new' });
+  });
+
+  it('reports a keychain that took the new name but not the old one', () => {
+    const sys = withEntries({ 'process-rules': 'ghp_old' });
+    sys.execOverride = (call) => {
+      if (call.args[0] !== '-i') return undefined;
+      sys.keychain.set(`niyam/${AGENT}`, 'ghp_new');
+      return { code: 0, stdout: '', stderr: '' };
+    };
+    assert.equal(KEYCHAIN.store(sys, AGENT, 'ghp_new'), false);
   });
 
   it("takes a session file an older release wrote, one that reads the old entry, as an older one, not a stranger's", () => {

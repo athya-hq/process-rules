@@ -1764,6 +1764,15 @@ describe('onboardArgs', () => {
 });
 
 describe('workflow', () => {
+  it("names the settings file in use above a schedule the settings set, the one before niyam included (P-50)", () => {
+    assert.match(workflow('main', '0.1.0', false, '5 4 * * 2'), /^ {2}# The decisions job: cron 5 4 \* \* 2, UTC, as "schedule" in \.github\/niyam\.json sets it\.$/m);
+    const older = workflow('main', '0.1.0', false, '5 4 * * 2', '.github/process-rules.json');
+    assert.match(older, /^ {2}# The decisions job: cron 5 4 \* \* 2, UTC, as "schedule" in \.github\/process-rules\.json sets it\.$/m);
+    assert.deepEqual(workflowUpdate(older, 'main', '0.1.0', false, '5 4 * * 2', '.github/process-rules.json'), { kind: 'same' });
+    const moved = workflowUpdate(older, 'main', '0.1.0', false, '6 4 * * 2', '.github/process-rules.json');
+    assert.match('text' in moved ? moved.text : '', /cron 6 4 \* \* 2, UTC, as "schedule" in \.github\/process-rules\.json sets it/);
+  });
+
   it('moves a pin of athya-hq/process-rules, the repo before niyam, to veda-hq/niyam at the new release', () => {
     const before = workflow('main', '0.6.1', false).replaceAll('veda-hq/niyam/', 'athya-hq/process-rules/');
     assert.deepEqual(workflowPins(before), Array(8).fill('0.6.1'), 'the old repo still counts as a pin');

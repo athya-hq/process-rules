@@ -170,10 +170,10 @@ export const OLDER_GUARD_COMMANDS = [
 ];
 
 /** The comment above the workflow's schedule, naming when the decisions job runs. */
-function scheduleComment(schedule: string): string {
+function scheduleComment(schedule: string, settings: string = SETTINGS_PATH): string {
   return schedule === DEFAULT_SCHEDULE
     ? '  # The weekly decisions job: Mondays, 06:17 UTC.'
-    : `  # The decisions job: cron ${schedule}, UTC, as "schedule" in ${SETTINGS_PATH} sets it.`;
+    : `  # The decisions job: cron ${schedule}, UTC, as "schedule" in ${settings} sets it.`;
 }
 
 /** The pull request events the workflow runs on, with why: since P-46, closed too. */
@@ -304,7 +304,7 @@ function addAsksJob(before: string, version: string, figma: boolean): string | u
 }
 
 /** The workflow's head, down to its jobs, which every template shares; `asks` adds the needs-owner job's triggers. */
-function workflowHead(branch: string, version: string, comments: string[], schedule = DEFAULT_SCHEDULE, types = TRIGGER_TYPES, asks = true): string[] {
+function workflowHead(branch: string, version: string, comments: string[], schedule = DEFAULT_SCHEDULE, types = TRIGGER_TYPES, asks = true, settings: string = SETTINGS_PATH): string[] {
   return [
     `# Written by process-rules onboard: the shared process-rules checks at v${version}.`,
     ...comments,
@@ -316,7 +316,7 @@ function workflowHead(branch: string, version: string, comments: string[], sched
     '  push:',
     `    branches: [${JSON.stringify(branch)}]`,
     ...(asks ? ASK_TRIGGERS : []),
-    scheduleComment(schedule),
+    scheduleComment(schedule, settings),
     '  schedule:',
     `    - cron: '${schedule}'`,
     ...(asks ? HOURLY_CRON : []),
@@ -372,7 +372,7 @@ function callChecks(version: string, secrets: string[]): string[] {
  * The Figma secrets are passed only when the figma feature is on; the
  * weekly job runs on the settings' `schedule`.
  */
-export function workflow(branch: string, version: string, figma: boolean, schedule = DEFAULT_SCHEDULE): string {
+export function workflow(branch: string, version: string, figma: boolean, schedule = DEFAULT_SCHEDULE, settings: string = SETTINGS_PATH): string {
   const secrets = figma ? FIGMA_SECRETS : [];
   return [
     ...workflowHead(
@@ -383,6 +383,9 @@ export function workflow(branch: string, version: string, figma: boolean, schedu
         SPLIT_COMMENT,
       ],
       schedule,
+      TRIGGER_TYPES,
+      true,
+      settings,
     ),
     '  # Pull request and push runs: read-only.',
     '  process-rules:',
@@ -472,11 +475,12 @@ export function workflowUpdate(
   version: string,
   figma: boolean,
   schedule = DEFAULT_SCHEDULE,
+  settings: string = SETTINGS_PATH,
 ):
   | { kind: 'same' }
   | { kind: 'write' | 'replace-older' | 'replace'; text: string; from?: string }
   | { kind: 'repin'; text: string; from?: string; branch?: string; schedule?: string; secrets?: true; merged?: true; asks?: true; authors?: true } {
-  const wanted = workflow(branch, version, figma, schedule);
+  const wanted = workflow(branch, version, figma, schedule, settings);
   if (before === undefined) return { kind: 'write', text: wanted };
   if (before === wanted) return { kind: 'same' };
   const pins = workflowPins(before);
@@ -489,13 +493,13 @@ export function workflowUpdate(
   const merged = /^ {2}process-rules-merged:\s*$/m.test(before);
   const added = split && !merged && pins.length === 4 && from !== undefined ? addMergedJob(before, from, figma) : undefined;
   if (added !== undefined) {
-    const update = workflowUpdate(added, branch, version, figma, schedule);
+    const update = workflowUpdate(added, branch, version, figma, schedule, settings);
     return { ...(update.kind === 'repin' ? update : { text: added }), kind: 'repin', merged: true };
   }
   const asks = /^ {2}process-rules-asks:\s*$/m.test(before);
   const withAsks = split && merged && !asks && pins.length === 6 && from !== undefined ? addAsksJob(before, from, figma) : undefined;
   if (withAsks !== undefined) {
-    const update = workflowUpdate(withAsks, branch, version, figma, schedule);
+    const update = workflowUpdate(withAsks, branch, version, figma, schedule, settings);
     return { ...(update.kind === 'repin' ? update : { text: withAsks }), kind: 'repin', asks: true };
   }
   if (split && merged && asks && pins.length === 8) {
@@ -512,7 +516,7 @@ export function workflowUpdate(
         moved ? `${head}${flowScalar(branch, quote)}${tail}` : line,
       )
       .replace(SCHEDULE, (line: string, comment: string | undefined, head: string, quote: string, _old: string, tail: string) =>
-        rescheduled ? `${comment === undefined ? '' : `${scheduleComment(schedule)}\n`}${head}${quote || "'"}${schedule}${quote || "'"}${tail}` : line,
+        rescheduled ? `${comment === undefined ? '' : `${scheduleComment(schedule, settings)}\n`}${head}${quote || "'"}${schedule}${quote || "'"}${tail}` : line,
       );
     const secrets = figma ? `${FIGMA_SECRETS.join('\n')}\n` : '';
     const text = pinned.replace(SECRETS_AFTER_REF, (_, ref: string) => `${ref}${secrets}`);
@@ -889,7 +893,7 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
       return 1;
     }
     // With several agents, the one named, else the one set up here.
-    const here = namedAgent ? { agent: namedAgent } : agentHere(sys, settings.agents);
+    const here = namedAgent ? { agent: namedAgent } : agentHere(sys, settings.agents, settingsFile);
     if ('problem' in here) {
       io.err(`onboard: ${here.problem}; name the owner and the agent: niyam onboard <owner> <agent>`);
       return 1;
@@ -1096,11 +1100,11 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
   // The shared checks run only for features that need them.
   const workflowFrom = workflowPins(fileAt(WORKFLOW_PATH) ?? '')[0];
   const workflowFor = (branch: string): void => {
-    const update = workflowUpdate(fileAt(WORKFLOW_PATH), branch, version, on('figma'), schedule);
+    const update = workflowUpdate(fileAt(WORKFLOW_PATH), branch, version, on('figma'), schedule, settingsFile);
     if (update.kind !== 'same') change(WORKFLOW_PATH, update.text, workflowWhat(update, version, on('figma'), settingsFile));
   };
   if (workflowNeeded) {
-    const update = planned === undefined ? undefined : workflowUpdate(fileAt(WORKFLOW_PATH), planned, version, on('figma'), schedule);
+    const update = planned === undefined ? undefined : workflowUpdate(fileAt(WORKFLOW_PATH), planned, version, on('figma'), schedule, settingsFile);
     if (update === undefined) pull.push({ label: 'workflow', detail: fileAt(WORKFLOW_PATH) === undefined ? 'new' : 'write or update' });
     else if (update.kind !== 'same') pull.push({ label: 'workflow', detail: workflowDetail(update, version, on('figma')) });
   }

@@ -240,8 +240,10 @@ export class FakeSys implements Sys {
       return token ? ok(`${token}\n`) : fail('not found');
     }
     if (command === '/usr/bin/security' && args[0] === '-i') {
-      const match = /-s (\S+) -a (\S+) -w (\S+)/.exec(options.input ?? '');
-      if (match?.[1] && match[2] && match[3]) this.keychain.set(`${match[1]}/${match[2]}`, match[3]);
+      // One add-generic-password per line, as `security -i` reads them.
+      for (const match of (options.input ?? '').matchAll(/-s (\S+) -a (\S+) -w (\S+)/g)) {
+        if (match[1] && match[2] && match[3]) this.keychain.set(`${match[1]}/${match[2]}`, match[3]);
+      }
       return ok();
     }
     return fail(`unexpected ${command}`);

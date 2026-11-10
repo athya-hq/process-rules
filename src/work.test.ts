@@ -1342,6 +1342,14 @@ describe('prMerged', () => {
     assert.deepEqual([...writes(off), ...writes(before)], []);
   });
 
+  it('reads the work rules off from .github/process-rules.json in a repo onboarded before niyam (P-50)', async () => {
+    const older = actions(merged('Slice: #12'));
+    older.files.delete(`${ROOT}/.github/niyam.json`);
+    older.files.set(`${ROOT}/.github/process-rules.json`, JSON.stringify({ owner: OWNER, agent: AGENT, features: ['identity'] }));
+    assert.match((await run(older)).out[0] ?? '', /^pr-merged: work-rules is off in /);
+    assert.deepEqual(writes(older), []);
+  });
+
   it('closes nothing in a personal repository', async () => {
     const sys = actions(merged('Slice: #12'));
     sys.ownerType = 'User';

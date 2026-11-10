@@ -39,11 +39,11 @@ export function featuresIn(raw: unknown): Feature[] {
 }
 
 /** A line for each feature the parsed settings list by an older name, saying what it is now. */
-export function renamedLines(raw: unknown): string[] {
+export function renamedLines(raw: unknown, file: string = SETTINGS_PATH): string[] {
   const listed = (raw as { features?: unknown } | null)?.features;
   if (!Array.isArray(listed)) return [];
   return listed.flatMap((name) =>
-    typeof name === 'string' && RENAMED.has(name.trim()) ? [`${SETTINGS_PATH} lists "${name.trim()}", which is now named "${RENAMED.get(name.trim())}"; run niyam onboard to rename it`] : [],
+    typeof name === 'string' && RENAMED.has(name.trim()) ? [`${file} lists "${name.trim()}", which is now named "${RENAMED.get(name.trim())}"; run niyam onboard to rename it`] : [],
   );
 }
 
