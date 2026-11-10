@@ -540,8 +540,9 @@ page, which the agent publishes first and names with `--page <url>` (one page
 for the whole run), argues it: what changes and why, from the slice's
 `**You will see:**` and `**Why:**` sections (a dropped State's own
 `**Why:**`), what it costs and what happens if the owner declines. Without
-`--page`, or with a link that is no published page, `propose` posts nothing
-and prints the command to run. It also refuses, posting nothing, while a
+`--page`, a proposal still to be posted is refused, posting nothing, with
+the command to run; a `--page` that is no published page is refused before
+GitHub is asked anything. It also refuses, posting nothing, while a
 body lacks those sections, naming them, and when a comment would break the
 guard's rule (a title so long the comment runs over 500 characters). The owner
 approves a proposal by reacting 👍 to it, from the phone or the web; a typed
