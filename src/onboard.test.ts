@@ -8,7 +8,7 @@ import { after, describe, it } from 'node:test';
 import { BUILT_IN, Board, COPY_URL, OWNER_TOKEN, URL, repoJson, settledViews } from './fake-board.test.ts';
 import { FIELDS, ISSUE_TYPES, LABELS } from './board.ts';
 import { AGENT, AGENT_ID, FakeSys, HOME, PULL_URL, RELEASE_SHA256, ROOT, TOKEN, capture } from './fake.test.ts';
-import { cloudRepoScript } from './cloud.ts';
+import { cloudRepoScript, releaseAsset } from './cloud.ts';
 import { CLOUD_SETUP_PATH } from './onboard-pull.ts';
 import type { HttpResult } from './types.ts';
 import { pathsFor, sessionScript } from './agent.ts';
@@ -390,8 +390,8 @@ describe('onboard', () => {
 
     const undigested = fresh();
     settled(undigested);
-    undigested.route('GET', `/repos/veda-hq/niyam/releases/tags/v${packageVersion()}`, { status: 200, json: { assets: [{ name: `athya-hq-process-rules-${packageVersion()}.tgz`, digest: null }] } });
-    assert.ok((await run(undigested, ['--dry-run'])).out.includes(`│  ! ${CLOUD_SETUP_PATH} left as it is: the v${packageVersion()} release names no sha256 for athya-hq-process-rules-${packageVersion()}.tgz`));
+    undigested.route('GET', `/repos/veda-hq/niyam/releases/tags/v${packageVersion()}`, { status: 200, json: { assets: [{ name: `${releaseAsset(packageVersion())}`, digest: null }] } });
+    assert.ok((await run(undigested, ['--dry-run'])).out.includes(`│  ! ${CLOUD_SETUP_PATH} left as it is: the v${packageVersion()} release names no sha256 for ${releaseAsset(packageVersion())}`));
 
     const down = fresh();
     settled(down);
