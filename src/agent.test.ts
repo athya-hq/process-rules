@@ -116,7 +116,7 @@ describe('agentHere', () => {
   it('refuses when none of the agents is set up here', () => {
     const sys = withSettings({}, ['ThirdBot']);
     assert.deepEqual(agentHere(sys, [AGENT, 'OtherBot']), {
-      problem: `.github/process-rules.json names the agents ${AGENT} or OtherBot, and process-rules machine has set up none of them on this machine`,
+      problem: `.github/process-rules.json names the agents ${AGENT} or OtherBot, and niyam machine has set up none of them on this machine`,
     });
   });
 
@@ -352,7 +352,7 @@ describe('GitHub reads', () => {
       scopes: CLASSIC['x-oauth-scopes'].split(', '),
       expires: new Date('2027-01-28T12:00:00Z'),
     };
-    const notClassic = 'it is not a classic token, which process-rules needs (see its docs/decisions.md)';
+    const notClassic = 'it is not a classic token, which niyam needs (see its docs/decisions.md)';
     for (const [name, token, given, problem] of [
       ['wider scopes that include the needed ones', TOKEN, { ...info, scopes: ['repo', 'workflow', 'admin:org', 'project', 'admin:ssh_signing_key'] }, undefined],
       ['a login differing only in case', TOKEN, { ...info, login: 'examplebot' }, undefined],

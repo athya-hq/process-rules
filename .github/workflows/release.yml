@@ -38,10 +38,21 @@ jobs:
       - run: pnpm check
       - name: Pack the CLI
         run: pnpm pack --pack-destination "$RUNNER_TEMP"
-      - name: Publish the release, with the CLI package
+      # The same build under the old name, for one release at least: 0.6.x's
+      # upgrade installs athya-hq-process-rules-<version>.tgz, and pnpm refuses a
+      # second global package with the bin process-rules. This one replaces the
+      # old package in place; niyam upgrade then moves it to @veda-hq/niyam.
+      - name: Pack the bridge, the same CLI under its old name
+        run: |
+          set -euo pipefail
+          cp package.json "$RUNNER_TEMP/package.json"
+          jq '.name = "@athya-hq/process-rules"' "$RUNNER_TEMP/package.json" > package.json
+          pnpm pack --pack-destination "$RUNNER_TEMP"
+          cp "$RUNNER_TEMP/package.json" package.json
+      - name: Publish the release, with the CLI package and the bridge
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
-          gh release create "$TAG" "$RUNNER_TEMP"/athya-hq-process-rules-*.tgz \
-            --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes --title "process-rules $TAG"
+          gh release create "$TAG" "$RUNNER_TEMP"/veda-hq-niyam-*.tgz "$RUNNER_TEMP"/athya-hq-process-rules-*.tgz \
+            --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes --title "niyam $TAG"

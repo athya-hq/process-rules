@@ -67,7 +67,7 @@ export function askProblem(body: Text, owners: readonly string[]): string | unde
 /** The refusal the guard prints for an ask that breaks the rule. */
 export function askRefusal(problem: string): string {
   return (
-    `process-rules: refused, because ${problem}. ` +
+    `niyam: refused, because ${problem}. ` +
     'The rule: anything the owner must read, approve or choose arrives as a published page; the comment carries only the question, the page link and how to answer, ' +
     `in ${ASK_LIMIT} characters or fewer. ` +
     `Fix: publish the page first, then post a comment of at most ${ASK_LIMIT} characters that links it, ` +

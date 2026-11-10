@@ -55,7 +55,7 @@ export async function reviewThread(sys: Sys, io: Output, args: readonly string[]
     return 1;
   };
   const token = sessionToken(sys);
-  if (!token) return refused('this session has no token; run process-rules doctor');
+  if (!token) return refused('this session has no token; run niyam doctor');
   const user = await sys.http(`${API}/user`, { token });
   const login = (user.json as { login?: string } | null)?.login;
   if (user.status !== 200 || !anyLogin(agents, login)) return refused(`review-thread answers as ${agent}, but this session's token is ${login ?? 'refused'}`);

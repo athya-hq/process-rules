@@ -368,7 +368,7 @@ describe('watchReviews', () => {
     const told = sys.requests.find((r) => r.url.endsWith('/issues/5/comments') && r.method === 'POST')?.body as { body: string };
     assert.equal(
       told.body,
-      `Vetted for the review routine on 2026-10-30: example-owner or ExampleBot wrote and last edited this decision's text, so \`reviews-due\` lists it while its text is this one. This job vets it again after their next edit.\n\n<!-- process-rules vetted sha256:${textHash('Review: 2026-12-01')} -->`,
+      `Vetted for the review routine on 2026-10-30: example-owner or ExampleBot wrote and last edited this decision's text, so \`reviews-due\` lists it while its text is this one. This job vets it again after their next edit.\n\n<!-- niyam vetted sha256:${textHash('Review: 2026-12-01')} -->`,
     );
     assert.equal(sys.requests.find((r) => r.method === 'PATCH')?.token, 'ghs_run');
   });

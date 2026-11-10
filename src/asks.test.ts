@@ -53,7 +53,7 @@ describe('the ask rule', () => {
 
   it('says the rule and the fix when it refuses', () => {
     const line = askRefusal('this comment asks the owner (x), and it links no published page');
-    assert.match(line, /^process-rules: refused, because this comment asks the owner \(x\), and it links no published page\. The rule: .* published page; .* 500 characters or fewer\. Fix: publish the page first, then post a comment of at most 500 characters that links it/);
+    assert.match(line, /^niyam: refused, because this comment asks the owner \(x\), and it links no published page\. The rule: .* published page; .* 500 characters or fewer\. Fix: publish the page first, then post a comment of at most 500 characters that links it/);
   });
 });
 

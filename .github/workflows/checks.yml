@@ -1,4 +1,4 @@
-name: process-rules checks
+name: niyam checks
 
 # The shared workflow every client calls from the workflow `onboard` writes.
 # Later slices add their checks here as jobs.
@@ -11,7 +11,7 @@ on:
   workflow_call:
     inputs:
       process-rules-ref:
-        description: The process-rules release the caller pins, which must be the one its uses line names
+        description: The niyam release the caller pins, which must be the one its uses line names
         type: string
         default: main
     secrets:
@@ -45,7 +45,7 @@ jobs:
           set -euo pipefail
           file=.github/process-rules.json
           fail() { echo "::error file=$file::$1"; exit 1; }
-          [ -f "$file" ] || fail "$file is missing; run process-rules onboard"
+          [ -f "$file" ] || fail "$file is missing; run niyam onboard"
           jq -e 'type == "object"' "$file" >/dev/null || fail "$file is not a JSON object"
           owner=$(jq -r 'if (.owner | type) == "string" then .owner else "" end' "$file")
           agent=$(jq -r 'if (.agent | type) == "string" then .agent else "" end' "$file")
@@ -54,11 +54,11 @@ jobs:
           [[ $agent =~ $login ]] || fail '"agent" must be a GitHub login'
           lower() { printf %s "$1" | tr '[:upper:]' '[:lower:]'; }
           [ "$(lower "$owner")" != "$(lower "$agent")" ] || fail "owner and agent must be different accounts"
-          echo "process-rules: owner $owner approves; agent $agent builds."
+          echo "niyam: owner $owner approves; agent $agent builds."
       # This workflow's own package.json: the release whose CLI every job here runs.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: ${{ job.workflow_repository || 'athya-hq/process-rules' }}
+          repository: ${{ job.workflow_repository || 'veda-hq/niyam' }}
           ref: ${{ job.workflow_sha || inputs.process-rules-ref }}
           path: .process-rules
           sparse-checkout: package.json
@@ -87,14 +87,14 @@ jobs:
           elif [[ $REF =~ ^[0-9a-f]{40}$ ]]; then
             [ "$REF" = "$sha" ] && same=1 || same=
           else
-            echo "process-rules: process-rules-ref is the branch $REF; these checks run v$version ($sha)."
+            echo "niyam: process-rules-ref is the branch $REF; these checks run v$version ($sha)."
             exit 0
           fi
           if [ -z "$same" ]; then
-            echo "::error file=$file::process-rules-ref is $REF, but this workflow runs the shared checks at v$version. Dependabot and Renovate move only a job's uses: line. Run process-rules onboard with v$version, which moves every pin, or set process-rules-ref: v$version on every job."
+            echo "::error file=$file::process-rules-ref is $REF, but this workflow runs the shared checks at v$version. Dependabot and Renovate move only a job's uses: line. Run niyam onboard with v$version, which moves every pin, or set process-rules-ref: v$version on every job."
             exit 1
           fi
-          echo "process-rules: process-rules-ref $REF is the release that runs, v$version ($sha)."
+          echo "niyam: process-rules-ref $REF is the release that runs, v$version ($sha)."
 
   identity:
     name: PR identity
@@ -114,7 +114,7 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: ${{ job.workflow_repository || 'athya-hq/process-rules' }}
+          repository: ${{ job.workflow_repository || 'veda-hq/niyam' }}
           ref: ${{ job.workflow_sha || inputs.process-rules-ref }}
           path: .process-rules
           persist-credentials: false
@@ -143,7 +143,7 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: ${{ job.workflow_repository || 'athya-hq/process-rules' }}
+          repository: ${{ job.workflow_repository || 'veda-hq/niyam' }}
           ref: ${{ job.workflow_sha || inputs.process-rules-ref }}
           path: .process-rules
           persist-credentials: false
@@ -172,7 +172,7 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: ${{ job.workflow_repository || 'athya-hq/process-rules' }}
+          repository: ${{ job.workflow_repository || 'veda-hq/niyam' }}
           ref: ${{ job.workflow_sha || inputs.process-rules-ref }}
           path: .process-rules
           persist-credentials: false
@@ -204,7 +204,7 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: ${{ job.workflow_repository || 'athya-hq/process-rules' }}
+          repository: ${{ job.workflow_repository || 'veda-hq/niyam' }}
           ref: ${{ job.workflow_sha || inputs.process-rules-ref }}
           path: .process-rules
           persist-credentials: false
@@ -234,7 +234,7 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: ${{ job.workflow_repository || 'athya-hq/process-rules' }}
+          repository: ${{ job.workflow_repository || 'veda-hq/niyam' }}
           ref: ${{ job.workflow_sha || inputs.process-rules-ref }}
           path: .process-rules
           persist-credentials: false
@@ -263,7 +263,7 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: ${{ job.workflow_repository || 'athya-hq/process-rules' }}
+          repository: ${{ job.workflow_repository || 'veda-hq/niyam' }}
           ref: ${{ job.workflow_sha || inputs.process-rules-ref }}
           path: .process-rules
           persist-credentials: false

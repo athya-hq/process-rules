@@ -23,7 +23,7 @@ describe('checks.yml', () => {
     const checkouts = Object.entries(jobs).flatMap(([name, job]) => job.steps.filter((step) => step.with?.path === '.process-rules').map((step) => [name, step] as const));
     assert.ok(checkouts.length >= 7, 'each job that runs the CLI, and Settings, checks it out');
     for (const [name, step] of checkouts) {
-      assert.equal(step.with?.repository, "${{ job.workflow_repository || 'athya-hq/process-rules' }}", name);
+      assert.equal(step.with?.repository, "${{ job.workflow_repository || 'veda-hq/niyam' }}", name);
       assert.equal(step.with?.ref, '${{ job.workflow_sha || inputs.process-rules-ref }}', name);
     }
     assert.doesNotMatch(CHECKS, /ref: \$\{\{ inputs\.process-rules-ref \}\}/);
@@ -47,7 +47,7 @@ describe('checks.yml', () => {
       for (const ref of ['v0.5.33', sha]) {
         const result = run(ref);
         assert.equal(result.status, 0, `${ref}: ${result.stdout}${result.stderr}`);
-        assert.equal(result.stdout.trim(), `process-rules: process-rules-ref ${ref} is the release that runs, v0.5.33 (${sha}).`);
+        assert.equal(result.stdout.trim(), `niyam: process-rules-ref ${ref} is the release that runs, v0.5.33 (${sha}).`);
       }
     });
 
@@ -57,7 +57,7 @@ describe('checks.yml', () => {
         assert.equal(result.status, 1, ref);
         assert.equal(
           result.stdout.trim(),
-          `::error file=.github/workflows/process-rules.yml::process-rules-ref is ${ref}, but this workflow runs the shared checks at v0.5.33. Dependabot and Renovate move only a job's uses: line. Run process-rules onboard with v0.5.33, which moves every pin, or set process-rules-ref: v0.5.33 on every job.`,
+          `::error file=.github/workflows/process-rules.yml::process-rules-ref is ${ref}, but this workflow runs the shared checks at v0.5.33. Dependabot and Renovate move only a job's uses: line. Run niyam onboard with v0.5.33, which moves every pin, or set process-rules-ref: v0.5.33 on every job.`,
         );
       }
     });
@@ -74,7 +74,7 @@ describe('checks.yml', () => {
       for (const ref of ['main', 'v2-preview', 'v0.5.33-rc', 'deadbeef', sha.slice(0, 12)]) {
         const result = run(ref);
         assert.equal(result.status, 0, ref);
-        assert.equal(result.stdout.trim(), `process-rules: process-rules-ref is the branch ${ref}; these checks run v0.5.33 (${sha}).`);
+        assert.equal(result.stdout.trim(), `niyam: process-rules-ref is the branch ${ref}; these checks run v0.5.33 (${sha}).`);
       }
     });
   });

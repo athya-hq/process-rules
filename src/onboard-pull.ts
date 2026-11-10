@@ -23,14 +23,15 @@ const LEADING_EMOJI = /^(\p{Regional_Indicator}{2}|\p{Extended_Pictographic}\p{E
  * commits are git's own words, so they count for neither style.
  */
 export function pullTitle(version: string, recent: readonly string[] = []): string {
-  const title = `chore(process-rules): onboard at v${version}`;
+  const title = `chore(niyam): onboard at v${version}`;
   const subjects = recent.filter((subject) => !subject.startsWith('Merge '));
   const led = subjects.flatMap((subject) => {
     const match = LEADING_EMOJI.exec(subject);
     return match ? [{ emoji: match[1] as string, rest: match[2] as string }] : [];
   });
   if (led.length * 2 <= subjects.length) return title;
-  const before = led.find((one) => one.rest.startsWith('chore(process-rules)'))?.emoji;
+  // An earlier onboard's commit, under either name.
+  const before = led.find((one) => /^chore\((?:niyam|process-rules)\)/.test(one.rest))?.emoji;
   const counts = new Map<string, number>();
   for (const { emoji, rest } of led) if (/^chore\b/.test(rest)) counts.set(emoji, (counts.get(emoji) ?? 0) + 1);
   const most = [...counts].sort((a, b) => b[1] - a[1])[0]?.[0];
@@ -176,7 +177,7 @@ export async function openPull(sys: Sys, io: Output, target: PullTarget, changes
     if (push.code !== 0) return failed(`pushing as ${agent}`, push.stderr);
 
     const body = [
-      `\`process-rules onboard\` v${version}, run by the owner, sets this repository up. The owner approved the plan holding every change below at the terminal:`,
+      `\`niyam onboard\` v${version}, run by the owner, sets this repository up. The owner approved the plan holding every change below at the terminal:`,
       '',
       ...changes.map((change) => `- \`${change.path}\`: ${change.what}`),
       '',

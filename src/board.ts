@@ -784,7 +784,7 @@ function stepMoves(items: BoardItem[], parent?: number): { moves: Move[]; lackin
   }
   return {
     moves,
-    lacking: [...lacking].map(([project, options]) => `! board: Step in "${project}" has no option ${[...options].join(', ')}, so work items that belong there stay where they are; process-rules onboard adds it`),
+    lacking: [...lacking].map(([project, options]) => `! board: Step in "${project}" has no option ${[...options].join(', ')}, so work items that belong there stay where they are; niyam onboard adds it`),
   };
 }
 

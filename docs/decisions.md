@@ -1013,3 +1013,32 @@
   and one pull request delivers one); reading States from prose (the five
   wrote it five ways); relying on "Closes #N" (nothing checks it is there,
   and it closes any issue, not only a State of the slice).
+- **2026-11-10 — Record: process-rules becomes niyam (P-49).** The owner
+  chose the name niyam (नियम, rule) on 2026-11-03 and said go on 2026-11-10;
+  athya_mono's approved 0114 spec v5 holds it as W-39
+  (athya-hq/athya_mono#3210): the repository moves to veda-hq/niyam and the
+  package is `@veda-hq/niyam`. The owner approved the plan
+  (https://claude.ai/artifact/HEQyFtZsxHKDLrt6GqQtEq) with a 👍 on #226 and on
+  W-39. What people see is renamed: the package, the bin `niyam` with
+  `process-rules` kept as a second bin (typed by the owner, it names `niyam`;
+  hooks stay quiet), the messages, the README and the shared workflow's
+  default repository. The workflow pin `onboard` writes is
+  `veda-hq/niyam/.github/workflows/checks.yml`, and a pin of
+  `athya-hq/process-rules` counts and is moved. What adopters' committed files
+  and hooks name stays: the hook commands and launcher, the lock's text,
+  `~/.config/process-rules`, `PROCESS_RULES_AGENT`,
+  `.github/workflows/process-rules.yml` and its job ids (so the required
+  checks keep their names and no ruleset changes), `process-rules-ref` and the
+  cloud setup path (no new Setup paste). The keychain service and the settings
+  file are P-50's, which the owner approves on its own. Releases attach the
+  CLI twice: `veda-hq-niyam-<v>.tgz`, and the same build named
+  `@athya-hq/process-rules` as `athya-hq-process-rules-<v>.tgz`, since 0.6.x's
+  `upgrade` looks for that name and pnpm refuses a second global package with
+  the bin `process-rules` (tried with pnpm 12.9.0). That bridge replaces the
+  old package in place; `niyam upgrade` then removes it and adds
+  `@veda-hq/niyam`, putting the old one back if the add fails. `upgrade` asks
+  veda-hq/niyam for releases and athya-hq/process-rules on a 404, so it works
+  before and after the transfer. Rejected: renaming the job ids, the workflow
+  file, the cloud path and `~/.config` now (each needs every adopter
+  re-onboarded, the job ids a ruleset edit in the same hour; a later slice);
+  publishing to npm now (tarballs as before; its own slice).

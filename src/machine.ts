@@ -267,12 +267,12 @@ export async function machine(sys: Sys, io: Output, args: readonly string[] = []
   for (const login of found.ghLogins) {
     const tried: { problem?: string | undefined } = {};
     await runStep(sys, io, paint, `gh signed out of ${login}`, async () => !(tried.problem = signOut(sys, login)));
-    if (tried.problem) fixes.push({ mark: '▲', text: `gh is still signed in as ${login}: ${tried.problem}`, fix: 'process-rules machine' });
+    if (tried.problem) fixes.push({ mark: '▲', text: `gh is still signed in as ${login}: ${tried.problem}`, fix: 'niyam machine' });
     else signedOut.push(login);
   }
   if (found.gitPassword) {
     const { ok } = await runStep(sys, io, paint, 'git password removed', async () => removeGitPassword(sys));
-    if (!ok) fixes.push({ mark: '▲', text: `the saved git password for ${GITHUB_HOST} is still in the keychain`, fix: 'process-rules machine' });
+    if (!ok) fixes.push({ mark: '▲', text: `the saved git password for ${GITHUB_HOST} is still in the keychain`, fix: 'niyam machine' });
   }
   if (found.ghLogins.length > 0 || found.gitPassword) fixes.push(...recordMove(sys, agent, signedOut));
   return end();

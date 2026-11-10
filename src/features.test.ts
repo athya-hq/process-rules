@@ -31,7 +31,7 @@ describe('features', () => {
 
   it('reads design, the older name of figma, and says so', () => {
     assert.deepEqual(featuresIn({ features: [' design ', 'board'] }), ['identity', 'board', 'figma']);
-    assert.deepEqual(renamedLines({ features: ['design', 'figma'] }), ['.github/process-rules.json lists "design", which is now named "figma"; run process-rules onboard to rename it']);
+    assert.deepEqual(renamedLines({ features: ['design', 'figma'] }), ['.github/process-rules.json lists "design", which is now named "figma"; run niyam onboard to rename it']);
     assert.deepEqual(renamedLines({ features: ['figma', 2] }), []);
     assert.deepEqual(renamedLines({}), []);
     assert.deepEqual(renamedLines({ features: ['constructor'] }), []);

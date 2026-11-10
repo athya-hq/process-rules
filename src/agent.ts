@@ -109,8 +109,8 @@ export function agentHere(sys: Sys, agents: readonly string[]): { agent: string 
   if (here.length === 1) return { agent: here[0] as string };
   return {
     problem: here.length === 0
-      ? `${SETTINGS_PATH} names the agents ${either(agents)}, and process-rules machine has set up none of them on this machine`
-      : `${SETTINGS_PATH} names the agents ${either(agents)}, and process-rules machine has set up ${here.join(' and ')} on this machine, so which one this session works as cannot be told; remove the others' folders under ~/.config/process-rules`,
+      ? `${SETTINGS_PATH} names the agents ${either(agents)}, and niyam machine has set up none of them on this machine`
+      : `${SETTINGS_PATH} names the agents ${either(agents)}, and niyam machine has set up ${here.join(' and ')} on this machine, so which one this session works as cannot be told; remove the others' folders under ~/.config/process-rules`,
   };
 }
 
@@ -394,7 +394,7 @@ export function checkToken(token: string, info: TokenInfo | undefined, agent: st
   if (!info) return { problem: 'GitHub refuses the token (expired or revoked?)' };
   if (!sameLogin(info.login, agent)) return { problem: `the token acts as ${info.login}, not ${agent}` };
   if (!token.startsWith('ghp_') || !info.scopes) {
-    return { problem: 'it is not a classic token, which process-rules needs (see its docs/decisions.md)' };
+    return { problem: 'it is not a classic token, which niyam needs (see its docs/decisions.md)' };
   }
   const { scopes } = info;
   const missing = TOKEN_SCOPES.filter(

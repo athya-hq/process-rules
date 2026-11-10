@@ -67,7 +67,7 @@ export function asAgent(sys: Sys, io: Output, parsed: ReturnType<typeof asAgentA
   if ('problem' in env) return locked(env.problem);
   const result = sys.exec(parsed.command, parsed.args, { env: env.env, interactive: true });
   // With standard error passed through, what is left is why the command could not start.
-  if (result.stderr) io.err(`process-rules as-agent: ${parsed.command}: ${result.stderr.trim()}`);
+  if (result.stderr) io.err(`niyam as-agent: ${parsed.command}: ${result.stderr.trim()}`);
   return result.code;
 }
 
@@ -98,7 +98,7 @@ function macEnv(sys: Sys, agent: string): Env {
   }
   const names = sessionNames(script);
   if (!names || !sameLogin(names.agent, agent) || script !== sessionScript(names.agent, names.id, paths, store)) {
-    return { problem: `${paths.session} is out of date, or not the file process-rules machine writes, for ${agent}` };
+    return { problem: `${paths.session} is out of date, or not the file niyam machine writes, for ${agent}` };
   }
   const token = store.read(sys, names.agent);
   if (!token) return { problem: `${store.where} has no ${names.agent} token` };

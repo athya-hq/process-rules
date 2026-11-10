@@ -26,14 +26,14 @@ import type { Output, Sys } from './types.ts';
 import { installedFindings } from './upgrade.ts';
 import { packageVersion } from './version.ts';
 
-const MACHINE = 'process-rules machine';
+const MACHINE = 'niyam machine';
 
 /** Runs a check that reads GitHub; a failed read is that check's ✗, fixed by asking again. */
 async function remote(name: string, check: () => Promise<Finding>): Promise<Finding> {
   try {
     return await check();
   } catch (error) {
-    return { mark: '✗', text: `${name}: cannot ask GitHub (${error instanceof Error ? error.message : String(error)})`, fix: 'process-rules doctor again' };
+    return { mark: '✗', text: `${name}: cannot ask GitHub (${error instanceof Error ? error.message : String(error)})`, fix: 'niyam doctor again' };
   }
 }
 
@@ -120,7 +120,7 @@ function repoFindings(sys: Sys): Finding[] {
     (hook): Finding => ({
       mark: '▲',
       text: `${hook} reaches GitHub outside as-agent, so gets 401`,
-      fix: `run its gh or git via process-rules as-agent --session <session_id> -- (exit ${LOCKED} when not the agent)`,
+      fix: `run its gh or git via niyam as-agent --session <session_id> -- (exit ${LOCKED} when not the agent)`,
     }),
   );
 }
@@ -139,7 +139,7 @@ function report(sys: Sys, io: Output, about: string, groups: [title: string, fin
   return all.some((finding) => finding.mark === '✗') ? 1 : 0;
 }
 
-const ONBOARD = 'process-rules onboard again';
+const ONBOARD = 'niyam onboard again';
 
 /**
  * A Claude cloud session's checks, reading only: no keychain, signing key,
@@ -159,13 +159,13 @@ async function cloudDoctor(sys: Sys, io: Output, named?: string): Promise<number
   try {
     root = repoRoot(sys);
   } catch (error) {
-    session.push({ mark: '✗', text: message(error), fix: "process-rules doctor in the repo's clone" });
+    session.push({ mark: '✗', text: message(error), fix: "niyam doctor in the repo's clone" });
   }
 
   if (root !== undefined) {
     const { pinned, scripted } = repoReleases(sys, root);
     if (scripted === undefined) {
-      session.push({ mark: '✗', text: `${CLOUD_SETUP_PATH} missing, or not the file onboard writes, so the Setup script installs no process-rules`, fix: ONBOARD });
+      session.push({ mark: '✗', text: `${CLOUD_SETUP_PATH} missing, or not the file onboard writes, so the Setup script installs no niyam`, fix: ONBOARD });
     } else if (pinned === undefined) {
       session.push({ mark: '▲', text: `${WORKFLOW_PATH} is missing or pins no one version, so ${CLOUD_SETUP_PATH} is not checked against it`, fix: ONBOARD });
     } else if (pinned !== scripted) {
@@ -176,11 +176,11 @@ async function cloudDoctor(sys: Sys, io: Output, named?: string): Promise<number
     const installed = packageVersion();
     const wanted = scripted ?? pinned;
     if (wanted === installed) {
-      session.push({ mark: '✓', text: `process-rules ${installed} runs here` });
+      session.push({ mark: '✓', text: `niyam ${installed} runs here` });
     } else if (scripted !== undefined) {
-      session.push({ mark: '▲', text: `this session runs process-rules ${installed}, not the ${scripted} ${CLOUD_SETUP_PATH} installs`, fix: `bash ${CLOUD_SETUP_PATH}, or a new session` });
+      session.push({ mark: '▲', text: `this session runs niyam ${installed}, not the ${scripted} ${CLOUD_SETUP_PATH} installs`, fix: `bash ${CLOUD_SETUP_PATH}, or a new session` });
     } else if (pinned !== undefined) {
-      session.push({ mark: '▲', text: `this session runs process-rules ${installed}, not the v${pinned} ${WORKFLOW_PATH} pins`, fix: `${ONBOARD}, then a new session` });
+      session.push({ mark: '▲', text: `this session runs niyam ${installed}, not the v${pinned} ${WORKFLOW_PATH} pins`, fix: `${ONBOARD}, then a new session` });
     }
   }
   session.push(
@@ -189,7 +189,7 @@ async function cloudDoctor(sys: Sys, io: Output, named?: string): Promise<number
       : {
           mark: '▲',
           text: `${FROM_SETUP} missing, so the cloud environment's Setup script does not run ${CLOUD_SETUP_PATH}`,
-          fix: "paste what process-rules cloud-setup prints into the cloud environment's Setup script, once",
+          fix: "paste what niyam cloud-setup prints into the cloud environment's Setup script, once",
         },
   );
 
@@ -203,7 +203,7 @@ async function cloudDoctor(sys: Sys, io: Output, named?: string): Promise<number
   }
   const asked = await cloudLogin(sys);
   if ('problem' in asked) {
-    github.push({ mark: '✗', text: asked.problem, fix: 'process-rules doctor again' });
+    github.push({ mark: '✗', text: asked.problem, fix: 'niyam doctor again' });
   } else if (agents !== undefined) {
     github.push(
       anyLogin(agents, asked.login)
@@ -220,7 +220,7 @@ async function cloudDoctor(sys: Sys, io: Output, named?: string): Promise<number
       : {
           mark: '✗',
           text: 'session-start did not give this session the agent identity, so gh and git stay locked out',
-          fix: 'a new session; its first process-rules line says why',
+          fix: 'a new session; its first niyam line says why',
         },
   );
 

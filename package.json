@@ -1,5 +1,5 @@
 {
-  "name": "@athya-hq/process-rules",
+  "name": "@veda-hq/niyam",
   "version": "0.6.3",
   "private": true,
   "description": "Work rules for repos that track work in GitHub Issues: setup, agent identity, push and PR checks.",
@@ -10,7 +10,8 @@
     "node": ">=24.15"
   },
   "bin": {
-    "process-rules": "dist/cli.js"
+    "niyam": "dist/cli.js",
+    "process-rules": "dist/old-cli.js"
   },
   "files": [
     "dist"

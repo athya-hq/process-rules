@@ -1,5 +1,5 @@
 /**
- * The one GitHub host process-rules works with (docs/decisions.md, P-30).
+ * The one GitHub host niyam works with (docs/decisions.md, P-30).
  * Every GitHub address in src/ derives from it, so a host setting can come
  * later by changing this module alone; host.test.ts keeps the rule.
  */

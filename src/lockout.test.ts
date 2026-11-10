@@ -34,9 +34,9 @@ describe('exposure', () => {
     const found = exposure(exposed(), AGENT);
     assert.deepEqual(found, { ghLogins: ['example-owner', 'old-owner'], gitPassword: true, openKeys: [OWNER_KEY, `${HOME}/.ssh/work_signing`], sshLogin: undefined });
     assert.deepEqual(exposureFindings(found, HOME), [
-      { mark: '▲', text: 'gh is signed in as example-owner', fix: 'process-rules machine' },
-      { mark: '▲', text: 'gh is signed in as old-owner', fix: 'process-rules machine' },
-      { mark: '▲', text: 'a saved git password for github.com', fix: 'process-rules machine' },
+      { mark: '▲', text: 'gh is signed in as example-owner', fix: 'niyam machine' },
+      { mark: '▲', text: 'gh is signed in as old-owner', fix: 'niyam machine' },
+      { mark: '▲', text: 'a saved git password for github.com', fix: 'niyam machine' },
       { mark: '▲', text: '~/.ssh/id_ed25519 has no passphrase', fix: 'ssh-keygen -p -f ~/.ssh/id_ed25519' },
       { mark: '▲', text: '~/.ssh/work_signing has no passphrase', fix: 'ssh-keygen -p -f ~/.ssh/work_signing' },
     ]);

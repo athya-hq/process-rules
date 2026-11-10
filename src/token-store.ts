@@ -1,6 +1,6 @@
 import type { Sys } from './types.ts';
 
-/** The platforms process-rules runs on, for the message on any other. */
+/** The platforms niyam runs on, for the message on any other. */
 export const SUPPORTED_PLATFORMS = 'macOS';
 
 /**
@@ -48,12 +48,12 @@ export const KEYCHAIN: TokenStore = {
 /** Each platform's store, by Node's name for the platform. */
 const STORES: Readonly<Record<string, TokenStore>> = { darwin: KEYCHAIN };
 
-/** This machine's token store, or undefined on a platform process-rules does not support. */
+/** This machine's token store, or undefined on a platform niyam does not support. */
 export function tokenStore(sys: Sys): TokenStore | undefined {
   return Object.hasOwn(STORES, sys.platform) ? STORES[sys.platform] : undefined;
 }
 
 /** Why this machine cannot hold the agent's token. */
 export function unsupported(sys: Sys): string {
-  return `process-rules supports ${SUPPORTED_PLATFORMS} only, where the keychain holds the agent's token; this machine runs ${sys.platform}`;
+  return `niyam supports ${SUPPORTED_PLATFORMS} only, where the keychain holds the agent's token; this machine runs ${sys.platform}`;
 }

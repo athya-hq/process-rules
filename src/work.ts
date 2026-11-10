@@ -77,7 +77,7 @@ async function rest(sys: Sys, token: string, slice: number, url: string, missing
   if (status !== 200) {
     const why = (json as { message?: string } | null)?.message ?? `HTTP ${status}`;
     // A client workflow from before the work rules grants no issues: read.
-    const hint = /not accessible/i.test(why) ? '; the client workflow needs issues: read, so run process-rules onboard to update it' : '';
+    const hint = /not accessible/i.test(why) ? '; the client workflow needs issues: read, so run niyam onboard to update it' : '';
     throw new Error(`cannot read #${slice}: ${why} (${url.replace(API, '')})${hint}`);
   }
   return json;
@@ -336,7 +336,7 @@ function owedProblem(one: Owed, slice: number, parent: number | undefined, { own
   const owner = either(owners);
   // The agent proposes as itself; with several, any of them.
   const agent = either(agents);
-  const ask = `${one.note ? ` (${one.note})` : ''}${one.proposals.length > 0 ? '' : `; ${agent} proposes it with: process-rules propose ${one.number}`}`;
+  const ask = `${one.note ? ` (${one.note})` : ''}${one.proposals.length > 0 ? '' : `; ${agent} proposes it with: niyam propose ${one.number}`}`;
   // Where the settings name an Approvals issue, one comment there answers this among a batch.
   const batch = approvals === undefined ? '' : `, or ${owner} comments on #${approvals}, the Approvals issue, with a first line "Decision: approve #${one.number}"`;
   return one.kind === 'added'
@@ -553,7 +553,7 @@ export async function prePush(sys: Sys, io: Output, refLines: string, url: strin
   }
   const token = sessionToken(sys);
   if (!token) {
-    return report(io, 'pre-push', ['this agent session has no token, so the work rules cannot be checked; run process-rules doctor']);
+    return report(io, 'pre-push', ['this agent session has no token, so the work rules cannot be checked; run niyam doctor']);
   }
   if (await isPersonal(sys, slug, token)) {
     io.err(offLine('pre-push', 'work-rules', PERSONAL_REPO));
@@ -618,7 +618,7 @@ async function moveBoard(sys: Sys, io: Output, token: string, slug: string, slic
 function refused(result: { status: number; json: unknown }, what: string): never {
   const why = (result.json as { message?: string } | null)?.message ?? `HTTP ${result.status}`;
   // A client workflow from before this release grants this job no issues: write.
-  const hint = /not accessible/i.test(why) ? '; the client workflow needs a job with issues: write for merged pull requests, so run process-rules onboard to update it' : '';
+  const hint = /not accessible/i.test(why) ? '; the client workflow needs a job with issues: write for merged pull requests, so run niyam onboard to update it' : '';
   throw new Error(`cannot ${what}: ${why}${hint}`);
 }
 
@@ -802,7 +802,7 @@ export async function propose(sys: Sys, io: Output, numbers: readonly number[]):
     return 0;
   }
   const token = sessionToken(sys);
-  if (!token) return report(io, 'propose', ['this session has no token; run process-rules doctor']);
+  if (!token) return report(io, 'propose', ['this session has no token; run niyam doctor']);
   if (await isPersonal(sys, slug, token)) {
     io.out(offLine('propose', 'work-rules', PERSONAL_REPO));
     return 0;
@@ -888,7 +888,7 @@ async function proposeOne(
     if (labeled.status !== 200) throw new Error(`cannot label #${slice} ${NEEDS_OWNER} (HTTP ${labeled.status})`);
     // A decision this run did not ask for still has its proposal's link, or the command that posts one.
     for (const one of waiting) if (!links.has(one) && one.proposals.length > 0) links.set(one, newest(one.proposals).html_url);
-    const unproposed = waiting.filter((one) => !links.has(one)).map((one) => `; ${either(accounts.agents)} proposes #${one.number} with: process-rules propose ${one.number}`);
+    const unproposed = waiting.filter((one) => !links.has(one)).map((one) => `; ${either(accounts.agents)} proposes #${one.number} with: niyam propose ${one.number}`);
     const urls = [...links.values()].filter((url) => url !== undefined);
     const where = urls.length > 0 ? `, waiting on ${owner}'s 👍 on ${urls.join(' and ')}` : '';
     io.out(`#${slice} is labeled ${NEEDS_OWNER}${where}${unproposed.join('')}`);
