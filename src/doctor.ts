@@ -1,10 +1,12 @@
 import {
   EXPIRY_WARNING_DAYS,
+  SETTINGS_PATH,
   account,
   agentFrom,
   anyLogin,
   either,
   loadSettings,
+  repoAt,
   sameLogin,
   checkToken,
   keyBody,
@@ -17,9 +19,12 @@ import {
 } from './agent.ts';
 import { LOCKED, hooksHittingLock } from './as-agent.ts';
 import { FROM_SETUP, cloudLogin, repoReleases } from './cloud.ts';
+import { featuresIn } from './features.ts';
+import { typesDrift } from './issue-types.ts';
 import { type Finding, closing, findingLines, heading, painter, tilde } from './layout.ts';
 import { exposure, exposureFindings, movedFindings, readDeclined, setAside } from './lockout.ts';
 import { CLOUD_SETUP_PATH, WORKFLOW_PATH } from './onboard-pull.ts';
+import { isOrganisation } from './owner-login.ts';
 import { repoRoot } from './session-start.ts';
 import { tokenStore, unsupported } from './token-store.ts';
 import type { Output, Sys } from './types.ts';
@@ -109,6 +114,7 @@ export async function doctor(sys: Sys, io: Output, named?: string): Promise<numb
       const registered = !keyProblem && (await signingKeys(sys, agent)).includes(keyBody(sys.read(`${paths.key}.pub`)));
       return registered ? { mark: '✓', text: 'signing key registered' } : { mark: '✗', text: 'signing key not registered', fix: MACHINE };
     }),
+    ...(await typesFindings(sys, token)),
   ];
 
   return report(sys, io, agent, [
@@ -116,6 +122,30 @@ export async function doctor(sys: Sys, io: Output, named?: string): Promise<numb
     [`GitHub — as ${agent}`, github],
     ['This repo', repoFindings(sys)],
   ]);
+}
+
+/**
+ * Whether the organisation's enabled issue types are the work model's, and
+ * no issue here holds another: checked in a repository whose settings turn
+ * the board on, in an organisation, since onboard keeps them so there.
+ */
+async function typesFindings(sys: Sys, token: string | undefined): Promise<Finding[]> {
+  let slug: string;
+  try {
+    const found = repoAt(sys);
+    const path = `${found.root}/${SETTINGS_PATH}`;
+    if (!token || !sys.exists(path) || !featuresIn(JSON.parse(sys.read(path))).includes('board')) return [];
+    slug = found.slug;
+  } catch {
+    // Outside a client's clone, or settings doctor cannot read: onboard says what is wrong with them.
+    return [];
+  }
+  const org = slug.split('/')[0] as string;
+  try {
+    return (await isOrganisation(sys, org)) ? [await typesDrift(sys, token, org, slug)] : [];
+  } catch (error) {
+    return [{ mark: '✗', text: `issue types: cannot ask GitHub (${message(error)})`, fix: 'process-rules doctor again' }];
+  }
 }
 
 /** Client hooks that reach GitHub outside `as-agent` where doctor runs, a Mac or a cloud session. */

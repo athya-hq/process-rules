@@ -1,14 +1,8 @@
 import { API } from './agent.ts';
+import { applyTypes, pages, typesPlan, typesQuestion } from './issue-types.ts';
 import type { Output, Sys } from './types.ts';
 
-/** The issue types the work model uses; an organisation-wide setting. */
-export const ISSUE_TYPES = [
-  { name: 'Work item', color: 'blue', description: 'A piece of work: its frame and spec, approved by the owner' },
-  { name: 'Slice', color: 'green', description: 'One shippable part of a work item, built in one pull request' },
-  { name: 'State', color: 'purple', description: "An experience state of a slice, linking its design frame" },
-  { name: 'Decision', color: 'orange', description: 'A watched decision with a review date' },
-  { name: 'Brief', color: 'gray', description: 'A small request, closed by the pull request that fixes it' },
-];
+export { ISSUE_TYPES } from './issue-types.ts';
 
 export const LABELS = [
   { name: 'approved', color: '0e8a16', description: "The owner's approval to start" },
@@ -117,14 +111,7 @@ async function graphql(sys: Sys, token: string, query: string, variables: Record
 
 /** Every named entry a REST list holds, reading 100 a page. */
 async function list(sys: Sys, token: string, url: string): Promise<{ name: string }[]> {
-  const names: { name: string }[] = [];
-  for (let page = 1; ; page++) {
-    const pageUrl = `${url}${url.includes('?') ? '&' : '?'}per_page=100&page=${page}`;
-    const { status, json } = await sys.http(pageUrl, { token });
-    if (status !== 200 || !Array.isArray(json)) throw new Error(`cannot read ${url} (HTTP ${status})`);
-    names.push(...json.filter((entry): entry is { name: string } => typeof (entry as { name?: unknown } | null)?.name === 'string'));
-    if (json.length < 100) return names;
-  }
+  return (await pages(sys, token, url)).filter((entry): entry is { name: string } => typeof (entry as { name?: unknown } | null)?.name === 'string');
 }
 
 /** The board's steps a yes is asked for, so a caller can answer each kind its own way. */
@@ -138,9 +125,10 @@ export interface BoardSetUp {
 
 /**
  * Sets up the client's work board as the owner, with the owner's token for
- * this run (owner-login.ts): the organisation's issue types, the repo's
- * labels, and a Project linked to the repo with the work model's fields. Creates only what is
- * missing; every change waits for `confirm`'s yes. Returns the Project and
+ * this run (owner-login.ts): the organisation's issue types, made the work
+ * model's alone (issue-types.ts), the repo's labels, and a Project linked to
+ * the repo with the work model's fields. Creates only what is missing; every
+ * change waits for `confirm`'s yes. Returns the Project and
  * what is left to do by hand, or undefined when it stopped.
  */
 export async function setUpBoard(
@@ -167,25 +155,13 @@ export async function setUpBoard(
     organisation: raw.owner.type === 'Organization',
   };
 
+  const typesByHand: string[] = [];
   if (repo.organisation) {
-    const have = await list(sys, token, `${API}/orgs/${repo.ownerLogin}/issue-types`);
-    const absent = ISSUE_TYPES.filter((type) => !have.some((had) => had.name.toLowerCase() === type.name.toLowerCase()));
-    if (absent.length > 0) {
-      // Said before asking, since GitHub keeps issue types for the whole organisation, not this repository.
-      const names = absent.map((t) => t.name).join(', ');
-      if (!(await confirm(`Issue types are an organisation-wide setting, so they apply to every repository in ${repo.ownerLogin}, not only ${repo.name}. Add the issue types ${names} to the ${repo.ownerLogin} organisation?`, 'issue types'))) {
-        return stopped(io, 'issue types');
-      }
-      for (const type of absent) {
-        const made = await sys.http(`${API}/orgs/${repo.ownerLogin}/issue-types`, {
-          method: 'POST',
-          token,
-          body: { ...type, is_enabled: true },
-        });
-        if (made.status !== 200 && made.status !== 201) throw new Error(`GitHub did not add the issue type ${type.name} (HTTP ${made.status})`);
-      }
-    }
-    io.out(`✓ issue types in ${repo.ownerLogin}: ${ISSUE_TYPES.map((t) => t.name).join(', ')}`);
+    // Read again as the owner, who sees every repository in the organisation, not only those the agent can.
+    const plan = await typesPlan(sys, token, repo.ownerLogin);
+    const question = typesQuestion(plan, repo.name);
+    if (question !== undefined && !(await confirm(question, 'issue types'))) return stopped(io, 'issue types');
+    typesByHand.push(...(await applyTypes(sys, io, token, plan)));
   } else {
     io.out('- issue types: GitHub has them for organisations only; skipped for a personal repository');
   }
@@ -344,7 +320,7 @@ export async function setUpBoard(
     io.out(`Turn on the workflows ${done.off.join(', ')} in ${project.url} → Workflows (GitHub's API cannot)`);
     byHand.push(`turn on ${done.off.length} project workflow${done.off.length === 1 ? '' : 's'} → ${project.url}/workflows`);
   }
-  return { url: project.url, byHand };
+  return { url: project.url, byHand: [...typesByHand, ...byHand] };
 }
 
 /** Renames a Project, and closes it when asked; otherwise it stays open or closed as it was. */

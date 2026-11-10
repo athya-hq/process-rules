@@ -141,7 +141,9 @@ describe('onboard', () => {
       '│',
       '◇  GitHub — one sign-in as example-owner',
       '│    board        set up or check',
-      '│    issue types  org-wide, if missing',
+      '│    issue types  org-wide: add 5, disable 2',
+      '│      add        Work item, Slice, State, Decision, Brief',
+      '│      disable    Task, Bug',
       '│',
       '◇  This Mac',
       '│    pre-push hook  new',
@@ -202,7 +204,7 @@ describe('onboard', () => {
     assert.match(body, /^- `\.github\/niyam\.json`: owner example-owner approves, agent ExampleBot builds, with identity, .* on$/m);
     assert.match(body, /^- `\.github\/workflows\/process-rules\.yml`: write \.github\/workflows\/process-rules\.yml, which runs the shared niyam checks$/m);
     // The long explanations the terminal no longer prints.
-    assert.ok(body.includes('\nDone at the terminal, outside this pull request:\n\n- board:\n  - issue types in example-org: Work item, Slice, State, Decision, Brief\n'), body);
+    assert.ok(body.includes('\nDone at the terminal, outside this pull request:\n\n- board:\n  - disabled the issue types Task, Bug in example-org, outside the work model, once no issue held them; not deleted, so they can be enabled again\n  - issue types in example-org: Work item, Slice, State, Decision, Brief\n'), body);
     assert.ok(body.includes(`\n  - Project "example-app work": ${COPY_URL}\n  - fields: Step, Decision, Review date\n`), body);
     assert.ok(body.includes('\n- pre-push hook:\n  - wrote the pre-push git hook .git/hooks/pre-push, which checks an agent session pushes to GitHub as the agent, and the work rules\n'), body);
     assert.ok(body.includes('\n  - committer: ExampleBot; verified: true (valid)\n  - GitHub shows the test commit Verified by ExampleBot\n'), body);
@@ -244,10 +246,56 @@ describe('onboard', () => {
     assert.deepEqual(planned(out, 'Pull request'), [], 'no file to change');
     assert.deepEqual(planned(out, 'This Mac'), [], 'the pre-push hook is there');
     assert.deepEqual(planned(out, 'Claude cloud — by hand, once'), [], 'the cloud setup file is there, so the Setup script was pasted');
-    assert.deepEqual(planned(out, 'GitHub'), ['board: set up or check', 'issue types: org-wide, if missing']);
+    assert.deepEqual(planned(out, 'GitHub'), ['board: set up or check', 'issue types: org-wide, the work model’s alone']);
     assert.ok(!sys.requests.some((r) => r.url.endsWith('/pulls')), 'nothing to change, no pull request');
     assert.ok(!sys.calls.some((c) => c.args[0] === 'read-tree'));
     assert.ok(out.includes('└  Done; no file changes, so no pull request.'), out.join('\n'));
+  });
+
+  describe('issue types outside the work model', () => {
+    const settled = (): { sys: FakeSys; board: Board } => {
+      const sys = fresh();
+      sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT }));
+      sys.files.set(HOOKS, JSON.stringify(CLAUDE));
+      sys.files.set(WORKFLOW, workflow('main', packageVersion(), true));
+      sys.files.set(PRE_PUSH, PRE_PUSH_HOOK);
+      sys.files.set(CLOUD, CLOUD_FILE);
+      const board = new Board(sys);
+      board.issueTypes = [...ISSUE_TYPES.map((t) => t.name), 'Task'];
+      board.labels = LABELS.map((l) => l.name);
+      board.project = { fields: [...BUILT_IN, ...FIELDS.map((f) => f.name)], linked: true, views: settledViews(), grouped: true };
+      board.issues = [{ repo: 'example-org/example-app', number: 12, type: 'Task' }];
+      return { sys, board };
+    };
+
+    it('shows the issues it retypes and the types it disables in the one plan, then does it as the owner', async () => {
+      const { sys, board } = settled();
+      const { code, out } = await run(sys, []);
+      assert.equal(code, 0);
+      assert.deepEqual(sys.chosen, ['Go ahead?']);
+      const at = out.findIndex((line) => line.startsWith('│    issue types '));
+      assert.deepEqual(out.slice(at - 1, at + 3), [
+        '│    board             set up or check',
+        '│    issue types       org-wide: retype 1, disable 1',
+        '│      example-app#12  Task → Brief',
+        '│      disable         Task',
+      ]);
+      assert.equal(board.issues[0]?.type, 'Brief');
+      assert.deepEqual(board.disabledTypes, ['Task']);
+      const before = sys.requests.findIndex((r) => r.method === 'PATCH');
+      assert.ok(sys.requests.slice(0, before).some((r) => r.url.includes('/issues?type=Task') && r.token === TOKEN), 'the plan reads as the agent');
+      assert.ok(sys.requests.filter((r) => r.method === 'PATCH' || r.method === 'PUT').every((r) => r.token === OWNER_TOKEN), 'the owner changes them');
+    });
+
+    it('says it reads them once signed in when the agent cannot', async () => {
+      const { sys, board } = settled();
+      const types = sys.routes.get('GET https://api.github.com/orgs/example-org/issue-types?per_page=100&page=1') as () => HttpResult;
+      sys.route('GET', '/orgs/example-org/issue-types?per_page=100&page=1', () => (sys.requests.at(-1)?.token === OWNER_TOKEN ? types() : { status: 403, json: null }));
+      const { code, out } = await run(sys, ['example-owner', AGENT, '--dry-run']);
+      assert.equal(code, 0);
+      assert.ok(out.some((line) => /^│ {4}issue types {2,}org-wide, read once signed in$/.test(line)), out.join('\n'));
+      assert.equal(board.issues[0]?.type, 'Task');
+    });
   });
 
   it('keeps the cloud setup file at the pin, asking for the Setup script paste only the first time', async () => {
@@ -815,7 +863,7 @@ describe('onboard', () => {
         assert.deepEqual({ code, err }, { code: 1, err: [message, 'onboard: stopped at "board"; nothing after it was changed, and no pull request was opened'] });
         assert.equal(sys.temps.length, 1);
         assert.deepEqual(sys.removed, sys.temps);
-        assert.ok(!sys.requests.some((r) => /\/labels|\/issue-types|\/graphql$/.test(r.url)), 'the board is not touched');
+        assert.ok(!sys.requests.some((r) => /\/labels|\/issue-types|\/graphql$/.test(r.url) && (r.method !== 'GET' || r.token === OWNER_TOKEN)), 'the board is not touched');
       });
     }
   });

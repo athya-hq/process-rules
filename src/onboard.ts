@@ -21,6 +21,7 @@ import {
   tokenInfo,
 } from './agent.ts';
 import { setUpBoard } from './board.ts';
+import { typesDetail, typesLines, typesPlan } from './issue-types.ts';
 import { type OwnerToken, asOwner, isOrganisation, ownerScopes, signInOnce } from './owner-login.ts';
 import { appendToArray, replaceValues, setMember } from './jsonedit.ts';
 import { HOURLY } from './asks.ts';
@@ -1111,7 +1112,13 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
 
   if (on('board')) {
     github.push({ label: 'board', detail: 'set up or check' });
-    if (await byOrganisation()) github.push({ label: 'issue types', detail: 'org-wide, if missing' });
+    if (await byOrganisation()) {
+      // Read as the agent, which sees the organisation's types and the repositories it can read; the board step
+      // reads again as the owner, who sees every repository, and retypes by the same rule.
+      const plan = await typesPlan(sys, token, slug.split('/')[0] as string).catch(() => undefined);
+      if (plan) github.push({ label: 'issue types', detail: typesDetail(plan) }, ...typesLines(plan));
+      else github.push({ label: 'issue types', detail: 'org-wide, read once signed in' });
+    }
     const projectTitle = (JSON.parse(fileAt(settingsFile) as string) as { project?: unknown }).project;
     steps.push({
       label: 'board',
