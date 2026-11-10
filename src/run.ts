@@ -15,12 +15,13 @@ import { upgrade } from './upgrade.ts';
 import { prMerged, prePush, prWorkRules, propose } from './work.ts';
 import type { Output, Sys } from './types.ts';
 
+import { CLI, OLD_CLI } from './names.ts';
 import { packageVersion } from './version.ts';
 
 export type { Output } from './types.ts';
 export { packageVersion, versionOf } from './version.ts';
 
-export const USAGE = `Usage: process-rules <command>
+export const USAGE = `Usage: niyam <command>
 
 Commands:
   machine [agent] [--yes] [--dry-run]
@@ -59,17 +60,24 @@ Features: identity (always on), pr-identity, board, work-rules, figma, decisions
 --features lists them the first time (all when left out); --add turns one more on.
 machine and onboard print one plan and ask once; --yes goes ahead without asking, --dry-run stops at the plan.`;
 
-/** Runs one command and returns its exit code: 0 done, 1 failed, 2 bad usage. */
+/** The commands the owner runs at a terminal: run as process-rules, they also name niyam. Hooks and workflows stay quiet. */
+const OWNER_COMMANDS = new Set(['machine', 'doctor', 'onboard', 'upgrade', 'cloud-setup', 'help', '--help', '-h', undefined]);
+
+/** Runs one command and returns its exit code: 0 done, 1 failed, 2 bad usage. `invokedAs` is the bin that ran it. */
 export async function run(
   args: readonly string[],
   io: Output,
   sys: () => Sys | Promise<Sys>,
+  invokedAs: string = CLI,
 ): Promise<number> {
   const [command, ...rest] = args;
+  if (invokedAs === OLD_CLI && OWNER_COMMANDS.has(command)) {
+    io.err(`${OLD_CLI} is now ${CLI}: run ${[CLI, ...args].join(' ')}. The old name still works for now.`);
+  }
   const allowed = command === 'onboard' || command === 'machine' || command === 'review-thread' || command === 'as-agent' || command === 'propose' ? Infinity : command === 'pre-push' ? 2 : command === 'doctor' ? 1 : 0;
   const extra = rest[allowed];
   if (extra !== undefined) {
-    io.err(`process-rules: unexpected argument "${extra}"`);
+    io.err(`niyam: unexpected argument "${extra}"`);
     io.err(USAGE);
     return 2;
   }
@@ -78,7 +86,7 @@ export async function run(
     try {
       (command === 'onboard' ? onboardArgs : command === 'machine' ? machineArgs : command === 'as-agent' ? asAgentArgs : threadArgs)(rest);
     } catch (error) {
-      io.err(`process-rules: ${error instanceof Error ? error.message : String(error)}`);
+      io.err(`niyam: ${error instanceof Error ? error.message : String(error)}`);
       io.err(USAGE);
       return 2;
     }
@@ -86,7 +94,7 @@ export async function run(
   // One issue number or several, each checked; the first that is not one is named.
   const notIssue = command === 'propose' ? (rest.length === 0 ? '' : rest.find((arg) => !/^#?0*[1-9]\d*$/.test(arg))) : undefined;
   if (notIssue !== undefined) {
-    io.err(`process-rules: propose needs an issue number${notIssue === '' ? '' : `, not "${notIssue}"`}`);
+    io.err(`niyam: propose needs an issue number${notIssue === '' ? '' : `, not "${notIssue}"`}`);
     io.err(USAGE);
     return 2;
   }
@@ -112,7 +120,7 @@ export async function run(
         const real = await sys();
         return guard(real, io, real.readStdin());
       } catch (error) {
-        io.err(`process-rules guard: refused, because the check failed: ${error instanceof Error ? error.message : String(error)}`);
+        io.err(`niyam guard: refused, because the check failed: ${error instanceof Error ? error.message : String(error)}`);
         return 2;
       }
     case 'as-agent':
@@ -120,7 +128,7 @@ export async function run(
       try {
         return asAgent(await sys(), io, asAgentArgs(rest));
       } catch (error) {
-        io.err(`process-rules as-agent: ran nothing, because the check failed: ${error instanceof Error ? error.message : String(error)}`);
+        io.err(`niyam as-agent: ran nothing, because the check failed: ${error instanceof Error ? error.message : String(error)}`);
         return LOCKED;
       }
     case 'machine':
@@ -156,11 +164,11 @@ export async function run(
         if (command === 'machine') return await machine(await sys(), io, rest);
         return await doctor(await sys(), io, rest[0]);
       } catch (error) {
-        io.err(`process-rules ${command}: ${error instanceof Error ? error.message : String(error)}`);
+        io.err(`niyam ${command}: ${error instanceof Error ? error.message : String(error)}`);
         return 1;
       }
     default:
-      io.err(`process-rules: unknown command "${command}"`);
+      io.err(`niyam: unknown command "${command}"`);
       io.err(USAGE);
       return 2;
   }

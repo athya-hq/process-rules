@@ -75,21 +75,21 @@ function cloudDrift(sys: Sys): string | undefined {
   const file = `${root}/${CLOUD_SETUP_PATH}`;
   if (scripted === undefined) {
     if (!pinned || pinned === installed) return undefined;
-    return `process-rules: this cloud session runs process-rules ${installed}, but ${WORKFLOW_PATH} pins v${pinned}, and the repo has no ${CLOUD_SETUP_PATH} to install it from. Run process-rules onboard again, which writes it; then paste what process-rules cloud-setup prints over the process-rules part of the cloud environment's Setup script, once.`;
+    return `niyam: this cloud session runs niyam ${installed}, but ${WORKFLOW_PATH} pins v${pinned}, and the repo has no ${CLOUD_SETUP_PATH} to install it from. Run niyam onboard again, which writes it; then paste what niyam cloud-setup prints over the process-rules part of the cloud environment's Setup script, once.`;
   }
   if (pinned && pinned !== scripted) {
-    return `process-rules: ${CLOUD_SETUP_PATH} installs process-rules ${scripted}, but ${WORKFLOW_PATH} pins v${pinned}. Run process-rules onboard again, which writes the file at the pin.`;
+    return `niyam: ${CLOUD_SETUP_PATH} installs niyam ${scripted}, but ${WORKFLOW_PATH} pins v${pinned}. Run niyam onboard again, which writes the file at the pin.`;
   }
   if (scripted === installed) return undefined;
   const ran = sys.exec('bash', [file], { input: '', timeoutMs: CLOUD_INSTALL_MS });
   const paste = sys.exists(FROM_SETUP)
     ? ''
-    : ` The cloud environment's Setup script installs a release of its own: paste what process-rules cloud-setup prints over its process-rules part, once, and new releases then need no paste.`;
+    : ` The cloud environment's Setup script installs a release of its own: paste what niyam cloud-setup prints over its process-rules part, once, and new releases then need no paste.`;
   if (ran.code !== 0) {
     const why = ran.stderr.trim().split('\n').at(-1) || `exit ${ran.code}`;
-    return `process-rules: this cloud session runs process-rules ${installed}, but ${CLOUD_SETUP_PATH} installs ${scripted}, and running it failed (${why}); the session works on with ${installed}.${paste}`;
+    return `niyam: this cloud session runs niyam ${installed}, but ${CLOUD_SETUP_PATH} installs ${scripted}, and running it failed (${why}); the session works on with ${installed}.${paste}`;
   }
-  return `process-rules: this cloud session's environment held process-rules ${installed}; installed ${scripted} from ${CLOUD_SETUP_PATH}, as the repo pins, for this session. The environment catches up when Claude builds it again.${paste}`;
+  return `niyam: this cloud session's environment held niyam ${installed}; installed ${scripted} from ${CLOUD_SETUP_PATH}, as the repo pins, for this session. The environment catches up when Claude builds it again.${paste}`;
 }
 
 /**
@@ -147,19 +147,19 @@ async function cloudStart(sys: Sys): Promise<Said> {
     root = repoRoot(sys);
     settings = loadSettings(sys, root);
   } catch (error) {
-    return { line: `process-rules: STOP. ${message(error)}, so this cloud session cannot be checked as the agent. Do not push, fetch, or run gh in this session; tell the owner.` };
+    return { line: `niyam: STOP. ${message(error)}, so this cloud session cannot be checked as the agent. Do not push, fetch, or run gh in this session; tell the owner.` };
   }
   const { owners, agents } = settings;
   const agent = either(agents);
   // Any owner can set up the agent: the first is the one to tell.
   const stop = `Do not push, fetch, or run gh in this session; tell ${owners[0]}.`;
   const envFile = sys.env.CLAUDE_ENV_FILE;
-  if (!envFile) return { line: `process-rules: STOP. CLAUDE_ENV_FILE is unset, so this cloud session cannot be given the agent identity. ${stop} ${HOOK_ONLY}` };
+  if (!envFile) return { line: `niyam: STOP. CLAUDE_ENV_FILE is unset, so this cloud session cannot be given the agent identity. ${stop} ${HOOK_ONLY}` };
   const asked = await cloudLogin(sys);
-  if ('problem' in asked) return { line: `process-rules: STOP. ${asked.problem}, so it cannot be checked as ${agent}. ${stop}` };
+  if ('problem' in asked) return { line: `niyam: STOP. ${asked.problem}, so it cannot be checked as ${agent}. ${stop}` };
   if (!anyLogin(agents, asked.login)) {
     return {
-      line: `process-rules: STOP. This cloud session reaches GitHub as ${asked.login}, not ${agent}: claude.ai's GitHub connection must be ${agent} for agent sessions. ${stop}`,
+      line: `niyam: STOP. This cloud session reaches GitHub as ${asked.login}, not ${agent}: claude.ai's GitHub connection must be ${agent} for agent sessions. ${stop}`,
     };
   }
   // A fresh clone has only git's samples: the identity and work rules before a push come from the hook written here,
@@ -169,21 +169,21 @@ async function cloudStart(sys: Sys): Promise<Said> {
     hook = prePushHook(sys, root);
     if (hook.state === 'missing' || hook.state === 'older') sys.write(hook.file, PRE_PUSH_HOOK, 0o755);
   } catch (error) {
-    return { line: `process-rules: STOP. Writing the pre-push git hook failed (${message(error)}), so this cloud session's pushes cannot be checked. ${stop}` };
+    return { line: `niyam: STOP. Writing the pre-push git hook failed (${message(error)}), so this cloud session's pushes cannot be checked. ${stop}` };
   }
   try {
     // gh needs a token to run at all: the proxy's placeholder, which it swaps for the connected account's.
     const token = cloudToken(sys);
     sys.append(envFile, `\nunset ${Object.keys(BASE_ENV).join(' ')}\nexport GH_TOKEN=${token} GITHUB_TOKEN=${token} PROCESS_RULES_AGENT=${asked.login}\n`);
   } catch (error) {
-    return { line: `process-rules: STOP. Writing to CLAUDE_ENV_FILE failed (${message(error)}), so this cloud session cannot be given the agent identity. ${stop}` };
+    return { line: `niyam: STOP. Writing to CLAUDE_ENV_FILE failed (${message(error)}), so this cloud session cannot be given the agent identity. ${stop}` };
   }
   const unchecked = hook.state === 'own'
-    ? ` Its pre-push hook ${hook.path} does not run process-rules, so only the pull request's checks hold the work rules.`
+    ? ` Its pre-push hook ${hook.path} does not run niyam, so only the pull request's checks hold the work rules.`
     : hook.state === 'outside'
       ? ` Its pre-push hook ${hook.path} is outside the repository and was not checked, so only the pull request's checks may hold the work rules.`
       : '';
-  return { line: `process-rules: this cloud session works as ${asked.login} on GitHub.${unchecked}`, agent: asked.login };
+  return { line: `niyam: this cloud session works as ${asked.login} on GitHub.${unchecked}`, agent: asked.login };
 }
 
 function start(sys: Sys): Said {
@@ -200,23 +200,23 @@ function start(sys: Sys): Said {
 
   const envFile = sys.env.CLAUDE_ENV_FILE;
   if (!envFile) {
-    return { line: `process-rules: STOP. CLAUDE_ENV_FILE is unset, so this session cannot be given the agent identity and gh and git would act as the owner. ${stop} ${HOOK_ONLY}` };
+    return { line: `niyam: STOP. CLAUDE_ENV_FILE is unset, so this session cannot be given the agent identity and gh and git would act as the owner. ${stop} ${HOOK_ONLY}` };
   }
   try {
     sys.append(envFile, `\n${lockScript(sys.home)}`);
   } catch (error) {
-    return { line: `process-rules: STOP. Writing the GitHub lock to CLAUDE_ENV_FILE failed (${message(error)}), so gh and git may act as the owner. ${stop}` };
+    return { line: `niyam: STOP. Writing the GitHub lock to CLAUDE_ENV_FILE failed (${message(error)}), so gh and git may act as the owner. ${stop}` };
   }
 
   const locked = (reason: string, fix: string): Said => ({
-    line: `process-rules: GitHub is locked out of this session: ${reason}. Do not work around the lock; ${fix}.`,
+    line: `niyam: GitHub is locked out of this session: ${reason}. Do not work around the lock; ${fix}.`,
   });
   if (!settings) return locked(settingsProblem, `tell ${owner}`);
   const here = agentHere(sys, settings.agents);
-  if ('problem' in here) return locked(here.problem, `ask ${owner} to run process-rules machine <agent> for one of them`);
+  if ('problem' in here) return locked(here.problem, `ask ${owner} to run niyam machine <agent> for one of them`);
   const { agent } = here;
   const paths = pathsFor(sys.home, agent);
-  const fix = `ask ${owner} to run process-rules machine ${agent} (process-rules doctor ${agent} names what is missing)`;
+  const fix = `ask ${owner} to run niyam machine ${agent} (niyam doctor ${agent} names what is missing)`;
   const store = tokenStore(sys);
   if (!store) return locked(unsupported(sys), `tell ${owner}`);
 
@@ -229,7 +229,7 @@ function start(sys: Sys): Said {
   }
   const names = sessionNames(script);
   if (!names || !sameLogin(names.agent, agent) || script !== sessionScript(names.agent, names.id, paths, store)) {
-    return locked(`${paths.session} is out of date, or not the file process-rules machine writes, for ${agent}`, fix);
+    return locked(`${paths.session} is out of date, or not the file niyam machine writes, for ${agent}`, fix);
   }
   try {
     sys.append(envFile, `\n${script}`);
@@ -239,7 +239,7 @@ function start(sys: Sys): Said {
   if (!store.read(sys, names.agent)) {
     return locked(`${store.where} has no ${names.agent} token, so GitHub refuses gh and git`, fix);
   }
-  return { line: `process-rules: this session works as ${names.agent} on GitHub. ${AUTO_FIX}`, agent: names.agent };
+  return { line: `niyam: this session works as ${names.agent} on GitHub. ${AUTO_FIX}`, agent: names.agent };
 }
 
 /**

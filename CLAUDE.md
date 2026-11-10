@@ -1,4 +1,4 @@
-# Agents in process-rules
+# Agents in niyam (formerly process-rules)
 
 ## Merging
 

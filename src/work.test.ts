@@ -255,7 +255,7 @@ describe('sliceProblems', () => {
     };
     const proposed =
       '#12 was added to work item #10 after its approval; example-owner reacts 👍 on ExampleBot\'s proposal on #12, or adds a "Decision:" comment naming #12, or #12 links example-owner\'s request for it on #10';
-    const refused = `${proposed}; ExampleBot proposes it with: process-rules propose 12`;
+    const refused = `${proposed}; ExampleBot proposes it with: niyam propose 12`;
 
     it('is refused without the owner\'s decision', async () => {
       assert.deepEqual(await problems(added().issue), [refused]);
@@ -289,7 +289,7 @@ describe('sliceProblems', () => {
 
     describe('a batch answer on the Approvals issue', () => {
       const batched = `${proposed}, or example-owner comments on #700, the Approvals issue, with a first line "Decision: approve #12"`;
-      const proposes = '; ExampleBot proposes it with: process-rules propose 12';
+      const proposes = '; ExampleBot proposes it with: niyam propose 12';
 
       it("passes when the first line of the owner's comment there approves it among others", async () => {
         const g = added();
@@ -343,7 +343,7 @@ describe('sliceProblems', () => {
     });
 
     describe("an owner's edited Decision:", () => {
-      const proposes = '; ExampleBot proposes it with: process-rules propose 12';
+      const proposes = '; ExampleBot proposes it with: niyam propose 12';
 
       it('is refused when the agent edited it, on the slice or on the work item', async () => {
         const g = added();
@@ -566,7 +566,7 @@ describe('sliceProblems', () => {
       ...extra,
     });
     const refused =
-      'state #30 was closed as not planned after approval; example-owner reacts 👍 on ExampleBot\'s proposal for it on #12, or adds a "Decision:" comment to it; ExampleBot proposes it with: process-rules propose 30';
+      'state #30 was closed as not planned after approval; example-owner reacts 👍 on ExampleBot\'s proposal for it on #12, or adds a "Decision:" comment to it; ExampleBot proposes it with: niyam propose 30';
 
     it('is refused without the owner\'s decision', async () => {
       const g = graph();
@@ -716,7 +716,7 @@ describe('sliceProblems', () => {
   it('says how to fix a client workflow without issues: read', async () => {
     const sys = new FakeSys();
     sys.route('GET', `${ISSUES}/12`, { status: 403, json: { message: 'Resource not accessible by integration' } });
-    await assert.rejects(sliceProblems(sys, 'tok', SLUG, 12, ACCOUNTS, {}), /needs issues: read, so run process-rules onboard to update it/);
+    await assert.rejects(sliceProblems(sys, 'tok', SLUG, 12, ACCOUNTS, {}), /needs issues: read, so run niyam onboard to update it/);
   });
 
   it('throws when GitHub will not answer', async () => {
@@ -991,7 +991,7 @@ describe('prePush', () => {
       call.args.join(' ') === 'credential fill' ? { code: 0, stdout: 'password=ghp_good\n', stderr: '' } : log(call);
     assert.deepEqual(await push(sys, `refs/heads/work ${LOCAL} refs/heads/work ${REMOTE}`), {
       code: 1,
-      err: ['✗ this agent session has no token, so the work rules cannot be checked; run process-rules doctor', 'pre-push: refused by the work rules'],
+      err: ['✗ this agent session has no token, so the work rules cannot be checked; run niyam doctor', 'pre-push: refused by the work rules'],
     });
   });
 
@@ -1332,7 +1332,7 @@ describe('prMerged', () => {
     });
   }
 
-  it('closes nothing with the work rules off, or before the repo adopts process-rules', async () => {
+  it('closes nothing with the work rules off, or before the repo adopts niyam', async () => {
     const off = actions(merged('Slice: #12'));
     off.files.set(`${ROOT}/.github/process-rules.json`, JSON.stringify({ owner: OWNER, agent: AGENT, features: ['identity'] }));
     assert.equal((await run(off)).out[0], 'pr-merged: work-rules is off in .github/process-rules.json; nothing to check');
@@ -1576,7 +1576,7 @@ describe('propose', () => {
         `example-owner answers it with one comment on https://github.com/${SLUG}/issues/700, the Approvals issue, whose first line is this (deleting a number leaves that one waiting):`,
         'Decision: approve #30',
       ]);
-      assert.match(out.at(-3) ?? '', /; ExampleBot proposes #12 with: process-rules propose 12$/);
+      assert.match(out.at(-3) ?? '', /; ExampleBot proposes #12 with: niyam propose 12$/);
     });
 
     it('prints no batch answer when nothing waits', async () => {
@@ -1632,7 +1632,7 @@ describe('propose', () => {
     const { sys } = session(g);
     assert.deepEqual((await run(sys, 30)).out, [
       '✓ state #30: proposed on #12: https://github.com/example-org/example-app/issues/12#issuecomment-1',
-      "#12 is labeled needs-owner, waiting on example-owner's 👍 on https://github.com/example-org/example-app/issues/12#issuecomment-1; ExampleBot proposes #12 with: process-rules propose 12",
+      "#12 is labeled needs-owner, waiting on example-owner's 👍 on https://github.com/example-org/example-app/issues/12#issuecomment-1; ExampleBot proposes #12 with: niyam propose 12",
     ]);
     const made = comment('Proposal: add #12', LATER, AGENT);
     g.comments.push(made);
@@ -1644,7 +1644,7 @@ describe('propose', () => {
     g.comments.pop();
     assert.deepEqual((await run(sys, 30)).out, [
       '✓ state #30: example-owner has decided',
-      '#12 is labeled needs-owner; ExampleBot proposes #12 with: process-rules propose 12',
+      '#12 is labeled needs-owner; ExampleBot proposes #12 with: niyam propose 12',
     ]);
   });
 
@@ -1688,7 +1688,7 @@ describe('propose', () => {
   it('refuses a session with no token, or not working as the agent', async () => {
     const { sys } = session();
     sys.env = { GH_TOKEN: 'process-rules-no-agent-token' };
-    assert.equal((await run(sys)).err[0], '✗ this session has no token; run process-rules doctor');
+    assert.equal((await run(sys)).err[0], '✗ this session has no token; run niyam doctor');
     sys.env = { GH_TOKEN: 'ghp_owner' };
     assert.equal((await run(sys)).err[0], "✗ propose posts as ExampleBot, but this session's token is refused");
     sys.acceptToken('ghp_owner', OWNER);
@@ -1737,7 +1737,7 @@ describe('with two owners and two agents', () => {
 
   it("names both owners and both agents in what a slice added after approval owes", async () => {
     assert.deepEqual(await problems(added().issue, [], {}, TEAM), [
-      '#12 was added to work item #10 after its approval; example-owner or Second-Owner reacts 👍 on ExampleBot or OtherBot\'s proposal on #12, or adds a "Decision:" comment naming #12, or #12 links example-owner or Second-Owner\'s request for it on #10; ExampleBot or OtherBot proposes it with: process-rules propose 12',
+      '#12 was added to work item #10 after its approval; example-owner or Second-Owner reacts 👍 on ExampleBot or OtherBot\'s proposal on #12, or adds a "Decision:" comment naming #12, or #12 links example-owner or Second-Owner\'s request for it on #10; ExampleBot or OtherBot proposes it with: niyam propose 12',
     ]);
   });
 
@@ -1780,7 +1780,7 @@ describe('with two owners and two agents', () => {
   it("takes the second owner's Decision: or 👍 on a dropped state", async () => {
     const g = dropped();
     assert.deepEqual(await problems(g.issue, [], {}, TEAM), [
-      'state #30 was closed as not planned after approval; example-owner or Second-Owner reacts 👍 on ExampleBot or OtherBot\'s proposal for it on #12, or adds a "Decision:" comment to it; ExampleBot or OtherBot proposes it with: process-rules propose 30',
+      'state #30 was closed as not planned after approval; example-owner or Second-Owner reacts 👍 on ExampleBot or OtherBot\'s proposal for it on #12, or adds a "Decision:" comment to it; ExampleBot or OtherBot proposes it with: niyam propose 30',
     ]);
     g.comments.push(comment('Decision: drop #30', LATEST, OWNER_2));
     assert.deepEqual(await problems(g.issue, [], {}, TEAM), []);

@@ -42,7 +42,7 @@ async function setUp(sys: FakeSys, ...args: string[]): Promise<{ code: number; o
 
 /** The plan fresh() shows: everything new. */
 const FRESH_PLAN = [
-  '◆  process-rules machine   ExampleBot',
+  '◆  niyam machine   ExampleBot',
   '│',
   '◇  This Mac',
   '│    signing key   ~/.ssh/examplebot_signing (new)',
@@ -61,7 +61,7 @@ describe('machine', () => {
     assert.deepEqual(await setUp(sys), {
       code: 1,
       out: [],
-      err: ["machine: process-rules supports macOS only, where the keychain holds the agent's token; this machine runs linux"],
+      err: ["machine: niyam supports macOS only, where the keychain holds the agent's token; this machine runs linux"],
     });
     assert.deepEqual([sys.calls, sys.requests, sys.asked], [[], [], []]);
   });
@@ -173,7 +173,7 @@ describe('machine', () => {
     const { code, out } = await setUp(sys);
     assert.deepEqual({ code, out }, {
       code: 0,
-      out: ['◆  process-rules machine   ExampleBot', '│', '◇  This Mac is set up for ExampleBot', '│', '└  ExampleBot is ready on this Mac'],
+      out: ['◆  niyam machine   ExampleBot', '│', '◇  This Mac is set up for ExampleBot', '│', '└  ExampleBot is ready on this Mac'],
     });
     assert.deepEqual([sys.chosen, sys.asked], [[], []]);
     assert.ok(!sys.calls.some((c) => c.command === 'ssh-keygen' && c.args[0] !== '-y'));
@@ -190,7 +190,7 @@ describe('machine', () => {
     assert.equal(code, 0);
     assert.deepEqual(sys.chosen, ['Go ahead?']);
     assert.deepEqual(out, [
-      '◆  process-rules machine   ExampleBot',
+      '◆  niyam machine   ExampleBot',
       '│',
       '◇  This Mac',
       '│    gh            sign out example-owner',
@@ -228,8 +228,8 @@ describe('machine', () => {
       '■  git password removed',
       '│',
       '◇  Worth fixing',
-      '▲  gh is still signed in as example-owner: no such account → process-rules machine',
-      '▲  the saved git password for github.com is still in the keychain → process-rules machine',
+      '▲  gh is still signed in as example-owner: no such account → niyam machine',
+      '▲  the saved git password for github.com is still in the keychain → niyam machine',
       '│',
       '└  ExampleBot is ready on this Mac',
     ]);
@@ -380,7 +380,7 @@ describe('machine', () => {
     ['an empty paste', '', undefined, CLASSIC, 'machine: GitHub refuses the token (expired or revoked?)'],
     ['a refused token', 'ghp_bad', undefined, CLASSIC, 'machine: GitHub refuses the token (expired or revoked?)'],
     ["the owner's token", 'ghp_owner', 'example-owner', CLASSIC, 'machine: the token acts as example-owner, not ExampleBot'],
-    ['a fine-grained token', 'github_pat_x', AGENT, {}, 'machine: it is not a classic token, which process-rules needs (see its docs/decisions.md)'],
+    ['a fine-grained token', 'github_pat_x', AGENT, {}, 'machine: it is not a classic token, which niyam needs (see its docs/decisions.md)'],
     ['a token short of scopes', 'ghp_thin', AGENT, { 'x-oauth-scopes': 'repo' }, 'machine: the token lacks the scopes workflow, read:org, project, write:ssh_signing_key'],
     ['a token that never expires', 'ghp_forever', AGENT, { 'x-oauth-scopes': CLASSIC['x-oauth-scopes'] }, 'machine: the token never expires; create one with an expiry (90 days recommended)'],
   ] as const) {

@@ -1,4 +1,9 @@
-# process-rules
+# niyam
+
+niyam (नियम, rule) was named process-rules until 0.6.3. Its repository moved
+from athya-hq/process-rules to veda-hq/niyam, and GitHub forwards the old
+address. The old names still work for at least one release: see
+[Renamed from process-rules](#renamed-from-process-rules).
 
 Work rules for a repository that tracks its work in GitHub Issues and a GitHub
 Project, with an owner account that approves and an agent account that builds.
@@ -10,7 +15,7 @@ hooks and a shared GitHub Actions workflow.
 
 Early. The CLI runs `machine`, `doctor`, `session-start`, `guard`, `onboard`, `propose` and `upgrade`. What comes next, and in what
 order: the Slice issues under
-[process-rules roadmap v1](https://github.com/athya-hq/process-rules/issues/22),
+[niyam roadmap v1](https://github.com/athya-hq/process-rules/issues/22),
 on the Project [process-rules work](https://github.com/orgs/athya-hq/projects/2);
 [docs/roadmap.md](docs/roadmap.md) keeps version v1 as approved. Decisions:
 [docs/decisions.md](docs/decisions.md).
@@ -56,7 +61,7 @@ repo whose settings list several it works as the owner named, else the
 one the run's browser sign-in is, which must be listed, and the agent named,
 else the one set up on the Mac; it leaves the lists as they are.
 
-`process-rules machine ExampleBot`, run once per Mac and agent account (inside
+`niyam machine ExampleBot`, run once per Mac and agent account (inside
 an adopting repo the name can be left out), needs no client repo. It makes the
 agent's signing key (`~/.ssh/<agent, lowercased>_signing`), opens GitHub's
 classic-token page with the scopes filled in (`repo`, `workflow`, `read:org`,
@@ -75,7 +80,7 @@ one plan, in the same layout as `onboard`, listing only what changes. Then it
 asks once:
 
 ```
-◆  process-rules machine   AGENT
+◆  niyam machine   AGENT
 │
 ◇  This Mac
 │    signing key   ~/.ssh/agent_signing (new)
@@ -111,7 +116,7 @@ now because a fine-grained token waits on an organisation owner's approval
 wherever the organisation requires it, reaches no repository where the agent
 is only an outside collaborator, takes one token per organisation, and
 cannot register the agent's signing key when an organisation owns it. An organisation or
-enterprise that blocks classic tokens cannot adopt process-rules yet:
+enterprise that blocks classic tokens cannot adopt niyam yet:
 `onboard` names the block and that an organisation owner can allow classic
 tokens under Settings → Personal access tokens. A fine-grained token or a
 GitHub App waits for adoption outside Athya.
@@ -250,26 +255,26 @@ first; a POST or PATCH never is. A call with a time limit keeps it for
 both tries, and one that runs out of time stops with that, not tried
 again.
 
-`process-rules doctor` only reads. It re-checks the key, the token and its
+`niyam doctor` only reads. It re-checks the key, the token and its
 scopes, the key's registration, the session file, that the launcher runs,
 that the CLI is the newest release (`▲` when a newer one is out, fixed by
-`process-rules upgrade`) and the only `process-rules` on `PATH` (`✗`
+`niyam upgrade`) and the only `niyam` on `PATH` (`✗`
 otherwise, naming each copy and its version), and
 what of the owner's an agent session could reach. It shows them grouped as
 This Mac, GitHub and This repo, one line each: `✓` fine, `▲` worth fixing,
 `✗` broken. Each problem line ends with its fix:
 
 ```
-◆  process-rules doctor   AGENT
+◆  niyam doctor   AGENT
 │
 ◇  This Mac
 ✓  signing key ~/.ssh/agent_signing
 ✓  session file
-✗  launcher missing, so hooks need node on PATH → process-rules machine
-▲  process-rules 0.5.20 runs here; 0.5.30 is out → process-rules upgrade
+✗  launcher missing, so hooks need node on PATH → niyam machine
+▲  niyam 0.5.20 runs here; 0.5.30 is out → niyam upgrade
 │
 ◇  GitHub — as AGENT
-▲  token ends in 11 days → process-rules machine
+▲  token ends in 11 days → niyam machine
 ✓  signing key registered
 │
 └  3 to fix
@@ -282,18 +287,18 @@ Claude cloud sessions below).
 
 ## Adopting
 
-1. On each Mac that runs agent sessions: `process-rules machine <agent>`.
+1. On each Mac that runs agent sessions: `niyam machine <agent>`.
    Only you can run it: it asks for the agent's token and makes its signing
    key. `onboard` refuses on a Mac it has not set up, naming what is missing.
-2. In the client repository, as its owner: `process-rules onboard`. It
+2. In the client repository, as its owner: `niyam onboard`. It
    suggests the owner from the run's browser sign-in (below) and the agent from the accounts
    `machine` set up on this Mac, for you to confirm (or name them:
-   `process-rules onboard <owner> <agent>`). It first works out everything
+   `niyam onboard <owner> <agent>`). It first works out everything
    it would change, changing nothing, and prints that as one plan, then asks
    once:
 
    ```
-   ◆  process-rules onboard   v0.5.17 → v0.5.20
+   ◆  niyam onboard   v0.5.17 → v0.5.20
    │  owner/repo · owner OWNER · agent AGENT
    │
    ◇  Pull request
@@ -309,7 +314,7 @@ Claude cloud sessions below).
    │    pre-push hook  new
    │
    ◇  Claude cloud — by hand, once
-   │    Setup script        process-rules cloud-setup, first
+   │    Setup script        niyam cloud-setup, first
    │    claude.ai's GitHub  as AGENT
    │
    ◇  Check
@@ -331,7 +336,8 @@ Claude cloud sessions below).
    It writes `.github/process-rules.json`, adds to `.claude/settings.json`
    the lock in `env`, a SessionStart hook running `process-rules
    session-start`, a PreToolUse hook running `process-rules guard` and a
-   `permissions.allow` rule for `process-rules review-thread`, and
+   `permissions.allow` rule for `process-rules review-thread` (hooks keep the
+   old name, a bin of niyam, so adopters' settings need no change), and
    writes `.github/workflows/process-rules.yml`, which calls this repository's
    shared checks (`.github/workflows/checks.yml`) from two jobs: `process-rules`
    on pull requests and pushes, read-only, and `process-rules-weekly` on the
@@ -387,7 +393,7 @@ Claude cloud sessions below).
    branch `process-rules/onboard` from the default branch's tip, in a
    temporary repository it deletes afterwards, pushes it as the agent and
    opens the agent's pull request (or updates the one an earlier run opened),
-   titled `chore(process-rules): onboard at v<version>`, as Conventional
+   titled `chore(niyam): onboard at v<version>`, as Conventional
    Commits reads it, and its commit the same. Where most of the default
    branch's latest 20 commit subjects, merge commits aside, lead with an
    emoji or a gitmoji shortcode, so does the title: the one an earlier
@@ -520,7 +526,7 @@ as for any pull request naming it. A request made in chat is filed as a slice qu
 owner's words and proposed once. Anything else the agent adds, a fix filed
 as its own slice included, waits for the owner's 👍.
 
-**Approving with one tap.** In an agent session, `process-rules propose
+**Approving with one tap.** In an agent session, `niyam propose
 <issue>` asks the owner for what a slice owes: given the slice, it comments
 on it as the agent, one `Proposal:` comment for its addition after the
 approval and one for each State dropped after it (given a State, for that
@@ -541,11 +547,11 @@ prints, for each decision still waiting, the link GitHub gives its newest
 proposal, posted now or before: the comment's own `#issuecomment-` address,
 where the owner reacts, never the slice's top or the `needs-owner` list. A
 waiting decision with no proposal yet gets the command that posts one,
-`process-rules propose <issue>` with its number. A
+`niyam propose <issue>` with its number. A
 reaction does not re-run a pull request's checks: the agent proposes before
 it starts, and pre-push or a re-run of Work rules sees the 👍.
 
-**Many at once.** `propose` takes several issues, `process-rules propose 12
+**Many at once.** `propose` takes several issues, `niyam propose 12
 30 41`, and asks for each in turn. Where the settings name an Approvals issue
 (`"approvals": N`), each proposal also says it can be answered in the batch
 on Approvals, and the run ends with that issue's link and the first line of
@@ -558,7 +564,7 @@ proposal by its own number, so a slice whose only waiting proposal is a
 State's leaves Needs you as soon as the batch names the State.
 
 **The Needs you list keeps itself.** With `board` on, the client workflow's
-`process-rules-asks` job runs `process-rules needs-owner`. An agent's comment
+`process-rules-asks` job runs `niyam needs-owner`. An agent's comment
 opening with `Needs you:` or `Proposal:`, on an issue, a pull request or a review thread, labels its issue or pull request
 `needs-owner`, so it shows in the owner's Needs you view. On an issue, the
 owner's `approved` label or `Decision:` comment takes the label off at once;
@@ -587,7 +593,7 @@ that may ask or decide, from the owner, a member or a collaborator, the
 `approved` label and the hourly cron start the job, so other comments, and an
 outsider's, run nothing.
 
-**Answering review threads.** In an agent session, `process-rules
+**Answering review threads.** In an agent session, `niyam
 review-thread <thread-id> --reply <text> --resolve` replies on a review
 thread (`PRRT_…`), resolves it, or both, as the agent. It refuses unless the
 session's token is the agent's and the thread is on a pull request the agent
@@ -639,7 +645,7 @@ only when the owner or the agent wrote the issue and was the last to edit it.
 
 The **review routine** is a weekly scheduled agent session in the client
 repository, working as the agent; its prompt is
-[routines/review.md](routines/review.md). It runs `process-rules reviews-due`
+[routines/review.md](routines/review.md). It runs `niyam reviews-due`
 for the open decisions whose `Review:` date has come, then for each one either
 keeps it (comment `Kept:` with reasoning and a new review date) or settles it
 (comment `Settled:` with reasoning, and closes it), labeling both `veto` so
@@ -703,7 +709,7 @@ missing, or, with `work-rules` on, the session has no token. When the repository
 pre-push hook, or git runs hooks from a folder outside the repository (a
 global `core.hooksPath`), `onboard` leaves it alone and lists the line to add
 under "By hand:": `process-rules pre-push "$@"`. The client workflow re-runs the checks when a
-pull request's description is edited. After upgrading process-rules, run
+pull request's description is edited. After upgrading niyam, run
 `onboard` again: it upgrades the hook entries in `.claude/settings.json` and
 the workflow. An older release's workflow, one job that let every run write
 to issues, is replaced; a workflow split into `process-rules` and
@@ -734,8 +740,8 @@ The others are `pr-identity`, `board`, `work-rules`, `figma`, `decisions` and
 { "owner": "example-owner", "agent": "ExampleBot", "features": ["identity"], "project": "Example work" }
 ```
 
-`process-rules onboard <owner> <agent> --features identity` sets up identity
-alone; later, `process-rules onboard --add board` turns one more on and sets
+`niyam onboard <owner> <agent> --features identity` sets up identity
+alone; later, `niyam onboard --add board` turns one more on and sets
 it up. Settings with no `features` key keep every feature on, as before;
 `"features": []` means identity alone. The shared checks,
 the weekly job, `reviews-due` and the pre-push hook each pass, saying so, when
@@ -781,7 +787,7 @@ status=$?
 exit "$status"
 ```
 
-`process-rules as-agent --session <session_id> -- <command> [args...]` runs
+`niyam as-agent --session <session_id> -- <command> [args...]` runs
 the command only when session-start recorded, for that session id, that the
 session works as one of the agents `.github/process-rules.json` names, the
 record the guard reads. On a Mac the command gets what the session file
@@ -796,7 +802,7 @@ the command's own failure. A missing `--` or command is bad usage, exit 2. The t
 only ever in the command's environment, never on a command line, in output
 or in a file, and it never falls back to the owner's `gh` logins, git
 password or SSH. Use the launcher line above, as the hooks `onboard` writes do:
-the app's hooks may have no node on their `PATH`. `process-rules doctor`,
+the app's hooks may have no node on their `PATH`. `niyam doctor`,
 run in the client repo, warns under "This repo" about each hook in `.claude/settings.json` or
 `.claude/settings.local.json` whose command, or the repo script it runs,
 calls `gh` or git's remote commands outside `as-agent`. A script that
@@ -841,7 +847,7 @@ such a comment does not count.
 The cloud environment's Setup script, which runs as root once the repo is
 cloned and before Claude Code starts, installs the CLI. Claude Code has no
 API or CLI for that field, so you paste it once, by hand, and it names no
-version: `process-rules cloud-setup` prints a short snippet that finds the
+version: `niyam cloud-setup` prints a short snippet that finds the
 clone and runs its `.github/process-rules/cloud-setup.sh`. `onboard` writes
 that file in its pull request at the version
 `.github/workflows/process-rules.yml` pins, and writes it again on every
@@ -851,7 +857,7 @@ clone (the VM's home, the clone one folder down), so the snippet looks there
 and in each home. The file unpacks Node and the CLI under
 `/opt/process-rules`, each once it matches the sha256 the file pins (Node's
 from this release, the CLI's from GitHub's record of the release archive),
-and puts `process-rules` on `PATH`, leaving the image's own Node alone. The
+and puts `process-rules` and `niyam` on `PATH`, leaving the image's own Node alone. The
 environment needs the network to reach nodejs.org and GitHub's release
 downloads.
 
@@ -876,16 +882,16 @@ the snippet over it, once. It only warns: the session works on.
 claude.ai has one GitHub connection per account, so it is the agent's for
 every cloud session that account starts.
 
-`process-rules doctor` in a cloud session (`CLAUDE_CODE_REMOTE=true`) only
+`niyam doctor` in a cloud session (`CLAUDE_CODE_REMOTE=true`) only
 reads, in the same layout and with the same exit codes as on a Mac:
 
 ```
-◆  process-rules doctor   AGENT
+◆  niyam doctor   AGENT
 │
 ◇  This cloud session
-✗  .github/process-rules/cloud-setup.sh installs 0.5.24, but .github/workflows/process-rules.yml pins v0.5.25 → process-rules onboard again
-✓  process-rules 0.5.24 runs here
-▲  /opt/process-rules/from-setup missing, so the cloud environment's Setup script does not run .github/process-rules/cloud-setup.sh → paste what process-rules cloud-setup prints into the cloud environment's Setup script, once
+✗  .github/process-rules/cloud-setup.sh installs 0.5.24, but .github/workflows/process-rules.yml pins v0.5.25 → niyam onboard again
+✓  niyam 0.5.24 runs here
+▲  /opt/process-rules/from-setup missing, so the cloud environment's Setup script does not run .github/process-rules/cloud-setup.sh → paste what niyam cloud-setup prints into the cloud environment's Setup script, once
 │
 ◇  GitHub — as AGENT
 ✓  the proxy acts as AGENT, an agent the repo's settings name
@@ -917,10 +923,14 @@ each machine with pnpm, once; nothing is built on install:
 pnpm add -g https://github.com/athya-hq/process-rules/releases/download/v0.6.3/athya-hq-process-rules-0.6.3.tgz
 ```
 
+From the first niyam release on, the package is
+`https://github.com/veda-hq/niyam/releases/download/v<version>/veda-hq-niyam-<version>.tgz`,
+and it puts two commands on `PATH`: `niyam`, and `process-rules`, its old name.
+
 After that, update it with one command on each machine:
 
 ```bash
-process-rules upgrade
+niyam upgrade
 ```
 
 `upgrade` asks GitHub's public releases API for the newest release, with no
@@ -930,9 +940,9 @@ runs. On the newest release it says so and installs nothing; it never moves
 back to an older one. When GitHub cannot be reached, or a newer release has no
 package attached yet, or pnpm fails, it says which and exits 1, checking
 nothing more. After an install, or when there was nothing to install, it walks
-`PATH`, as `type -a process-rules` does, reading an empty or relative entry
+`PATH`, as `type -a niyam` does, reading an empty or relative entry
 against the current folder as the shell does. It exits 0 when exactly one
-`process-rules` is there and it is the newest release. When more than one is
+`niyam` is there and it is the newest release. When more than one is
 there, or the first is not that release, it lists each path and its version,
 marks pnpm's own copy to keep, names the others to remove, and exits 1, since
 an older copy the shell finds first is how a Mac keeps running an old release
@@ -940,7 +950,7 @@ after an upgrade. It works in an agent session on a Mac too; in a Claude cloud
 session it refuses, because there the repo's `cloud-setup.sh` installs the
 release the workflow pins. A CLI from before `upgrade` has none (`process-rules
 help` lists it when it is there): install the newest release with the line above. `onboard`, when the repo pins a newer release than the
-CLI running, refuses and says to run `process-rules upgrade` first.
+CLI running, refuses and says to run `niyam upgrade` first.
 
 `onboard` pins the client's workflow to one version, the release of the CLI
 that ran it. Each job writes the pin twice, `checks.yml@vX.Y.Z` and, two lines
@@ -950,11 +960,11 @@ below it under `with:`, `process-rules-ref: vX.Y.Z`. Every job of
 GitHub Enterprise Server, which has no `job.workflow_sha`, the CLI comes from
 `process-rules-ref`. Settings fails a run whose `process-rules-ref` names
 another release, saying which and how to fix it: Dependabot and Renovate move
-a job's `uses:` line and nothing else, so their bump of process-rules leaves
+a job's `uses:` line and nothing else, so their bump of niyam leaves
 the pair apart, and it also leaves out the cloud setup file's pin and any job a
-newer release adds. So leave `athya-hq/process-rules` out of their updates (a
+newer release adds. So leave `veda-hq/niyam` and `athya-hq/process-rules` out of their updates (a
 Dependabot `ignore` entry, a Renovate `packageRules` entry with `enabled:
-false`). Upgrading is two steps: `process-rules upgrade`, then `onboard` again,
+false`). Upgrading is two steps: `niyam upgrade`, then `onboard` again,
 which moves every pin together. Editing the version by hand means changing
 every line that names it, two per job. A split workflow needs v0.5.4 or later: GitHub refuses a whole run, before
 any job's `if:`, when the called workflow asks for more than the calling job
@@ -980,3 +990,32 @@ history.
 ## License
 
 MIT
+
+## Renamed from process-rules
+
+process-rules became niyam in the release after 0.6.3 (docs/decisions.md,
+P-49). What changed, and what still reads or runs the old name:
+
+| What | Now | The old name |
+| ---- | --- | ------------ |
+| Repository | veda-hq/niyam | athya-hq/process-rules, which GitHub forwards |
+| Package | `@veda-hq/niyam` | each release also attaches the same CLI as `athya-hq-process-rules-<version>.tgz`, for 0.6.x's `upgrade` |
+| Command | `niyam` | `process-rules`, a second bin; typed by the owner it also names `niyam` |
+| Workflow pin | `veda-hq/niyam/.github/workflows/checks.yml@v…` | `athya-hq/process-rules/…`, which `onboard` moves |
+
+Unchanged, because adopters' committed files and hooks name them: the hook
+commands and launcher (`~/.config/process-rules/bin/process-rules`), the lock
+in `.claude/settings.json`'s `env`, `PROCESS_RULES_AGENT`,
+`~/.config/process-rules/`, `.github/workflows/process-rules.yml` and its job
+ids (so the required checks `process-rules / Work rules` and `process-rules /
+PR identity` keep their names), `process-rules-ref`, the settings file
+`.github/process-rules.json` and the keychain service `process-rules`, and
+`.github/process-rules/cloud-setup.sh` (so the cloud Setup script needs no new
+paste).
+
+From a 0.6.x install, `process-rules upgrade` installs the old-name archive,
+which replaces the old package in place; pnpm refuses a second global package
+with the same bin. Then `niyam upgrade` moves it to `@veda-hq/niyam`: it
+removes the old package, adds the new one, and puts the old one back if the add
+fails. pnpm keeps the `process-rules` command at the same path, so the
+launcher `machine` wrote keeps working.

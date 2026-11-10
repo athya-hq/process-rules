@@ -108,7 +108,7 @@ describe('reviewThread', () => {
     assert.match((await run(refused, [THREAD, '--resolve'])).err[0] ?? '', /this session's token is refused$/);
     const none = session();
     delete none.env.GH_TOKEN;
-    assert.deepEqual((await run(none, [THREAD, '--resolve'])).err, ['✗ this session has no token; run process-rules doctor', 'review-thread: refused']);
+    assert.deepEqual((await run(none, [THREAD, '--resolve'])).err, ['✗ this session has no token; run niyam doctor', 'review-thread: refused']);
     assert.equal(owner.requests.filter((r) => r.url.endsWith('/graphql')).length, 0);
   });
 

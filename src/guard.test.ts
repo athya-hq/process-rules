@@ -14,7 +14,7 @@ function check(sys: FakeSys, command: unknown, sessionId: unknown = 'abc-123'): 
   return { code, err };
 }
 
-const REFUSED = 'process-rules: refused, because this session does not work as the agent on GitHub:';
+const REFUSED = 'niyam: refused, because this session does not work as the agent on GitHub:';
 
 describe('reachesGitHub', () => {
   for (const command of ['/usr/local/bin/gh pr list', '~/bin/git push', 'git -c a=b fetch', 'git --git-dir=.git push', 'gh pr list', 'cd x && gh api user', 'git push', 'git -C /repo fetch origin', 'git pull --rebase', 'git clone url', 'git ls-remote origin', 'git remote update', 'git submodule update', 'echo; git push -u origin HEAD', '(gh issue view 1)']) {
@@ -85,9 +85,9 @@ describe('guard', () => {
 
   it('refuses them where session-start locked GitHub out, repeating why', () => {
     const sys = new FakeSys();
-    sys.files.set(RECORD, JSON.stringify({ problem: 'process-rules: GitHub is locked out of this session: x is missing.' }));
+    sys.files.set(RECORD, JSON.stringify({ problem: 'niyam: GitHub is locked out of this session: x is missing.' }));
     assert.deepEqual(check(sys, 'git push').err, [
-      `${REFUSED} session-start said: process-rules: GitHub is locked out of this session: x is missing. Do not work around it; tell the owner.`,
+      `${REFUSED} session-start said: niyam: GitHub is locked out of this session: x is missing. Do not work around it; tell the owner.`,
     ]);
   });
 
@@ -133,7 +133,7 @@ describe('guard on comments that ask the owner', () => {
     assert.equal(err.length, 1);
     assert.match(
       err[0] ?? '',
-      /^process-rules: refused, because this comment asks the owner \(it opens with "Proposal:"\), and it links no published page .* and runs \d+ characters, over 500\. The rule: anything the owner must read, approve or choose arrives as a published page; .* Fix: publish the page first/,
+      /^niyam: refused, because this comment asks the owner \(it opens with "Proposal:"\), and it links no published page .* and runs \d+ characters, over 500\. The rule: anything the owner must read, approve or choose arrives as a published page; .* Fix: publish the page first/,
     );
   });
 

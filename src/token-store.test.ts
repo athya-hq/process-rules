@@ -65,7 +65,7 @@ describe('tokenStore', () => {
   it('names macOS as the supported platform', () => {
     assert.equal(
       unsupported(Object.assign(new FakeSys(), { platform: 'linux' })),
-      "process-rules supports macOS only, where the keychain holds the agent's token; this machine runs linux",
+      "niyam supports macOS only, where the keychain holds the agent's token; this machine runs linux",
     );
   });
 });

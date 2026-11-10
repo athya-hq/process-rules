@@ -7,6 +7,12 @@ export function packageVersion(): string {
   );
 }
 
+/** The name in this package's package.json: @veda-hq/niyam, or @athya-hq/process-rules in the bridge release's archive. */
+export function packageName(): string {
+  const raw: unknown = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  return typeof raw === 'object' && raw !== null && 'name' in raw && typeof raw.name === 'string' ? raw.name : '';
+}
+
 /** The string `version` of a parsed package.json; throws without one. */
 export function versionOf(raw: unknown): string {
   if (

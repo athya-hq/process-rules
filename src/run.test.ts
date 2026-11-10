@@ -68,7 +68,7 @@ describe('run', () => {
     assert.deepEqual(await capture(['deploy']), {
       code: 2,
       out: [],
-      err: ['process-rules: unknown command "deploy"', USAGE],
+      err: ['niyam: unknown command "deploy"', USAGE],
     });
   });
 
@@ -80,7 +80,7 @@ describe('run', () => {
         code: 1,
         out: [],
         err: [
-          `process-rules ${command}: name the agent account after the command, or run it in a repo whose .github/process-rules.json names one`,
+          `niyam ${command}: name the agent account after the command, or run it in a repo whose .github/process-rules.json names one`,
         ],
       });
     });
@@ -89,7 +89,7 @@ describe('run', () => {
   it('runs doctor', async () => {
     const { code, out } = await capture(['doctor'], () => new FakeSys());
     assert.equal(code, 1);
-    assert.equal(out[0], '◆  process-rules doctor   ExampleBot');
+    assert.equal(out[0], '◆  niyam doctor   ExampleBot');
     assert.equal(out.at(-1), '└  5 to fix');
   });
 
@@ -101,18 +101,18 @@ describe('run', () => {
 
   it('passes the named agent on', async () => {
     const { out } = await capture(['doctor', 'OtherBot'], () => new FakeSys());
-    assert.equal(out[0], '◆  process-rules doctor   OtherBot');
+    assert.equal(out[0], '◆  niyam doctor   OtherBot');
   });
 
   it('passes machine its agent and flags, and treats a bad one as bad usage', async () => {
     const { code, out } = await capture(['machine', 'examplebot', '--dry-run'], () => new FakeSys());
     assert.equal(code, 0);
-    assert.equal(out[0], '◆  process-rules machine   ExampleBot');
+    assert.equal(out[0], '◆  niyam machine   ExampleBot');
     assert.equal(out.at(-1), '└  Dry run: nothing changed.');
     for (const args of [['machine', '--force'], ['machine', 'a', 'b']]) {
       const { code: bad, err } = await capture(args);
       assert.equal(bad, 2, args.join(' '));
-      assert.match(err[0] ?? '', /^process-rules: (unknown option --force|unexpected argument "b")$/);
+      assert.match(err[0] ?? '', /^niyam: (unknown option --force|unexpected argument "b")$/);
     }
   });
 
@@ -135,19 +135,19 @@ describe('run', () => {
     const several = await capture(['propose', '12', '#13'], () => new FakeSys());
     assert.equal(several.code, 1);
     assert.match(several.err[0] ?? '', /this session has no token/);
-    assert.deepEqual(await capture(['propose']), { code: 2, out: [], err: ['process-rules: propose needs an issue number', USAGE] });
-    assert.deepEqual(await capture(['propose', 'twelve']), { code: 2, out: [], err: ['process-rules: propose needs an issue number, not "twelve"', USAGE] });
-    assert.deepEqual(await capture(['propose', '12', 'x', 'y']), { code: 2, out: [], err: ['process-rules: propose needs an issue number, not "x"', USAGE] });
-    assert.deepEqual(await capture(['propose', '#0']), { code: 2, out: [], err: ['process-rules: propose needs an issue number, not "#0"', USAGE] });
+    assert.deepEqual(await capture(['propose']), { code: 2, out: [], err: ['niyam: propose needs an issue number', USAGE] });
+    assert.deepEqual(await capture(['propose', 'twelve']), { code: 2, out: [], err: ['niyam: propose needs an issue number, not "twelve"', USAGE] });
+    assert.deepEqual(await capture(['propose', '12', 'x', 'y']), { code: 2, out: [], err: ['niyam: propose needs an issue number, not "x"', USAGE] });
+    assert.deepEqual(await capture(['propose', '#0']), { code: 2, out: [], err: ['niyam: propose needs an issue number, not "#0"', USAGE] });
   });
 
   it('runs review-thread, whose arguments are checked first', async () => {
     const refused = await capture(['review-thread', 'PRRT_x', '--resolve'], () => new FakeSys());
-    assert.deepEqual(refused, { code: 1, out: [], err: ['✗ this session has no token; run process-rules doctor', 'review-thread: refused'] });
+    assert.deepEqual(refused, { code: 1, out: [], err: ['✗ this session has no token; run niyam doctor', 'review-thread: refused'] });
     assert.deepEqual(await capture(['review-thread', 'PRRT_x']), {
       code: 2,
       out: [],
-      err: ['process-rules: review-thread needs --reply <text>, --resolve, or both', USAGE],
+      err: ['niyam: review-thread needs --reply <text>, --resolve, or both', USAGE],
     });
     assert.equal((await capture(['review-thread', 'PRRT_x', '--resolve', 'more'])).code, 2);
   });
@@ -157,11 +157,11 @@ describe('run', () => {
     sys.stdin = JSON.stringify({ session_id: 's', tool_input: { command: 'ls' } });
     assert.equal((await capture(['guard'], () => sys)).code, 0);
     const failed = await capture(['guard']);
-    assert.deepEqual(failed, { code: 2, out: [], err: ['process-rules guard: refused, because the check failed: this command must not touch the machine'] });
+    assert.deepEqual(failed, { code: 2, out: [], err: ['niyam guard: refused, because the check failed: this command must not touch the machine'] });
     const thrown = await capture(['guard'], () => {
       throw 'odd';
     });
-    assert.equal(thrown.err[0], 'process-rules guard: refused, because the check failed: odd');
+    assert.equal(thrown.err[0], 'niyam guard: refused, because the check failed: odd');
   });
 
   it('treats a bad onboard option as bad usage', async () => {
@@ -176,7 +176,7 @@ describe('run', () => {
     assert.deepEqual(await capture(['machine', 'OtherBot', 'now']), {
       code: 2,
       out: [],
-      err: ['process-rules: unexpected argument "now"', USAGE],
+      err: ['niyam: unexpected argument "now"', USAGE],
     });
   });
 
@@ -188,7 +188,7 @@ describe('run', () => {
     assert.deepEqual(await capture(['machine'], () => sys), {
       code: 1,
       out: [],
-      err: ['process-rules machine: odd'],
+      err: ['niyam machine: odd'],
     });
   });
 
@@ -196,7 +196,7 @@ describe('run', () => {
     assert.deepEqual(await capture(['version', 'now']), {
       code: 2,
       out: [],
-      err: ['process-rules: unexpected argument "now"', USAGE],
+      err: ['niyam: unexpected argument "now"', USAGE],
     });
   });
 });
@@ -232,5 +232,25 @@ describe('cli entry', () => {
     assert.equal(result.status, 2);
     assert.equal(result.stdout, '');
     assert.match(result.stderr, /unknown command "nope"/);
+  });
+
+  it('runs the same CLI as process-rules, the old bin, which names niyam to the owner alone (P-49)', () => {
+    const old = fileURLToPath(new URL('./old-cli.ts', import.meta.url));
+    assert.equal(execFileSync(process.execPath, [old, '--version'], { encoding: 'utf8' }), `${String(expectedVersion)}\n`, 'what upgrade and hooks parse stays bare');
+    const help = spawnSync(process.execPath, [old, 'help'], { encoding: 'utf8' });
+    assert.equal(help.status, 0);
+    assert.equal(help.stderr, 'process-rules is now niyam: run niyam help. The old name still works for now.\n');
+    assert.equal(help.stdout, `${USAGE}\n`);
+  });
+
+  it('names niyam only for the commands the owner types', async () => {
+    const said = async (args: string[], invokedAs?: string): Promise<string[]> => {
+      const err: string[] = [];
+      await run(args, { out: () => {}, err: (line) => err.push(line) }, () => new FakeSys(), invokedAs);
+      return err;
+    };
+    assert.deepEqual(await said([], 'process-rules'), ['process-rules is now niyam: run niyam. The old name still works for now.']);
+    assert.deepEqual(await said(['version'], 'process-rules'), [], 'not version');
+    assert.deepEqual(await said(['help']), [], 'not as niyam');
   });
 });

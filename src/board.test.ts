@@ -566,8 +566,8 @@ describe('boardStarted', () => {
       '✓ board: work item #10 is at Step Build in "example-app work"',
       '✓ board: work item #21 had no Step; it is at Frame in "roadmap"',
       '✓ board: work item #20 had no Step; it is at Frame in "example-app work"',
-      '! board: Step in "example-app work" has no option Done, so work items that belong there stay where they are; process-rules onboard adds it',
-      '! board: Step in "roadmap" has no option Done, so work items that belong there stay where they are; process-rules onboard adds it',
+      '! board: Step in "example-app work" has no option Done, so work items that belong there stay where they are; niyam onboard adds it',
+      '! board: Step in "roadmap" has no option Done, so work items that belong there stay where they are; niyam onboard adds it',
     ]);
   });
 

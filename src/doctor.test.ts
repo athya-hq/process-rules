@@ -34,7 +34,7 @@ describe('doctor', () => {
     assert.deepEqual(await check(Object.assign(healthy(), { platform: 'win32' })), {
       code: 1,
       out: [],
-      err: ["doctor: process-rules supports macOS only, where the keychain holds the agent's token; this machine runs win32"],
+      err: ["doctor: niyam supports macOS only, where the keychain holds the agent's token; this machine runs win32"],
     });
   });
 
@@ -45,7 +45,7 @@ describe('doctor', () => {
       assert.deepEqual(await check(sys), {
         code: 1,
         out: [],
-        err: ["doctor: process-rules supports macOS only, where the keychain holds the agent's token; this machine runs linux"],
+        err: ["doctor: niyam supports macOS only, where the keychain holds the agent's token; this machine runs linux"],
       });
     }
   });
@@ -54,13 +54,13 @@ describe('doctor', () => {
     assert.deepEqual(await check(healthy()), {
       code: 0,
       out: [
-        '◆  process-rules doctor   ExampleBot',
+        '◆  niyam doctor   ExampleBot',
         '│',
         '◇  This Mac',
         '✓  signing key ~/.ssh/examplebot_signing',
         '✓  session file',
         '✓  launcher',
-        `✓  process-rules ${packageVersion()}, the newest release`,
+        `✓  niyam ${packageVersion()}, the newest release`,
         '│',
         '◇  GitHub — as ExampleBot',
         '✓  token, ends in 90 days',
@@ -91,7 +91,7 @@ describe('doctor', () => {
     assert.deepEqual(out.slice(-5), [
       '│',
       '◇  This repo',
-      '▲  .claude/settings.json Stop hook "gh pr view" reaches GitHub outside as-agent, so gets 401 → run its gh or git via process-rules as-agent --session <session_id> -- (exit 77 when not the agent)',
+      '▲  .claude/settings.json Stop hook "gh pr view" reaches GitHub outside as-agent, so gets 401 → run its gh or git via niyam as-agent --session <session_id> -- (exit 77 when not the agent)',
       '│',
       '└  1 to fix',
     ]);
@@ -120,17 +120,17 @@ describe('doctor', () => {
     const { code, out, err } = await check(new FakeSys());
     assert.deepEqual({ code, err }, { code: 1, err: [] });
     assert.deepEqual(out, [
-      '◆  process-rules doctor   ExampleBot',
+      '◆  niyam doctor   ExampleBot',
       '│',
       '◇  This Mac',
-      '✗  ~/.ssh/examplebot_signing is missing → process-rules machine',
-      '✗  session file missing → process-rules machine',
-      '✗  launcher missing, so hooks need node on PATH → process-rules machine',
-      `✓  process-rules ${packageVersion()}, the newest release`,
+      '✗  ~/.ssh/examplebot_signing is missing → niyam machine',
+      '✗  session file missing → niyam machine',
+      '✗  launcher missing, so hooks need node on PATH → niyam machine',
+      `✓  niyam ${packageVersion()}, the newest release`,
       '│',
       '◇  GitHub — as ExampleBot',
-      "✗  no token in this Mac's keychain → process-rules machine",
-      '✗  signing key not registered → process-rules machine',
+      "✗  no token in this Mac's keychain → niyam machine",
+      '✗  signing key not registered → niyam machine',
       '│',
       '└  5 to fix',
     ]);
@@ -141,14 +141,14 @@ describe('doctor', () => {
     sys.setToken(AGENT, 'revoked');
     const { code, out } = await check(sys);
     assert.equal(code, 1);
-    assert.deepEqual(marked(out, '✗'), ['✗  token: GitHub refuses the token (expired or revoked?) → process-rules machine']);
+    assert.deepEqual(marked(out, '✗'), ['✗  token: GitHub refuses the token (expired or revoked?) → niyam machine']);
   });
 
   it("refuses a token that is someone else's", async () => {
     const sys = healthy();
     sys.setToken(AGENT, 'ghp_owners');
     sys.acceptToken('ghp_owners', 'example-owner');
-    assert.deepEqual(marked((await check(sys)).out, '✗'), ['✗  token: the token acts as example-owner, not ExampleBot → process-rules machine']);
+    assert.deepEqual(marked((await check(sys)).out, '✗'), ['✗  token: the token acts as example-owner, not ExampleBot → niyam machine']);
   });
 
   it('refuses a fine-grained token', async () => {
@@ -156,7 +156,7 @@ describe('doctor', () => {
     sys.setToken(AGENT, 'github_pat_x');
     sys.acceptToken('github_pat_x', AGENT, {});
     assert.deepEqual(marked((await check(sys)).out, '✗'), [
-      '✗  token: it is not a classic token, which process-rules needs (see its docs/decisions.md) → process-rules machine',
+      '✗  token: it is not a classic token, which niyam needs (see its docs/decisions.md) → niyam machine',
     ]);
   });
 
@@ -165,7 +165,7 @@ describe('doctor', () => {
     sys.acceptToken(TOKEN, AGENT, { ...CLASSIC, 'github-authentication-token-expiration': '2026-11-10 12:00:00 UTC' });
     const { code, out } = await check(sys);
     assert.equal(code, 0);
-    assert.deepEqual(marked(out, '▲'), ['▲  token ends in 11 days → process-rules machine']);
+    assert.deepEqual(marked(out, '▲'), ['▲  token ends in 11 days → niyam machine']);
     assert.equal(out.at(-1), '└  1 to fix');
   });
 
@@ -189,8 +189,8 @@ describe('doctor', () => {
     const { code, out } = await check(sys);
     assert.equal(code, 0);
     assert.deepEqual(marked(out, '▲'), [
-      '▲  gh is signed in as example-owner → process-rules machine',
-      '▲  a saved git password for github.com → process-rules machine',
+      '▲  gh is signed in as example-owner → niyam machine',
+      '▲  a saved git password for github.com → niyam machine',
       '▲  ~/.ssh/id_ed25519 has no passphrase → ssh-keygen -p -f ~/.ssh/id_ed25519',
     ]);
     assert.equal(out.at(-1), '└  3 to fix');
@@ -205,7 +205,7 @@ describe('doctor', () => {
     assert.equal(code, 0);
     assert.ok(out.includes('✓  gh stays signed in as example-owner, as you chose'));
     assert.ok(out.includes('✓  the saved git password for github.com stays, as you chose'));
-    assert.deepEqual(marked(out, '▲'), ['▲  gh is signed in as new-owner → process-rules machine']);
+    assert.deepEqual(marked(out, '▲'), ['▲  gh is signed in as new-owner → niyam machine']);
   });
 
   it('checks a named agent outside any repository', async () => {
@@ -219,15 +219,15 @@ describe('doctor', () => {
     const sys = healthy();
     sys.route('GET', '/users/ExampleBot/ssh_signing_keys', { status: 200, json: [{ key: 'ssh-ed25519 other' }] });
     const { code, out } = await check(sys);
-    assert.deepEqual({ code, broken: marked(out, '✗') }, { code: 1, broken: ['✗  signing key not registered → process-rules machine'] });
+    assert.deepEqual({ code, broken: marked(out, '✗') }, { code: 1, broken: ['✗  signing key not registered → niyam machine'] });
   });
 
   it('refuses a key pair whose halves do not match, to be moved aside', async () => {
     const sys = healthy();
     sys.files.set(`${KEY}.pub`, 'ssh-ed25519 other');
     assert.deepEqual(marked((await check(sys)).out, '✗'), [
-      '✗  ~/.ssh/examplebot_signing.pub does not match ~/.ssh/examplebot_signing → move it aside, then process-rules machine',
-      '✗  signing key not registered → process-rules machine',
+      '✗  ~/.ssh/examplebot_signing.pub does not match ~/.ssh/examplebot_signing → move it aside, then niyam machine',
+      '✗  signing key not registered → niyam machine',
     ]);
   });
 
@@ -236,14 +236,14 @@ describe('doctor', () => {
     sys.execOverride = (call) => (call.command === LAUNCHER ? { code: 127, stdout: '', stderr: '/gone/bin/node: not found\n' } : undefined);
     const { code, out } = await check(sys);
     assert.equal(code, 1);
-    assert.deepEqual(marked(out, '✗'), ['✗  launcher does not run (/gone/bin/node: not found); its node removed? → process-rules machine']);
+    assert.deepEqual(marked(out, '✗'), ['✗  launcher does not run (/gone/bin/node: not found); its node removed? → niyam machine']);
     assert.equal(sys.calls.find((c) => c.command === LAUNCHER)?.env?.PATH, '/usr/bin:/bin', 'runs it without the PATH of this shell');
   });
 
   it('names a launcher that fails without saying why', async () => {
     const sys = healthy();
     sys.execOverride = (call) => (call.command === LAUNCHER ? { code: 3, stdout: '', stderr: '' } : undefined);
-    assert.deepEqual(marked((await check(sys)).out, '✗'), ['✗  launcher does not run (exit 3); its node removed? → process-rules machine']);
+    assert.deepEqual(marked((await check(sys)).out, '✗'), ['✗  launcher does not run (exit 3); its node removed? → niyam machine']);
   });
 
   it('accepts a token whose login differs only in case', async () => {
@@ -259,22 +259,22 @@ describe('doctor', () => {
     assert.equal(code, 1);
     assert.deepEqual(marked(out, '✓'), ['✓  signing key ~/.ssh/examplebot_signing', '✓  launcher']);
     assert.deepEqual(marked(out, '✗'), [
-      '✗  session file: cannot ask GitHub (rate limited) → process-rules doctor again',
-      '✗  token: cannot ask GitHub (rate limited) → process-rules doctor again',
-      '✗  signing key: cannot ask GitHub (rate limited) → process-rules doctor again',
+      '✗  session file: cannot ask GitHub (rate limited) → niyam doctor again',
+      '✗  token: cannot ask GitHub (rate limited) → niyam doctor again',
+      '✗  signing key: cannot ask GitHub (rate limited) → niyam doctor again',
     ]);
   });
 
   it('reports a thrown non-error from GitHub', async () => {
     const sys = healthy();
     sys.http = () => Promise.reject('down');
-    assert.ok((await check(sys)).out.includes('✗  token: cannot ask GitHub (down) → process-rules doctor again'));
+    assert.ok((await check(sys)).out.includes('✗  token: cannot ask GitHub (down) → niyam doctor again'));
   });
 
   it('refuses a stale session file', async () => {
     const sys = healthy();
     sys.files.set(SESSION, 'old');
-    assert.deepEqual(marked((await check(sys)).out, '✗'), ['✗  session file out of date → process-rules machine']);
+    assert.deepEqual(marked((await check(sys)).out, '✗'), ['✗  session file out of date → niyam machine']);
   });
 });
 
@@ -282,7 +282,7 @@ describe('doctor in a Claude cloud session', () => {
   const v = packageVersion();
   const WORKFLOW = `${ROOT}/${WORKFLOW_PATH}`;
   const CLOUD_FILE = `${ROOT}/${CLOUD_SETUP_PATH}`;
-  const PASTE = "paste what process-rules cloud-setup prints into the cloud environment's Setup script, once";
+  const PASTE = "paste what niyam cloud-setup prints into the cloud environment's Setup script, once";
 
   /**
    * A cloud session session-start gave the agent's identity, in a clone whose
@@ -305,11 +305,11 @@ describe('doctor in a Claude cloud session', () => {
     assert.deepEqual(await check(sys), {
       code: 0,
       out: [
-        '◆  process-rules doctor   ExampleBot',
+        '◆  niyam doctor   ExampleBot',
         '│',
         '◇  This cloud session',
         `✓  ${CLOUD_SETUP_PATH} installs ${v}, as ${WORKFLOW_PATH} pins`,
-        `✓  process-rules ${v} runs here`,
+        `✓  niyam ${v} runs here`,
         `✓  the Setup script runs ${CLOUD_SETUP_PATH}`,
         '│',
         '◇  GitHub — as ExampleBot',
@@ -329,7 +329,7 @@ describe('doctor in a Claude cloud session', () => {
     sys.files.set(WORKFLOW, workflow('main', '0.0.1', false));
     const { code, out } = await check(sys);
     assert.equal(code, 1);
-    assert.deepEqual(marked(out, '✗'), [`✗  ${CLOUD_SETUP_PATH} installs ${v}, but ${WORKFLOW_PATH} pins v0.0.1 → process-rules onboard again`]);
+    assert.deepEqual(marked(out, '✗'), [`✗  ${CLOUD_SETUP_PATH} installs ${v}, but ${WORKFLOW_PATH} pins v0.0.1 → niyam onboard again`]);
   });
 
   it('says to run onboard again when the repo has no cloud setup file, or one onboard did not write', async () => {
@@ -340,9 +340,9 @@ describe('doctor in a Claude cloud session', () => {
       const { code, out } = await check(sys);
       assert.equal(code, 1);
       assert.deepEqual(marked(out, '✗'), [
-        `✗  ${CLOUD_SETUP_PATH} missing, or not the file onboard writes, so the Setup script installs no process-rules → process-rules onboard again`,
+        `✗  ${CLOUD_SETUP_PATH} missing, or not the file onboard writes, so the Setup script installs no niyam → niyam onboard again`,
       ]);
-      assert.ok(out.includes(`✓  process-rules ${v} runs here`), 'still checked against the pin');
+      assert.ok(out.includes(`✓  niyam ${v} runs here`), 'still checked against the pin');
     }
   });
 
@@ -354,7 +354,7 @@ describe('doctor in a Claude cloud session', () => {
       const { code, out } = await check(sys);
       assert.equal(code, 0);
       assert.deepEqual(marked(out, '▲'), [
-        `▲  ${WORKFLOW_PATH} is missing or pins no one version, so ${CLOUD_SETUP_PATH} is not checked against it → process-rules onboard again`,
+        `▲  ${WORKFLOW_PATH} is missing or pins no one version, so ${CLOUD_SETUP_PATH} is not checked against it → niyam onboard again`,
       ]);
     }
   });
@@ -365,7 +365,7 @@ describe('doctor in a Claude cloud session', () => {
     sys.files.set(CLOUD_FILE, cloudRepoScript('0.0.1', 'ab'.repeat(32)));
     const { code, out } = await check(sys);
     assert.equal(code, 0);
-    assert.deepEqual(marked(out, '▲'), [`▲  this session runs process-rules ${v}, not the 0.0.1 ${CLOUD_SETUP_PATH} installs → bash ${CLOUD_SETUP_PATH}, or a new session`]);
+    assert.deepEqual(marked(out, '▲'), [`▲  this session runs niyam ${v}, not the 0.0.1 ${CLOUD_SETUP_PATH} installs → bash ${CLOUD_SETUP_PATH}, or a new session`]);
     assert.ok(!sys.calls.some((call) => call.command === 'bash'), 'only reads: installs nothing');
   });
 
@@ -374,7 +374,7 @@ describe('doctor in a Claude cloud session', () => {
     sys.files.delete(CLOUD_FILE);
     sys.files.set(WORKFLOW, workflow('main', '0.0.1', false));
     assert.deepEqual(marked((await check(sys)).out, '▲'), [
-      `▲  this session runs process-rules ${v}, not the v0.0.1 ${WORKFLOW_PATH} pins → process-rules onboard again, then a new session`,
+      `▲  this session runs niyam ${v}, not the v0.0.1 ${WORKFLOW_PATH} pins → niyam onboard again, then a new session`,
     ]);
   });
 
@@ -392,11 +392,11 @@ describe('doctor in a Claude cloud session', () => {
     sys.env.PROCESS_RULES_AGENT = undefined;
     const { code, out } = await check(sys);
     assert.equal(code, 1);
-    assert.equal(out[0], '◆  process-rules doctor   example-owner');
+    assert.equal(out[0], '◆  niyam doctor   example-owner');
     assert.ok(out.includes('◇  GitHub — as example-owner'));
     assert.deepEqual(marked(out, '✗'), [
       "✗  the proxy acts as example-owner, not ExampleBot → connect claude.ai's GitHub as ExampleBot",
-      '✗  session-start did not give this session the agent identity, so gh and git stay locked out → a new session; its first process-rules line says why',
+      '✗  session-start did not give this session the agent identity, so gh and git stay locked out → a new session; its first niyam line says why',
     ]);
   });
 
@@ -410,11 +410,11 @@ describe('doctor in a Claude cloud session', () => {
     const down = cloud(null);
     const { code, out } = await check(down);
     assert.equal(code, 1);
-    assert.equal(out[0], '◆  process-rules doctor   ExampleBot');
-    assert.deepEqual(marked(out, '✗'), ['✗  GitHub answered HTTP 401 when asked who this session is → process-rules doctor again']);
+    assert.equal(out[0], '◆  niyam doctor   ExampleBot');
+    assert.deepEqual(marked(out, '✗'), ['✗  GitHub answered HTTP 401 when asked who this session is → niyam doctor again']);
     const thrown = cloud();
     thrown.http = () => Promise.reject(new Error('ECONNRESET'));
-    assert.deepEqual(marked((await check(thrown)).out, '✗'), ['✗  GitHub could not be asked who this session is (ECONNRESET) → process-rules doctor again']);
+    assert.deepEqual(marked((await check(thrown)).out, '✗'), ['✗  GitHub could not be asked who this session is (ECONNRESET) → niyam doctor again']);
   });
 
   it('refuses a session session-start left locked out, or gave an account the settings do not name', async () => {
@@ -425,12 +425,12 @@ describe('doctor in a Claude cloud session', () => {
     assert.equal(code, 1);
     assert.ok(out.includes("✓  the proxy acts as ExampleBot, an agent the repo's settings name"), 'asks with the proxy placeholder, never the lock');
     assert.deepEqual(marked(out, '✗'), [
-      '✗  session-start did not give this session the agent identity, so gh and git stay locked out → a new session; its first process-rules line says why',
+      '✗  session-start did not give this session the agent identity, so gh and git stay locked out → a new session; its first niyam line says why',
     ]);
     const other = cloud();
     other.env.PROCESS_RULES_AGENT = 'OtherBot';
     assert.deepEqual(marked((await check(other)).out, '✗'), [
-      '✗  session-start did not give this session the agent identity, so gh and git stay locked out → a new session; its first process-rules line says why',
+      '✗  session-start did not give this session the agent identity, so gh and git stay locked out → a new session; its first niyam line says why',
     ]);
   });
 
@@ -441,7 +441,7 @@ describe('doctor in a Claude cloud session', () => {
     assert.equal(code, 1);
     assert.ok(out.includes("✓  the proxy acts as SecondBot, an agent the repo's settings name"));
     assert.deepEqual(marked(out, '✗'), [
-      '✗  session-start did not give this session the agent identity, so gh and git stay locked out → a new session; its first process-rules line says why',
+      '✗  session-start did not give this session the agent identity, so gh and git stay locked out → a new session; its first niyam line says why',
     ]);
   });
 
@@ -450,7 +450,7 @@ describe('doctor in a Claude cloud session', () => {
     sys.inRepo = false;
     const { code, out } = await check(sys);
     assert.equal(code, 1);
-    assert.deepEqual(marked(out, '✗'), [`✗  ${ROOT} is not inside a git repository → process-rules doctor in the repo's clone`]);
+    assert.deepEqual(marked(out, '✗'), [`✗  ${ROOT} is not inside a git repository → niyam doctor in the repo's clone`]);
     assert.ok(out.includes(`✓  the Setup script runs ${CLOUD_SETUP_PATH}`));
     assert.ok(!out.some((line) => line.includes('proxy acts as')), 'no agents to check the account against');
   });
@@ -469,7 +469,7 @@ describe('doctor in a Claude cloud session', () => {
     const sys = cloud(null);
     sys.inRepo = false;
     const { out } = await check(sys);
-    assert.equal(out[0], '◆  process-rules doctor   this cloud session');
+    assert.equal(out[0], '◆  niyam doctor   this cloud session');
     assert.ok(out.includes('◇  GitHub — as this cloud session'));
   });
 
@@ -477,7 +477,7 @@ describe('doctor in a Claude cloud session', () => {
     const sys = cloud();
     sys.files.delete(`${ROOT}/.github/process-rules.json`);
     assert.deepEqual(marked((await check(sys)).out, '✗'), [
-      `✗  .github/process-rules.json not found in ${ROOT}, so the agents are not known → process-rules onboard again`,
+      `✗  .github/process-rules.json not found in ${ROOT}, so the agents are not known → niyam onboard again`,
     ]);
   });
 
@@ -489,7 +489,7 @@ describe('doctor in a Claude cloud session', () => {
     assert.deepEqual(out.slice(-5), [
       '│',
       '◇  This repo',
-      '▲  .claude/settings.json Stop hook "gh pr view" reaches GitHub outside as-agent, so gets 401 → run its gh or git via process-rules as-agent --session <session_id> -- (exit 77 when not the agent)',
+      '▲  .claude/settings.json Stop hook "gh pr view" reaches GitHub outside as-agent, so gets 401 → run its gh or git via niyam as-agent --session <session_id> -- (exit 77 when not the agent)',
       '│',
       '└  1 to fix',
     ]);

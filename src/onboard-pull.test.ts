@@ -5,7 +5,7 @@ import { FakeSys, TOKEN } from './fake.test.ts';
 import { mergeQueue, pullTitle } from './onboard-pull.ts';
 
 describe('pullTitle', () => {
-  const plain = 'chore(process-rules): onboard at v1.2.3';
+  const plain = 'chore(niyam): onboard at v1.2.3';
 
   it('is plain Conventional Commits when the history gives no emoji style, or none', () => {
     assert.equal(pullTitle('1.2.3'), plain);

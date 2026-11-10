@@ -68,14 +68,14 @@ function sshLogin(sys: Sys, agent: string): string | undefined {
 
 /**
  * What `doctor` says of what `exposure` found: each finding ▲ with its fix,
- * and the owner's SSH route ✓, since process-rules leaves it in place on
+ * and the owner's SSH route ✓, since niyam leaves it in place on
  * purpose: agent sessions send GitHub over HTTPS and refuse SSH, and the
  * pre-push hook refuses their pushes over SSH (docs/decisions.md).
  */
 export function exposureFindings(found: Exposure, home: string): Finding[] {
   return [
-    ...found.ghLogins.map((login): Finding => ({ mark: '▲', text: `gh is signed in as ${login}`, fix: 'process-rules machine' })),
-    ...(found.gitPassword ? [{ mark: '▲', text: `a saved git password for ${GITHUB_HOST}`, fix: 'process-rules machine' } as const] : []),
+    ...found.ghLogins.map((login): Finding => ({ mark: '▲', text: `gh is signed in as ${login}`, fix: 'niyam machine' })),
+    ...(found.gitPassword ? [{ mark: '▲', text: `a saved git password for ${GITHUB_HOST}`, fix: 'niyam machine' } as const] : []),
     ...keyFindings(found, home),
     ...(found.sshLogin ? [{ mark: '✓', text: `ssh reaches GitHub as ${found.sshLogin}; agent sessions refuse SSH` } as const] : []),
   ];

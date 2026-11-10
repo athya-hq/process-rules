@@ -26,6 +26,7 @@ updates:
     # whose process-rules-ref names another release (docs/decisions.md).
     ignore:
       - dependency-name: 'athya-hq/process-rules*'
+      - dependency-name: 'veda-hq/niyam*'
     groups:
       actions:
         patterns: ['*']

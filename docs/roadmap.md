@@ -1,5 +1,8 @@
 # Roadmap
 
+process-rules is now niyam, at veda-hq/niyam (P-49; docs/decisions.md).
+This file keeps roadmap v1 as it was approved, under the old name.
+
 process-rules is a product. Client repositories adopt a released version;
 the product names none of them and holds no client's data. Every slice is
 proven against a sandbox client repository made for the purpose, never a
@@ -64,3 +67,4 @@ Slices added since v1 live in their issues; these rows only point to them.
 | P-37 | [#88](https://github.com/athya-hq/process-rules/issues/88) | Onboard sets the FIGMA_LIBRARY secret itself | `onboard` seals the Figma library key with the repository's Actions public key and stores the `FIGMA_LIBRARY` secret through GitHub's API, as the owner for one run; it prints no `gh` command and never the key | shipped |
 | P-38 | [#91](https://github.com/athya-hq/process-rules/issues/91) | PR identity judges the pusher, not the run's actor | The PR identity check names who pushed each agent commit from GitHub's push record alone; an edit, reopen or re-run by anyone gives the push's result, an unrecorded push fails closed, and sandbox #8 re-run from Cubic's edit fails naming the owner | shipped |
 | P-39 | [#94](https://github.com/athya-hq/process-rules/issues/94) | Work rules read a slice's parent as CI can | the work rules read a slice's parent from GitHub's parent endpoint, which a workflow's token can read on a private repository; a parent that cannot be read fails closed naming the failed read, never "not a sub-issue of a Work item" | in progress |
+| P-49 | [#226](https://github.com/athya-hq/process-rules/issues/226) | process-rules becomes niyam | Package `@veda-hq/niyam` with bins `niyam` and `process-rules`; releases attach the old-name archive too; `upgrade` follows veda-hq/niyam and moves an old install to the new package; `onboard` pins veda-hq/niyam | in progress |

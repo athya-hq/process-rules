@@ -1,8 +1,10 @@
 import { API, NO_TOKEN } from './agent.ts';
-import { PRODUCT, SETUP_FIRST, workflowPins } from './onboard.ts';
+import { SETUP_FIRST, workflowPins } from './onboard.ts';
+import { OLD_PACKAGE, PRODUCT, tarballName } from './names.ts';
 import type { Output, Sys } from './types.ts';
 import { CLOUD_SETUP_PATH, WORKFLOW_PATH } from './onboard-pull.ts';
 import { GITHUB_WEB } from './host.ts';
+import { isNewer } from './version.ts';
 
 /**
  * What a cloud session's GH_TOKEN reads when its environment sets none; the
@@ -77,9 +79,17 @@ export function repoReleases(sys: Sys, root: string): { pinned: string | undefin
   return { pinned, scripted };
 }
 
+/** The last release made under the old name: it attached only athya-hq-process-rules-<version>.tgz. */
+export const LAST_OLD_RELEASE = '0.6.3';
+
+/** The CLI archive a release attaches: niyam's from the first niyam release on, the old name's before. */
+export function releaseAsset(version: string): string {
+  return isNewer(version, LAST_OLD_RELEASE) ? tarballName(version) : tarballName(version, OLD_PACKAGE);
+}
+
 /** The release archive of `version`, as GitHub serves it. */
 export function releaseTarball(version: string): string {
-  return `${GITHUB_WEB}/${PRODUCT}/releases/download/v${version}/athya-hq-process-rules-${version}.tgz`;
+  return `${GITHUB_WEB}/${PRODUCT}/releases/download/v${version}/${releaseAsset(version)}`;
 }
 
 /**
@@ -88,7 +98,7 @@ export function releaseTarball(version: string): string {
  * cloud install checks the CLI it unpacks as it checks Node.
  */
 export async function releaseSha256(sys: Sys, version: string, token: string): Promise<{ sha256: string } | { problem: string }> {
-  const name = `athya-hq-process-rules-${version}.tgz`;
+  const name = releaseAsset(version);
   try {
     const { status, json } = await sys.http(`${API}/repos/${PRODUCT}/releases/tags/v${version}`, { token });
     if (status !== 200) return { problem: `GitHub answered HTTP ${status} for the v${version} release` };
@@ -105,7 +115,7 @@ export async function releaseSha256(sys: Sys, version: string, token: string): P
  * The repo's cloud setup file, CLOUD_SETUP_PATH, which onboard writes at
  * the version the workflow pins and rewrites on every run: Node and that
  * release of the CLI, unpacked under CLOUD_DIR as root, and a
- * `process-rules` on PATH that runs one with the other, leaving the image's
+ * `niyam` on PATH that runs one with the other, leaving the image's
  * own Node alone. Each download is checked against the sha256 pinned here
  * before it is unpacked; a Node already unpacked at this version is kept,
  * so a session that runs it again fetches the CLI alone. The Setup snippet
@@ -117,7 +127,7 @@ export function cloudRepoScript(version: string, sha256: string): string {
     '#!/bin/bash',
     `# process-rules ${version} for Claude cloud sessions: Node ${CLOUD_NODE} and the CLI, as process-rules on PATH.`,
     `# process-rules onboard writes this file at the version ${WORKFLOW_PATH} pins, and writes it again on every run.`,
-    "# The cloud environment's Setup script runs it, from what process-rules cloud-setup prints, and so does",
+    "# The cloud environment's Setup script runs it, from what niyam cloud-setup prints, and so does",
     '# session-start when the environment holds another release. Change it by running onboard, not by hand.',
     'set -euo pipefail',
     `dir=${CLOUD_DIR}`,
@@ -141,6 +151,7 @@ export function cloudRepoScript(version: string, sha256: string): string {
     'rm "$dir/process-rules.tgz"',
     'printf \'#!/bin/sh\\nexec %s %s "$@"\\n\' "$bin" "$cli/package/dist/cli.js" > /usr/local/bin/process-rules',
     'chmod 755 /usr/local/bin/process-rules',
+    'ln -sf /usr/local/bin/process-rules /usr/local/bin/niyam',
     `if [ -n "\${PROCESS_RULES_SETUP:-}" ]; then : > ${FROM_SETUP}; fi`,
     'process-rules version </dev/null',
     '',
@@ -176,7 +187,7 @@ export function cloudSetupSnippet(): string {
 /** Prints the Setup snippet for a Claude cloud environment, with what else agent sessions there need. */
 export function cloudSetup(io: Output): number {
   io.err(
-    `process-rules: paste this into the Claude cloud environment's Setup script, once; it runs ${CLOUD_SETUP_PATH}, which process-rules onboard writes, so a new release needs no new paste. Connect claude.ai's GitHub as the agent account the repo's settings name. ${SETUP_FIRST}`,
+    `niyam: paste this into the Claude cloud environment's Setup script, once; it runs ${CLOUD_SETUP_PATH}, which niyam onboard writes, so a new release needs no new paste. Connect claude.ai's GitHub as the agent account the repo's settings name. ${SETUP_FIRST}`,
   );
   io.out(cloudSetupSnippet().trimEnd());
   return 0;

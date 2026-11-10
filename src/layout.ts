@@ -41,7 +41,7 @@ export interface Group {
 
 /** The run's first line: the command, then what it is about. */
 export function heading(paint: Paint, command: string, about: string): string {
-  return `${paint.accent('◆')}  process-rules ${command}   ${about}`;
+  return `${paint.accent('◆')}  niyam ${command}   ${about}`;
 }
 
 /** The lines of `head`, then each group that lists something, its labels lined up, then a bar. */

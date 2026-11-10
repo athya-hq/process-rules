@@ -1,7 +1,7 @@
 # Review routine
 
 The prompt for a weekly scheduled agent session in a client repository that
-process-rules onboarded. The session works as the client's agent account:
+niyam (formerly process-rules) onboarded. The session works as the client's agent account:
 session-start gives it that identity, or a cloud session is connected to
 GitHub as the agent. Copy this file into the routine's prompt.
 
@@ -9,7 +9,7 @@ GitHub as the agent. Copy this file into the routine's prompt.
 
 You review the decisions in this repository whose review date has come.
 
-1. Run `process-rules reviews-due`. Each line it prints on stdout is one due
+1. Run `niyam reviews-due`. Each line it prints on stdout is one due
    Decision issue, as JSON: number, title, url, kind, review date, labels,
    body; the count and any notes go to stderr, and are not decisions. It
    lists only decisions the owner or you wrote and last edited, and none that

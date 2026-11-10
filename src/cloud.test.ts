@@ -21,12 +21,14 @@ describe('cloudScriptVersion', () => {
 describe('cloudRepoScript', () => {
   const script = cloudRepoScript('9.8.7', SHA);
 
-  it('installs Node and that release of the CLI, each checked, and puts process-rules on PATH', () => {
+  it('installs Node and that release of the CLI, each checked, and puts niyam on PATH', () => {
     assert.match(script, /^#!\/bin\/bash\n# process-rules 9\.8\.7 for Claude cloud sessions/);
     assert.ok(script.includes(`node=${CLOUD_NODE}\n`));
     assert.ok(script.includes('https://nodejs.org/dist/v$node/node-v$node-linux-$arch.tar.xz'));
     assert.ok(script.includes(`-o "$dir/process-rules.tgz" ${releaseTarball('9.8.7')}\n`));
-    assert.equal(releaseTarball('9.8.7'), 'https://github.com/athya-hq/process-rules/releases/download/v9.8.7/athya-hq-process-rules-9.8.7.tgz');
+    assert.equal(releaseTarball('9.8.7'), 'https://github.com/veda-hq/niyam/releases/download/v9.8.7/veda-hq-niyam-9.8.7.tgz');
+    assert.equal(releaseTarball('0.6.1'), 'https://github.com/veda-hq/niyam/releases/download/v0.6.1/athya-hq-process-rules-0.6.1.tgz', 'a release before niyam: its old asset');
+    assert.ok(script.includes('ln -sf /usr/local/bin/process-rules /usr/local/bin/niyam\n'), 'niyam and its old name both run it');
     assert.ok(script.includes(`echo "${SHA}  $dir/process-rules.tgz" | sha256sum -c --quiet -\n`));
     assert.ok(script.includes(`at the version ${WORKFLOW_PATH} pins`));
     assert.equal(spawnSync('bash', ['-n', '-c', script]).status, 0, 'bash reads it');
@@ -61,18 +63,19 @@ describe('cloudRepoScript', () => {
       const runnable = cloudRepoScript('9.8.7', SHA)
         .replaceAll(CLOUD_DIR, opt)
         .replaceAll('/usr/local/bin/process-rules', join(local, 'process-rules'))
+        .replaceAll('/usr/local/bin/niyam', join(local, 'niyam'))
         .replace('process-rules version', 'true');
       const result = spawnSync('bash', ['-c', runnable], { encoding: 'utf8', env: { PATH: `${bin}:/usr/bin:/bin`, ...options.env } });
       const read = (path: string): string => (existsSync(path) ? readFileSync(path, 'utf8') : '');
       return { result, opt, local, fetched: read(log), checked: read(join(root, 'checked')) };
     }
 
-    it('writes a process-rules that runs the CLI with that Node, once each matches its sha256', () => {
+    it('writes a niyam that runs the CLI with that Node, once each matches its sha256', () => {
       const { result, opt, local, fetched, checked } = setup('good', 0);
       assert.deepEqual({ status: result.status, stdout: result.stdout, stderr: result.stderr }, { status: 0, stdout: '', stderr: '' });
       assert.equal(checked, `${CLOUD_NODE_SHA256.arm64}  ${opt}/node.tar.xz\n${SHA}  ${opt}/process-rules.tgz\n`);
       assert.equal(
-        readFileSync(join(local, 'process-rules'), 'utf8'),
+        readFileSync(join(local, 'niyam'), 'utf8'),
         `#!/bin/sh\nexec ${opt}/node-v${CLOUD_NODE}-linux-arm64/bin/node ${opt}/cli-9.8.7/package/dist/cli.js "$@"\n`,
       );
       assert.equal(fetched, `https://nodejs.org/dist/v${CLOUD_NODE}/node-v${CLOUD_NODE}-linux-arm64.tar.xz\n${opt}\n${releaseTarball('9.8.7')}\n${opt}/cli-9.8.7\n`);
@@ -94,11 +97,11 @@ describe('cloudRepoScript', () => {
       assert.equal(existsSync(join(opt, 'from-setup')), true);
     });
 
-    it('stops, unpacking nothing and writing no process-rules, when a download does not match its sha256', () => {
+    it('stops, unpacking nothing and writing no niyam, when a download does not match its sha256', () => {
       const { result, local, fetched } = setup('bad', 1);
       assert.equal(result.status, 1);
       assert.equal(fetched, '');
-      assert.equal(existsSync(join(local, 'process-rules')), false);
+      assert.equal(existsSync(join(local, 'niyam')), false);
       const cli = setup('bad-cli', 1, { node: `v${CLOUD_NODE}` });
       assert.equal(cli.result.status, 1);
       assert.equal(cli.fetched, '');
@@ -183,7 +186,7 @@ describe('cloudSetup', () => {
     const { io, out, err } = capture();
     assert.equal(cloudSetup(io), 0);
     assert.deepEqual(out, [cloudSetupSnippet().trimEnd()]);
-    assert.match(err[0] ?? '', /Setup script, once; it runs \.github\/process-rules\/cloud-setup\.sh, which process-rules onboard writes, so a new release needs no new paste/);
+    assert.match(err[0] ?? '', /Setup script, once; it runs \.github\/process-rules\/cloud-setup\.sh, which niyam onboard writes, so a new release needs no new paste/);
     assert.match(err[0] ?? '', /Connect claude\.ai's GitHub as the agent account/);
     assert.match(err[0] ?? '', /its own Setup script, put this first, then the repo's own: a repo's script may end with exit/);
   });

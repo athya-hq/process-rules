@@ -1,3 +1,4 @@
+import { OLD_PRODUCT, PRODUCT } from './names.ts';
 import {
   API,
   BASE_ENV,
@@ -36,7 +37,7 @@ import { type Item, type Paint, closing, heading, painter, planLines, runStep } 
 export const SETUP_FIRST = "If the repo has its own Setup script, put this first, then the repo's own: a repo's script may end with exit, and nothing after that runs.";
 
 /** This product's repository: clients call its shared workflow. */
-export const PRODUCT = 'athya-hq/process-rules';
+export { PRODUCT } from './names.ts';
 export { HOOKS_PATH, WORKFLOW_PATH } from './onboard-pull.ts';
 /**
  * The pre-push git hook: before a local agent session pushes, that it
@@ -104,7 +105,7 @@ export function prePushHook(sys: Sys, root: string): { path: string; file: strin
   if (!sys.exists(file)) return { path, file, state: 'missing' };
   const text = sys.read(file);
   if (OLDER_PRE_PUSH_HOOKS.includes(text)) return { path, file, state: 'older' };
-  return { path, file, state: /^\s*(?:exec\s+)?(?:"\$cli"|process-rules)\s+pre-push\b/m.test(text) ? 'ours' : 'own' };
+  return { path, file, state: /^\s*(?:exec\s+)?(?:"\$cli"|process-rules|niyam)\s+pre-push\b/m.test(text) ? 'ours' : 'own' };
 }
 
 /** How a hook finds the CLI: the launcher `machine` writes, else whatever PATH has. */
@@ -364,7 +365,7 @@ function callChecks(version: string, secrets: string[]): string[] {
 
 /**
  * The client's workflow: the shared checks on every pull request, on pushes
- * to the default branch and weekly, at the process-rules release `version`.
+ * to the default branch and weekly, at the niyam release `version`.
  * Pull request and push runs are read-only; the weekly job alone writes to
  * issues. Upgrading is changing that version, which each job names twice.
  * The Figma secrets are passed only when the figma feature is on; the
@@ -421,7 +422,9 @@ export function olderWorkflows(branch: string, version: string): string[] {
   ];
 }
 
-const CHECKS_PIN = new RegExp(`(${PRODUCT.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/\\.github/workflows/checks\\.yml@v)([^\\s'"#]+)`, 'g');
+const escape = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/** A call of the shared workflow, at this repository or the one it moved from (GitHub forwards it), and its version. */
+const CHECKS_PIN = new RegExp(`((?:${escape(PRODUCT)}|${escape(OLD_PRODUCT)})/\\.github/workflows/checks\\.yml@v)([^\\s'"#]+)`, 'g');
 const REF_PIN = /^(\s+process-rules-ref:\s*['"]?v)([^\s'"#]+)/gm;
 const HEADER_PIN = /^(# Written by process-rules onboard: the shared process-rules checks at v)(\S+?)(\.?)$/m;
 
@@ -501,7 +504,7 @@ export function workflowUpdate(
     const authors = before.includes(OLDER_ASKS_COMMENT_IF.join('\n'));
     const pinned = before
       .replace(OLDER_ASKS_COMMENT_IF.join('\n'), ASKS_COMMENT_IF.join('\n'))
-      .replace(CHECKS_PIN, (_, head: string) => `${head}${version}`)
+      .replace(CHECKS_PIN, () => `${PRODUCT}/.github/workflows/checks.yml@v${version}`)
       .replace(REF_PIN, (_, head: string) => `${head}${version}`)
       .replace(HEADER_PIN, (_, head: string, _old: string, dot: string) => `${head}${version}${dot}`)
       .replace(PUSH_BRANCH, (line: string, head: string, quote: string, _old: string, tail: string) =>
@@ -519,7 +522,7 @@ export function workflowUpdate(
   return { kind: 'replace', text: wanted };
 }
 
-/** A process-rules release a repository pins, and where. */
+/** A niyam release a repository pins, and where. */
 interface Pin {
   version: string;
   where: string;
@@ -568,8 +571,8 @@ async function newerPinOnGitHub(sys: Sys, slug: string, token: string, branch: s
 
 /** onboard's refusal of a repository that pins a newer release than this one. */
 function refuseOlder(io: Output, slug: string, pin: Pin, version: string): number {
-  io.err(`onboard: ${slug} already pins process-rules v${pin.version} (${pin.where}), and this is v${version}; onboard never moves the pin back`);
-  io.err(`  Update this Mac's process-rules first: ${UPGRADE}`);
+  io.err(`onboard: ${slug} already pins niyam v${pin.version} (${pin.where}), and this is v${version}; onboard never moves the pin back`);
+  io.err(`  Update this Mac's niyam first: ${UPGRADE}`);
   return 1;
 }
 
@@ -760,9 +763,9 @@ function workflowDetail(update: Exclude<ReturnType<typeof workflowUpdate>, { kin
 function workflowWhat(update: Exclude<ReturnType<typeof workflowUpdate>, { kind: 'same' }>, version: string, figma: boolean, schedulePath: string): string {
   if (update.kind !== 'repin') {
     return {
-      write: `write ${WORKFLOW_PATH}, which runs the shared process-rules checks`,
+      write: `write ${WORKFLOW_PATH}, which runs the shared niyam checks`,
       'replace-older': `replace the older ${WORKFLOW_PATH}, which lets every run write to issues, with this release's, which lets the weekly run alone`,
-      replace: `replace ${WORKFLOW_PATH}, which runs the shared process-rules checks`,
+      replace: `replace ${WORKFLOW_PATH}, which runs the shared niyam checks`,
     }[update.kind];
   }
   const parts = [
@@ -885,7 +888,7 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     // With several agents, the one named, else the one set up here.
     const here = namedAgent ? { agent: namedAgent } : agentHere(sys, settings.agents);
     if ('problem' in here) {
-      io.err(`onboard: ${here.problem}; name the owner and the agent: process-rules onboard <owner> <agent>`);
+      io.err(`onboard: ${here.problem}; name the owner and the agent: niyam onboard <owner> <agent>`);
       return 1;
     }
     let raw = JSON.parse(fileAt(SETTINGS_PATH) as string) as Record<string, unknown>;
@@ -896,12 +899,12 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     let chosenOwner = namedOwner ?? (settings.owners.length === 1 ? settings.owners[0] : undefined);
     if (!chosenOwner) {
       if (dryRun) {
-        io.err(`onboard: ${SETTINGS_PATH} names the owners ${either(settings.owners)}; name yours for a dry run, which signs in to nothing: process-rules onboard <owner> --dry-run`);
+        io.err(`onboard: ${SETTINGS_PATH} names the owners ${either(settings.owners)}; name yours for a dry run, which signs in to nothing: niyam onboard <owner> --dry-run`);
         return 1;
       }
       const signed = await signIn(settings.owners);
       if ('problem' in signed) {
-        io.err(`onboard: ${signed.problem}; name the owner: process-rules onboard <owner>`);
+        io.err(`onboard: ${signed.problem}; name the owner: niyam onboard <owner>`);
         return 1;
       }
       if (!anyLogin(settings.owners, signed.login)) {
@@ -964,12 +967,12 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     }
   } else {
     if (add) {
-      io.err(`onboard: there is no ${SETTINGS_PATH} to add to; run process-rules onboard <owner> <agent> first`);
+      io.err(`onboard: there is no ${SETTINGS_PATH} to add to; run niyam onboard <owner> <agent> first`);
       return 1;
     }
     features = chosen ?? [...FEATURES];
     if ((!named[0] || !named[1]) && !sys.tty) {
-      io.err('onboard: name the owner and the agent account: process-rules onboard <owner> <agent>');
+      io.err('onboard: name the owner and the agent account: niyam onboard <owner> <agent>');
       return 1;
     }
     // The sign-in suggests the owner, so it comes before the plan; a dry run signs in to nothing.
@@ -978,7 +981,7 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     const namedOwner = named[0] ?? (await choose(sys, io, 'owner, who approves', [suggested]));
     const namedAgent = named[1] ?? (await choose(sys, io, 'agent, which builds', agentsSetUp(sys)));
     if (!namedOwner || !namedAgent) {
-      io.err('onboard: name the owner and the agent account: process-rules onboard <owner> <agent>');
+      io.err('onboard: name the owner and the agent account: niyam onboard <owner> <agent>');
       return 1;
     }
     for (const login of [namedOwner, namedAgent]) {
@@ -1022,7 +1025,7 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     // machine is the owner's to run, apart from onboard: it asks for the agent's token, hidden, and makes and
     // registers the agent's signing key, and a --yes or a run with no terminal can do neither (docs/decisions.md).
     const why = !token || !ready ? `no token stored for ${agent}` : (ready.problem ?? keyProblem);
-    io.err(`onboard: this Mac is not set up for ${agent} (${why}); run process-rules machine ${agent}, then onboard again`);
+    io.err(`onboard: this Mac is not set up for ${agent} (${why}); run niyam machine ${agent}, then onboard again`);
     return 1;
   }
   const { id } = await account(sys, agent);
@@ -1161,13 +1164,13 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     if (text !== cloudBefore) {
       const from = cloudBefore === undefined ? undefined : cloudScriptVersion(cloudBefore);
       pull.push({ label: 'cloud-setup.sh', detail: cloudBefore === undefined ? `new, installs v${version}` : from && from !== version ? `v${from} → v${version}` : 'written again' });
-      change(CLOUD_SETUP_PATH, text, `installs process-rules ${version} in Claude cloud sessions, its download checked against its sha256`);
+      change(CLOUD_SETUP_PATH, text, `installs niyam ${version} in Claude cloud sessions, its download checked against its sha256`);
     }
     if (cloudBefore === undefined) {
-      cloud.push({ label: 'Setup script', detail: 'process-rules cloud-setup, first' }, { label: "claude.ai's GitHub", detail: `as ${agent}` });
-      byHand.push(`cloud sessions, once: claude.ai's GitHub as ${agent}, Setup script from process-rules cloud-setup, first`);
+      cloud.push({ label: 'Setup script', detail: 'niyam cloud-setup, first' }, { label: "claude.ai's GitHub", detail: `as ${agent}` });
+      byHand.push(`cloud sessions, once: claude.ai's GitHub as ${agent}, Setup script from niyam cloud-setup, first`);
       later.push(
-        `Claude cloud sessions, once: connect claude.ai's GitHub as ${agent}, and paste what process-rules cloud-setup prints into the cloud environment's Setup script, over any older process-rules part. It runs ${CLOUD_SETUP_PATH}, which onboard keeps at the pin, so a new release needs no new paste. ${SETUP_FIRST}`,
+        `Claude cloud sessions, once: connect claude.ai's GitHub as ${agent}, and paste what niyam cloud-setup prints into the cloud environment's Setup script, over any older process-rules part. It runs ${CLOUD_SETUP_PATH}, which onboard keeps at the pin, so a new release needs no new paste. ${SETUP_FIRST}`,
       );
     }
   }
@@ -1323,7 +1326,7 @@ async function testCommit(sys: Sys, io: Output, target: Target): Promise<number>
         return 1;
       }
     }
-    const made = git('commit-tree', '-S', 'FETCH_HEAD^{tree}', '-p', 'FETCH_HEAD', '-m', `process-rules: signing check for ${agent}`);
+    const made = git('commit-tree', '-S', 'FETCH_HEAD^{tree}', '-p', 'FETCH_HEAD', '-m', `niyam: signing check for ${agent}`);
     const sha = made.stdout.trim();
     if (made.code !== 0 || !sha) {
       io.err(`onboard: signing the test commit failed: ${made.stderr.trim()}`);

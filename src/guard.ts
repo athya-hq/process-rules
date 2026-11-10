@@ -96,7 +96,7 @@ export function recordedAgent(sys: Sys, sessionId: unknown): { agent: string } |
 
 /** The line a refusal prints, for the guard and `as-agent` alike. */
 export function refusal(reason: string): string {
-  return `process-rules: refused, because this session does not work as the agent on GitHub: ${reason.replace(/\.$/, '')}. Do not work around it; tell the owner.`;
+  return `niyam: refused, because this session does not work as the agent on GitHub: ${reason.replace(/\.$/, '')}. Do not work around it; tell the owner.`;
 }
 
 function refuse(io: Output, reason: string): number {

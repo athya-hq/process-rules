@@ -1,3 +1,4 @@
+import { releaseAsset } from './cloud.ts';
 import { createHash } from 'node:crypto';
 
 import { launcherPath, launcherScript } from './agent.ts';
@@ -116,7 +117,7 @@ export class FakeSys implements Sys {
     return this;
   }
 
-  /** The agent token as `machine` stores it: service process-rules. */
+  /** The agent token as `machine` stores it: service niyam. */
   setToken(account: string, token: string): this {
     this.keychain.set(`process-rules/${account}`, token);
     return this;
@@ -325,13 +326,13 @@ export class FakeSys implements Sys {
   /** The repository's owner's account type, which a check reads when no test routes the repository. */
   ownerType: 'Organization' | 'User' = 'Organization';
   private unrouted(url: string): HttpResult {
-    const release = /^https:\/\/api\.github\.com\/repos\/athya-hq\/process-rules\/releases\/tags\/v(.+)$/.exec(url);
+    const release = /^https:\/\/api\.github\.com\/repos\/veda-hq\/niyam\/releases\/tags\/v(.+)$/.exec(url);
     // The newest release is the one this checkout builds, unless a test routes it.
-    if (url === 'https://api.github.com/repos/athya-hq/process-rules/releases/latest') {
+    if (url === 'https://api.github.com/repos/veda-hq/niyam/releases/latest') {
       const version = packageVersion();
-      return { status: 200, json: { tag_name: `v${version}`, assets: [{ name: `athya-hq-process-rules-${version}.tgz` }] } };
+      return { status: 200, json: { tag_name: `v${version}`, assets: [{ name: releaseAsset(version) }] } };
     }
-    if (release) return { status: 200, json: { assets: [{ name: `athya-hq-process-rules-${release[1]}.tgz`, digest: `sha256:${RELEASE_SHA256}` }] } };
+    if (release) return { status: 200, json: { assets: [{ name: releaseAsset(release[1] as string), digest: `sha256:${RELEASE_SHA256}` }] } };
     if (url === 'https://api.github.com/repos/example-org/example-app') return { status: 200, json: { owner: { login: 'example-org', type: this.ownerType } } };
     if (url === 'https://api.github.com/users/example-org') return { status: 200, json: { login: 'example-org', type: this.ownerType } };
     return { status: 404, json: { message: 'Not Found' } };

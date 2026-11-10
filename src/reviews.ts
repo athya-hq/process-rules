@@ -43,7 +43,8 @@ const DATE = /^\d{4}-\d{2}-\d{2}$/;
 /** Labels that mean a decision waits on the owner: the routine leaves it alone. */
 const WAITING = ['veto', 'needs-owner'];
 /** The mark in the weekly job's comment naming the decision text it vetted, by its SHA-256. */
-const VETTED = /<!-- process-rules vetted sha256:([0-9a-f]{64}) -->/;
+/** The vetted mark, niyam's or, on decisions vetted before the rename, process-rules'. */
+const VETTED = /<!-- (?:niyam|process-rules) vetted sha256:([0-9a-f]{64}) -->/;
 
 /** The SHA-256 of a decision's body, as GitHub returns it, in hex. */
 export function textHash(body: string): string {
@@ -221,7 +222,7 @@ export async function watchReviews(sys: Sys, io: Output, slug: string, token: st
     const mark = vettedHash(await commentsOf(issue.number));
     if (mark?.hash === hash) continue;
     const body = {
-      body: `Vetted for the review routine on ${today}: ${either([...owners, ...agents])} wrote and last edited this decision's text, so \`reviews-due\` lists it while its text is this one. This job vets it again after their next edit.\n\n<!-- process-rules vetted sha256:${hash} -->`,
+      body: `Vetted for the review routine on ${today}: ${either([...owners, ...agents])} wrote and last edited this decision's text, so \`reviews-due\` lists it while its text is this one. This job vets it again after their next edit.\n\n<!-- niyam vetted sha256:${hash} -->`,
     };
     if (mark?.id !== undefined) {
       const edited = await sys.http(`${API}/repos/${slug}/issues/comments/${mark.id}`, { method: 'PATCH', token, body });
