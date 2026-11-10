@@ -346,6 +346,9 @@ export class FakeSys implements Sys {
     if (release) return { status: 200, json: { assets: [{ name: releaseAsset(release[1] as string), digest: `sha256:${RELEASE_SHA256}` }] } };
     if (url === 'https://api.github.com/repos/example-org/example-app') return { status: 200, json: { owner: { login: 'example-org', type: this.ownerType } } };
     if (url === 'https://api.github.com/users/example-org') return { status: 200, json: { login: 'example-org', type: this.ownerType } };
+    // The organisation has this repository alone, and no open issue with no type, unless a test routes them.
+    if (url === 'https://api.github.com/orgs/example-org/repos?type=all&per_page=100&page=1') return { status: 200, json: [{ full_name: 'example-org/example-app' }] };
+    if (/^https:\/\/api\.github\.com\/repos\/[^/]+\/[^/]+\/issues\?type=none&state=open&per_page=100&page=1$/.test(url)) return { status: 200, json: [] };
     return { status: 404, json: { message: 'Not Found' } };
   }
 

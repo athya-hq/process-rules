@@ -190,6 +190,17 @@ const SPLIT_COMMENT = '# The weekly, merged and needs-owner jobs are split out s
 /** The comment before the needs-owner job. */
 const MERGED_SPLIT_COMMENT = '# The weekly and merged jobs are split out so pull request and push runs stay read-only.';
 
+/** The issue events: the owner's approved label, and since 0.6.4 an issue opened or reopened, which gets a type if it has none. */
+const ISSUE_TRIGGER = ['  # opened, reopened: an issue with no type gets the work model\'s.', '  issues:', '    types: [labeled, opened, reopened]'];
+/** The issue events before 0.6.4: the label alone. */
+const OLDER_ISSUE_TRIGGER = ['  issues:', '    types: [labeled]'];
+/** The asks job's clause for the approved label, after which 0.6.4 adds the opened and reopened one. */
+const ASKS_LABEL_IF = "      (github.event_name == 'issues' && github.event.label.name == 'approved') ||";
+const ASKS_TYPE_IF = "      (github.event_name == 'issues' && (github.event.action == 'opened' || github.event.action == 'reopened')) ||";
+
+const ASKS_COMMENT = "  # An ask labels its issue needs-owner, which the board's Needs you view lists; the owner's answer takes it off.";
+const ASKS_TYPE_COMMENT = "  # An issue opened or reopened with no type gets the work model's.";
+
 /** The events an ask and the owner's answer to it raise: since 0156 S-2, a comment and a label. */
 const ASK_TRIGGERS = [
   "  # A comment that asks the owner labels its issue needs-owner; the owner's approved label or Decision: comment takes it off.",
@@ -197,8 +208,7 @@ const ASK_TRIGGERS = [
   '    types: [created]',
   '  pull_request_review_comment:',
   '    types: [created]',
-  '  issues:',
-  '    types: [labeled]',
+  ...ISSUE_TRIGGER,
 ];
 /** The second cron, after the decisions job's: the hourly needs-owner sweep. */
 const HOURLY_CRON = ["    # Hourly: the owner's 👍 on an ask takes its needs-owner label off.", `    - cron: '${HOURLY}'`];
@@ -226,11 +236,13 @@ const OLDER_ASKS_COMMENT_IF = ASKS_COMMENT_IF.filter((_, at) => at !== 1);
  */
 function asksJob(version: string, secrets: string[]): string[] {
   return [
-    "  # An ask labels its issue needs-owner, which the board's Needs you view lists; the owner's answer takes it off.",
+    ASKS_COMMENT,
+    ASKS_TYPE_COMMENT,
     '  process-rules-asks:',
     '    if: >-',
     ...ASKS_COMMENT_IF,
-    "      (github.event_name == 'issues' && github.event.label.name == 'approved') ||",
+    ASKS_LABEL_IF,
+    ASKS_TYPE_IF,
     `      (github.event_name == 'schedule' && github.event.schedule == '${HOURLY}')`,
     '    permissions:',
     '      contents: read',
@@ -480,7 +492,7 @@ export function workflowUpdate(
 ):
   | { kind: 'same' }
   | { kind: 'write' | 'replace-older' | 'replace'; text: string; from?: string }
-  | { kind: 'repin'; text: string; from?: string; branch?: string; schedule?: string; secrets?: true; merged?: true; asks?: true; authors?: true } {
+  | { kind: 'repin'; text: string; from?: string; branch?: string; schedule?: string; secrets?: true; merged?: true; asks?: true; authors?: true; types?: true } {
   const wanted = workflow(branch, version, figma, schedule, settings);
   if (before === undefined) return { kind: 'write', text: wanted };
   if (before === wanted) return { kind: 'same' };
@@ -501,14 +513,25 @@ export function workflowUpdate(
   const withAsks = split && merged && !asks && pins.length === 6 && from !== undefined ? addAsksJob(before, from, figma) : undefined;
   if (withAsks !== undefined) {
     const update = workflowUpdate(withAsks, branch, version, figma, schedule, settings);
-    return { ...(update.kind === 'repin' ? update : { text: withAsks }), kind: 'repin', asks: true };
+    // The asks job it adds also types each new issue, so the plan says so.
+    return { ...(update.kind === 'repin' ? update : { text: withAsks }), kind: 'repin', asks: true, types: true };
   }
   if (split && merged && asks && pins.length === 8) {
     const moved = pushed !== undefined && pushed !== branch;
     const cron = SCHEDULE.exec(before)?.[4]?.trim();
     const rescheduled = cron !== undefined && cron.split(/\s+/).join(' ') !== schedule;
     const authors = before.includes(OLDER_ASKS_COMMENT_IF.join('\n'));
-    const pinned = before
+    // Before 0.6.4 the asks job ran on the approved label alone; both its trigger and its condition gain opened and reopened.
+    const olderTrigger = `\n${OLDER_ISSUE_TRIGGER.join('\n')}\n`;
+    const olderLabelIf = `\n${ASKS_LABEL_IF}\n`;
+    const types = before.split(olderTrigger).length === 2 && before.split(olderLabelIf).length === 2 && !before.includes(ASKS_TYPE_IF);
+    const typed = types
+      ? before
+          .replace(olderTrigger, `\n${ISSUE_TRIGGER.join('\n')}\n`)
+          .replace(olderLabelIf, `\n${ASKS_LABEL_IF}\n${ASKS_TYPE_IF}\n`)
+          .replace(`${ASKS_COMMENT}\n  process-rules-asks:`, `${ASKS_COMMENT}\n${ASKS_TYPE_COMMENT}\n  process-rules-asks:`)
+      : before;
+    const pinned = typed
       .replace(OLDER_ASKS_COMMENT_IF.join('\n'), ASKS_COMMENT_IF.join('\n'))
       .replace(CHECKS_PIN, () => `${PRODUCT}/.github/workflows/checks.yml@v${version}`)
       .replace(REF_PIN, (_, head: string) => `${head}${version}`)
@@ -523,7 +546,7 @@ export function workflowUpdate(
     const text = pinned.replace(SECRETS_AFTER_REF, (_, ref: string) => `${ref}${secrets}`);
     if (text === before) return { kind: 'same' };
     const stale = pins.find((pin) => pin !== version);
-    return { kind: 'repin', text, ...(stale ? { from: stale } : {}), ...(moved ? { branch } : {}), ...(rescheduled ? { schedule } : {}), ...(text !== pinned ? { secrets: true as const } : {}), ...(authors ? { authors: true as const } : {}) };
+    return { kind: 'repin', text, ...(stale ? { from: stale } : {}), ...(moved ? { branch } : {}), ...(rescheduled ? { schedule } : {}), ...(text !== pinned ? { secrets: true as const } : {}), ...(authors ? { authors: true as const } : {}), ...(types ? { types: true as const } : {}) };
   }
   return { kind: 'replace', text: wanted };
 }
@@ -761,6 +784,7 @@ function workflowDetail(update: Exclude<ReturnType<typeof workflowUpdate>, { kin
       ...(update.merged ? ['merged job'] : []),
       ...(update.asks ? ['needs-owner job'] : []),
       ...(update.authors ? ['needs-owner job only for owners, members and collaborators'] : []),
+      ...(update.types ? ['issue types for new issues'] : []),
     ].join(', ') || `header → v${version}`
   );
 }
@@ -782,6 +806,7 @@ function workflowWhat(update: Exclude<ReturnType<typeof workflowUpdate>, { kind:
     ...(update.merged ? ['add a job that closes the slice a merged pull request names, the one pull request run that writes to issues'] : []),
     ...(update.asks ? ["add a job that labels an issue needs-owner where the agent asks the owner, and takes it off at the owner's approved label, Decision: comment or (hourly) 👍"] : []),
     ...(update.authors ? ['start the needs-owner job only on a comment by the owner, a member or a collaborator'] : []),
+    ...(update.types ? ["start the needs-owner job when an issue is opened or reopened too, which gives one with no type the work model's"] : []),
   ];
   return `in ${WORKFLOW_PATH}, ${parts.join(' and ') || `set the version in its header comment to v${version}`}, leaving the rest as it is`;
 }
@@ -1015,7 +1040,7 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     change(settingsFile, `${JSON.stringify({ owner, agent, features }, null, 2)}\n`, `owner ${owner} approves, agent ${agent} builds, with ${features.join(', ')} on`);
   }
   const on = (feature: Feature): boolean => features.includes(feature);
-  const workflowNeeded = on('pr-identity') || on('work-rules') || on('figma') || on('decisions') || on('review');
+  const workflowNeeded = on('pr-identity') || on('board') || on('work-rules') || on('figma') || on('decisions') || on('review');
 
   const existing = fileAt(HOOKS_PATH);
   // Worked out before the plan, so a file onboard cannot edit is refused before any question.
@@ -1116,14 +1141,15 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     if (await byOrganisation()) {
       const org = slug.split('/')[0] as string;
       // The agent reads the organisation's types but only the repositories it can see. Where a type outside the
-      // work model exists, the owner, who sees every repository, signs in before the plan, so the plan shows what
-      // the yes approves; the run changes nothing beyond it. A dry run signs in to nothing: it shows the agent's view.
+      // work model exists, or an open issue with no type, the owner, who sees every repository, signs in before the
+      // plan, so the plan shows what the yes approves; the run changes nothing beyond it. A dry run signs in to
+      // nothing: it shows the agent's view.
       approved = await typesPlan(sys, token, org).catch(() => undefined);
-      if (!dryRun && (approved === undefined || approved.others.length > 0)) {
+      if (!dryRun && (approved === undefined || approved.others.length > 0 || approved.retype.length > 0)) {
         const mine = await ownerToken();
         if (!mine) return 1;
         approved = await typesPlan(sys, mine, org);
-        notes.push('- onboard signed in before showing its plan: the organisation has issue types outside the work model, and only the owner sees every repository whose issues hold one.');
+        notes.push('- onboard signed in before showing its plan: the organisation has issue types outside the work model or open issues with no type, and only the owner sees every repository that holds them.');
       }
       if (approved) github.push({ label: 'issue types', detail: typesDetail(approved) }, ...typesLines(approved));
       else github.push({ label: 'issue types', detail: 'org-wide, read once signed in' });

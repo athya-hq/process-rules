@@ -125,24 +125,30 @@ export async function doctor(sys: Sys, io: Output, named?: string): Promise<numb
 }
 
 /**
- * Whether the organisation's enabled issue types are the work model's, and
- * no issue here holds another: checked in a repository whose settings turn
- * the board on, in an organisation, since onboard keeps them so there.
+ * Whether the organisation's enabled issue types are the work model's, no
+ * issue here holds another, and every open one here has one but the
+ * Approvals issue: checked in a repository whose settings turn the board on,
+ * in an organisation, since onboard keeps them so there.
  */
 async function typesFindings(sys: Sys, token: string | undefined): Promise<Finding[]> {
   let slug: string;
+  let approvals: number | undefined;
   try {
     const found = repoAt(sys);
     const path = `${found.root}/${settingsPathIn(sys, found.root)}`;
-    if (!token || !sys.exists(path) || !featuresIn(JSON.parse(sys.read(path))).includes('board')) return [];
+    if (!token || !sys.exists(path)) return [];
+    const settings = JSON.parse(sys.read(path)) as unknown;
+    if (!featuresIn(settings).includes('board')) return [];
     slug = found.slug;
+    const named = (settings as { approvals?: unknown } | null)?.approvals;
+    approvals = typeof named === 'number' ? named : undefined;
   } catch {
     // Outside a client's clone, or settings doctor cannot read: onboard says what is wrong with them.
     return [];
   }
   const org = slug.split('/')[0] as string;
   try {
-    return (await isOrganisation(sys, org)) ? [await typesDrift(sys, token, org, slug)] : [];
+    return (await isOrganisation(sys, org)) ? [await typesDrift(sys, token, org, slug, approvals)] : [];
   } catch (error) {
     return [{ mark: '✗', text: `issue types: cannot ask GitHub (${message(error)})`, fix: 'niyam doctor again' }];
   }

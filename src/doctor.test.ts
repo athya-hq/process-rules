@@ -67,7 +67,7 @@ describe('doctor', () => {
         '◇  GitHub — as ExampleBot',
         '✓  token, ends in 90 days',
         '✓  signing key registered',
-        '✓  issue types in example-org: the work model’s alone',
+        '✓  issue types in example-org: the work model’s alone, and every open issue here has one',
         '│',
         '└  All good',
       ],
@@ -287,6 +287,18 @@ describe('doctor', () => {
       const { code, out } = await check(sys);
       assert.equal(code, 0);
       assert.deepEqual(marked(out, '▲'), [`▲  example-org has issue types outside the work model: Task, Bug; 1 issue here holds one (#9 Task) → ${RERUN}`]);
+    });
+
+    it('warns about open issues here with no type, but the Approvals issue the settings name', async () => {
+      const sys = typed(healthy(), MODEL);
+      sys.files.set(`${ROOT}/.github/niyam.json`, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity', 'board'], approvals: 3 }));
+      const row = (number: number) => ({ number, url: `https://api.github.com/repos/example-org/example-app/issues/${number}`, type: null });
+      sys.route('GET', '/repos/example-org/example-app/issues?type=none&state=open&per_page=100&page=1', { status: 200, json: [row(3), row(4), row(5)] });
+      const { code, out } = await check(sys);
+      assert.equal(code, 0);
+      assert.deepEqual(marked(out, '▲'), [`▲  2 open issues here have no type (#4, #5) → ${RERUN}`]);
+      sys.route('GET', '/repos/example-org/example-app/issues?type=none&state=open&per_page=100&page=1', { status: 200, json: [row(3), row(4)] });
+      assert.deepEqual(marked((await check(sys)).out, '▲'), [`▲  1 open issue here has no type (#4) → ${RERUN}`]);
     });
 
     it("warns about a work model type the organisation lacks or disabled", async () => {

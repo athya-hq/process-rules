@@ -5,6 +5,7 @@ import { decisionsWeekly } from './decisions.ts';
 import { prDesign } from './design.ts';
 import { doctor } from './doctor.ts';
 import { guard } from './guard.ts';
+import { issueType } from './issue-types.ts';
 import { prIdentity } from './identity.ts';
 import { machine, machineArgs } from './machine.ts';
 import { reviewsDue } from './reviews.ts';
@@ -41,6 +42,7 @@ Commands:
   pr-design        Run by the shared workflow: each state of the slice links a frame from the design library
   decisions-weekly Run by the shared workflow weekly: decision checks, undo issues, expiring labels
   needs-owner      Run by the shared workflow: an ask labels its issue needs-owner; the owner's answer takes it off
+  issue-type       Run by the shared workflow: an issue opened with no type gets the work model's
   reviews-due      For the review routine: open decisions whose review date has come, as JSON lines
   pre-push         Run by the pre-push git hook: the same rules before an agent session pushes
   propose <issue>... [--page <url>]
@@ -160,6 +162,7 @@ export async function run(
     case 'pr-design':
     case 'decisions-weekly':
     case 'needs-owner':
+    case 'issue-type':
     case 'reviews-due':
     case 'pre-push':
     case 'propose':
@@ -175,6 +178,7 @@ export async function run(
         if (command === 'reviews-due') return await reviewsDue(await sys(), io);
         if (command === 'decisions-weekly') return await decisionsWeekly(await sys(), io);
         if (command === 'needs-owner') return await needsOwner(await sys(), io);
+        if (command === 'issue-type') return await issueType(await sys(), io);
         if (command === 'pr-design') return await prDesign(await sys(), io);
         if (command === 'pr-identity') return await prIdentity(await sys(), io);
         if (command === 'pr-work-rules') return await prWorkRules(await sys(), io);

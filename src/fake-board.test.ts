@@ -89,6 +89,7 @@ export interface FakeIssue {
   parent?: number;
   subIssues?: number;
   pull?: boolean;
+  closed?: boolean;
 }
 
 export class Board {
@@ -179,6 +180,13 @@ export class Board {
       // GitHub filters by the type's name in any case.
       const rows = this.issues.filter((issue) => issue.repo === listed[1] && issue.type?.toLowerCase() === name.toLowerCase());
       return { status: 200, json: rows.map((issue) => this.issueJson(issue)) };
+    }
+    // Open issues with no type: GitHub's type=none.
+    const bare = /^https:\/\/api\.github\.com\/repos\/([^/]+\/[^/]+)\/issues\?type=none&state=open&per_page=100&page=(\d+)$/.exec(url);
+    if (bare && method === 'GET') {
+      const page = Number(bare[2]);
+      const rows = this.issues.filter((issue) => issue.repo === bare[1] && issue.type === null && !issue.closed);
+      return { status: 200, json: rows.slice((page - 1) * 100, page * 100).map((issue) => this.issueJson(issue)) };
     }
     const one = /^https:\/\/api\.github\.com\/repos\/([^/]+\/[^/]+)\/issues\/(\d+)$/.exec(url);
     const issue = one && this.issues.find((had) => had.repo === one[1] && had.number === Number(one[2]));
