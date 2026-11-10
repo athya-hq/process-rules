@@ -19,8 +19,11 @@ export const LABELS = [
   { name: 'cannot-run-here', color: 'bfd4f2', description: 'A decision check that reads files only a laptop has' },
 ];
 
+/** The Steps a Work item moves through, in order; a closed one is Done. */
+export const STEPS = ['Frame', 'Specify', 'Slice', 'Build', 'Done'];
+
 export const FIELDS = [
-  { name: 'Step', options: ['Frame', 'Specify', 'Slice', 'Build'] },
+  { name: 'Step', options: STEPS },
   { name: 'Decision', options: ['Needs owner', 'Tripped', 'Decided by the routine'] },
   { name: 'Review date' },
 ];
@@ -256,14 +259,15 @@ export async function setUpBoard(
   }
   io.out(`✓ Project "${title}": ${project.url}`);
 
+  type Option = { id: string; name: string; color: string; description: string };
   const fields = (await graphql(
     sys,
     token,
-    'query($id: ID!) { node(id: $id) { ... on ProjectV2 { fields(first: 50) { nodes { ... on ProjectV2FieldCommon { name } } } } } }',
+    'query($id: ID!) { node(id: $id) { ... on ProjectV2 { fields(first: 50) { nodes { ... on ProjectV2FieldCommon { id name } ... on ProjectV2SingleSelectField { options { id name color description } } } } } } }',
     { id: project.id },
-  )) as { node: { fields: { nodes: { name?: string }[] } } };
-  const names = fields.node.fields.nodes.map((node) => node.name?.toLowerCase());
-  const newFields = FIELDS.filter((field) => !names.includes(field.name.toLowerCase()));
+  )) as { node: { fields: { nodes: { id?: string; name?: string; options?: Option[] }[] } } };
+  const had = (name: string) => fields.node.fields.nodes.find((node) => node.name?.toLowerCase() === name.toLowerCase());
+  const newFields = FIELDS.filter((field) => !had(field.name));
   if (newFields.length > 0) {
     if (!(await confirm(`Add the fields ${newFields.map((f) => f.name).join(', ')} to "${title}"?`, 'fields'))) {
       return stopped(io, 'fields');
@@ -278,6 +282,34 @@ export async function setUpBoard(
           name: field.name,
           type: field.options ? 'SINGLE_SELECT' : 'DATE',
           options: field.options?.map((name) => ({ name, color: 'GRAY', description: '' })) ?? null,
+        },
+      );
+    }
+  }
+  // A field made before an option joined it, such as Step's Done, gains the option.
+  const short = FIELDS.flatMap((field) => {
+    const held = had(field.name);
+    const absent = field.options?.filter((name) => held?.options && !held.options.some((option) => option.name.toLowerCase() === name.toLowerCase())) ?? [];
+    return held?.id && held.options && absent.length > 0 ? [{ id: held.id, name: field.name, options: held.options, absent }] : [];
+  });
+  if (short.length > 0) {
+    const what = short.map((field) => `${field.absent.join(', ')} to the field ${field.name}`).join(' and ');
+    const plural = short.flatMap((field) => field.absent).length > 1 ? 's' : '';
+    if (!(await confirm(`Add the option${plural} ${what} in "${title}"?`, 'fields'))) {
+      return stopped(io, 'fields');
+    }
+    for (const field of short) {
+      // GitHub replaces the field's options with those sent: each kept one goes with its id, so no item loses its value.
+      await graphql(
+        sys,
+        token,
+        'mutation($field: ID!, $options: [ProjectV2SingleSelectFieldOptionInput!]) { updateProjectV2Field(input: { fieldId: $field, singleSelectOptions: $options }) { projectV2Field { ... on ProjectV2FieldCommon { name } } } }',
+        {
+          field: field.id,
+          options: [
+            ...field.options.map(({ id, name, color, description }) => ({ id, name, color, description })),
+            ...field.absent.map((name) => ({ name, color: 'GRAY', description: '' })),
+          ],
         },
       );
     }
@@ -607,11 +639,23 @@ interface RestIssue {
   state: string;
   url?: string;
   type?: { name?: string } | null;
-  pull_request?: unknown;
 }
 
-/** An item of a Project, holding an issue, with its single-select field `field` and the item's value of it. */
-type BoardItem = { url: string; project: string; number: number; field: ProjectField; value: string | undefined };
+/** An item of a Project, holding an issue, with its single-select field `field`, the item's value of it, and what the issue is now. */
+type BoardItem = {
+  url: string;
+  project: string;
+  number: number;
+  field: ProjectField;
+  value: string | undefined;
+  /** The issue's type's name, its state, and its sub-issues: how many, and how many closed. */
+  type: string | undefined;
+  state: string | undefined;
+  subIssues: { total: number; completed: number };
+};
+
+/** The field's option named `option`, in any case. */
+const optionOf = (field: ProjectField, option: string) => field.options?.find((had) => named(had.name)?.toLowerCase() === option.toLowerCase());
 
 /**
  * Sets `item`'s field to the option named `option`, in any case, unless the
@@ -619,7 +663,7 @@ type BoardItem = { url: string; project: string; number: number; field: ProjectF
  * title when it moved the item.
  */
 async function moveTo(sys: Sys, token: string, item: BoardItem, option: string): Promise<string | undefined> {
-  const chosen = item.field.options?.find((had) => named(had.name)?.toLowerCase() === option.toLowerCase());
+  const chosen = optionOf(item.field, option);
   if (!chosen || item.value?.toLowerCase() === option.toLowerCase()) return undefined;
   await rest(sys, token, item.url, { method: 'PATCH', body: { fields: [{ id: item.field.id, value: chosen.id }] } });
   return item.project;
@@ -642,22 +686,33 @@ async function projectItems(sys: Sys, token: string, slug: string): Promise<{ st
     const step = single('Step');
     if (!status && !step) continue;
     const wanted = [status, step].flatMap((field) => (field ? [field.id] : [])).join(',');
+    // Each item holds its issue as GitHub's REST API gives one: its type, state and sub-issues come with it, so no issue is read on its own.
     const items = await all<{
       id: number;
       content_type?: string;
       archived_at?: string | null;
-      content?: { number?: number; repository_url?: string } | null;
+      content?: {
+        number?: number;
+        repository_url?: string;
+        state?: string;
+        type?: { name?: string } | null;
+        sub_issues_summary?: { total?: number; completed?: number } | null;
+      } | null;
       fields?: { id?: number; value?: { name?: Named } | null }[];
     }>(sys, token, `${url}/items?per_page=100&fields=${wanted}`);
     for (const item of items) {
-      const number = item.content?.number;
-      if (item.archived_at || item.content_type !== 'Issue' || !number || !item.content?.repository_url?.toLowerCase().endsWith(repoUrl)) continue;
+      const content = item.content;
+      const number = content?.number;
+      if (item.archived_at || item.content_type !== 'Issue' || !number || !content?.repository_url?.toLowerCase().endsWith(repoUrl)) continue;
       const of = (field: ProjectField): BoardItem => ({
         url: `${url}/items/${item.id}`,
         project: project.title,
         number,
         field,
         value: named(item.fields?.find((held) => held.id === field.id)?.value?.name),
+        type: content.type?.name ?? undefined,
+        state: content.state,
+        subIssues: { total: content.sub_issues_summary?.total ?? 0, completed: content.sub_issues_summary?.completed ?? 0 },
       });
       if (status) found.status.push(of(status));
       if (step) found.step.push(of(step));
@@ -666,15 +721,86 @@ async function projectItems(sys: Sys, token: string, slug: string): Promise<{ st
   return found;
 }
 
+const rank = (step: string | undefined): number => STEPS.findIndex((had) => had.toLowerCase() === step?.toLowerCase());
+
+/**
+ * The Step GitHub's facts put a Work item at, when its Step must move there:
+ * a closed one is Done; an open one is at least Frame, at least Slice once
+ * it has sub-issues, and at least Build once one of them is closed or
+ * `building` (a push builds one). Specify has no fact that marks it, so it
+ * is set by hand and kept. A Step moves only forward, except that a reopened
+ * work item leaves Done; an option the owner added to Step is kept.
+ */
+export function stepDue(item: Pick<BoardItem, 'value' | 'state' | 'subIssues'>, building = false): string | undefined {
+  const now = rank(item.value);
+  if (item.value !== undefined && now < 0) return undefined;
+  if (item.state === 'closed') return now === rank('Done') ? undefined : 'Done';
+  const due = building || item.subIssues.completed > 0 ? 'Build' : item.subIssues.total > 0 ? 'Slice' : 'Frame';
+  return item.value === undefined || now === rank('Done') || now < rank(due) ? due : undefined;
+}
+
+type Move = { item: BoardItem; option: string; name: string; what: string };
+
+/**
+ * The Step moves for the Work items among `items`, `parent` being the work
+ * item a push builds a slice of: newest first, that one leading. A Project
+ * whose Step lacks the option a move needs, such as Done on one made before
+ * it, gets one line saying so instead of those moves.
+ */
+function stepMoves(items: BoardItem[], parent?: number): { moves: Move[]; lacking: string[] } {
+  const moves: Move[] = [];
+  const lacking = new Map<string, Set<string>>();
+  const ordered = items.filter((item) => item.type === 'Work item').sort((a, b) => Number(b.number === parent) - Number(a.number === parent) || b.number - a.number);
+  for (const item of ordered) {
+    const option = stepDue(item, item.number === parent);
+    if (!option) continue;
+    if (!optionOf(item.field, option)) {
+      lacking.set(item.project, (lacking.get(item.project) ?? new Set()).add(option));
+      continue;
+    }
+    const name = `work item #${item.number}`;
+    const what = item.value === undefined ? `${name} had no Step; it is at ${option}` : option === 'Done' ? `${name} is closed; it is at Step Done` : `${name} is at Step ${option}`;
+    moves.push({ item, option, name, what });
+  }
+  return {
+    moves,
+    lacking: [...lacking].map(([project, options]) => `! board: Step in "${project}" has no option ${[...options].join(', ')}, so work items that belong there stay where they are; process-rules onboard adds it`),
+  };
+}
+
+/** Makes the moves, each standing alone, so one GitHub refuses leaves the others made; returns them as lines. */
+async function move(sys: Sys, token: string, moves: Move[]): Promise<string[]> {
+  const moved: string[] = [];
+  for (const { item, option, name, what } of moves) {
+    try {
+      const project = await moveTo(sys, token, item, option);
+      if (project) moved.push(`✓ board: ${what} in "${project}"`);
+    } catch (error) {
+      moved.push(`! board: ${name} was not moved to ${option} in "${item.project}" (${(error as Error).message})`);
+    }
+  }
+  return moved;
+}
+
+/**
+ * Moves every Work item of `slug` to the Step `stepDue` gives it, on every
+ * open Project of the repository's owner that holds it, through GitHub's
+ * REST API alone. Returns what moved, as lines.
+ */
+export async function boardSwept(sys: Sys, token: string, slug: string): Promise<string[]> {
+  const steps = stepMoves((await projectItems(sys, token, slug)).step);
+  return [...(await move(sys, token, steps.moves)), ...steps.lacking];
+}
+
 /**
  * Moves the work board on as an agent starts building slice `slice` of
  * `slug`, with the agent's token, on every open Project of the repository's
  * owner that holds the issues: the open slice's Status to In Progress; its
- * Work item's Step to Build, as its first slice has started; and an open
- * Work item with no Step to Frame, where every new one starts. A workflow's
- * GITHUB_TOKEN cannot write a Project, so the agent's push does this,
- * through GitHub's REST API alone, as a cloud session's proxy refuses
- * GraphQL. Returns what moved, as lines.
+ * Work item's Step to Build, as its first slice has started; and every
+ * other Work item to the Step `stepDue` gives it, so a closed one is Done
+ * and a new one is at Frame. A workflow's GITHUB_TOKEN cannot write a
+ * Project, so the agent's push does this, through GitHub's REST API alone,
+ * as a cloud session's proxy refuses GraphQL. Returns what moved, as lines.
  */
 export async function boardStarted(sys: Sys, token: string, slug: string, slice: number): Promise<string[]> {
   const issue = (await rest(sys, token, `${API}/repos/${slug}/issues/${slice}`)).json as RestIssue;
@@ -687,31 +813,13 @@ export async function boardStarted(sys: Sys, token: string, slug: string, slice:
     throw new Error(`GitHub's REST API refused GET /repos/${slug}/issues/${slice}/parent: HTTP ${status}${typeof message === 'string' ? ` ${message}` : ''}`);
   }
   const parent = status === 200 && (json as RestIssue | null)?.type?.name === 'Work item' ? (json as RestIssue).number : undefined;
-  // Newest first, as the moves are said.
-  const workItems = (await all<RestIssue>(sys, token, `${API}/repos/${slug}/issues?state=open&type=${encodeURIComponent('Work item')}&sort=created&direction=desc&per_page=100`))
-    .filter((one) => !one.pull_request && one.type?.name === 'Work item')
-    .map((one) => one.number);
   const items = await projectItems(sys, token, slug);
-  const moves = [
+  const steps = stepMoves(items.step, parent);
+  const moved = await move(sys, token, [
     ...items.status.filter((item) => item.number === slice).map((item) => ({ item, option: 'In Progress', name: `slice #${slice}`, what: `slice #${slice} is In Progress` })),
-    ...items.step.filter((item) => item.number === parent).map((item) => ({ item, option: 'Build', name: `work item #${parent}`, what: `work item #${parent} is at Step Build` })),
-    ...workItems.flatMap((number) =>
-      number === parent
-        ? []
-        : items.step.filter((item) => item.number === number && !item.value).map((item) => ({ item, option: 'Frame', name: `work item #${number}`, what: `work item #${number} had no Step; it is at Frame` })),
-    ),
-  ];
-  // Each move stands alone, so one GitHub refuses leaves the others made.
-  const moved: string[] = [];
-  for (const { item, option, name, what } of moves) {
-    try {
-      const project = await moveTo(sys, token, item, option);
-      if (project) moved.push(`✓ board: ${what} in "${project}"`);
-    } catch (error) {
-      moved.push(`! board: ${name} was not moved to ${option} in "${item.project}" (${(error as Error).message})`);
-    }
-  }
-  return moved;
+    ...steps.moves,
+  ]);
+  return [...moved, ...steps.lacking];
 }
 
 function stopped(io: Output, step: string): undefined {
