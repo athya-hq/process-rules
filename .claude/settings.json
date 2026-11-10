@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cli=\"$HOME/.config/process-rules/bin/process-rules\"; [ -x \"$cli\" ] || cli=process-rules; if said=$(\"$cli\" session-start 2>&1); then printf '%s\\n' \"$said\"; else printf '%s\\n' \"process-rules: STOP. process-rules session-start did not run here ($said), so this session cannot be given the agent identity and GitHub is locked out of it. Do not push, fetch, or run gh in this session; tell the owner.\"; fi"
+            "command": "cli=\"$HOME/.config/process-rules/bin/process-rules\"; [ -x \"$cli\" ] || cli=niyam; if said=$(\"$cli\" session-start 2>&1); then printf '%s\\n' \"$said\"; else printf '%s\\n' \"niyam: STOP. niyam session-start did not run here ($said), so this session cannot be given the agent identity and GitHub is locked out of it. Do not push, fetch, or run gh in this session; tell the owner.\"; fi"
           }
         ]
       }
@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "input=$(cat); cmd=$(printf '%s' \"$input\" | sed -nE 's/.*\"command\"[[:space:]]*:[[:space:]]*\"(([^\"\\\\]|\\\\.)*)\".*/\\1/p'); printf '%s' \"$cmd\" | grep -Eq '(^|[^[:alnum:]_-])(gh|git)([^[:alnum:]_-]|$)' || exit 0; cli=\"$HOME/.config/process-rules/bin/process-rules\"; [ -x \"$cli\" ] || cli=process-rules; printf '%s' \"$input\" | \"$cli\" guard && exit 0; [ $? -eq 2 ] && exit 2; echo \"process-rules: refused, because the process-rules CLI did not run here to check this command. Do not work around it; tell the owner.\" >&2; exit 2"
+            "command": "input=$(cat); cmd=$(printf '%s' \"$input\" | sed -nE 's/.*\"command\"[[:space:]]*:[[:space:]]*\"(([^\"\\\\]|\\\\.)*)\".*/\\1/p'); printf '%s' \"$cmd\" | grep -Eq '(^|[^[:alnum:]_-])(gh|git)([^[:alnum:]_-]|$)' || exit 0; cli=\"$HOME/.config/process-rules/bin/process-rules\"; [ -x \"$cli\" ] || cli=niyam; printf '%s' \"$input\" | \"$cli\" guard && exit 0; [ $? -eq 2 ] && exit 2; echo \"niyam: refused, because the niyam CLI did not run here to check this command. Do not work around it; tell the owner.\" >&2; exit 2"
           }
         ]
       }
@@ -46,7 +46,7 @@
   },
   "permissions": {
     "allow": [
-      "Bash(process-rules review-thread *)",
+      "Bash(niyam review-thread *)",
       "mcp__ccd_pr__bind_pr",
       "mcp__ccd_pr__get_status",
       "mcp__ccd_pr__set_monitor"
