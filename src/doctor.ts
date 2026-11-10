@@ -144,7 +144,7 @@ async function typesFindings(sys: Sys, token: string | undefined): Promise<Findi
   try {
     return (await isOrganisation(sys, org)) ? [await typesDrift(sys, token, org, slug)] : [];
   } catch (error) {
-    return [{ mark: '✗', text: `issue types: cannot ask GitHub (${message(error)})`, fix: 'process-rules doctor again' }];
+    return [{ mark: '✗', text: `issue types: cannot ask GitHub (${message(error)})`, fix: 'niyam doctor again' }];
   }
 }
 

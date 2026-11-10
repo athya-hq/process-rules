@@ -107,7 +107,7 @@ describe('typesPlan', () => {
     assert.ok(!sys.requests.some((request) => request.method === 'PATCH' && request.url.includes(OTHER)));
     assert.ok(out.includes(`- ${OTHER}#2 keeps Bug: ${OTHER} is archived, which GitHub keeps read-only`));
     assert.ok(out.includes('- left Bug enabled in example-org, since an issue in an archived repository holds it'));
-    assert.deepEqual(byHand, [`issue types: unarchive ${OTHER}, then process-rules onboard again, to retype ${OTHER}#2 and disable Bug`]);
+    assert.deepEqual(byHand, [`issue types: unarchive ${OTHER}, then niyam onboard again, to retype ${OTHER}#2 and disable Bug`]);
   });
 
   it('adds the work model types missing and enables those disabled, and reads no repository when no other type exists', async () => {

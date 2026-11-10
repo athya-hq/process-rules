@@ -250,7 +250,7 @@ export async function applyTypes(sys: Sys, io: Output, token: string, plan: Type
   if (plan.kept.length > 0) io.out(`- left ${names(plan.kept)} enabled in ${org}, since an issue in an archived repository holds ${plan.kept.length === 1 ? 'it' : 'them'}`);
   io.out(`✓ issue types in ${org}: ${names(ISSUE_TYPES)}`);
   const archived = [...new Set(plan.held.map((issue) => issue.repo))];
-  return archived.length > 0 ? [`issue types: unarchive ${archived.join(', ')}, then process-rules onboard again, to retype ${plan.held.map((issue) => `${issue.repo}#${issue.number}`).join(', ')} and disable ${names(plan.kept)}`] : [];
+  return archived.length > 0 ? [`issue types: unarchive ${archived.join(', ')}, then niyam onboard again, to retype ${plan.held.map((issue) => `${issue.repo}#${issue.number}`).join(', ')} and disable ${names(plan.kept)}`] : [];
 }
 
 /** Sets a type enabled or disabled, sending its name, description and colour back, since GitHub's PUT takes them all. */
@@ -264,7 +264,7 @@ async function putType(sys: Sys, token: string, org: string, type: OrgType, enab
 }
 
 /** The fix for issue-type drift: onboard, run by the owner, who alone can change the organisation's types. */
-export const RERUN = 'the owner reruns process-rules onboard, which retypes those issues and disables the other types';
+export const RERUN = 'the owner reruns niyam onboard, which retypes those issues and disables the other types';
 
 /**
  * doctor's check that the organisation's enabled issue types are the work
