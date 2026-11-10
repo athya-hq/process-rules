@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { NO_TOKEN, launcherPath, pathsFor, sessionScript } from './agent.ts';
+import { NO_TOKEN, launcherPath, launcherScript, pathsFor, sessionScript } from './agent.ts';
 import { FROM_SETUP, PROXY_TOKEN, cloudRepoScript } from './cloud.ts';
 import { doctor } from './doctor.ts';
 import { KEYCHAIN } from './token-store.ts';
@@ -291,6 +291,14 @@ describe('doctor', () => {
     assert.equal(code, 1);
     assert.deepEqual(marked(out, '✗'), ['✗  launcher does not run (/gone/bin/node: not found); its node removed? → niyam machine']);
     assert.equal(sys.calls.find((c) => c.command === LAUNCHER)?.env?.PATH, '/usr/bin:/bin', 'runs it without the PATH of this shell');
+  });
+
+  it("marks ▲ a launcher that runs the old process-rules command, which P-54 removes", async () => {
+    const sys = healthy();
+    sys.files.set(LAUNCHER, launcherScript('/opt/node/bin/node', '/x/dist/cli.js', '/home/u/Library/pnpm/bin/process-rules'));
+    assert.deepEqual(marked((await check(sys)).out, '▲'), ["▲  launcher runs process-rules, niyam's old command, which a later release removes → niyam machine"]);
+    sys.files.set(LAUNCHER, launcherScript('/opt/node/bin/node', '/x/dist/cli.js', '/home/u/Library/pnpm/bin/niyam'));
+    assert.deepEqual(marked((await check(sys)).out, '▲'), []);
   });
 
   it('names a launcher that fails without saying why', async () => {

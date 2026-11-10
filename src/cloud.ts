@@ -52,7 +52,7 @@ export const FROM_SETUP = `${CLOUD_DIR}/from-setup`;
 
 /** The release `cloudRepoScript` installs, from its first comment; undefined when `text` is not one. */
 export function cloudScriptVersion(text: string): string | undefined {
-  return /^# process-rules (\d+\.\d+\.\d+) for Claude cloud sessions/m.exec(text)?.[1];
+  return /^# (?:niyam|process-rules) (\d+\.\d+\.\d+) for Claude cloud sessions/m.exec(text)?.[1];
 }
 
 /**
@@ -115,7 +115,7 @@ export async function releaseSha256(sys: Sys, version: string, token: string): P
  * The repo's cloud setup file, CLOUD_SETUP_PATH, which onboard writes at
  * the version the workflow pins and rewrites on every run: Node and that
  * release of the CLI, unpacked under CLOUD_DIR as root, and a
- * `niyam` on PATH that runs one with the other, leaving the image's
+ * `niyam` on PATH that runs one with the other, `process-rules` linked to it, leaving the image's
  * own Node alone. Each download is checked against the sha256 pinned here
  * before it is unpacked; a Node already unpacked at this version is kept,
  * so a session that runs it again fetches the CLI alone. The Setup snippet
@@ -125,7 +125,7 @@ export async function releaseSha256(sys: Sys, version: string, token: string): P
 export function cloudRepoScript(version: string, sha256: string): string {
   return [
     '#!/bin/bash',
-    `# process-rules ${version} for Claude cloud sessions: Node ${CLOUD_NODE} and the CLI, as process-rules on PATH.`,
+    `# niyam ${version} for Claude cloud sessions: Node ${CLOUD_NODE} and the CLI, as niyam on PATH.`,
     `# niyam onboard writes this file at the version ${WORKFLOW_PATH} pins, and writes it again on every run.`,
     "# The cloud environment's Setup script runs it, from what niyam cloud-setup prints, and so does",
     '# session-start when the environment holds another release. Change it by running onboard, not by hand.',
@@ -141,19 +141,22 @@ export function cloudRepoScript(version: string, sha256: string): string {
     '  tar -xJ -f "$dir/node.tar.xz" -C "$dir"',
     '  rm "$dir/node.tar.xz"',
     'fi',
-    `curl -fsSL --connect-timeout 10 --max-time 120 -o "$dir/process-rules.tgz" ${releaseTarball(version)}`,
-    `echo "${sha256}  $dir/process-rules.tgz" | sha256sum -c --quiet -`,
+    `curl -fsSL --connect-timeout 10 --max-time 120 -o "$dir/niyam.tgz" ${releaseTarball(version)}`,
+    `echo "${sha256}  $dir/niyam.tgz" | sha256sum -c --quiet -`,
     // A folder per release: a session that installs another leaves the one it runs in place.
     `cli="$dir/cli-${version}"`,
     'rm -rf "$cli"',
     'mkdir -p "$cli"',
-    'tar -xz -f "$dir/process-rules.tgz" -C "$cli"',
-    'rm "$dir/process-rules.tgz"',
-    'printf \'#!/bin/sh\\nexec %s %s "$@"\\n\' "$bin" "$cli/package/dist/cli.js" > /usr/local/bin/process-rules',
-    'chmod 755 /usr/local/bin/process-rules',
-    'ln -sf /usr/local/bin/process-rules /usr/local/bin/niyam',
+    'tar -xz -f "$dir/niyam.tgz" -C "$cli"',
+    'rm "$dir/niyam.tgz"',
+    // Both gone first: before P-53 niyam was a link to process-rules, which the write would follow.
+    'rm -f /usr/local/bin/niyam /usr/local/bin/process-rules',
+    'printf \'#!/bin/sh\\nexec %s %s "$@"\\n\' "$bin" "$cli/package/dist/cli.js" > /usr/local/bin/niyam',
+    'chmod 755 /usr/local/bin/niyam',
+    // The old name, for hooks onboarded before P-53, until P-54.
+    'ln -s /usr/local/bin/niyam /usr/local/bin/process-rules',
     `if [ -n "\${PROCESS_RULES_SETUP:-}" ]; then : > ${FROM_SETUP}; fi`,
-    'process-rules version </dev/null',
+    'niyam version </dev/null',
     '',
   ].join('\n');
 }

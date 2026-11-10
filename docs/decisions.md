@@ -1267,3 +1267,42 @@
   - Rejected: reading the token into the CLI to call the API (it would be in
     memory and in reach of a bug that prints it); a `--yes` flag;
     `gh auth logout` (above).
+- **2026-11-10 — Record: the hooks and checks say niyam (P-53).** After the
+  rename the owner asked, in chat, to fix the check still named
+  `process-rules` and the `process-rules` command still installed. That
+  reverses P-49's choice to keep both "now". The command cannot go first:
+  every hook `onboard` wrote, and the launcher `machine` wrote, runs it, so
+  dropping it would lock every agent session out of GitHub. So P-53 moves
+  everything that runs it, and P-54, a release later, drops it.
+  - The hooks and the pre-push hook fall back to `niyam` on PATH and say
+    niyam; `onboard` replaces 0.6.7's texts, kept in its older lists. The
+    allow rule is `Bash(niyam review-thread *)`, put in the old rule's
+    place. The cloud setup writes `/usr/local/bin/niyam`, removing both names
+    first (0.6.x's `niyam` was a link to `process-rules`, which the write
+    would follow), and links `process-rules` to it until P-54. `machine`
+    points the launcher at the package manager's `niyam`; `doctor` marks ▲
+    one that runs `process-rules`. `niyam upgrade` points such a launcher at
+    the `niyam` beside it, so upgrading to P-54, which installs no
+    `process-rules`, cannot leave the hooks without a CLI.
+  - Checks take a reusable workflow's caller job's `name:`, so each job gets
+    one (`niyam`, `niyam-weekly`, `niyam-merged`, `niyam-asks`) and keeps its
+    id. The ids, the workflow's file name and `process-rules-ref` stay:
+    `onboard` and `owner-step` find the jobs by id, and renaming them would
+    rewrite every adopter's workflow for no visible change.
+  - A pull request reports only the names its own workflow gives, so the
+    onboard pull request that adds the names cannot meet a ruleset that
+    requires the old ones, and the old ones go missing from every pull
+    request after it. `owner-step required-checks` requires each
+    `process-rules / …` check as `niyam / …` in its place, but only once the
+    workflow on the default branch or on `process-rules/onboard` names the
+    job niyam, and adds no niyam check before. `onboard` reads the rulesets
+    and lists that step by hand when one still requires an old name. The
+    order is: the onboard pull request opens, the owner swaps, it merges.
+    Pull requests opened before it report the old names until they merge
+    main. Rejected: reporting both names for a release, by running the
+    read-only job twice (twice the runs and pull request checks, and a
+    second job to remove later); renaming the job ids (above).
+  - Unchanged: the launcher's path, `~/.config/process-rules`,
+    `PROCESS_RULES_AGENT`, the lock's text and placeholder token, the cloud
+    setup path and the Setup paste, the settings and keychain fallbacks, and
+    the bridge archive for 0.6.x's `upgrade`.

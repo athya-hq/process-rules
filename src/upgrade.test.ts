@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
+import { launcherPath, launcherScript } from './agent.ts';
 import { releaseTarball } from './cloud.ts';
 import { FakeSys, HOME, capture } from './fake.test.ts';
 import { run } from './run.ts';
@@ -74,6 +75,28 @@ describe('upgrade', () => {
     assert.ok(asked, 'asks GitHub for the newest release');
     assert.equal(asked.token, undefined, 'with no token: the releases are public');
     assert.deepEqual(sys.spun, ['Asking GitHub for the newest release', `Installing niyam ${NEW}`]);
+  });
+
+  it('points a launcher that runs pnpm\'s process-rules at the niyam beside it, which P-54 alone leaves', async () => {
+    const launcher = launcherPath(HOME);
+    for (const running of [OLD, NEW]) {
+      const sys = machine({ [PNPM_BIN]: running });
+      sys.files.set(launcher, launcherScript('/opt/node/bin/node', '/x/dist/cli.js', `${PNPM_BIN}/process-rules`));
+      const { code, out } = await upgraded(sys, running);
+      assert.equal(code, 0, out.join('\n'));
+      assert.equal(sys.files.get(launcher), launcherScript('/opt/node/bin/node', '/x/dist/cli.js', `${PNPM_BIN}/niyam`));
+      assert.ok(out.includes('upgrade: the launcher ~/.config/process-rules/bin/process-rules now runs ~/Library/pnpm/bin/niyam, not process-rules'), out.join('\n'));
+    }
+    const kept = machine({ [PNPM_BIN]: NEW });
+    const own = launcherScript('/opt/node/bin/node', '/x/dist/cli.js', `${PNPM_BIN}/niyam`);
+    kept.files.set(launcher, own);
+    assert.equal((await upgraded(kept, NEW)).code, 0);
+    assert.equal(kept.files.get(launcher), own, 'one that runs niyam stays');
+    const lone = machine({ [PNPM_BIN]: NEW });
+    lone.files.set(launcher, launcherScript('/opt/node/bin/node', '/x/dist/cli.js', '/elsewhere/process-rules'));
+    const { code, err } = await upgraded(lone, NEW);
+    assert.equal(code, 1);
+    assert.deepEqual(err, ['upgrade: the launcher ~/.config/process-rules/bin/process-rules runs process-rules, and no /elsewhere/niyam is there to run instead; run niyam machine']);
   });
 
   it('says so and installs nothing when this is the newest release', async () => {

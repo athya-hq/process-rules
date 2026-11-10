@@ -14,7 +14,7 @@ import type { HttpResult } from './types.ts';
 import { pathsFor, sessionScript } from './agent.ts';
 import { FEATURES } from './features.ts';
 import { packageVersion } from './version.ts';
-import { GUARD_COMMAND, HOOK_COMMAND, HOOKS_PATH, OLDER_HOOK_COMMANDS, OLDER_PRE_PUSH_HOOKS, PRE_PUSH_HOOK, AUTO_FIX_RULES, REVIEW_THREAD_RULE, SETUP_FIRST, WORKFLOW_PATH, claudeSettings, jobsWithoutLibrary, olderWorkflows, onboard, onboardArgs, workflow, workflowPins, workflowUpdate } from './onboard.ts';
+import { GUARD_COMMAND, HOOK_COMMAND, HOOKS_PATH, OLDER_HOOK_COMMANDS, OLDER_PRE_PUSH_HOOKS, PRE_PUSH_HOOK, AUTO_FIX_RULES, OLDER_REVIEW_THREAD_RULE, REVIEW_THREAD_RULE, SETUP_FIRST, WORKFLOW_PATH, claudeSettings, jobsWithoutLibrary, olderWorkflows, onboard, onboardArgs, workflow, workflowPins, workflowUpdate } from './onboard.ts';
 import { BASE_ENV } from './agent.ts';
 import { actionsKey, sealedValue } from './fake-secrets.test.ts';
 
@@ -514,10 +514,10 @@ describe('onboard', () => {
       assert.ok(planned(out, 'Pull request').includes('settings.json: hooks updated, lock, allow rules'), out.join('\n'));
       assert.ok(
         opened(sys)?.body.includes(
-          "\n- `.claude/settings.json`: replace the older SessionStart hook that runs process-rules session-start with this release's; " +
+          "\n- `.claude/settings.json`: replace the older SessionStart hook that runs niyam session-start with this release's; " +
             "add the PreToolUse hook that refuses gh and git's remote commands outside the agent identity; " +
             `set GH_TOKEN, GITHUB_TOKEN and ${Object.keys(BASE_ENV).length - 2} more in env, so GitHub is locked out until session-start gives the agent identity; ` +
-            'allow process-rules review-thread without a prompt, so agent sessions answer review threads on their own pull requests; ' +
+            'allow niyam review-thread without a prompt, so agent sessions answer review threads on their own pull requests; ' +
             `allow ${AUTO_FIX_RULES.join(', ')} without a prompt, so agent sessions turn Auto-fix on for their own pull requests\n`,
         ),
         opened(sys)?.body,
@@ -539,9 +539,20 @@ describe('onboard', () => {
   it("adds the review-thread rule to the client's own allow list once", () => {
     const { text, changes, labels } = claudeSettings(JSON.stringify({ ...CLAUDE, permissions: { allow: ['Bash(pnpm test)', ...AUTO_FIX_RULES], deny: ['Read(.env)'] } }));
     assert.deepEqual(JSON.parse(text).permissions, { allow: ['Bash(pnpm test)', ...AUTO_FIX_RULES, REVIEW_THREAD_RULE], deny: ['Read(.env)'] });
-    assert.deepEqual(changes, ['allow process-rules review-thread without a prompt, so agent sessions answer review threads on their own pull requests']);
+    assert.deepEqual(changes, ['allow niyam review-thread without a prompt, so agent sessions answer review threads on their own pull requests']);
     assert.deepEqual(labels, ['review rule']);
     assert.deepEqual(claudeSettings(text).changes, []);
+  });
+
+  it('replaces the review-thread rule under the old command in its place, and leaves both where both are there', () => {
+    const before = JSON.stringify({ ...CLAUDE, permissions: { allow: ['Bash(pnpm test)', OLDER_REVIEW_THREAD_RULE, ...AUTO_FIX_RULES] } });
+    const { text, changes, labels } = claudeSettings(before);
+    assert.deepEqual(JSON.parse(text).permissions.allow, ['Bash(pnpm test)', REVIEW_THREAD_RULE, ...AUTO_FIX_RULES]);
+    assert.deepEqual(changes, [`replace ${OLDER_REVIEW_THREAD_RULE} with ${REVIEW_THREAD_RULE}, the CLI's own name`]);
+    assert.deepEqual(labels, ['review rule']);
+    assert.equal(REVIEW_THREAD_RULE, 'Bash(niyam review-thread *)');
+    const both = JSON.stringify({ ...CLAUDE, permissions: { allow: [OLDER_REVIEW_THREAD_RULE, REVIEW_THREAD_RULE, ...AUTO_FIX_RULES] } });
+    assert.deepEqual(claudeSettings(both), { text: both, changes: [], labels: [] });
   });
 
   it('adds the Auto-fix rules to a fresh file', () => {
@@ -646,15 +657,16 @@ describe('onboard', () => {
 
     it('session-start: its output, in a cloud session too, else STOP with why', () => {
       rmSync(launcher, { force: true });
-      cli(join(bin, 'process-rules'), 'echo "ran $* with $(cat)"');
+      cli(join(bin, 'process-rules'), 'echo "the old command ran"');
+      cli(join(bin, 'niyam'), 'echo "ran $* with $(cat)"');
       assert.equal(shell(HOOK_COMMAND, { PATH: `${bin}:/usr/bin:/bin`, CLAUDE_CODE_REMOTE: 'true' }, '{}').stdout, 'ran session-start with {}\n');
       assert.equal(shell(HOOK_COMMAND, { PATH: `${bin}:/usr/bin:/bin` }, '{"session_id":"s"}').stdout, 'ran session-start with {"session_id":"s"}\n');
       assert.match(
         shell(HOOK_COMMAND, {}).stdout,
-        /^process-rules: STOP\. process-rules session-start did not run here \(.*process-rules: (?:command )?not found\), so this session cannot be given the agent identity and GitHub is locked out of it\./,
+        /^niyam: STOP\. niyam session-start did not run here \(.*niyam: (?:command )?not found\), so this session cannot be given the agent identity and GitHub is locked out of it\./,
       );
       cli(launcher, 'echo "env: node: No such file or directory" >&2; exit 127');
-      assert.match(shell(HOOK_COMMAND, { PATH: `${bin}:/usr/bin:/bin` }).stdout, /^process-rules: STOP\. process-rules session-start did not run here \(env: node: No such file or directory\)/);
+      assert.match(shell(HOOK_COMMAND, { PATH: `${bin}:/usr/bin:/bin` }).stdout, /^niyam: STOP\. niyam session-start did not run here \(env: node: No such file or directory\)/);
       cli(launcher, 'echo "launched $*"');
       assert.equal(shell(HOOK_COMMAND, {}).stdout, 'launched session-start\n', 'the launcher, with nothing on PATH');
     });
@@ -665,7 +677,7 @@ describe('onboard', () => {
       assert.equal(hook({}).status, 0);
       for (const env of [{ CLAUDECODE: '1' }, { PROCESS_RULES_AGENT: AGENT }, { CLAUDECODE: '1', CLAUDE_CODE_REMOTE: 'true' }]) {
         const refused = hook(env);
-        assert.deepEqual({ status: refused.status, stderr: refused.stderr }, { status: 1, stderr: 'process-rules: the CLI is not installed, so this agent push cannot be checked\n' });
+        assert.deepEqual({ status: refused.status, stderr: refused.stderr }, { status: 1, stderr: 'niyam: the CLI is not installed, so this agent push cannot be checked\n' });
       }
       cli(launcher, 'echo "ran $*"; exit 1');
       assert.deepEqual((({ status, stdout }) => ({ status, stdout }))(hook({ CLAUDECODE: '1' })), { status: 1, stdout: 'ran pre-push origin url\n' });
@@ -685,7 +697,7 @@ describe('onboard', () => {
       assert.equal(shell(GUARD_COMMAND, {}, '{ "tool_input": { "command": "echo \\"a\\" && gh pr list" } }').status, 2);
       const missing = shell(GUARD_COMMAND, {}, input('git push'));
       assert.equal(missing.status, 2);
-      assert.match(missing.stderr, /process-rules: refused, because the process-rules CLI did not run here to check this command\./);
+      assert.match(missing.stderr, /niyam: refused, because the niyam CLI did not run here to check this command\./);
       assert.equal(shell(GUARD_COMMAND, { CLAUDE_CODE_REMOTE: 'true' }, input('git push')).status, 2, 'in a cloud session too');
       cli(launcher, 'cat > "$HOME/seen"; exit 0');
       assert.equal(shell(GUARD_COMMAND, {}, input('gh pr list')).status, 0);
@@ -757,13 +769,33 @@ describe('onboard', () => {
     assert.equal(sys.files.get(PRE_PUSH), PRE_PUSH_HOOK);
   });
 
+  it('names the owner step that swaps a ruleset\'s process-rules check names, while the pull request is open', async () => {
+    const sys = fresh();
+    const api = `https://api.github.com${REPO}`;
+    const slug = 'example-org/example-app';
+    sys.routes.set(`GET ${api}/rulesets?includes_parents=false&per_page=100`, { status: 200, json: [{ id: 1, name: 'main' }, { id: 2, name: 'release tags' }, { id: 3, name: 'prod branch' }] });
+    const required = (...contexts: string[]) => ({ status: 200, json: { rules: [{ type: 'deletion' }, { type: 'required_status_checks', parameters: { required_status_checks: contexts.map((context) => ({ context })) } }] } });
+    sys.routes.set(`GET ${api}/rulesets/1`, required('CI Gate', 'process-rules / Work rules'));
+    sys.routes.set(`GET ${api}/rulesets/2`, { status: 200, json: { rules: [{ type: 'deletion' }] } });
+    sys.routes.set(`GET ${api}/rulesets/3`, required('process-rules / PR identity'));
+    const { out } = await run(sys);
+    assert.deepEqual(
+      byHand(out).filter((line) => line.includes('owner-step')),
+      [`niyam owner-step required-checks ${slug} main → while the pull request is open`, `niyam owner-step required-checks ${slug} 'prod branch' → while the pull request is open`],
+      out.join('\n'),
+    );
+    assert.ok(opened(sys)?.body.includes(`run \`niyam owner-step required-checks ${slug} main\`, which requires them under the new names`), opened(sys)?.body);
+    const none = fresh();
+    assert.ok(!byHand((await run(none)).out).some((line) => line.includes('owner-step')), 'no ruleset GitHub shows');
+  });
+
   it("leaves the client's own pre-push hook, naming the line to add", async () => {
     const sys = fresh();
     sys.files.set(PRE_PUSH, '#!/bin/sh\nnpm test\n');
     const { out } = await run(sys);
     assert.deepEqual(planned(out, 'This Mac'), []);
-    assert.ok(byHand(out).includes('add process-rules pre-push "$@" → .git/hooks/pre-push'), out.join('\n'));
-    assert.ok(opened(sys)?.body.includes('\n- Add the line `process-rules pre-push "$@"` to the pre-push git hook .git/hooks/pre-push, which is your own.\n'), 'the pull request lists it too');
+    assert.ok(byHand(out).includes('add niyam pre-push "$@" → .git/hooks/pre-push'), out.join('\n'));
+    assert.ok(opened(sys)?.body.includes('\n- Add the line `niyam pre-push "$@"` to the pre-push git hook .git/hooks/pre-push, which is your own.\n'), 'the pull request lists it too');
     assert.equal(sys.files.get(PRE_PUSH), '#!/bin/sh\nnpm test\n');
   });
 
@@ -778,14 +810,14 @@ describe('onboard', () => {
     const sys = fresh();
     sys.execOverride = (call) => (call.args[1] === '--git-path' ? { code: 0, stdout: '/shared/hooks/pre-push\n', stderr: '' } : undefined);
     const { out } = await run(sys);
-    assert.ok(byHand(out).includes('add process-rules pre-push "$@" → /shared/hooks/pre-push'), out.join('\n'));
+    assert.ok(byHand(out).includes('add niyam pre-push "$@" → /shared/hooks/pre-push'), out.join('\n'));
     assert.ok(!sys.files.has('/shared/hooks/pre-push'));
   });
 
   it('counts only a hook line that runs the rules, not a mention', async () => {
     const sys = fresh();
     sys.files.set(PRE_PUSH, '#!/bin/sh\n# TODO: process-rules pre-push\n');
-    assert.ok(byHand((await run(sys)).out).includes('add process-rules pre-push "$@" → .git/hooks/pre-push'));
+    assert.ok(byHand((await run(sys)).out).includes('add niyam pre-push "$@" → .git/hooks/pre-push'));
     const ours = fresh();
     ours.files.set(PRE_PUSH, '#!/bin/sh\nnpm test\n  process-rules pre-push "$@"\n');
     const { out } = await run(ours);
@@ -2018,7 +2050,7 @@ describe('workflowUpdate', () => {
   it('moves the pins of a split workflow, quoted or not, and nothing else', () => {
     const before = workflow('main', '0.5.2', true)
       .replace("branches: [\"main\"]", "branches: ['main']")
-      .replace('name: process-rules\n', 'name: process-rules\n# Our own note: split by hand at v0.5.2.\n')
+      .replace('name: niyam\n', 'name: niyam\n# Our own note: split by hand at v0.5.2.\n')
       .replace('process-rules-ref: v0.5.2\n    secrets', "process-rules-ref: 'v0.5.2'\n    secrets");
     const update = workflowUpdate(before, 'main', '0.5.3', true);
     assert.equal(update.kind, 'repin');
@@ -2027,6 +2059,26 @@ describe('workflowUpdate', () => {
     assert.equal(update.text, before.replaceAll('0.5.2', '0.5.3').replace('split by hand at v0.5.3', 'split by hand at v0.5.2'));
     assert.match(update.text, /^# Our own note: split by hand at v0\.5\.2\.$/m);
     assert.deepEqual(workflowPins(update.text), Array(8).fill('0.5.3'));
+  });
+
+  it('names the workflow and its jobs niyam in one a release before P-53 wrote, keeping the job ids and a name of the client\'s own', () => {
+    /** The template as releases before P-53 wrote it: process-rules' header and name, and no job names. */
+    const unnamed = (text: string): string =>
+      text
+        .replace('# Written by niyam onboard: the shared niyam checks at', '# Written by process-rules onboard: the shared process-rules checks at')
+        .replace(/^name: niyam$/m, 'name: process-rules')
+        .replace(/^ {4}name: niyam(?:-\w+)?\n/gm, '');
+    const older = unnamed(workflow('main', '0.6.7', false));
+    assert.doesNotMatch(older, /name: niyam|niyam onboard|niyam checks/, older);
+    assert.deepEqual(workflowUpdate(older, 'main', '0.6.8', false), { kind: 'repin', text: workflow('main', '0.6.8', false), from: '0.6.7', names: true });
+    assert.deepEqual(workflowUpdate(older, 'main', '0.6.7', false), { kind: 'repin', text: workflow('main', '0.6.7', false), names: true }, 'at the same release too');
+    const text = workflow('main', '0.6.8', false);
+    assert.match(text, /^ {2}process-rules:\n {4}name: niyam\n/m);
+    for (const job of ['weekly', 'merged', 'asks']) assert.match(text, new RegExp(`^ {2}process-rules-${job}:\\n {4}name: niyam-${job}\\n`, 'm'));
+    const own = older.replace('  process-rules-weekly:\n', '  process-rules-weekly:\n    name: our weekly\n');
+    const kept = workflowUpdate(own, 'main', '0.6.8', false);
+    assert.ok(kept.kind === 'repin' && kept.names, JSON.stringify(kept));
+    assert.match(kept.text, /^ {2}process-rules-weekly:\n {4}name: our weekly\n {4}if:/m);
   });
 
   it("sets each job's Figma secrets to what figma needs, leaving secrets of the client's own", () => {
