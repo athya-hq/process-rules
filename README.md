@@ -479,8 +479,9 @@ least Frame, where a new one starts, at least Slice once it has sub-issues,
 and at least Build once one of them is closed. Nothing on GitHub marks
 Specify, so the owner sets it by hand and it stays. A Step moves only
 forward, except that a reopened work item leaves Done, and an option the
-owner added to Step is left alone; so the Work items view groups no closed
-work item under a working Step, and none under "No Step". The items it reads
+owner added to Step is left alone. So once Step has Done, the Work items
+view groups no closed work item under Frame, Specify, Slice or Build, and
+none under "No Step", but for one the owner put at an option of their own. The items it reads
 hold their issues, so this reads no issue on its own. A Project whose Step
 has no Done, made before it, gets one line saying so, and `onboard` adds the
 option, keeping every item's Step. A workflow's `GITHUB_TOKEN` cannot write to a Project, so the

@@ -550,11 +550,14 @@ describe('boardStarted', () => {
     board.workItems = [10, 20, 21, 40, 41];
     board.projects[0]!.fields.Step = ['Frame', 'Specify', 'Slice', 'Build'];
     board.projects[0]!.items.push({ issue: 40, state: 'closed', values: { Step: 'Build' } }, { issue: 41, state: 'closed', values: {} });
+    board.projects.push({ number: 5, title: 'roadmap', fields: { Title: null, Step: ['Frame', 'Build'] }, items: [{ issue: 40, state: 'closed', values: {} }, { issue: 41, state: 'closed', values: {} }, { issue: 21, values: {} }] });
     assert.deepEqual(await boardStarted(sys, 'tok', SLUG, 12), [
       '✓ board: slice #12 is In Progress in "example-app work"',
       '✓ board: work item #10 is at Step Build in "example-app work"',
+      '✓ board: work item #21 had no Step; it is at Frame in "roadmap"',
       '✓ board: work item #20 had no Step; it is at Frame in "example-app work"',
       '! board: Step in "example-app work" has no option Done, so work items that belong there stay where they are; process-rules onboard adds it',
+      '! board: Step in "roadmap" has no option Done, so work items that belong there stay where they are; process-rules onboard adds it',
     ]);
   });
 
