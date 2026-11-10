@@ -97,7 +97,7 @@ export class Board {
   /** The types disabled, by name. */
   disabledTypes: string[] = [];
   /** The organisation's repositories, and which are archived. */
-  orgRepos: { full_name: string; archived?: boolean }[] = [{ full_name: SLUG }];
+  orgRepos: { full_name: string; archived?: boolean; has_issues?: boolean }[] = [{ full_name: SLUG }];
   /** The issues in the organisation's repositories. */
   issues: FakeIssue[] = [];
   labels = ['bug'];

@@ -799,13 +799,14 @@ issues that hold it and shows it again if it is enabled. `onboard` disables
 rather than deletes, so a type can come back; GitHub does not say what
 deleting one does to its issues. An issue in an archived repository cannot be
 changed, so it keeps its type, that type stays enabled, and "By hand:" says
-to unarchive the repository and run `onboard` again. A rerun changes
+to unarchive the repository and run `onboard` again. A repository with issues
+turned off, as a fork usually is, has none to read. A rerun changes
 nothing when all is in order, and catches a type someone enabled again or a
 default GitHub adds later. Disabling a type needs an organisation owner
 (`admin:org`); retyping an issue needs write access to its repository. Both
 come from the owner's sign-in for the run.
 
-`doctor`, in a repository whose settings turn the board on, warns (`▲`)
+`doctor` on a Mac, in a repository whose settings turn the board on, warns (`▲`)
 when the organisation has an enabled type outside the work model or lacks
 one of the work model's, naming the issues in this repository that hold
 another type; the fix is the owner running `onboard` again. Issues with no

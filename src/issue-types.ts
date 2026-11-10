@@ -50,12 +50,13 @@ export interface TypesPlan {
 const same = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCase();
 const inModel = (name: string): boolean => ISSUE_TYPES.some((type) => same(type.name, name));
 
-/** Every entry a REST list holds, reading 100 a page. */
-export async function pages(sys: Sys, token: string, url: string): Promise<unknown[]> {
+/** Every entry a REST list holds, reading 100 a page; none, when `gone` and GitHub answers 410 Gone. */
+export async function pages(sys: Sys, token: string, url: string, gone = false): Promise<unknown[]> {
   const entries: unknown[] = [];
   for (let page = 1; ; page++) {
     const pageUrl = `${url}${url.includes('?') ? '&' : '?'}per_page=100&page=${page}`;
     const { status, json } = await sys.http(pageUrl, { token });
+    if (gone && status === 410) return entries;
     if (status !== 200 || !Array.isArray(json)) throw new Error(`cannot read ${url} (HTTP ${status})`);
     entries.push(...(json as unknown[]));
     if (json.length < 100) return entries;
@@ -81,7 +82,8 @@ interface Holder {
 
 /** The issues in a repository that hold the type, open and closed; pull requests have no type. */
 async function holding(sys: Sys, token: string, repo: string, type: string): Promise<Omit<Holder, 'archived'>[]> {
-  const rows = await pages(sys, token, `${API}/repos/${repo}/issues?type=${encodeURIComponent(type)}&state=all`);
+  // GitHub answers 410 Gone for a repository with issues turned off, a fork's usual setting: it holds none to retype.
+  const rows = await pages(sys, token, `${API}/repos/${repo}/issues?type=${encodeURIComponent(type)}&state=all`, true);
   return rows.flatMap((row) => {
     const issue = row as { number?: unknown; url?: unknown; pull_request?: unknown; type?: { name?: unknown } | null; parent_issue_url?: unknown; sub_issues_summary?: { total?: unknown } };
     // Only an issue GitHub shows holding the type, so a filter GitHub ignored retypes nothing.
@@ -115,8 +117,9 @@ export async function typesPlan(sys: Sys, token: string, org: string): Promise<T
   const holders: Holder[] = [];
   if (others.length > 0) {
     const repos = (await pages(sys, token, `${API}/orgs/${org}/repos?type=all`)).flatMap((entry) => {
-      const repo = entry as { full_name?: unknown; archived?: unknown };
-      return typeof repo.full_name === 'string' ? [{ slug: repo.full_name, archived: repo.archived === true }] : [];
+      const repo = entry as { full_name?: unknown; archived?: unknown; has_issues?: unknown };
+      // A repository with issues turned off has none GitHub would list.
+      return typeof repo.full_name === 'string' && repo.has_issues !== false ? [{ slug: repo.full_name, archived: repo.archived === true }] : [];
     });
     for (const repo of repos) {
       for (const type of others) holders.push(...(await holding(sys, token, repo.slug, type.name)).map((found) => ({ ...found, archived: repo.archived })));

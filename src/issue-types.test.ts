@@ -62,6 +62,16 @@ describe('typesPlan', () => {
     assert.deepEqual((await typesPlan(sys, OWNER_TOKEN, 'example-org')).retype, []);
   });
 
+  it('reads no issues in a repository with issues turned off', async () => {
+    const { sys, board } = org();
+    board.orgRepos = [{ full_name: SLUG }, { full_name: OTHER, has_issues: false }, { full_name: 'example-org/example-fork' }];
+    board.issues = [{ repo: SLUG, number: 4, type: 'Task' }];
+    for (const type of ['Task', 'Bug', 'Feature']) sys.route('GET', `/repos/example-org/example-fork/issues?type=${type}&state=all&per_page=100&page=1`, { status: 410, json: null });
+    const plan = await typesPlan(sys, OWNER_TOKEN, 'example-org');
+    assert.deepEqual(plan.retype.map((issue) => issue.number), [4]);
+    assert.ok(!sys.requests.some((request) => request.url.includes(OTHER)), 'a repository with issues off is not read');
+  });
+
   it('reads past a full page of issues', async () => {
     const { sys, board } = org();
     board.orgRepos = [{ full_name: SLUG }];
