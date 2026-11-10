@@ -1205,3 +1205,65 @@
   set its monitor without a prompt; they give no new access to GitHub, and
   the app still checks that the session opened the pull request as its own
   login.
+- **2026-11-10 — Record: the owner's GitHub steps run as one command
+  (P-51).** The owner approved #240 with a 👍. On 2026-11-10 the coordinator
+  gave the owner a one-off shell script for veda-hq's issue types, and it
+  stalled in gh's pager. The owner asked, in chat, that owner-only work
+  become one tested command. `niyam owner-step <step> [args]` has three steps
+  for now: `issue-types <org>`, `label <repo> <number> <add|remove> <label>`
+  and `required-checks <repo> <ruleset>`. A new step is a slice the owner
+  approves, never a script an agent writes.
+  - It refuses where onboard does, and also where `CLAUDECODE=1` (the
+    pre-push hook's test), so an agent session whose hooks never ran is
+    refused too. It also refuses without a terminal, and it has no `--yes`.
+  - It signs in to a throwaway gh: a new `niyam-owner-step-…` folder as
+    `GH_CONFIG_DIR`, `GH_PAGER=cat`, the token variables unset, and
+    `gh auth login -p https --skip-ssh-key -w -s <scope> --insecure-storage`,
+    through a pipe so gh cannot prompt to set up git. Every call is `gh api`
+    in that folder, and none runs unless the folder's `hosts.yml` holds a
+    token. niyam reads that file only to check that a token is there; it
+    never takes the token out of it or passes it to anything. gh's own lookup falls back to the
+    keychain when the config has none (gh 2.103.3, `AuthConfig.ActiveToken`),
+    and the owner's normal login must never be used.
+  - It checks the login owns the organisation (an active admin) or the
+    repository (the user, or an owner of its organisation). It reads the
+    state and prints the exact changes, and asks the one yes only then: the
+    sign-in and the reads change nothing, so the yes still comes before any
+    change. Each change is read back and marked ✓ or ✗.
+  - It does not run `gh auth logout`, though #240 says it signs out. In gh
+    2.103.3, `AuthConfig.Logout` deletes the keychain entries `gh:github.com`
+    for the login and for "" whatever `GH_CONFIG_DIR` says, so logout could
+    delete a gh login the owner keeps in the keychain. The owner's rule is
+    that the command never touches the keychain or the owner's own login,
+    and the coordinator chose that over the logout. With `--insecure-storage`
+    the token's only copy is in the folder, so deleting it signs out locally.
+    The token stays valid on GitHub until revoked, as it would after a
+    logout, and the closing line links where to revoke it.
+  - Cleanup is synchronous and runs once, from `finally` and from a SIGINT
+    handler `Sys.onInterrupt` adds. A gh call runs synchronously, so its
+    Ctrl-C reaches the handler only once the event loop runs. Before each
+    change, and after a failed one, the command waits a few milliseconds
+    for that, so a Ctrl-C stops the changes not yet made and exits 130.
+  - The folder sits in macOS's per-user temporary folder (`getconf
+    DARWIN_USER_TEMP_DIR`), which is the same whatever TMPDIR a shell sets,
+    so `doctor`, run from an agent session too, finds one a killed run left.
+  - `issue-types` adds and enables the work model's types only. Disabling
+    the others and retyping issues stays with `onboard`, whose plan explains
+    them.
+  - `label` takes `approved` and `do-not-merge` alone, and refuses a label
+    the repository lacks, since adding an unknown name would create it.
+  - `required-checks` follows the README's rule: it adds the checks of the
+    features the repository's settings turn on and removes none. The
+    settings come from the file `loadSettings` reads: `.github/niyam.json`,
+    then `.github/process-rules.json`. On the coordinator's ask, a check is
+    added only when the repository's workflow runs its job: a `process-rules`
+    job calling shared checks that have a job of that name at the pinned
+    version. A required check that never reports would hold every pull
+    request, so the others are `✗` lines saying why. It sends
+    back the ruleset's whole `rules` list as read, changing only the
+    contexts, and checks that the other rules are unchanged afterwards.
+  - Nothing in P-17 or P-18 changes. `signInOnce` (P-35) only shares its
+    line handler.
+  - Rejected: reading the token into the CLI to call the API (it would be in
+    memory and in reach of a bug that prints it); a `--yes` flag;
+    `gh auth logout` (above).

@@ -237,6 +237,18 @@ describe('doctor', () => {
     assert.equal(out.at(-1), '└  3 to fix');
   });
 
+  it('warns about an owner-step folder left behind, saying when it holds a token, and still passes', async () => {
+    const sys = healthy();
+    sys.execOverride = (call) => (call.command === 'getconf' ? { code: 0, stdout: '/var/folders/xy/T/\n', stderr: '' } : undefined);
+    sys.files.set('/var/folders/xy/T/niyam-owner-step-ab/hosts.yml', 'github.com:\n    oauth_token: gho_left\n');
+    const { code, out } = await check(sys);
+    assert.equal(code, 0);
+    assert.deepEqual(marked(out, '▲'), [
+      '▲  an owner-step folder left behind holds a GitHub token: /var/folders/xy/T/niyam-owner-step-ab → with no owner-step running, rm -rf /var/folders/xy/T/niyam-owner-step-ab, then revoke the GitHub CLI token at https://github.com/settings/applications',
+    ]);
+    assert.ok(!out.join('\n').includes('gho_left'));
+  });
+
   it('reports a declined lockout as chosen, and warns about an account signed in since', async () => {
     const sys = healthy();
     sys.ghAccounts = ['example-owner', 'new-owner'];

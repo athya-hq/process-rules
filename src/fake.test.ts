@@ -290,8 +290,8 @@ export class FakeSys implements Sys {
     this.dirs.push(path);
   }
 
-  tempDir(): string {
-    const dir = `/tmp/process-rules-${this.temps.length + 1}`;
+  tempDir(prefix = '/tmp/process-rules-'): string {
+    const dir = `${prefix}${this.temps.length + 1}`;
     this.temps.push(dir);
     this.dirs.push(dir);
     return dir;
@@ -419,6 +419,19 @@ export class FakeSys implements Sys {
 
   open(url: string): void {
     this.opened.push(url);
+  }
+
+  /** The Ctrl-C handlers on now; interrupt() calls them, as a Ctrl-C at the terminal does. */
+  interrupts: (() => void)[] = [];
+  onInterrupt(handler: () => void): () => void {
+    this.interrupts.push(handler);
+    return () => {
+      this.interrupts = this.interrupts.filter((on) => on !== handler);
+    };
+  }
+
+  interrupt(): void {
+    for (const handler of [...this.interrupts]) handler();
   }
 
   now(): Date {

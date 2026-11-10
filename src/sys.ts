@@ -55,7 +55,7 @@ export function realSys(): Sys {
     append: (path, data) => appendFileSync(path, data),
     mkdir: (path) => mkdirSync(path, { recursive: true, mode: 0o700 }),
     list: (path) => (existsSync(path) ? readdirSync(path) : []),
-    tempDir: () => mkdtempSync(join(tmpdir(), 'process-rules-')),
+    tempDir: (prefix) => mkdtempSync(prefix ?? join(tmpdir(), 'process-rules-')),
     remove: (path) => rmSync(path, { recursive: true, force: true }),
     async http(url, options = {}) {
       const method = (options.method ?? 'GET').toUpperCase();
@@ -145,6 +145,12 @@ export function realSys(): Sys {
     },
     open(url) {
       spawnSync('open', [url]);
+    },
+    onInterrupt(handler) {
+      process.on('SIGINT', handler);
+      return () => {
+        process.off('SIGINT', handler);
+      };
     },
     now: () => new Date(),
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),

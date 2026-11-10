@@ -11,6 +11,7 @@ import { machine, machineArgs } from './machine.ts';
 import { reviewsDue } from './reviews.ts';
 import { reviewThread, threadArgs } from './review-thread.ts';
 import { onboard, onboardArgs } from './onboard.ts';
+import { ownerStep, ownerStepArgs } from './owner-step.ts';
 import { sessionStart } from './session-start.ts';
 import { upgrade } from './upgrade.ts';
 import { prMerged, prePush, prWorkRules, propose } from './work.ts';
@@ -31,6 +32,11 @@ Commands:
   onboard [owner agent] [--features a,b] [--add feature] [--yes] [--dry-run]
                    Set up the client repo here, for the features it turns on
   upgrade          Install the newest release with pnpm, and check PATH runs it alone
+  owner-step <step> [args]
+                   In your own terminal: one GitHub step only the owner's account can do, through a
+                   throwaway gh sign-in. Steps: issue-types <org>;
+                   label <owner/repo> <number> <add|remove> <approved|do-not-merge>;
+                   required-checks <owner/repo> <ruleset id or name>
   cloud-setup      Print the Setup snippet for a Claude cloud environment, pasted once
   session-start    Run by a client's SessionStart hook: the agent identity, or GitHub locked out
   guard            Run by a client's PreToolUse hook: gh and git's remote commands only as the agent
@@ -65,7 +71,7 @@ Features: identity (always on), pr-identity, board, work-rules, figma, decisions
 machine and onboard print one plan and ask once; --yes goes ahead without asking, --dry-run stops at the plan.`;
 
 /** The commands the owner runs at a terminal: run as process-rules, they also name niyam. Hooks and workflows stay quiet. */
-const OWNER_COMMANDS = new Set(['machine', 'doctor', 'onboard', 'upgrade', 'cloud-setup', 'help', '--help', '-h', undefined]);
+const OWNER_COMMANDS = new Set(['machine', 'doctor', 'onboard', 'upgrade', 'owner-step', 'cloud-setup', 'help', '--help', '-h', undefined]);
 
 /**
  * propose's issue numbers, one or several, and the page its comments link
@@ -103,17 +109,17 @@ export async function run(
   if (invokedAs === OLD_CLI && OWNER_COMMANDS.has(command)) {
     io.err(`${OLD_CLI} is now ${CLI}: run ${[CLI, ...args].join(' ')}. The old name still works for now.`);
   }
-  const allowed = command === 'onboard' || command === 'machine' || command === 'review-thread' || command === 'as-agent' || command === 'propose' ? Infinity : command === 'pre-push' ? 2 : command === 'doctor' ? 1 : 0;
+  const allowed = command === 'onboard' || command === 'machine' || command === 'review-thread' || command === 'as-agent' || command === 'propose' || command === 'owner-step' ? Infinity : command === 'pre-push' ? 2 : command === 'doctor' ? 1 : 0;
   const extra = rest[allowed];
   if (extra !== undefined) {
     io.err(`niyam: unexpected argument "${extra}"`);
     io.err(USAGE);
     return 2;
   }
-  if (command === 'onboard' || command === 'machine' || command === 'review-thread' || command === 'as-agent' || command === 'propose') {
+  if (command === 'onboard' || command === 'machine' || command === 'review-thread' || command === 'as-agent' || command === 'propose' || command === 'owner-step') {
     // Their options are checked here, so a bad one is bad usage (exit 2).
     try {
-      (command === 'onboard' ? onboardArgs : command === 'machine' ? machineArgs : command === 'as-agent' ? asAgentArgs : command === 'propose' ? proposeArgs : threadArgs)(rest);
+      (command === 'onboard' ? onboardArgs : command === 'machine' ? machineArgs : command === 'as-agent' ? asAgentArgs : command === 'propose' ? proposeArgs : command === 'owner-step' ? ownerStepArgs : threadArgs)(rest);
     } catch (error) {
       io.err(`niyam: ${error instanceof Error ? error.message : String(error)}`);
       io.err(USAGE);
@@ -168,8 +174,10 @@ export async function run(
     case 'propose':
     case 'review-thread':
     case 'upgrade':
+    case 'owner-step':
       try {
         if (command === 'upgrade') return await upgrade(await sys(), io);
+        if (command === 'owner-step') return await ownerStep(await sys(), io, rest);
         if (command === 'review-thread') return await reviewThread(await sys(), io, rest);
         if (command === 'propose') {
           const { numbers, page } = proposeArgs(rest);

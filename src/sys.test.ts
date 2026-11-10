@@ -60,6 +60,20 @@ describe('realSys', () => {
     sys.remove(temp);
     assert.equal(sys.exists(temp), false);
     sys.remove(temp);
+    const named = sys.tempDir(join(dir, 'niyam-owner-step-'));
+    assert.match(named, /\/niyam-owner-step-\w+$/);
+    assert.equal(statSync(named).mode & 0o777, 0o700);
+  });
+
+  it('calls a Ctrl-C handler instead of ending, until it is taken off', () => {
+    const seen: string[] = [];
+    const before = process.listenerCount('SIGINT');
+    const off = sys.onInterrupt(() => seen.push('interrupted'));
+    assert.equal(process.listenerCount('SIGINT'), before + 1);
+    process.emit('SIGINT');
+    assert.deepEqual(seen, ['interrupted']);
+    off();
+    assert.equal(process.listenerCount('SIGINT'), before);
   });
 
   it('leaves an interactive command the terminal, capturing nothing', () => {

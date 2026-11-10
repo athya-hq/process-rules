@@ -13,7 +13,7 @@ hooks and a shared GitHub Actions workflow.
 
 ## Status
 
-Early. The CLI runs `machine`, `doctor`, `session-start`, `guard`, `onboard`, `propose` and `upgrade`. What comes next, and in what
+Early. The CLI runs `machine`, `doctor`, `session-start`, `guard`, `onboard`, `propose`, `upgrade` and `owner-step`. What comes next, and in what
 order: the Slice issues under
 [niyam roadmap v1](https://github.com/athya-hq/process-rules/issues/22),
 on the Project [process-rules work](https://github.com/orgs/athya-hq/projects/2);
@@ -266,7 +266,8 @@ scopes, the key's registration, the session file, that the launcher runs,
 that the CLI is the newest release (`▲` when a newer one is out, fixed by
 `niyam upgrade`) and the only `niyam` on `PATH` (`✗`
 otherwise, naming each copy and its version), and
-what of the owner's an agent session could reach, and, in a repository with
+what of the owner's an agent session could reach, any `owner-step` folder
+left behind (`▲`, saying whether it still holds a token; see Owner steps), and, in a repository with
 the board on, the organisation's issue types (see Issue types). It shows them grouped as
 This Mac, GitHub and This repo, one line each: `✓` fine, `▲` worth fixing,
 `✗` broken. Each problem line ends with its fix:
@@ -1022,6 +1023,68 @@ and that `session-start` gave the session that identity (`✗` otherwise:
 `gh` and git stay locked out). This repo lists hooks that reach GitHub
 outside `as-agent` and the Auto-fix rules missing, as on a Mac. It installs nothing; on Linux outside a
 cloud session, `doctor` still refuses.
+
+### Owner steps
+
+Some GitHub changes only the owner's account can make: an organisation's
+issue types, the `approved` and `do-not-merge` labels (the auto-mode
+classifier keeps agents from changing them), and a ruleset's required checks.
+An agent that needs one asks the owner to run one command in their own
+terminal, never a script or a settings page:
+
+```bash
+niyam owner-step issue-types <org>
+niyam owner-step label <owner/repo> <number> <add|remove> <approved|do-not-merge>
+niyam owner-step required-checks <owner/repo> <ruleset id or name>
+```
+
+- `issue-types` adds the work model's issue types the organisation lacks and
+  enables any that are disabled. It changes no other type and no issue; `onboard`
+  does that.
+- `label` adds or removes `approved` or `do-not-merge` on an issue or pull
+  request. It refuses a label the repository does not have.
+- `required-checks` makes the ruleset also require the checks of the features
+  the repository's settings turn on, read from its default branch
+  (`.github/niyam.json`, or `.github/process-rules.json` where that is
+  missing): `process-rules / PR identity` for `pr-identity`,
+  `process-rules / Work rules` for `work-rules` and `process-rules / Design
+  frames` for `figma`. It adds a check only when the repository's
+  `.github/workflows/process-rules.yml` has a `process-rules` job calling
+  shared checks that run that job, at the version it pins. A required check
+  that never reports would hold every pull request, so any other check is a
+  `✗` saying why. It keeps every other check and rule, removes none, and
+  shows the before and after.
+
+It refuses in an agent session (`PROCESS_RULES_AGENT` set, or `CLAUDECODE=1`)
+and without a terminal. It makes a new folder in the user's temporary folder
+(`niyam-owner-step-…`; on macOS, `getconf DARWIN_USER_TEMP_DIR`) and runs gh
+with that folder as `GH_CONFIG_DIR`, `GH_PAGER=cat`, no `GH_TOKEN`, and
+git's global config pointed inside the folder. It then signs in with one
+browser approval of gh's device code: `gh auth login -h github.com -p https
+--skip-ssh-key -w -s <scope> --insecure-storage`. The scope is `admin:org`
+for issue types and `repo` for the others; gh always adds `repo`, `read:org`
+and `gist`. The token stays in that folder: never in the keychain, the
+owner's gh config, git's or SSH's settings, a command's arguments or the
+output. Every call goes through `gh api` there, and none is made unless the
+folder holds the token, so gh can never fall back to another login.
+
+It checks that the signed-in login owns the organisation, or the repository
+(the user who owns it, or an owner of its organisation), and reads what is
+there. Then it prints exactly what it will change and asks for a yes; the
+sign-in and the reads change nothing. It makes each change, reads it back,
+and marks it `✓` or `✗`. Whatever happens, an error or Ctrl-C included, it
+tries to delete the folder, which holds the token's only copy, and marks that
+`✗`, with the `rm -rf` to run, when the delete fails. It does not run
+`gh auth logout`, which deletes gh's keychain entries for the host whatever
+`GH_CONFIG_DIR` says, and which cannot revoke the token anyway. The token
+stays valid on GitHub until it is revoked, so the command ends with the link
+to do that: https://github.com/settings/applications. Exit 0 when every change was made, or none
+was needed or wanted, and no check was skipped; 1 otherwise, a `required-checks`
+run that skipped a check included, even after a no; 130 after a Ctrl-C.
+`doctor` marks `▲` any owner-step folder left behind, which a killed run or a
+failed delete leaves, and says whether it still holds a token. A run going on
+now has one too, so delete it only when no owner-step is running. Each step lives here with tests; a new step
+is a slice the owner approves.
 
 ### Releases and upgrading
 

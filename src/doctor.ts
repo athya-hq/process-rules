@@ -27,6 +27,7 @@ import { exposure, exposureFindings, movedFindings, readDeclined, setAside } fro
 import { CLOUD_SETUP_PATH, HOOKS_PATH, WORKFLOW_PATH } from './onboard-pull.ts';
 import { missingAutoFixRules } from './onboard.ts';
 import { isOrganisation } from './owner-login.ts';
+import { leftBehind } from './owner-step.ts';
 import { repoRoot } from './session-start.ts';
 import { tokenStore, unsupported } from './token-store.ts';
 import type { Output, Sys } from './types.ts';
@@ -100,7 +101,7 @@ export async function doctor(sys: Sys, io: Output, named?: string): Promise<numb
     ...(await installedFindings(sys)),
   );
   const { left, kept } = setAside(exposure(sys, agent), readDeclined(sys, agent));
-  mac.push(...kept.map((text): Finding => ({ mark: '✓', text })), ...exposureFindings(left, sys.home), ...movedFindings(sys, agent));
+  mac.push(...kept.map((text): Finding => ({ mark: '✓', text })), ...exposureFindings(left, sys.home), ...movedFindings(sys, agent), ...leftBehind(sys));
 
   const token = store.read(sys, agent);
   const github: Finding[] = [
