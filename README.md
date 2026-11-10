@@ -830,8 +830,9 @@ too, so the plan names each such type on a `disabled` row (as `disabled
 Task, Bug, Feature: GitHub lists no issues by a disabled type, so onboard
 cannot tell whether any holds one`), never saying none holds it, and the
 type stays disabled; enabled again, `onboard` retypes what holds it and
-disables it once more. Any other refusal, a 422 for an enabled type
-included, still fails the read.
+disables it once more. Any other 422, one for an enabled type included,
+still fails the read, as does any other refusal but the 410 of a repository
+with issues turned off.
 An issue in an archived repository cannot be
 changed, so it keeps its type, that type stays enabled, and "By hand:" says
 to unarchive the repository and run `onboard` again. A repository with issues
