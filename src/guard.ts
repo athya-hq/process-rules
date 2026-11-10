@@ -50,8 +50,9 @@ export function reachesGitHub(command: string): boolean {
  * comment`, `gh pr comment`, or `gh api` on a comments endpoint) that asks
  * the owner, opening with `Needs you:` or `Proposal:` or naming the owner,
  * must link a published page and fit 500 characters; otherwise it is refused
- * with the rule and the fix. `propose` posts its own text through the API,
- * not through gh, so this check leaves it alone.
+ * with the rule and the fix. `propose` posts through the API, not gh, so
+ * this check does not see it; it holds its own comments to the same rule
+ * (`askProblem`) before posting them.
  */
 export function guard(sys: Sys, io: Output, stdin: string): number {
   let input: { session_id?: unknown; cwd?: unknown; tool_input?: { command?: unknown } };

@@ -8,6 +8,7 @@ import { GITHUB_HOST_RE, GITHUB_WEB } from './host.ts';
 import { boardStarted } from './board.ts';
 import { ownersAlone, whyNotCounted } from './edits.ts';
 import { batchAnswers } from './approvals.ts';
+import { PAGE_LINK, askProblem } from './asks.ts';
 
 /** How a pull request or a commit names the slice it builds. */
 const SLICE_LINE = new RegExp(`^Slice:\\s*(?:#|https://${GITHUB_HOST_RE}/[^/\\s]+/[^/\\s]+/issues/)(\\d+)\\s*$`, 'gim');
@@ -336,7 +337,7 @@ function owedProblem(one: Owed, slice: number, parent: number | undefined, { own
   const owner = either(owners);
   // The agent proposes as itself; with several, any of them.
   const agent = either(agents);
-  const ask = `${one.note ? ` (${one.note})` : ''}${one.proposals.length > 0 ? '' : `; ${agent} proposes it with: niyam propose ${one.number}`}`;
+  const ask = `${one.note ? ` (${one.note})` : ''}${one.proposals.length > 0 ? '' : `; ${agent} proposes it with: ${proposeCommand(one.number)}`}`;
   // Where the settings name an Approvals issue, one comment there answers this among a batch.
   const batch = approvals === undefined ? '' : `, or ${owner} comments on #${approvals}, the Approvals issue, with a first line "Decision: approve #${one.number}"`;
   return one.kind === 'added'
@@ -758,30 +759,28 @@ function proposalGap(one: Owed): string | undefined {
   return `${what}'s body has no ${missing.map((name) => `"**${name}:**"`).join(' or ')} section; write it there first, so the proposal says what changes and why`;
 }
 
+/** A `--page` value: the whole of it one published page, as the guard recognises one. */
+const PAGE_ONLY = new RegExp(`^${PAGE_LINK.source}$`);
+
+/** The command that proposes `number`, for a hint: the page comes first, then the pointer to it. */
+function proposeCommand(number: number): string {
+  return `niyam propose ${number} --page <page url>`;
+}
+
 /**
- * The `Proposal:` comment for `one`: what changes, why, what it costs and
- * what happens if the owner declines, so it stands alone.
+ * The `Proposal:` comment for `one`: a pointer, as every ask to the owner is
+ * (the guard's rule): what is proposed in one line, the published page that
+ * argues it, and how to answer. What changes, why and what it costs live on
+ * the page, from the slice's sections.
  */
-function proposalBody(one: Owed, slice: number, parent: number | undefined, { owners, approvals }: Settings): string {
+function proposalBody(one: Owed, parent: number | undefined, page: string, { owners, approvals }: Settings): string {
   // The issue it is for comes first: that is how the work rules match a 👍 to it.
-  const lines = one.kind === 'added'
-    ? [
-        `Proposal: add #${one.number} (${one.title}) to work item #${parent}, after its approval.`,
-        `**What changes:** ${section(one.body, 'You will see')}`,
-        `**Why:** ${section(one.body, 'Why')}`,
-        `**What it costs:** ${section(one.body, 'Cost') ?? `one more slice of work item #${parent}: the agent builds it in a pull request, which you review.`}`,
-        `**If you decline:** #${one.number} is closed as not planned and nothing of it is built; work item #${parent} keeps what you approved.`,
-      ]
-    : [
-        `Proposal: drop state #${one.number} (${one.title}), closed as not planned after work item #${parent}'s approval.`,
-        `**What changes:** slice #${slice} is built without state #${one.number}, which you approved.`,
-        `**Why:** ${section(one.body, 'Why')}`,
-        `**What it costs:** ${section(one.body, 'Cost') ?? `what state #${one.number} would show is not built.`}`,
-        `**If you decline:** state #${one.number} is reopened and built as you approved it.`,
-      ];
+  const what = one.kind === 'added'
+    ? `Proposal: add #${one.number} (${one.title}) to work item #${parent}.`
+    : `Proposal: drop state #${one.number} (${one.title}), closed as not planned after work item #${parent}'s approval.`;
   // Where the settings name an Approvals issue, the owner may answer this there, among a batch.
   const batch = approvals === undefined ? '' : `, or answer the batch on Approvals, #${approvals}`;
-  return `${lines.join('\n\n')}\n\n${either(owners.map((owner) => `@${owner}`))}: react 👍 to this comment to approve it, or comment "Decision:"${batch}.`;
+  return `${what}\n\nPage: ${page}\n\n${either(owners.map((owner) => `@${owner}`))}: react 👍 to this comment to approve it, or comment "Decision:"${batch}.`;
 }
 
 /**
@@ -793,13 +792,22 @@ function proposalBody(one: Owed, slice: number, parent: number | undefined, { ow
  * it takes the label off. Where the settings name an Approvals issue, it
  * ends with the first line of the owner's batch answer there, naming every
  * proposal still waiting, ready to paste.
+ *
+ * Each comment is a pointer to `page`, the published page that argues the
+ * proposals (one page for the run, a batch included), and is held to the
+ * guard's rule for asks before it is posted. Without a page, a proposal yet
+ * to be posted is refused with the command to run; a run that only links
+ * proposals already posted needs none.
  */
-export async function propose(sys: Sys, io: Output, numbers: readonly number[]): Promise<number> {
+export async function propose(sys: Sys, io: Output, numbers: readonly number[], page?: string): Promise<number> {
   const { root, slug } = repoAt(sys);
   const accounts = loadSettings(sys, root);
   if (!isOn(sys, root, 'work-rules')) {
     io.out(offLine('propose', 'work-rules'));
     return 0;
+  }
+  if (page !== undefined && !PAGE_ONLY.test(page)) {
+    return report(io, 'propose', [`--page takes the link of a published page (https://claude.ai/artifact/… or https://claude.ai/code/artifact/…), not "${page}"`]);
   }
   const token = sessionToken(sys);
   if (!token) return report(io, 'propose', ['this session has no token; run niyam doctor']);
@@ -818,7 +826,7 @@ export async function propose(sys: Sys, io: Output, numbers: readonly number[]):
   // Each issue once, in the order given, though two of the numbers share a slice.
   const waiting = new Set<number>();
   for (const number of numbers) {
-    const one = await proposeOne(sys, io, token, slug, accounts, number);
+    const one = await proposeOne(sys, io, token, slug, accounts, number, page);
     code = Math.max(code, one.code);
     for (const each of one.waiting) waiting.add(each);
   }
@@ -845,6 +853,7 @@ async function proposeOne(
   slug: string,
   accounts: Settings,
   number: number,
+  page: string | undefined,
 ): Promise<{ code: number; waiting: number[] }> {
   const issue = await readIssue(sys, token, slug, number);
   const { parent, problem } = issue?.type?.name === 'State' ? await parentOf(sys, token, issue) : {};
@@ -861,8 +870,27 @@ async function proposeOne(
   }
 
   // A proposal says what it asks for, so one whose body cannot say it is not posted.
-  const gaps = asked.filter((one) => !one.settled && one.proposals.length === 0).map(proposalGap).filter((gap) => gap !== undefined);
+  const fresh = asked.filter((one) => !one.settled && one.proposals.length === 0);
+  const gaps = fresh.map(proposalGap).filter((gap) => gap !== undefined);
   if (gaps.length > 0) return { code: report(io, 'propose', gaps), waiting: [] };
+  const named = (one: Owed): string => (one.kind === 'added' ? `#${one.number}` : `state #${one.number}`);
+  // A proposal is a pointer to the page that argues it, so with no page nothing is posted.
+  if (fresh.length > 0 && page === undefined) {
+    const which = fresh.map(named).join(' and ');
+    return {
+      code: report(io, 'propose', [
+        `${which} ${fresh.length === 1 ? 'has' : 'have'} no proposal yet, and a proposal is a short pointer to the published page that argues it: publish the page, then run ${proposeCommand(number)}`,
+      ]),
+      waiting: [],
+    };
+  }
+  // Each comment meets the guard's rule for asks (a page link, ASK_LIMIT characters) before any is posted.
+  const bodies = new Map(page === undefined ? [] : fresh.map((one) => [one, proposalBody(one, read.parent, page, accounts)] as const));
+  const unfit = [...bodies].flatMap(([one, body]) => {
+    const problem = askProblem({ text: body, known: true, opensUnknown: false }, accounts.owners);
+    return problem ? [`${named(one)}'s proposal is not posted: ${problem}; shorten ${named(one)}'s title`] : [];
+  });
+  if (unfit.length > 0) return { code: report(io, 'propose', unfit), waiting: [] };
 
   const issues = `${API}/repos/${slug}/issues/${slice}`;
   // Each link opens the very comment the owner reacts 👍 to, never the slice's top or a label's list.
@@ -875,7 +903,7 @@ async function proposeOne(
       links.set(one, newest(one.proposals).html_url);
       io.out(`${what}: proposed on #${slice}, waiting on ${owner}'s 👍: ${links.get(one)}`);
     } else {
-      const posted = await sys.http(`${issues}/comments`, { method: 'POST', token, body: { body: proposalBody(one, slice, read.parent, accounts) } });
+      const posted = await sys.http(`${issues}/comments`, { method: 'POST', token, body: { body: bodies.get(one) } });
       if (posted.status !== 201) throw new Error(`cannot comment on #${slice} (HTTP ${posted.status})`);
       const url = (posted.json as { html_url?: string } | null)?.html_url;
       links.set(one, url);
@@ -888,7 +916,7 @@ async function proposeOne(
     if (labeled.status !== 200) throw new Error(`cannot label #${slice} ${NEEDS_OWNER} (HTTP ${labeled.status})`);
     // A decision this run did not ask for still has its proposal's link, or the command that posts one.
     for (const one of waiting) if (!links.has(one) && one.proposals.length > 0) links.set(one, newest(one.proposals).html_url);
-    const unproposed = waiting.filter((one) => !links.has(one)).map((one) => `; ${either(accounts.agents)} proposes #${one.number} with: niyam propose ${one.number}`);
+    const unproposed = waiting.filter((one) => !links.has(one)).map((one) => `; ${either(accounts.agents)} proposes #${one.number} with: ${proposeCommand(one.number)}`);
     const urls = [...links.values()].filter((url) => url !== undefined);
     const where = urls.length > 0 ? `, waiting on ${owner}'s 👍 on ${urls.join(' and ')}` : '';
     io.out(`#${slice} is labeled ${NEEDS_OWNER}${where}${unproposed.join('')}`);

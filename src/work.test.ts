@@ -8,6 +8,7 @@ import { after, describe, it } from 'node:test';
 import type { Settings } from './agent.ts';
 import { RestBoard } from './fake-board.test.ts';
 import { AGENT, FakeSys, ROOT, SETTINGS, capture } from './fake.test.ts';
+import { askProblem } from './asks.ts';
 import { prMerged, prePush, prWorkRules, propose, section, sliceProblems, slicesNamed, statesNamed } from './work.ts';
 
 const SLUG = 'example-org/example-app';
@@ -255,7 +256,7 @@ describe('sliceProblems', () => {
     };
     const proposed =
       '#12 was added to work item #10 after its approval; example-owner reacts 👍 on ExampleBot\'s proposal on #12, or adds a "Decision:" comment naming #12, or #12 links example-owner\'s request for it on #10';
-    const refused = `${proposed}; ExampleBot proposes it with: niyam propose 12`;
+    const refused = `${proposed}; ExampleBot proposes it with: niyam propose 12 --page <page url>`;
 
     it('is refused without the owner\'s decision', async () => {
       assert.deepEqual(await problems(added().issue), [refused]);
@@ -289,7 +290,7 @@ describe('sliceProblems', () => {
 
     describe('a batch answer on the Approvals issue', () => {
       const batched = `${proposed}, or example-owner comments on #700, the Approvals issue, with a first line "Decision: approve #12"`;
-      const proposes = '; ExampleBot proposes it with: niyam propose 12';
+      const proposes = '; ExampleBot proposes it with: niyam propose 12 --page <page url>';
 
       it("passes when the first line of the owner's comment there approves it among others", async () => {
         const g = added();
@@ -343,7 +344,7 @@ describe('sliceProblems', () => {
     });
 
     describe("an owner's edited Decision:", () => {
-      const proposes = '; ExampleBot proposes it with: niyam propose 12';
+      const proposes = '; ExampleBot proposes it with: niyam propose 12 --page <page url>';
 
       it('is refused when the agent edited it, on the slice or on the work item', async () => {
         const g = added();
@@ -566,7 +567,7 @@ describe('sliceProblems', () => {
       ...extra,
     });
     const refused =
-      'state #30 was closed as not planned after approval; example-owner reacts 👍 on ExampleBot\'s proposal for it on #12, or adds a "Decision:" comment to it; ExampleBot proposes it with: niyam propose 30';
+      'state #30 was closed as not planned after approval; example-owner reacts 👍 on ExampleBot\'s proposal for it on #12, or adds a "Decision:" comment to it; ExampleBot proposes it with: niyam propose 30 --page <page url>';
 
     it('is refused without the owner\'s decision', async () => {
       const g = graph();
@@ -1470,9 +1471,14 @@ describe('propose', () => {
     });
     return g;
   };
-  async function run(sys: FakeSys, ...numbers: number[]): Promise<{ code: number; out: string[]; err: string[] }> {
+  /** The published page each run's proposals point to, unless a test runs without one. */
+  const PAGE = 'https://claude.ai/artifact/W48-page';
+  async function withPage(sys: FakeSys, page: string | undefined, ...numbers: number[]): Promise<{ code: number; out: string[]; err: string[] }> {
     const { io, out, err } = capture();
-    return { code: await propose(sys, io, numbers.length > 0 ? numbers : [12]), out, err };
+    return { code: await propose(sys, io, numbers.length > 0 ? numbers : [12], page), out, err };
+  }
+  async function run(sys: FakeSys, ...numbers: number[]): Promise<{ code: number; out: string[]; err: string[] }> {
+    return withPage(sys, PAGE, ...numbers);
   }
   /** Settings that name #700 as the Approvals issue. */
   const withApprovals = (sys: FakeSys): void => {
@@ -1494,24 +1500,13 @@ describe('propose', () => {
       err: [],
     });
     const ask = '@example-owner: react 👍 to this comment to approve it, or comment "Decision:".';
+    // A pointer: what is proposed, the page that argues it, how to answer.
     assert.deepEqual(posted(sys), [
-      [
-        'Proposal: add #12 (Add the thing) to work item #10, after its approval.',
-        '**What changes:** the thing.\n- on every page',
-        '**Why:** it is asked for.',
-        '**What it costs:** one more slice of work item #10: the agent builds it in a pull request, which you review.',
-        '**If you decline:** #12 is closed as not planned and nothing of it is built; work item #10 keeps what you approved.',
-        ask,
-      ].join('\n\n'),
-      [
-        "Proposal: drop state #30 (Empty list), closed as not planned after work item #10's approval.",
-        '**What changes:** slice #12 is built without state #30, which you approved.',
-        '**Why:** the list is never empty now.',
-        '**What it costs:** nothing anyone would see.',
-        '**If you decline:** state #30 is reopened and built as you approved it.',
-        ask,
-      ].join('\n\n'),
+      ['Proposal: add #12 (Add the thing) to work item #10.', `Page: ${PAGE}`, ask].join('\n\n'),
+      ["Proposal: drop state #30 (Empty list), closed as not planned after work item #10's approval.", `Page: ${PAGE}`, ask].join('\n\n'),
     ]);
+    // Each passes the guard's own rule for asks: a page link, at most 500 characters.
+    for (const body of posted(sys)) assert.equal(askProblem({ text: body, known: true, opensUnknown: false }, [OWNER]), undefined);
     assert.deepEqual(sys.requests.find((r) => r.url.endsWith('/labels'))?.body, { labels: ['needs-owner'] });
   });
 
@@ -1534,6 +1529,47 @@ describe('propose', () => {
     g.comments.push(comment('Proposal: add #12', LATER, AGENT));
     ((g.states[0] as Node).comments as Node[]).push(comment('Decision: drop it'));
     assert.equal((await run(sys)).code, 0);
+    assert.deepEqual(posted(sys), []);
+  });
+
+  it('refuses, posting nothing, without a page to point to, and prints the command to run', async () => {
+    const { sys } = session(owing());
+    const why = 'no proposal yet, and a proposal is a short pointer to the published page that argues it: publish the page, then run';
+    assert.deepEqual(await withPage(sys, undefined), {
+      code: 1,
+      out: [],
+      err: [`✗ #12 and state #30 have ${why} niyam propose 12 --page <page url>`, 'propose: refused by the work rules'],
+    });
+    assert.equal((await withPage(sys, undefined, 30)).err[0], `✗ state #30 has ${why} niyam propose 30 --page <page url>`);
+    assert.deepEqual(posted(sys), []);
+  });
+
+  it('refuses a link that is no published page, before asking GitHub anything', async () => {
+    const { sys } = session(owing());
+    for (const page of ['https://example.com/page', 'https://claude.ai/artifact/abc extra', 'see https://claude.ai/artifact/abc', '']) {
+      assert.deepEqual(
+        await withPage(sys, page),
+        {
+          code: 1,
+          out: [],
+          err: [`✗ --page takes the link of a published page (https://claude.ai/artifact/… or https://claude.ai/code/artifact/…), not "${page}"`, 'propose: refused by the work rules'],
+        },
+        page,
+      );
+    }
+    assert.deepEqual(sys.requests, []);
+    assert.equal((await withPage(sys, 'https://claude.ai/code/artifact/abc-1')).code, 0);
+    assert.match(posted(sys)[0] ?? '', /\n\nPage: https:\/\/claude\.ai\/code\/artifact\/abc-1\n\n/);
+  });
+
+  it('refuses, posting nothing, a proposal the guard would refuse: a title too long for 500 characters', async () => {
+    const g = owing();
+    g.issue.title = 'x'.repeat(450);
+    const { sys } = session(g);
+    const { code, err } = await run(sys);
+    assert.equal(code, 1);
+    assert.match(err[0] ?? '', /^✗ #12's proposal is not posted: this comment asks the owner \(it opens with "Proposal:"\), and it runs \d+ characters, over 500; shorten #12's title$/);
+    assert.equal(err.length, 2);
     assert.deepEqual(posted(sys), []);
   });
 
@@ -1584,7 +1620,7 @@ describe('propose', () => {
         `example-owner answers it with one comment on https://github.com/${SLUG}/issues/700, the Approvals issue, whose first line is this (deleting a number leaves that one waiting):`,
         'Decision: approve #30',
       ]);
-      assert.match(out.at(-3) ?? '', /; ExampleBot proposes #12 with: niyam propose 12$/);
+      assert.match(out.at(-3) ?? '', /; ExampleBot proposes #12 with: niyam propose 12 --page <page url>$/);
     });
 
     it('prints no batch answer when nothing waits', async () => {
@@ -1633,6 +1669,9 @@ describe('propose', () => {
       `#12 is labeled needs-owner, waiting on example-owner's 👍 on ${made.html_url as string}`,
     ]);
     assert.deepEqual(posted(sys), []);
+    // Linking what is already posted, and labeling, needs no page.
+    assert.equal((await withPage(sys, undefined)).code, 0);
+    assert.deepEqual(posted(sys), []);
   });
 
   it("links, given a state, the slice's own waiting proposal too, or says how to post it", async () => {
@@ -1640,7 +1679,7 @@ describe('propose', () => {
     const { sys } = session(g);
     assert.deepEqual((await run(sys, 30)).out, [
       '✓ state #30: proposed on #12: https://github.com/example-org/example-app/issues/12#issuecomment-1',
-      "#12 is labeled needs-owner, waiting on example-owner's 👍 on https://github.com/example-org/example-app/issues/12#issuecomment-1; ExampleBot proposes #12 with: niyam propose 12",
+      "#12 is labeled needs-owner, waiting on example-owner's 👍 on https://github.com/example-org/example-app/issues/12#issuecomment-1; ExampleBot proposes #12 with: niyam propose 12 --page <page url>",
     ]);
     const made = comment('Proposal: add #12', LATER, AGENT);
     g.comments.push(made);
@@ -1652,7 +1691,7 @@ describe('propose', () => {
     g.comments.pop();
     assert.deepEqual((await run(sys, 30)).out, [
       '✓ state #30: example-owner has decided',
-      '#12 is labeled needs-owner; ExampleBot proposes #12 with: niyam propose 12',
+      '#12 is labeled needs-owner; ExampleBot proposes #12 with: niyam propose 12 --page <page url>',
     ]);
   });
 
@@ -1745,7 +1784,7 @@ describe('with two owners and two agents', () => {
 
   it("names both owners and both agents in what a slice added after approval owes", async () => {
     assert.deepEqual(await problems(added().issue, [], {}, TEAM), [
-      '#12 was added to work item #10 after its approval; example-owner or Second-Owner reacts 👍 on ExampleBot or OtherBot\'s proposal on #12, or adds a "Decision:" comment naming #12, or #12 links example-owner or Second-Owner\'s request for it on #10; ExampleBot or OtherBot proposes it with: niyam propose 12',
+      '#12 was added to work item #10 after its approval; example-owner or Second-Owner reacts 👍 on ExampleBot or OtherBot\'s proposal on #12, or adds a "Decision:" comment naming #12, or #12 links example-owner or Second-Owner\'s request for it on #10; ExampleBot or OtherBot proposes it with: niyam propose 12 --page <page url>',
     ]);
   });
 
@@ -1788,7 +1827,7 @@ describe('with two owners and two agents', () => {
   it("takes the second owner's Decision: or 👍 on a dropped state", async () => {
     const g = dropped();
     assert.deepEqual(await problems(g.issue, [], {}, TEAM), [
-      'state #30 was closed as not planned after approval; example-owner or Second-Owner reacts 👍 on ExampleBot or OtherBot\'s proposal for it on #12, or adds a "Decision:" comment to it; ExampleBot or OtherBot proposes it with: niyam propose 30',
+      'state #30 was closed as not planned after approval; example-owner or Second-Owner reacts 👍 on ExampleBot or OtherBot\'s proposal for it on #12, or adds a "Decision:" comment to it; ExampleBot or OtherBot proposes it with: niyam propose 30 --page <page url>',
     ]);
     g.comments.push(comment('Decision: drop #30', LATEST, OWNER_2));
     assert.deepEqual(await problems(g.issue, [], {}, TEAM), []);
@@ -1846,7 +1885,7 @@ describe('with two owners and two agents', () => {
     sys.route('POST', `/repos/${SLUG}/issues/12/comments`, { status: 201, json: { html_url: `https://github.com/${SLUG}/issues/12#issuecomment-9` } });
     sys.route('POST', `/repos/${SLUG}/issues/12/labels`, { status: 200, json: [] });
     const { io, out } = capture();
-    assert.equal(await propose(sys, io, [12]), 0);
+    assert.equal(await propose(sys, io, [12], 'https://claude.ai/artifact/W48-page'), 0);
     assert.equal(out.at(-1), `#12 is labeled needs-owner, waiting on example-owner or Second-Owner's 👍 on https://github.com/${SLUG}/issues/12#issuecomment-9`);
     const body = (sys.requests.find((r) => r.method === 'POST' && r.url.endsWith('/comments'))?.body as { body: string }).body;
     assert.match(body, /\n\n@example-owner or @Second-Owner: react 👍 to this comment to approve it, or comment "Decision:"\.$/);
