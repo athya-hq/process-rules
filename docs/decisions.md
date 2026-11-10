@@ -1205,3 +1205,46 @@
   set its monitor without a prompt; they give no new access to GitHub, and
   the app still checks that the session opened the pull request as its own
   login.
+- **2026-11-10 — Record: the owner's GitHub steps run as one command
+  (P-51).** The owner approved #240 with a 👍. On 2026-11-10 the coordinator
+  gave the owner a one-off shell script for veda-hq's issue types, and it
+  stalled in gh's pager. The owner asked, in chat, that owner-only work
+  become one tested command. `niyam owner-step <step> [args]` has three steps
+  for now: `issue-types <org>`, `label <repo> <number> <add|remove> <label>`
+  and `required-checks <repo> <ruleset>`. A new step is a slice the owner
+  approves, never a script an agent writes.
+  - It refuses where onboard does, and also where `CLAUDECODE=1` (the
+    pre-push hook's test), so an agent session whose hooks never ran is
+    refused too. It also refuses without a terminal, and it has no `--yes`.
+  - It signs in to a throwaway gh: a new `niyam-owner-step-…` folder as
+    `GH_CONFIG_DIR`, `GH_PAGER=cat`, the token variables unset, and
+    `gh auth login -p https --skip-ssh-key -w -s <scope> --insecure-storage`,
+    through a pipe so gh cannot prompt to set up git. Every call is `gh api`
+    in that folder, so the CLI never reads the token, and none runs unless
+    the folder's `hosts.yml` holds a token. gh's own lookup falls back to the
+    keychain when the config has none (gh 2.103.3, `AuthConfig.ActiveToken`),
+    and the owner's normal login must never be used.
+  - It checks the login owns the organisation (an active admin) or the
+    repository (the user, or an owner of its organisation). It reads the
+    state and prints the exact changes, and asks the one yes only then: the
+    sign-in and the reads change nothing, so the yes still comes before any
+    change. Each change is read back and marked ✓ or ✗.
+  - Cleanup is synchronous and runs once, from `finally` and from a SIGINT
+    handler `Sys.onInterrupt` adds. A Ctrl-C stops the changes not yet made
+    and exits 130.
+  - The folder sits in macOS's per-user temporary folder (`getconf
+    DARWIN_USER_TEMP_DIR`), which is the same whatever TMPDIR a shell sets,
+    so `doctor`, run from an agent session too, finds one a killed run left.
+  - `issue-types` adds and enables the work model's types only. Disabling
+    the others and retyping issues stays with `onboard`, whose plan explains
+    them.
+  - `label` takes `approved` and `do-not-merge` alone, and refuses a label
+    the repository lacks, since adding an unknown name would create it.
+  - `required-checks` follows the README's rule: it adds the checks of the
+    features the repository's settings turn on and removes none. It sends
+    back the ruleset's whole `rules` list as read, changing only the
+    contexts, and checks that the other rules are unchanged afterwards.
+  - Nothing in P-17 or P-18 changes. `signInOnce` (P-35) only shares its
+    line handler.
+  - Rejected: reading the token into the CLI to call the API (it would be in
+    memory and in reach of a bug that prints it); a `--yes` flag.

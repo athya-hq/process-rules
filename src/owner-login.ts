@@ -35,6 +35,25 @@ const GH_CHATTER = [/Authentication complete/i, /git_protocol/, /Configured git 
 const ONE_TIME_CODE = /\b[A-Z0-9]{4}-[A-Z0-9]{4}\b/;
 
 /**
+ * What to do with each line gh prints during a browser sign-in, its output
+ * not a terminal: the one-time code and the link go to `show`, the link also
+ * opens in the browser, gh's tips and notes on its own setup are dropped, and
+ * any other line, its errors included, is shown as gh wrote it.
+ */
+export function signInLines(sys: Sys, show: (line: string) => void): (raw: string) => void {
+  return (raw) => {
+    const line = raw.trim();
+    const oneTime = ONE_TIME_CODE.exec(line)?.[0];
+    const url = /https:\/\/\S+/.exec(line)?.[0];
+    if (oneTime) show(`one-time code ${oneTime}${/clipboard/i.test(line) ? ' (copied)' : ''}`);
+    else if (url && /browser/i.test(line)) {
+      show(`approve it at ${url}`);
+      sys.open(url);
+    } else if (line && !GH_CHATTER.some((chatter) => chatter.test(line))) show(line);
+  };
+}
+
+/**
  * Signs the owner in to GitHub for this run alone: one browser approval
  * through `gh auth login --web`, into a fresh temporary gh folder with no
  * token from the environment, and the token read back from that folder.
@@ -64,16 +83,7 @@ export async function signInOnce(sys: Sys, scopes: readonly string[], show: (lin
     };
     // SSH as the protocol, with no key, keeps gh from asking to set up git's credentials.
     const args = ['auth', 'login', '--web', '-h', GITHUB_HOST, '-p', 'ssh', '--skip-ssh-key', '--insecure-storage'];
-    const code = await sys.converse('gh', [...args, ...(scopes.length > 0 ? ['-s', scopes.join(',')] : [])], { env }, (raw) => {
-      const line = raw.trim();
-      const oneTime = ONE_TIME_CODE.exec(line)?.[0];
-      const url = /https:\/\/\S+/.exec(line)?.[0];
-      if (oneTime) show(`one-time code ${oneTime}${/clipboard/i.test(line) ? ' (copied)' : ''}`);
-      else if (url && /browser/i.test(line)) {
-        show(`approve it at ${url}`);
-        sys.open(url);
-      } else if (line && !GH_CHATTER.some((chatter) => chatter.test(line))) show(line);
-    });
+    const code = await sys.converse('gh', [...args, ...(scopes.length > 0 ? ['-s', scopes.join(',')] : [])], { env }, signInLines(sys, show));
     if (code !== 0) return { problem: 'the GitHub sign-in in the browser did not finish' };
     const read = sys.exec('gh', ['auth', 'token', '-h', GITHUB_HOST], { env });
     const token = read.stdout.trim();

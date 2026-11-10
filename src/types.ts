@@ -45,8 +45,12 @@ export interface Sys {
   mkdir(path: string): void;
   /** The names in a folder, or none when it does not exist. */
   list(path: string): string[];
-  /** A new empty folder only this user can read, for the caller to remove. */
-  tempDir(): string;
+  /**
+   * A new empty folder only this user can read, for the caller to remove:
+   * `prefix` and some random letters, a path; without one, in the system's
+   * temporary folder.
+   */
+  tempDir(prefix?: string): string;
   /** Deletes a file or folder and all in it; nothing there is fine. */
   remove(path: string): void;
   /**
@@ -80,6 +84,11 @@ export interface Sys {
     line: (text: string) => void,
   ): Promise<number>;
   open(url: string): void;
+  /**
+   * Calls `handler` at each Ctrl-C (SIGINT) instead of the CLI ending there,
+   * until the returned function takes it off.
+   */
+  onInterrupt(handler: () => void): () => void;
   now(): Date;
   sleep(ms: number): Promise<void>;
 }
