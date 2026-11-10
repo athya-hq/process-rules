@@ -81,8 +81,25 @@ function options(name: string): string[] | undefined {
 }
 
 /** GitHub as the owner's `gh` sees it: an organisation with none of the board yet, and the process-rules template. */
+/** An issue in the fake organisation: its type, the issue it is a sub-issue of in the same repository, and how many it has. */
+export interface FakeIssue {
+  repo: string;
+  number: number;
+  type: string | null;
+  parent?: number;
+  subIssues?: number;
+  pull?: boolean;
+}
+
 export class Board {
+  /** The organisation's issue types, by name; their ids count from 1 in this order. */
   issueTypes = ['Task', 'Bug'];
+  /** The types disabled, by name. */
+  disabledTypes: string[] = [];
+  /** The organisation's repositories, and which are archived. */
+  orgRepos: { full_name: string; archived?: boolean; has_issues?: boolean }[] = [{ full_name: SLUG }];
+  /** The issues in the organisation's repositories. */
+  issues: FakeIssue[] = [];
   labels = ['bug'];
   project: FakeProject | undefined;
   /** The Project a copy of the template replaced. */
@@ -108,7 +125,12 @@ export class Board {
     if (!sys.routes.has(`GET https://api.github.com/repos/${SLUG}`)) {
       sys.route('GET', `/repos/${SLUG}`, { status: 200, json: repoJson(organisation) });
     }
-    sys.route('GET', '/orgs/example-org/issue-types?per_page=100&page=1', () => ({ status: 200, json: this.issueTypes.map((name) => ({ name })) }));
+    sys.route('GET', '/orgs/example-org/issue-types?per_page=100&page=1', () => ({
+      status: 200,
+      json: this.issueTypes.map((name, index) => ({ id: index + 1, name, description: `${name} issues`, color: 'gray', is_enabled: !this.disabledTypes.includes(name) })),
+    }));
+    // A board made later answers first, as its routes replace an earlier one's.
+    sys.handlers.unshift((method, url, body) => this.typed(method, url, body));
     sys.route('POST', '/orgs/example-org/issue-types', () => {
       this.issueTypes.push(String((sys.requests.at(-1)?.body as { name: string }).name));
       return { status: 201, json: {} };
@@ -119,6 +141,55 @@ export class Board {
       return { status: 201, json: {} };
     });
     sys.route('POST', '/graphql', () => this.graphql((sys.requests.at(-1)?.body ?? {}) as { query: string; variables: Record<string, unknown> }));
+  }
+
+  /** An issue as GitHub's REST API shows it. */
+  issueJson(issue: FakeIssue): unknown {
+    const url = `https://api.github.com/repos/${issue.repo}/issues/${issue.number}`;
+    return {
+      number: issue.number,
+      url,
+      type: issue.type === null || this.disabledTypes.includes(issue.type) ? null : { name: issue.type },
+      parent_issue_url: issue.parent === undefined ? null : `https://api.github.com/repos/${issue.repo}/issues/${issue.parent}`,
+      sub_issues_summary: { total: issue.subIssues ?? 0 },
+      ...(issue.pull ? { pull_request: {} } : {}),
+    };
+  }
+
+  /** Issue types by id, issues by type, one issue, and an issue's new type. */
+  typed(method: string, url: string, body: unknown): HttpResult | undefined {
+    // The organisation's repositories, 100 a page.
+    const repos = /^https:\/\/api\.github\.com\/orgs\/example-org\/repos\?type=all&per_page=100&page=(\d+)$/.exec(url);
+    if (repos && method === 'GET') {
+      const page = Number(repos[1]);
+      return { status: 200, json: this.orgRepos.slice((page - 1) * 100, page * 100) };
+    }
+    const type = /^https:\/\/api\.github\.com\/orgs\/example-org\/issue-types\/(\d+)$/.exec(url);
+    if (type && method === 'PUT') {
+      const name = this.issueTypes[Number(type[1]) - 1];
+      if (name === undefined) return { status: 404, json: null };
+      const { is_enabled } = body as { is_enabled: boolean };
+      this.disabledTypes = this.disabledTypes.filter((had) => had !== name);
+      if (!is_enabled) this.disabledTypes.push(name);
+      return { status: 200, json: {} };
+    }
+    const listed = /^https:\/\/api\.github\.com\/repos\/([^/]+\/[^/]+)\/issues\?type=([^&]+)&state=all&per_page=100&page=1$/.exec(url);
+    if (listed && method === 'GET') {
+      const name = decodeURIComponent(listed[2] as string);
+      // GitHub filters by the type's name in any case.
+      const rows = this.issues.filter((issue) => issue.repo === listed[1] && issue.type?.toLowerCase() === name.toLowerCase());
+      return { status: 200, json: rows.map((issue) => this.issueJson(issue)) };
+    }
+    const one = /^https:\/\/api\.github\.com\/repos\/([^/]+\/[^/]+)\/issues\/(\d+)$/.exec(url);
+    const issue = one && this.issues.find((had) => had.repo === one[1] && had.number === Number(one[2]));
+    if (one && method === 'GET') return issue ? { status: 200, json: this.issueJson(issue) } : { status: 404, json: null };
+    if (one && method === 'PATCH') {
+      if (!issue) return { status: 404, json: null };
+      if (this.orgRepos.find((repo) => repo.full_name === issue.repo)?.archived) return { status: 403, json: null };
+      issue.type = (body as { type: string }).type;
+      return { status: 200, json: this.issueJson(issue) };
+    }
+    return undefined;
   }
 
   /** The Project with the id: the old one a copy replaced, or the current one. */

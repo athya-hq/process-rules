@@ -2,6 +2,7 @@ import { releaseAsset } from './cloud.ts';
 import { createHash } from 'node:crypto';
 
 import { launcherPath, launcherScript } from './agent.ts';
+import { ISSUE_TYPES } from './issue-types.ts';
 import type { ExecResult, HttpResult, Sys } from './types.ts';
 import { packageVersion } from './version.ts';
 
@@ -82,6 +83,8 @@ export class FakeSys implements Sys {
   /** When the Claude desktop app started, as `ps` lists it; undefined while it is not running. */
   appStarted: Date | undefined;
   routes = new Map<string, HttpResult | (() => HttpResult)>();
+  /** Routes by pattern, asked in order when no exact route matches: a handler's undefined passes the request on. */
+  handlers: ((method: string, url: string, body: unknown) => HttpResult | undefined)[] = [];
   answers: string[] = [];
   secrets: string[] = [];
   calls: Call[] = [];
@@ -97,6 +100,11 @@ export class FakeSys implements Sys {
     this.route('POST', '/repos/example-org/example-app/pulls', { status: 201, json: { number: 7, html_url: PULL_URL, node_id: 'PR_7' } });
     // No onboard pull request is open yet.
     this.route('GET', '/repos/example-org/example-app/pulls?state=open&head=example-org:process-rules/onboard', { status: 200, json: [] });
+    // The organisation's issue types are the work model's alone, unless a test routes them.
+    this.route('GET', '/orgs/example-org/issue-types?per_page=100&page=1', {
+      status: 200,
+      json: ISSUE_TYPES.map((type, index) => ({ id: index + 1, ...type, is_enabled: true })),
+    });
   }
 
   route(method: string, path: string, result: HttpResult | (() => HttpResult)): this {
@@ -317,9 +325,10 @@ export class FakeSys implements Sys {
       (url.includes('/users/')
         ? [...this.routes].find(([key]) => key.toLowerCase() === wanted.toLowerCase())?.[1]
         : undefined);
-    // A route may throw, as fetch rejects when its time runs out.
+    // A route or a handler may throw, as fetch rejects when its time runs out.
     try {
-      return Promise.resolve(typeof route === 'function' ? route() : route ?? this.unrouted(url));
+      const handled = route ?? this.handlers.reduce<HttpResult | undefined>((found, handler) => found ?? handler(method, url, options.body), undefined);
+      return Promise.resolve(typeof handled === 'function' ? handled() : handled ?? this.unrouted(url));
     } catch (error) {
       return Promise.reject(error as Error);
     }

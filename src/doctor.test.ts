@@ -5,6 +5,7 @@ import { NO_TOKEN, launcherPath, pathsFor, sessionScript } from './agent.ts';
 import { FROM_SETUP, PROXY_TOKEN, cloudRepoScript } from './cloud.ts';
 import { doctor } from './doctor.ts';
 import { KEYCHAIN } from './token-store.ts';
+import { ISSUE_TYPES, RERUN } from './issue-types.ts';
 import { declinedPath, movedPath, ownerFixes } from './lockout.ts';
 import { CLOUD_SETUP_PATH, WORKFLOW_PATH } from './onboard-pull.ts';
 import { workflow } from './onboard.ts';
@@ -66,6 +67,7 @@ describe('doctor', () => {
         '◇  GitHub — as ExampleBot',
         '✓  token, ends in 90 days',
         '✓  signing key registered',
+        '✓  issue types in example-org: the work model’s alone',
         '│',
         '└  All good',
       ],
@@ -263,7 +265,51 @@ describe('doctor', () => {
       '✗  session file: cannot ask GitHub (rate limited) → niyam doctor again',
       '✗  token: cannot ask GitHub (rate limited) → niyam doctor again',
       '✗  signing key: cannot ask GitHub (rate limited) → niyam doctor again',
+      '✗  issue types: cannot ask GitHub (rate limited) → niyam doctor again',
     ]);
+  });
+
+  describe('issue types', () => {
+    const typed = (sys: FakeSys, types: { name: string; is_enabled: boolean }[]): FakeSys =>
+      sys.route('GET', '/orgs/example-org/issue-types?per_page=100&page=1', { status: 200, json: types.map((type, index) => ({ id: index + 1, description: null, color: null, ...type })) });
+    const MODEL = ISSUE_TYPES.map((type) => ({ name: type.name, is_enabled: true }));
+
+    it('warns about types outside the work model and the issues here holding one, and still passes', async () => {
+      const sys = typed(healthy(), [...MODEL, { name: 'Task', is_enabled: true }, { name: 'Bug', is_enabled: true }, { name: 'Feature', is_enabled: false }]);
+      sys.route('GET', '/repos/example-org/example-app/issues?type=Task&state=all&per_page=100&page=1', {
+        status: 200,
+        json: [
+          { number: 9, url: 'https://api.github.com/repos/example-org/example-app/issues/9', type: { name: 'Task' } },
+          { number: 10, url: 'https://api.github.com/repos/example-org/example-app/pull/10', type: null, pull_request: {} },
+        ],
+      });
+      sys.route('GET', '/repos/example-org/example-app/issues?type=Bug&state=all&per_page=100&page=1', { status: 200, json: [] });
+      const { code, out } = await check(sys);
+      assert.equal(code, 0);
+      assert.deepEqual(marked(out, '▲'), [`▲  example-org has issue types outside the work model: Task, Bug; 1 issue here holds one (#9 Task) → ${RERUN}`]);
+    });
+
+    it("warns about a work model type the organisation lacks or disabled", async () => {
+      const sys = typed(healthy(), MODEL.map((type) => (type.name === 'Slice' ? { ...type, is_enabled: false } : type)).filter((type) => type.name !== 'Brief'));
+      const { code, out } = await check(sys);
+      assert.equal(code, 0);
+      assert.deepEqual(marked(out, '▲'), [`▲  example-org lacks the work model's Slice, Brief → ${RERUN}`]);
+    });
+
+    it('checks nothing for a personal repository, settings without the board, or outside a clone', async () => {
+      const personal = healthy();
+      personal.ownerType = 'User';
+      const off = healthy();
+      off.files.set(`${ROOT}/.github/niyam.json`, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity', 'work-rules'] }));
+      const outside = healthy();
+      outside.inRepo = false;
+      for (const sys of [personal, off, outside]) {
+        const { code, out } = await check(sys, sys === outside ? AGENT : undefined);
+        assert.equal(code, 0);
+        assert.ok(!out.some((line) => line.includes('issue types')), out.join('\n'));
+        assert.ok(!sys.requests.some((request) => request.url.includes('/issue-types')));
+      }
+    });
   });
 
   it('reports a thrown non-error from GitHub', async () => {

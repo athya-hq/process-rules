@@ -261,7 +261,8 @@ scopes, the key's registration, the session file, that the launcher runs,
 that the CLI is the newest release (`▲` when a newer one is out, fixed by
 `niyam upgrade`) and the only `niyam` on `PATH` (`✗`
 otherwise, naming each copy and its version), and
-what of the owner's an agent session could reach. It shows them grouped as
+what of the owner's an agent session could reach, and, in a repository with
+the board on, the organisation's issue types (see Issue types). It shows them grouped as
 This Mac, GitHub and This repo, one line each: `✓` fine, `▲` worth fixing,
 `✗` broken. Each problem line ends with its fix:
 
@@ -308,8 +309,10 @@ Claude cloud sessions below).
    │    auto-merge      when checks pass
    │
    ◇  GitHub — one sign-in as OWNER
-   │    board        set up or check
-   │    issue types  org-wide, if missing
+   │    board             set up or check
+   │    issue types       org-wide: retype 1, disable 3
+   │      example-app#12  Task → Brief
+   │      disable         Task, Bug, Feature
    │
    ◇  This Mac
    │    pre-push hook  new
@@ -355,7 +358,7 @@ Claude cloud sessions below).
    requires SAML authorisation or blocks classic tokens. As the owner (with
    the `project` scope, and `admin:org` in an organisation), it sets up the
    work board: the organisation's issue types
-   (Work item, Slice, State, Decision, Brief), the repo's labels (`approved`,
+   (Work item, Slice, State, Decision, Brief; see Issue types below), the repo's labels (`approved`,
    `needs-owner`, `mechanical`, `veto`, `expiring`, `cannot-run-here`), and a
    Project "<repo> work" linked to the repo. It makes that Project by copying
    the product's public [process-rules template](https://github.com/orgs/athya-hq/projects/4),
@@ -367,7 +370,7 @@ Claude cloud sessions below).
    date":<=@today`), with its workflows; so the board needs nothing done by
    hand. What the board lacks is known only once you have signed in, so the
    plan says "set up or check"; issue types are an organisation-wide
-   setting, so it says they would be added for the whole organisation. If
+   setting, so the plan says "org-wide" and lists what it would change. If
    a copy's workflows arrive off, "By hand:" links where to turn them on. A
    Project of that title made before the template is left as it is: the plan's
    yes does not replace it. When GitHub refuses the copy, or for such an
@@ -773,6 +776,51 @@ weekly job, `reviews-due` and the pre-push hook's work rules pass, saying the
 feature is off on a personal account's repository and why, rather than
 failing every pull request. They ask GitHub whose the repository is once per
 run.
+
+### Issue types
+
+The work model has five issue types, Work item, Slice, State, Decision and
+Brief, and `onboard` makes the organisation's enabled types exactly these.
+Issue types are an organisation-wide setting, so this reaches every
+repository in the organisation, onboarded or not, and the plan says
+"org-wide". `onboard` adds a work model type the organisation lacks and
+enables one it has disabled. Every other type, GitHub's default Task, Bug
+and Feature or one of the organisation's own, it disables, after giving each
+issue that holds one, open or closed, in any of the organisation's
+repositories, a work model type from GitHub's facts about it:
+
+- a sub-issue of a Work item becomes a Slice;
+- an issue with sub-issues becomes a Work item;
+- any other becomes a Brief.
+
+An issue whose parent is being retyped is read as the parent's new type, so
+a Task with Task sub-issues becomes a Work item with Slices. The plan names
+each issue it retypes (the first ten; the pull request's description names
+them all) and each type it disables, and the one yes covers them. The agent
+reads the organisation's types, but only the repositories it can see, so
+where a type outside the work model exists, `onboard` signs you in before the
+plan and reads every repository as you: the plan shows what the yes
+approves. The run reads again and changes nothing beyond it: an issue found
+only after the plan keeps its type, that type stays enabled, and "By hand:"
+says to run `onboard` again. A dry run signs in to nothing, so it lists what
+the agent can see. It retypes every issue first and disables a type only then, so no
+issue is left holding a disabled type: GitHub hides a disabled type on the
+issues that hold it and shows it again if it is enabled. `onboard` disables
+rather than deletes, so a type can come back; GitHub does not say what
+deleting one does to its issues. An issue in an archived repository cannot be
+changed, so it keeps its type, that type stays enabled, and "By hand:" says
+to unarchive the repository and run `onboard` again. A repository with issues
+turned off, as a fork usually is, has none to read. A rerun changes
+nothing when all is in order, and catches a type someone enabled again or a
+default GitHub adds later. Disabling a type needs an organisation owner
+(`admin:org`); retyping an issue needs write access to its repository. Both
+come from the owner's sign-in for the run.
+
+`doctor` on a Mac, in a repository whose settings turn the board on, warns (`▲`)
+when the organisation has an enabled type outside the work model or lacks
+one of the work model's, naming the issues in this repository that hold
+another type; the fix is the owner running `onboard` again. Issues with no
+type are left as they are.
 
 ### Hooks that call GitHub
 

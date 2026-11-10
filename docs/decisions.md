@@ -1067,6 +1067,50 @@
   `PROCESS_RULES_AGENT` stay. Rejected: moving the token (an older CLI would
   lose it); renaming an adopter's settings file now (an older CLI's
   session-start would lock out).
+  cloud setup path (no new Setup paste). The keychain service and the settings
+  file are P-50's, which the owner approves on its own. Releases attach the
+  CLI twice: `veda-hq-niyam-<v>.tgz`, and the same build named
+  `@athya-hq/process-rules` as `athya-hq-process-rules-<v>.tgz`, since 0.6.x's
+  `upgrade` looks for that name and pnpm refuses a second global package with
+  the bin `process-rules` (tried with pnpm 12.9.0). That bridge replaces the
+  old package in place; `niyam upgrade` then removes it and adds
+  `@veda-hq/niyam`, putting the old one back if the add fails. `upgrade` asks
+  veda-hq/niyam for releases and athya-hq/process-rules on a 404, so it works
+  before and after the transfer. Rejected: renaming the job ids, the workflow
+  file, the cloud path and `~/.config` now (each needs every adopter
+  re-onboarded, the job ids a ruleset edit in the same hour; a later slice);
+  publishing to npm now (tarballs as before; its own slice).
+- **2026-11-10 — Record: an organisation's enabled issue types are the work
+  model's alone.** The agent filed an issue as Task, one of GitHub's default
+  types, which `onboard` never touched, and it showed on the owner's Needs
+  you view with a type outside the work model. The owner asked for a proper
+  solution, not only turning the defaults off: issues holding another type
+  must be handled, and `onboard` must see to it in every organisation. Now
+  `onboard`'s issue types step adds or enables the work model's types, gives
+  each issue holding any other type, in every repository of the
+  organisation, a work model type (a sub-issue of a Work item a Slice, an
+  issue with sub-issues a Work item, any other a Brief), and then disables
+  the other types, all under the plan's one yes, as the owner. It disables
+  (`PUT /orgs/{org}/issue-types/{id}` with `is_enabled: false`, sending the
+  type's name, description and colour back, since the PUT takes them all)
+  rather than deletes: GitHub's documentation says a disabled type is not
+  shown and cannot be set, and shows again on its issues when enabled, but
+  does not say what deleting one does to them. Retyping first leaves no
+  issue holding a disabled type, which would hide it. It finds the issues by
+  listing each repository's issues with `type=`, open and closed, not by
+  search, which caps results at 1000 and lags its index; it keeps only rows
+  GitHub shows holding the type, so a filter GitHub ignored retypes nothing.
+  An issue in an archived repository, which GitHub keeps read-only, keeps
+  its type, and that type stays enabled until the owner unarchives it and
+  reruns. Where a type outside the work model exists, the owner signs in
+  before the plan, since the agent sees only the repositories it can read,
+  and the run changes nothing beyond the plan shown (review). `doctor` warns
+  when an enabled type outside the work model, or a missing work model type,
+  appears again. Rejected: deleting the types
+  (unknown effect on issues, no way back); search (capped, lagging);
+  retyping as the agent before the owner's run (the owner approves the
+  organisation-wide change once, from one plan); typing the issues with no
+  type at all (another question, for the owner).
 - **2026-11-10 — Record: `propose` posts a pointer to a page (State #236 of
   P-40).** The owner approved it with a 👍 (page
   https://claude.ai/artifact/UKSecSCvue9yfwcbA9nHGP): on 10 Nov, all four

@@ -26,7 +26,9 @@ describe('setUpBoard', () => {
     assert.deepEqual(board.issueTypes, ['Task', 'Bug', ...ISSUE_TYPES.map((t) => t.name)]);
     assert.deepEqual(board.labels, ['bug', ...LABELS.map((l) => l.name)]);
     assert.deepEqual(board.project?.fields, [...BUILT_IN, ...FIELDS.map((f) => f.name)]);
-    assert.deepEqual(out.slice(0, 6), [
+    assert.deepEqual(board.disabledTypes, ['Task', 'Bug']);
+    assert.deepEqual(out.slice(0, 7), [
+      '✓ disabled the issue types Task, Bug in example-org, outside the work model, once no issue held them; not deleted, so they can be enabled again',
       '✓ issue types in example-org: Work item, Slice, State, Decision, Brief',
       '✓ labels: approved, needs-owner, mechanical, veto, expiring, cannot-run-here',
       '- the process-rules template could not be copied (GitHub shows no Project 4 in athya-hq); building the Project instead',
@@ -34,7 +36,7 @@ describe('setUpBoard', () => {
       '✓ fields: Step, Decision, Review date',
       '✓ views: Needs you, Board, Work items, Decisions, Reviews due',
     ]);
-    assert.deepEqual(out.slice(6), viewsChecklist(URL));
+    assert.deepEqual(out.slice(7), viewsChecklist(URL));
     assert.deepEqual(board.project?.views, [
       { id: 'V_1', name: 'Needs you', layout: 'TABLE_LAYOUT', filter: 'label:needs-owner is:open', visible: ['Title', 'Status', 'Parent issue'] },
       { id: 'V_2', name: 'Board', layout: 'BOARD_LAYOUT', filter: 'type:Slice,Brief', visible: ['Title', 'Assignees', 'Status', 'Linked pull requests'] },
@@ -44,7 +46,7 @@ describe('setUpBoard', () => {
     ]);
     assert.equal(
       sys.asked[0],
-      'Issue types are an organisation-wide setting, so they apply to every repository in example-org, not only example-app. Add the issue types Work item, Slice, State, Decision, Brief to the example-org organisation?',
+      'Issue types are an organisation-wide setting, so they apply to every repository in example-org, not only example-app. In the example-org organisation, add the issue types Work item, Slice, State, Decision, Brief, then disable Task, Bug, which can be enabled again?',
     );
     assert.ok(sys.asked.includes('Set up the views Needs you, Board, Work items, Decisions, Reviews due in "example-app work" (renaming "View 1" to "Needs you")?'));
     assert.ok(sys.requests.filter((r) => r.url.includes('/orgs/') || r.url.includes('/labels') || r.url.endsWith('/graphql')).every((r) => r.token === OWNER_TOKEN));
@@ -126,9 +128,10 @@ describe('setUpBoard', () => {
     board.project = { fields: [...BUILT_IN, ...FIELDS.map((f) => f.name)], linked: true, views: settledViews(), grouped: true };
     await setUp(sys, ['y']);
     assert.deepEqual(sys.asked, [
-      'Issue types are an organisation-wide setting, so they apply to every repository in example-org, not only example-app. Add the issue types Decision, Brief to the example-org organisation?',
+      'Issue types are an organisation-wide setting, so they apply to every repository in example-org, not only example-app. In the example-org organisation, add the issue types Decision, Brief, then disable Task, which can be enabled again?',
     ]);
     assert.deepEqual(board.issueTypes, ['Task', 'Work item', 'Slice', 'State', 'Decision', 'Brief']);
+    assert.deepEqual(board.disabledTypes, ['Task']);
   });
 
   it('skips issue types for a personal repository', async () => {
@@ -152,7 +155,7 @@ describe('setUpBoard', () => {
     assert.ok(board.project?.linked);
     assert.deepEqual(sys.slept, [3000, 3000], 'waits for the fields GitHub adds after the copy');
     assert.deepEqual(sys.asked.slice(2), ['Create the Project "example-app work" for example-org from the process-rules template, linked to example-org/example-app?']);
-    assert.deepEqual(out.slice(2), [
+    assert.deepEqual(out.slice(3), [
       `✓ Project "example-app work": ${COPY_URL}`,
       '✓ fields: Step, Decision, Review date',
       '✓ views: Needs you, Board, Work items, Decisions, Reviews due',
