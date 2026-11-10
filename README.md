@@ -1019,8 +1019,9 @@ pnpm add -g https://github.com/veda-hq/niyam/releases/download/v0.6.4/veda-hq-ni
 
 The package puts two commands on `PATH`: `niyam`, and `process-rules`, its
 old name. Each release also attaches the same CLI as
-`athya-hq-process-rules-<version>.tgz`, so `process-rules upgrade` from a
-0.6.3 or older install still finds it.
+`athya-hq-process-rules-<version>.tgz`, so `process-rules upgrade` from an
+install of 0.5.37 to 0.6.3 still finds it; an install older than 0.5.37 has
+no `upgrade`, so it takes the `pnpm add -g` line above.
 
 After that, update it with one command on each machine:
 
