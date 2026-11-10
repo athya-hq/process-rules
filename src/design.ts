@@ -1,4 +1,4 @@
-import { API, SETTINGS_PATH, anyLogin, loadSettings } from './agent.ts';
+import { API, SETTINGS_PATH, anyLogin, loadSettings, settingsPathIn } from './agent.ts';
 import type { Output, Sys } from './types.ts';
 import { slicesNamed } from './work.ts';
 import { FIGMA_FILE_KEY, PERSONAL_REPO, isOn, isPersonal, notAdoptedLine, offLine, renamedLines } from './features.ts';
@@ -25,7 +25,7 @@ export function designLibrary(sys: Sys, root: string): { library?: string; warni
     if (!FIGMA_FILE_KEY.test(secret)) throw new Error('the FIGMA_LIBRARY secret must be the file key of the design library');
     return { library: secret, warnings: [] };
   }
-  const raw = JSON.parse(sys.read(`${root}/${SETTINGS_PATH}`)) as { figma?: { library?: unknown } | null };
+  const raw = JSON.parse(sys.read(`${root}/${settingsPathIn(sys, root)}`)) as { figma?: { library?: unknown } | null };
   if (raw.figma === undefined) return { warnings: [] };
   const library = raw.figma?.library;
   if (typeof library !== 'string' || !FIGMA_FILE_KEY.test(library)) {
@@ -139,7 +139,7 @@ export async function prDesign(sys: Sys, io: Output): Promise<number> {
     return 0;
   }
   loadSettings(sys, sys.cwd);
-  for (const line of renamedLines(JSON.parse(sys.read(`${sys.cwd}/${SETTINGS_PATH}`)))) io.out(`::warning::${line}`);
+  for (const line of renamedLines(JSON.parse(sys.read(`${sys.cwd}/${settingsPathIn(sys, sys.cwd)}`)))) io.out(`::warning::${line}`);
   if (!isOn(sys, sys.cwd, 'figma')) {
     io.out(offLine('pr-design', 'figma'));
     return 0;

@@ -1,4 +1,4 @@
-import { API, SETTINGS_PATH } from './agent.ts';
+import { API, SETTINGS_PATH, hasSettings, settingsPathIn } from './agent.ts';
 import type { HttpResult, Sys } from './types.ts';
 
 /**
@@ -49,7 +49,7 @@ export function renamedLines(raw: unknown): string[] {
 
 /** Whether the settings at `root` turn `feature` on. */
 export function isOn(sys: Sys, root: string, feature: Feature): boolean {
-  return featuresIn(JSON.parse(sys.read(`${root}/${SETTINGS_PATH}`))).includes(feature);
+  return featuresIn(JSON.parse(sys.read(`${root}/${settingsPathIn(sys, root)}`))).includes(feature);
 }
 
 /**
@@ -102,7 +102,7 @@ export async function isPersonal(sys: Sys, slug: string, token: string): Promise
  * feature that is off. Undefined when the settings are there.
  */
 export function notAdoptedLine(sys: Sys, root: string, command: string): string | undefined {
-  if (sys.exists(`${root}/${SETTINGS_PATH}`)) return undefined;
+  if (hasSettings(sys, root)) return undefined;
   return `${command}: the base branch has no ${SETTINGS_PATH}, so the repo is not adopted on its base yet; nothing to check`;
 }
 

@@ -29,6 +29,36 @@ describe('checks.yml', () => {
     assert.doesNotMatch(CHECKS, /ref: \$\{\{ inputs\.process-rules-ref \}\}/);
   });
 
+  describe("Settings' file check, which reads .github/niyam.json, else the file before niyam (P-50)", () => {
+    const script = jobs.settings?.steps.find((step) => step.name === 'Check .github/niyam.json')?.run ?? '';
+    const repoWith = (files: Record<string, string>) => {
+      const dir = mkdtempSync(join(tmpdir(), 'niyam-settings-'));
+      mkdirSync(join(dir, '.github'));
+      for (const [name, text] of Object.entries(files)) writeFileSync(join(dir, '.github', name), text);
+      const result = spawnSync('bash', ['-c', script], { cwd: dir, encoding: 'utf8', env: { PATH: process.env.PATH } });
+      rmSync(dir, { recursive: true, force: true });
+      return result;
+    };
+
+    it('reads the new file, the old one where the new one is missing, and the new one when both are there', () => {
+      const pair = (owner: string) => `{"owner": "${owner}", "agent": "ExampleBot"}`;
+      for (const [files, owner] of [
+        [{ 'niyam.json': pair('new-owner') }, 'new-owner'],
+        [{ 'process-rules.json': pair('old-owner') }, 'old-owner'],
+        [{ 'niyam.json': pair('new-owner'), 'process-rules.json': pair('old-owner') }, 'new-owner'],
+      ] as const) {
+        const result = repoWith(files);
+        assert.equal(result.status, 0, result.stdout);
+        assert.equal(result.stdout.trim(), `niyam: owner ${owner} approves; agent ExampleBot builds.`);
+      }
+    });
+
+    it('names the new file when neither is there, and the file it read when that is wrong', () => {
+      assert.equal(repoWith({}).stdout.trim(), '::error file=.github/niyam.json::.github/niyam.json is missing; run niyam onboard');
+      assert.match(repoWith({ 'process-rules.json': '[]' }).stdout, /^::error file=\.github\/process-rules\.json::/);
+    });
+  });
+
   describe("Settings' process-rules-ref check", () => {
     const script = jobs.settings?.steps.find((step) => step.name === 'Check process-rules-ref names the release that runs')?.run ?? '';
     const dir = mkdtempSync(join(tmpdir(), 'process-rules-checks-'));

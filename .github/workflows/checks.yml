@@ -40,10 +40,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Check .github/process-rules.json
+      - name: Check .github/niyam.json
         run: |
           set -euo pipefail
-          file=.github/process-rules.json
+          # Repos onboarded before niyam keep .github/process-rules.json, still read when the new name is missing.
+          file=.github/niyam.json
+          [ -f "$file" ] || [ ! -f .github/process-rules.json ] || file=.github/process-rules.json
           fail() { echo "::error file=$file::$1"; exit 1; }
           [ -f "$file" ] || fail "$file is missing; run niyam onboard"
           jq -e 'type == "object"' "$file" >/dev/null || fail "$file is not a JSON object"

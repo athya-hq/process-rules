@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import { NO_TOKEN, launcherPath, pathsFor, sessionScript } from './agent.ts';
 import { FROM_SETUP, PROXY_TOKEN, cloudRepoScript } from './cloud.ts';
 import { doctor } from './doctor.ts';
+import { KEYCHAIN } from './token-store.ts';
 import { declinedPath, movedPath, ownerFixes } from './lockout.ts';
 import { CLOUD_SETUP_PATH, WORKFLOW_PATH } from './onboard-pull.ts';
 import { workflow } from './onboard.ts';
@@ -211,7 +212,7 @@ describe('doctor', () => {
   it('checks a named agent outside any repository', async () => {
     const sys = healthy();
     sys.inRepo = false;
-    sys.files.delete('/repo/.github/process-rules.json');
+    sys.files.delete('/repo/.github/niyam.json');
     assert.equal((await check(sys, AGENT)).code, 0);
   });
 
@@ -269,6 +270,14 @@ describe('doctor', () => {
     const sys = healthy();
     sys.http = () => Promise.reject('down');
     assert.ok((await check(sys)).out.includes('✗  token: cannot ask GitHub (down) → niyam doctor again'));
+  });
+
+  it('warns of a session file a release before niyam wrote, which still works (P-50)', async () => {
+    const sys = healthy();
+    sys.files.set(SESSION, sessionScript(AGENT, AGENT_ID, pathsFor(HOME, AGENT), KEYCHAIN, '/usr/bin/security find-generic-password -s process-rules -a ExampleBot -w 2>/dev/null'));
+    const { code, out } = await check(sys);
+    assert.equal(code, 0);
+    assert.deepEqual(marked(out, '▲'), ['▲  session file from an older release; it still works → niyam machine']);
   });
 
   it('refuses a stale session file', async () => {
@@ -436,7 +445,7 @@ describe('doctor in a Claude cloud session', () => {
 
   it('refuses an identity session-start gave that is not the account the proxy acts as now', async () => {
     const sys = cloud('SecondBot');
-    sys.files.set(`${ROOT}/.github/process-rules.json`, JSON.stringify({ owner: 'example-owner', agent: [AGENT, 'SecondBot'] }));
+    sys.files.set(`${ROOT}/.github/niyam.json`, JSON.stringify({ owner: 'example-owner', agent: [AGENT, 'SecondBot'] }));
     const { code, out } = await check(sys);
     assert.equal(code, 1);
     assert.ok(out.includes("✓  the proxy acts as SecondBot, an agent the repo's settings name"));
@@ -475,9 +484,9 @@ describe('doctor in a Claude cloud session', () => {
 
   it("refuses a clone with no settings", async () => {
     const sys = cloud();
-    sys.files.delete(`${ROOT}/.github/process-rules.json`);
+    sys.files.delete(`${ROOT}/.github/niyam.json`);
     assert.deepEqual(marked((await check(sys)).out, '✗'), [
-      `✗  .github/process-rules.json not found in ${ROOT}, so the agents are not known → niyam onboard again`,
+      `✗  .github/niyam.json not found in ${ROOT}, so the agents are not known → niyam onboard again`,
     ]);
   });
 

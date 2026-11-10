@@ -7,6 +7,8 @@ import { after, describe, it } from 'node:test';
 
 import {
   NO_TOKEN,
+  OLD_SETTINGS_PATH,
+  SETTINGS_PATH,
   account,
   agentFrom,
   agentHere,
@@ -14,6 +16,7 @@ import {
   anyLogin,
   checkToken,
   either,
+  hasSettings,
   keyBody,
   keyPairProblem,
   loadSettings,
@@ -23,6 +26,7 @@ import {
   sameLogin,
   sessionEnv,
   sessionScript,
+  settingsPathIn,
   signingKeys,
   tokenInfo,
 } from './agent.ts';
@@ -31,10 +35,46 @@ import { AGENT, AGENT_ID, CLASSIC, FakeSys, HOME, KEY, NOW, PRIVATE_KEY, PUBLIC_
 /** A FakeSys whose settings are `settings`, with `machine`'s session file for each of `setUp`. */
 function withSettings(settings: object, setUp: string[] = []): FakeSys {
   const sys = new FakeSys();
-  sys.files.set(`${ROOT}/.github/process-rules.json`, JSON.stringify(settings));
+  sys.files.set(`${ROOT}/.github/niyam.json`, JSON.stringify(settings));
   for (const agent of setUp) sys.files.set(pathsFor(HOME, agent).session, sessionScript(agent, AGENT_ID, pathsFor(HOME, agent)));
   return sys;
 }
+
+describe('the settings file before niyam (P-50)', () => {
+  const OLD_FILE = `${ROOT}/${OLD_SETTINGS_PATH}`;
+  const NEW_FILE = `${ROOT}/${SETTINGS_PATH}`;
+  const holding = (files: Record<string, string>): FakeSys => {
+    const sys = new FakeSys();
+    sys.files.delete(NEW_FILE);
+    for (const [path, text] of Object.entries(files)) sys.files.set(path, text);
+    return sys;
+  };
+
+  it('reads .github/process-rules.json where .github/niyam.json is missing', () => {
+    const sys = holding({ [OLD_FILE]: '{"owner":"old-owner","agent":"OldBot"}' });
+    assert.equal(settingsPathIn(sys, ROOT), OLD_SETTINGS_PATH);
+    assert.equal(hasSettings(sys, ROOT), true);
+    assert.deepEqual(loadSettings(sys, ROOT), { owners: ['old-owner'], agents: ['OldBot'] });
+  });
+
+  it('reads .github/niyam.json when both are there', () => {
+    const sys = holding({ [OLD_FILE]: '{"owner":"old-owner","agent":"OldBot"}', [NEW_FILE]: '{"owner":"new-owner","agent":"NewBot"}' });
+    assert.equal(settingsPathIn(sys, ROOT), SETTINGS_PATH);
+    assert.deepEqual(loadSettings(sys, ROOT), { owners: ['new-owner'], agents: ['NewBot'] });
+  });
+
+  it('names the new file when neither is there', () => {
+    const sys = holding({});
+    assert.equal(settingsPathIn(sys, ROOT), SETTINGS_PATH);
+    assert.equal(hasSettings(sys, ROOT), false);
+    assert.throws(() => loadSettings(sys, ROOT), /^Error: \.github\/niyam\.json not found in /);
+  });
+
+  it('names the file it read when it refuses what is in it', () => {
+    const sys = holding({ [OLD_FILE]: '{"owner":"same","agent":"SAME"}' });
+    assert.throws(() => loadSettings(sys, ROOT), /^Error: \.github\/process-rules\.json: same is named as both owner and agent/);
+  });
+});
 
 describe('loadSettings', () => {
   it('reads owner and agent, each as a list', () => {
@@ -55,15 +95,15 @@ describe('loadSettings', () => {
   for (const approvals of ['"42"', '0', '-3', '4.5', 'null', '[42]']) {
     it(`refuses "approvals": ${approvals}`, () => {
       const sys = new FakeSys();
-      sys.files.set(`${ROOT}/.github/process-rules.json`, `{"owner":"me","agent":"bot","approvals":${approvals}}`);
-      assert.throws(() => loadSettings(sys, ROOT), /^Error: \.github\/process-rules\.json: "approvals" must be the number of the repository's Approvals issue, such as 42$/);
+      sys.files.set(`${ROOT}/.github/niyam.json`, `{"owner":"me","agent":"bot","approvals":${approvals}}`);
+      assert.throws(() => loadSettings(sys, ROOT), /^Error: \.github\/niyam\.json: "approvals" must be the number of the repository's Approvals issue, such as 42$/);
     });
   }
 
   it('says when the file is missing', () => {
     const sys = new FakeSys();
     sys.files.clear();
-    assert.throws(() => loadSettings(sys, ROOT), /^Error: \.github\/process-rules\.json not found in \/repo$/);
+    assert.throws(() => loadSettings(sys, ROOT), /^Error: \.github\/niyam\.json not found in \/repo$/);
   });
 
   for (const [raw, message] of [
@@ -81,7 +121,7 @@ describe('loadSettings', () => {
   ] as const) {
     it(`refuses ${raw}`, () => {
       const sys = new FakeSys();
-      sys.files.set(`${ROOT}/.github/process-rules.json`, raw);
+      sys.files.set(`${ROOT}/.github/niyam.json`, raw);
       assert.throws(() => loadSettings(sys, ROOT), message);
     });
   }
@@ -116,7 +156,7 @@ describe('agentHere', () => {
   it('refuses when none of the agents is set up here', () => {
     const sys = withSettings({}, ['ThirdBot']);
     assert.deepEqual(agentHere(sys, [AGENT, 'OtherBot']), {
-      problem: `.github/process-rules.json names the agents ${AGENT} or OtherBot, and niyam machine has set up none of them on this machine`,
+      problem: `.github/niyam.json names the agents ${AGENT} or OtherBot, and niyam machine has set up none of them on this machine`,
     });
   });
 

@@ -1,4 +1,4 @@
-import { API, SETTINGS_PATH, pathsFor, sessionEnv } from './agent.ts';
+import { API, OLD_SETTINGS_PATH, SETTINGS_PATH, pathsFor, sessionEnv } from './agent.ts';
 import type { Output, Sys } from './types.ts';
 import { GITHUB_WEB } from './host.ts';
 
@@ -9,7 +9,7 @@ export const WORKFLOW_PATH = '.github/workflows/process-rules.yml';
 /** The repo's cloud setup file, which installs the pinned CLI in Claude cloud sessions. */
 export const CLOUD_SETUP_PATH = '.github/process-rules/cloud-setup.sh';
 /** Every file onboard's pull request may change. */
-export const ONBOARD_FILES = [SETTINGS_PATH, HOOKS_PATH, WORKFLOW_PATH, CLOUD_SETUP_PATH];
+export const ONBOARD_FILES = [SETTINGS_PATH, OLD_SETTINGS_PATH, HOOKS_PATH, WORKFLOW_PATH, CLOUD_SETUP_PATH];
 
 /** A subject's leading emoji, or gitmoji shortcode, and the rest of it. */
 const LEADING_EMOJI = /^(\p{Regional_Indicator}{2}|\p{Extended_Pictographic}\p{Emoji_Modifier}?️?(?:‍\p{Extended_Pictographic}\p{Emoji_Modifier}?️?)*|:[a-z0-9_+-]+:)\s+(.*)$/u;

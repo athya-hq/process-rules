@@ -121,7 +121,7 @@ describe('reviewsDue', () => {
 
   it('with two owners and two agents, reviews a decision any of them wrote, and no one else\'s', async () => {
     const sys = session([issue(5, 'Review: 2026-10-01', [], 'Second-Owner'), issue(6, 'Review: 2026-10-01', [], 'OtherBot'), issue(7, 'Review: 2026-10-01', [], 'mallory')]);
-    sys.files.set(`${ROOT}/.github/process-rules.json`, JSON.stringify({ owner: ['example-owner', 'Second-Owner'], agent: [AGENT, 'OtherBot'] }));
+    sys.files.set(`${ROOT}/.github/niyam.json`, JSON.stringify({ owner: ['example-owner', 'Second-Owner'], agent: [AGENT, 'OtherBot'] }));
     const { io, out, err } = capture();
     assert.equal(await reviewsDue(sys, io), 0);
     assert.deepEqual(out.map((line) => (JSON.parse(line) as { number: number }).number), [5, 6]);

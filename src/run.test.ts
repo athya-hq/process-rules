@@ -81,7 +81,7 @@ describe('run', () => {
         code: 1,
         out: [],
         err: [
-          `niyam ${command}: name the agent account after the command, or run it in a repo whose .github/process-rules.json names one`,
+          `niyam ${command}: name the agent account after the command, or run it in a repo whose .github/niyam.json names one`,
         ],
       });
     });

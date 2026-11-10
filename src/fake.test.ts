@@ -52,7 +52,7 @@ export class FakeSys implements Sys {
   cwd = ROOT;
   runtime = { node: NODE, cli: CLI };
   platform = 'darwin';
-  files = new Map<string, string>([[`${ROOT}/.github/process-rules.json`, SETTINGS]]);
+  files = new Map<string, string>([[`${ROOT}/.github/niyam.json`, SETTINGS]]);
   /** Keychain items by "service/account". */
   keychain = new Map<string, string>();
   modes = new Map<string, number>();
@@ -117,14 +117,14 @@ export class FakeSys implements Sys {
     return this;
   }
 
-  /** The agent token as `machine` stores it: service process-rules. */
+  /** The agent token as `machine` stores it: service niyam. */
   setToken(account: string, token: string): this {
-    this.keychain.set(`process-rules/${account}`, token);
+    this.keychain.set(`niyam/${account}`, token);
     return this;
   }
 
   token(account: string): string | undefined {
-    return this.keychain.get(`process-rules/${account}`);
+    return this.keychain.get(`niyam/${account}`);
   }
 
   acceptToken(token: string, login: string, headers: Record<string, string> = CLASSIC): this {

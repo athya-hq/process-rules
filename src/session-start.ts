@@ -9,7 +9,7 @@ import {
   sameLogin,
   sessionNames,
   sessionRecord,
-  sessionScript,
+  sessionFileIs,
   type Settings,
 } from './agent.ts';
 import { FROM_SETUP, cloudLogin, cloudToken, repoReleases } from './cloud.ts';
@@ -228,7 +228,7 @@ function start(sys: Sys): Said {
     return locked(`${paths.session} cannot be read (${message(error)})`, fix);
   }
   const names = sessionNames(script);
-  if (!names || !sameLogin(names.agent, agent) || script !== sessionScript(names.agent, names.id, paths, store)) {
+  if (!names || !sameLogin(names.agent, agent) || !sessionFileIs(script, names.agent, names.id, paths, store)) {
     return locked(`${paths.session} is out of date, or not the file niyam machine writes, for ${agent}`, fix);
   }
   try {

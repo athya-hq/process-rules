@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { after, describe, it } from 'node:test';
 
 import { BASE_ENV, NO_TOKEN, lockScript, pathsFor, sessionNames, sessionRecord, sessionScript } from './agent.ts';
+import { KEYCHAIN } from './token-store.ts';
 import { AGENT, AGENT_ID, FakeSys, HOME, ROOT, capture } from './fake.test.ts';
 import { FROM_SETUP, PROXY_TOKEN, cloudRepoScript } from './cloud.ts';
 import { CLOUD_SETUP_PATH } from './onboard-pull.ts';
@@ -69,6 +70,16 @@ describe('sessionStart', () => {
       throw new Error('read-only');
     };
     assert.deepEqual((await start(sys)).out, [`niyam: this session works as ExampleBot on GitHub. ${AUTO_FIX}`]);
+  });
+
+  it('gives the agent identity with a session file a release before niyam wrote, which reads the old keychain entry (P-50)', async () => {
+    const sys = ready();
+    const older = sessionScript(AGENT, AGENT_ID, pathsFor(HOME, AGENT), KEYCHAIN, '/usr/bin/security find-generic-password -s process-rules -a ExampleBot -w 2>/dev/null');
+    sys.files.set(SESSION, older);
+    const { code, out, env } = await start(sys);
+    assert.equal(code, 0);
+    assert.deepEqual(out, [`niyam: this session works as ExampleBot on GitHub. ${AUTO_FIX}`]);
+    assert.equal(env, `\n${lockScript(HOME)}\n${older}`);
   });
 
   it('locks, then gives the session the agent identity', async () => {
@@ -288,7 +299,7 @@ describe('sessionStart', () => {
 
     it('says to stop without settings, an env file, or when the env file cannot be written', async () => {
       const bare = cloud(AGENT);
-      bare.files.delete(`${ROOT}/.github/process-rules.json`);
+      bare.files.delete(`${ROOT}/.github/niyam.json`);
       assert.match((await start(bare)).out[0] ?? '', /^niyam: STOP\. .*, so this cloud session cannot be checked as the agent\. .*tell the owner\.$/);
       const noFile = cloud(AGENT);
       delete noFile.env.CLAUDE_ENV_FILE;
@@ -326,7 +337,7 @@ describe('sessionStart', () => {
 
   for (const [name, change, reason] of [
     ['outside a repository', (sys: FakeSys) => (sys.inRepo = false), `${ROOT} is not inside a git repository`],
-    ['without settings', (sys: FakeSys) => sys.files.delete(`${ROOT}/.github/process-rules.json`), `.github/process-rules.json not found in ${ROOT}`],
+    ['without settings', (sys: FakeSys) => sys.files.delete(`${ROOT}/.github/niyam.json`), `.github/niyam.json not found in ${ROOT}`],
   ] as const) {
     it(`stays locked ${name}`, async () => {
       const sys = ready();
@@ -390,7 +401,7 @@ describe('sessionStart', () => {
 
   it('accepts settings naming the agent in another case', async () => {
     const sys = ready();
-    sys.files.set(`${ROOT}/.github/process-rules.json`, JSON.stringify({ owner: 'example-owner', agent: 'examplebot' }));
+    sys.files.set(`${ROOT}/.github/niyam.json`, JSON.stringify({ owner: 'example-owner', agent: 'examplebot' }));
     assert.deepEqual((await start(sys)).out, [`niyam: this session works as ExampleBot on GitHub. ${AUTO_FIX}`]);
   });
 
@@ -399,7 +410,7 @@ describe('sessionStart', () => {
     const OTHER_SESSION = pathsFor(HOME, 'OtherBot').session;
     const team = (): FakeSys => {
       const sys = ready();
-      sys.files.set(`${ROOT}/.github/process-rules.json`, TEAM);
+      sys.files.set(`${ROOT}/.github/niyam.json`, TEAM);
       return sys;
     };
     const locked = (reason: string): string =>
@@ -416,7 +427,7 @@ describe('sessionStart', () => {
       sys.files.delete(SESSION);
       const { out, env } = await start(sys);
       assert.equal(env, `\n${lockScript(HOME)}`);
-      assert.deepEqual(out, [locked('.github/process-rules.json names the agents OtherBot or ExampleBot, and niyam machine has set up none of them on this machine')]);
+      assert.deepEqual(out, [locked('.github/niyam.json names the agents OtherBot or ExampleBot, and niyam machine has set up none of them on this machine')]);
     });
 
     it('stays locked rather than guess when machine set up both', async () => {
@@ -426,7 +437,7 @@ describe('sessionStart', () => {
       assert.equal(env, `\n${lockScript(HOME)}`);
       assert.deepEqual(out, [
         locked(
-          '.github/process-rules.json names the agents OtherBot or ExampleBot, and niyam machine has set up OtherBot and ExampleBot on this machine, so which one this session works as cannot be told; remove the others\' folders under ~/.config/process-rules',
+          '.github/niyam.json names the agents OtherBot or ExampleBot, and niyam machine has set up OtherBot and ExampleBot on this machine, so which one this session works as cannot be told; remove the others\' folders under ~/.config/process-rules',
         ),
       ]);
     });
@@ -435,7 +446,7 @@ describe('sessionStart', () => {
       const cloud = (login: string): FakeSys => {
         const sys = new FakeSys();
         sys.env = { CLAUDE_ENV_FILE: ENV, CLAUDE_CODE_REMOTE: 'true', GH_TOKEN: NO_TOKEN };
-        sys.files.set(`${ROOT}/.github/process-rules.json`, TEAM);
+        sys.files.set(`${ROOT}/.github/niyam.json`, TEAM);
         sys.acceptToken(PROXY_TOKEN, login);
         return sys;
       };
