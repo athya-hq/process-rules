@@ -813,7 +813,7 @@ every issue it types, a run of consecutive ones in a repository that one
 rule types alike on one row (the question names the first ten), and each
 type it disables, and the one yes covers them. The agent
 reads the organisation's types, but only the repositories it can see, so
-where a type outside the work model exists, or an issue to type, `onboard`
+where an enabled type outside the work model exists, or an issue to type, `onboard`
 signs you in before the
 plan and reads every repository as you: the plan shows what the yes
 approves. The run reads again and changes nothing beyond it: an issue found
@@ -824,7 +824,16 @@ the agent can see. It retypes every issue first and disables a type only then, s
 issue is left holding a disabled type: GitHub hides a disabled type on the
 issues that hold it and shows it again if it is enabled. `onboard` disables
 rather than deletes, so a type can come back; GitHub does not say what
-deleting one does to its issues. An issue in an archived repository cannot be
+deleting one does to its issues. A rerun cannot check a type that is
+disabled: GitHub refuses to list issues by one (HTTP 422), for the owner
+too, so the plan names each such type on a `disabled` row (as `disabled
+Task, Bug, Feature: GitHub lists no issues by a disabled type, so onboard
+cannot tell whether any holds one`), never saying none holds it, and the
+type stays disabled; enabled again, `onboard` retypes what holds it and
+disables it once more. Any other 422, one for an enabled type included,
+still fails the read, as does any other refusal but the 410 of a repository
+with issues turned off.
+An issue in an archived repository cannot be
 changed, so it keeps its type, that type stays enabled, and "By hand:" says
 to unarchive the repository and run `onboard` again. A repository with issues
 turned off, as a fork usually is, has none to read. A rerun changes
