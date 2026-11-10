@@ -39,7 +39,7 @@ export const CLOUD_NODE_SHA256 = {
 };
 
 /** What the Setup snippet says when the install fails: the commands after it in the Setup script still run. */
-export const INSTALL_FAILED = 'process-rules: the install failed, so sessions start without process-rules; the rest of the Setup script still runs.';
+export const INSTALL_FAILED = 'niyam: the install failed, so sessions start without niyam; the rest of the Setup script still runs.';
 
 /** Where the install puts Node and the CLI in a cloud session. */
 export const CLOUD_DIR = '/opt/process-rules';
@@ -126,13 +126,13 @@ export function cloudRepoScript(version: string, sha256: string): string {
   return [
     '#!/bin/bash',
     `# process-rules ${version} for Claude cloud sessions: Node ${CLOUD_NODE} and the CLI, as process-rules on PATH.`,
-    `# process-rules onboard writes this file at the version ${WORKFLOW_PATH} pins, and writes it again on every run.`,
+    `# niyam onboard writes this file at the version ${WORKFLOW_PATH} pins, and writes it again on every run.`,
     "# The cloud environment's Setup script runs it, from what niyam cloud-setup prints, and so does",
     '# session-start when the environment holds another release. Change it by running onboard, not by hand.',
     'set -euo pipefail',
     `dir=${CLOUD_DIR}`,
     `node=${CLOUD_NODE}`,
-    `case "$(uname -m)" in x86_64) arch=x64 sum=${CLOUD_NODE_SHA256.x64} ;; aarch64 | arm64) arch=arm64 sum=${CLOUD_NODE_SHA256.arm64} ;; *) echo "process-rules: no Node for $(uname -m)" >&2; exit 1 ;; esac`,
+    `case "$(uname -m)" in x86_64) arch=x64 sum=${CLOUD_NODE_SHA256.x64} ;; aarch64 | arm64) arch=arm64 sum=${CLOUD_NODE_SHA256.arm64} ;; *) echo "niyam: no Node for $(uname -m)" >&2; exit 1 ;; esac`,
     'bin="$dir/node-v$node-linux-$arch/bin/node"',
     'mkdir -p "$dir"',
     'if [ "$("$bin" --version 2>/dev/null)" != "v$node" ]; then',
@@ -172,12 +172,12 @@ export function cloudSetupSnippet(): string {
   const file = CLOUD_SETUP_PATH;
   return [
     '#!/bin/bash',
-    `# process-rules for Claude cloud sessions: runs the clone's ${file}, which process-rules onboard keeps at the version the repo pins. Paste once; put the repo's own setup after it.`,
+    `# process-rules for Claude cloud sessions: runs the clone's ${file}, which niyam onboard keeps at the version the repo pins. Paste once; put the repo's own setup after it.`,
     `bash <<'PROCESS_RULES' || echo "${INSTALL_FAILED}" >&2`,
     `for script in "$PWD/${file}" "$PWD"/*/${file} /home/*/*/${file} /root/*/${file}; do`,
     '  if [ -f "$script" ]; then PROCESS_RULES_SETUP=1 exec bash "$script" </dev/null; fi',
     'done',
-    `echo "process-rules: no ${file} in the clone under $PWD; run process-rules onboard, which writes it" >&2`,
+    `echo "niyam: no ${file} in the clone under $PWD; run niyam onboard, which writes it" >&2`,
     'exit 1',
     'PROCESS_RULES',
     '',

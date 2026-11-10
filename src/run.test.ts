@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 import { FakeSys } from './fake.test.ts';
 import { USAGE, packageVersion, run, versionOf } from './run.ts';
+import { nameOf, packageName } from './version.ts';
 
 const manifest: unknown = JSON.parse(
   readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
@@ -253,4 +254,17 @@ describe('cli entry', () => {
     assert.deepEqual(await said(['version'], 'process-rules'), [], 'not version');
     assert.deepEqual(await said(['help']), [], 'not as niyam');
   });
+});
+
+describe('nameOf', () => {
+  it("reads the package's name, as the bridge release's archive renames it", () => {
+    assert.equal(nameOf({ name: '@athya-hq/process-rules', version: '1.0.0' }), '@athya-hq/process-rules');
+    assert.equal(packageName(), '@veda-hq/niyam');
+  });
+
+  for (const raw of [null, 'x', {}, { name: 1 }]) {
+    it(`throws for ${JSON.stringify(raw)}`, () => {
+      assert.throws(() => nameOf(raw), /no string "name"/);
+    });
+  }
 });

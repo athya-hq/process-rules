@@ -185,9 +185,9 @@ function pnpmBin(sys: Sys): string | undefined {
  * the old name. One package gives both names, so a process-rules beside a
  * niyam is that package's and judged with it.
  */
-export function apartCopies(sys: Sys): Copy[] {
-  const dirs = new Set(copiesOnPath(sys, CLI).map((copy) => dirOf(copy.path)));
-  return copiesOnPath(sys, OLD_CLI).filter((copy) => !dirs.has(dirOf(copy.path)));
+export function apartCopies(niyams: readonly Copy[], olds: readonly Copy[]): Copy[] {
+  const dirs = new Set(niyams.map((copy) => dirOf(copy.path)));
+  return olds.filter((copy) => !dirs.has(dirOf(copy.path)));
 }
 
 /** The line naming copies of the old name apart from niyam, or none. */
@@ -200,18 +200,20 @@ function apartLines(copies: readonly Copy[]): string[] {
 }
 
 /** What is wrong with niyam on PATH, and with its old name where no niyam is beside it. */
-function strayBoth(sys: Sys, wanted: string, bin?: string, install?: string): string[] {
-  return [...strayCopies(copiesOnPath(sys), wanted, bin === undefined ? undefined : `${bin}/${CLI}`, install), ...apartLines(apartCopies(sys))];
+function strayBoth(niyams: readonly Copy[], olds: readonly Copy[], wanted: string, bin?: string, install?: string): string[] {
+  return [...strayCopies(niyams, wanted, bin === undefined ? undefined : `${bin}/${CLI}`, install), ...apartLines(apartCopies(niyams, olds))];
 }
 
 /** Says which niyam the shell now runs; exit 1, naming each copy, when it is not `wanted` alone. */
 function pathCheck(sys: Sys, io: Output, wanted: string, bin?: string, install?: string): number {
-  const stray = strayBoth(sys, wanted, bin, install);
+  // Each copy prints its version once: every check below reads these.
+  const niyams = copiesOnPath(sys);
+  const stray = strayBoth(niyams, copiesOnPath(sys, OLD_CLI), wanted, bin, install);
   if (stray.length > 0) {
     for (const line of stray) io.err(/^ /.test(line) ? line : `upgrade: ${line}`);
     return 1;
   }
-  const [first] = copiesOnPath(sys);
+  const [first] = niyams;
   io.out(first === undefined ? `upgrade: no ${CLI} is on PATH; the hooks run the launcher ${CLI} machine writes` : `upgrade: the shell runs ${CLI} ${wanted} (${first.path})`);
   return 0;
 }
@@ -244,7 +246,7 @@ export async function installedFindings(sys: Sys, running: string = packageVersi
       fix: `remove all but one, then ${UPGRADE}`,
     });
   }
-  const apart = apartCopies(sys);
+  const apart = apartCopies(copies, copiesOnPath(sys, OLD_CLI));
   if (apart.length > 0) {
     findings.push({
       mark: '✗',

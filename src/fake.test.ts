@@ -117,7 +117,7 @@ export class FakeSys implements Sys {
     return this;
   }
 
-  /** The agent token as `machine` stores it: service niyam. */
+  /** The agent token as `machine` stores it: service process-rules. */
   setToken(account: string, token: string): this {
     this.keychain.set(`process-rules/${account}`, token);
     return this;

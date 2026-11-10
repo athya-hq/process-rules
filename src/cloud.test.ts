@@ -112,7 +112,7 @@ describe('cloudRepoScript', () => {
       mkdirSync(bin, { recursive: true });
       writeFileSync(join(bin, 'uname'), '#!/bin/sh\necho riscv64\n', { mode: 0o755 });
       const result = spawnSync('bash', ['-c', cloudRepoScript('9.8.7', SHA)], { encoding: 'utf8', env: { PATH: `${bin}:/usr/bin:/bin` } });
-      assert.deepEqual({ status: result.status, stderr: result.stderr }, { status: 1, stderr: 'process-rules: no Node for riscv64\n' });
+      assert.deepEqual({ status: result.status, stderr: result.stderr }, { status: 1, stderr: 'niyam: no Node for riscv64\n' });
     });
   });
 });
@@ -175,7 +175,7 @@ describe('cloudSetupSnippet', () => {
       assert.deepEqual(setup(empty), {
         status: 0,
         stdout: 'repo setup ran\n',
-        stderr: `process-rules: no ${CLOUD_SETUP_PATH} in the clone under ${realpathSync(empty)}; run process-rules onboard, which writes it\n${FAILED}\n`,
+        stderr: `niyam: no ${CLOUD_SETUP_PATH} in the clone under ${realpathSync(empty)}; run niyam onboard, which writes it\n${FAILED}\n`,
       });
     });
   });
