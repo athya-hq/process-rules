@@ -177,8 +177,8 @@ question, the link and how to answer. A body the guard cannot read in full
 (a variable, a command substitution other than `cat`) is judged by what it
 spells out; where that asks the owner, or the body opens with the unknown
 part, it is refused with how to write it so the guard can read it; so is a comment with no body in the command, which gh would take from an editor, a prompt or the browser. Commands inside `$(…)`, backquotes and `sh -c` are read too. `propose`
-posts its own text through GitHub's API, not through `gh`, so this check
-does not see it.
+posts through GitHub's API, not through `gh`, so this check does not see
+it; `propose` holds its own comments to the same rule before posting them.
 
 The session file holds no secret: `GH_TOKEN` is read from the keychain on each
 use, and is a value GitHub refuses when the keychain has none. Git gets a
@@ -527,16 +527,21 @@ owner's words and proposed once. Anything else the agent adds, a fix filed
 as its own slice included, waits for the owner's 👍.
 
 **Approving with one tap.** In an agent session, `niyam propose
-<issue>` asks the owner for what a slice owes: given the slice, it comments
+<issue> --page <url>` asks the owner for what a slice owes: given the slice, it comments
 on it as the agent, one `Proposal:` comment for its addition after the
 approval and one for each State dropped after it (given a State, for that
 state alone), mentioning the owner, and labels the slice `needs-owner`, so it
 shows in the owner's Needs you view and their GitHub notifications. Each
-proposal stands alone: what changes and why, from the slice's `**You will
-see:**` and `**Why:**` sections (a dropped State's own `**Why:**`), what it
-costs (a `**Cost:**` section, if any) and what happens if the owner
-declines. `propose` refuses, posting nothing, while a body lacks those
-sections, and names them. The owner
+proposal is a pointer, as every ask to the owner is: one line naming what it
+proposes, `Page: <url>` and how to answer, in at most 500 characters. The
+page, which the agent publishes first and names with `--page <url>` (one page
+for the whole run), argues it: what changes and why, from the slice's
+`**You will see:**` and `**Why:**` sections (a dropped State's own
+`**Why:**`), what it costs and what happens if the owner declines. Without
+`--page`, or with a link that is no published page, `propose` posts nothing
+and prints the command to run. It also refuses, posting nothing, while a
+body lacks those sections, naming them, and when a comment would break the
+guard's rule (a title so long the comment runs over 500 characters). The owner
 approves a proposal by reacting 👍 to it, from the phone or the web; a typed
 `Decision:` comment still works. A 👍 counts only from the owner, only on the
 agent's comment starting `Proposal:` whose first `#N` is the slice or state
@@ -547,12 +552,12 @@ prints, for each decision still waiting, the link GitHub gives its newest
 proposal, posted now or before: the comment's own `#issuecomment-` address,
 where the owner reacts, never the slice's top or the `needs-owner` list. A
 waiting decision with no proposal yet gets the command that posts one,
-`niyam propose <issue>` with its number. A
+`niyam propose <issue> --page <page url>` with its number. A
 reaction does not re-run a pull request's checks: the agent proposes before
 it starts, and pre-push or a re-run of Work rules sees the 👍.
 
 **Many at once.** `propose` takes several issues, `niyam propose 12
-30 41`, and asks for each in turn. Where the settings name an Approvals issue
+30 41 --page <url>`, and asks for each in turn, each comment linking that page. Where the settings name an Approvals issue
 (`"approvals": N`), each proposal also says it can be answered in the batch
 on Approvals, and the run ends with that issue's link and the first line of
 the owner's answer there, ready to paste: `Decision: approve #12 #30 #41`,

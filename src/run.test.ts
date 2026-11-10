@@ -5,7 +5,7 @@ import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { FakeSys } from './fake.test.ts';
-import { USAGE, packageVersion, run, versionOf } from './run.ts';
+import { USAGE, packageVersion, proposeArgs, run, versionOf } from './run.ts';
 import { nameOf, packageName } from './version.ts';
 
 const manifest: unknown = JSON.parse(
@@ -140,6 +140,27 @@ describe('run', () => {
     assert.deepEqual(await capture(['propose', 'twelve']), { code: 2, out: [], err: ['niyam: propose needs an issue number, not "twelve"', USAGE] });
     assert.deepEqual(await capture(['propose', '12', 'x', 'y']), { code: 2, out: [], err: ['niyam: propose needs an issue number, not "x"', USAGE] });
     assert.deepEqual(await capture(['propose', '#0']), { code: 2, out: [], err: ['niyam: propose needs an issue number, not "#0"', USAGE] });
+  });
+
+  it("takes propose's page once, before or after the numbers, with its value", async () => {
+    const PAGE = 'https://claude.ai/artifact/W48-page';
+    assert.deepEqual(proposeArgs(['12', '--page', PAGE]), { numbers: [12], page: PAGE });
+    assert.deepEqual(proposeArgs([`--page=${PAGE}`, '#12', '30']), { numbers: [12, 30], page: PAGE });
+    assert.deepEqual(proposeArgs(['12']), { numbers: [12] });
+    const paged = await capture(['propose', '12', '--page', PAGE], () => new FakeSys());
+    assert.equal(paged.code, 1);
+    assert.match(paged.err[0] ?? '', /this session has no token/);
+    const bad: Array<[string[], string]> = [
+      [['12', '--page'], "propose --page needs the published page's link"],
+      [['12', '--page', '--other'], "propose --page needs the published page's link"],
+      [['12', '--page='], "propose --page needs the published page's link"],
+      [['12', '--page', PAGE, '--page', PAGE], 'propose takes one --page: one page argues every proposal of the run'],
+      [['--page', PAGE], 'propose needs an issue number'],
+      [['12', PAGE], `propose needs an issue number, not "${PAGE}"`],
+    ];
+    for (const [args, message] of bad) {
+      assert.deepEqual(await capture(['propose', ...args]), { code: 2, out: [], err: [`niyam: ${message}`, USAGE] }, args.join(' '));
+    }
   });
 
   it('runs review-thread, whose arguments are checked first', async () => {

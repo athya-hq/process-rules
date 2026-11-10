@@ -1042,3 +1042,20 @@
   file, the cloud path and `~/.config` now (each needs every adopter
   re-onboarded, the job ids a ruleset edit in the same hour; a later slice);
   publishing to npm now (tarballs as before; its own slice).
+- **2026-11-10 — Record: `propose` posts a pointer to a page (State #236 of
+  P-40).** The owner approved it with a 👍 (page
+  https://claude.ai/artifact/UKSecSCvue9yfwcbA9nHGP): on 10 Nov, all four
+  proposals `propose` posted in the first client ran 716 to 2,134 characters
+  and linked no page, which the guard refuses for any other ask, and one had
+  to be cut by hand. A proposal is now three lines: what it proposes (the
+  first `#N` still names the issue, which the 👍 matching relies on), `Page:
+  <url>` from a required `--page`, and how to answer. The body is checked
+  with the guard's own `askProblem` before anything is posted, so the two
+  cannot drift apart. One page per run, a batch included: one page argues a
+  batch, and every comment then carries its link. A run that only links
+  proposals already posted needs no `--page`, so re-running to relabel or
+  print the batch line still works. The slice must still have its "You will
+  see" and "Why" sections, which the page is written from. Rejected: cutting
+  the old body to 500 characters (it still argues in the comment and links
+  no page); reading the page link from the slice body (a page link in a
+  slice is evidence, not the ask's page).
