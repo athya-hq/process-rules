@@ -2,10 +2,12 @@ import { CLI } from './names.ts';
 import {
   API,
   EXPIRY_WARNING_DAYS,
+  NOT_AGENTS,
   TOKEN_SCOPES,
   account,
   agentFrom,
   checkToken,
+  configDir,
   keyBody,
   keyPairProblem,
   launcherPath,
@@ -34,6 +36,31 @@ const KEY_PAGE = `${GITHUB_WEB}/settings/ssh/new`;
 export const LEFTOVER_DIR = '.config/process-rules';
 
 /** The leftover folder's path on this Mac, when it is there. */
+/**
+ * The records in the folder before P-55 that a session or a later run still
+ * needs: each Claude Code session's record, which guard and as-agent read to
+ * tell an agent session (a session started before 0.6.10 has its record
+ * there alone), and each agent's lockout records. Copied into the new folder
+ * where it has none of the same name, before the old folder goes; what the
+ * new folder has already wins. Returns how many it copied.
+ */
+export function moveLeftoverRecords(sys: Sys, oldDir: string): number {
+  const newDir = configDir(sys.home);
+  const files: [string, string][] = sys.list(`${oldDir}/sessions`).filter((name) => name.endsWith('.json')).map((name) => [`sessions/${name}`, name]);
+  for (const agent of sys.list(oldDir).filter((name) => !NOT_AGENTS.includes(name))) {
+    for (const name of ['lockout-declined.json', 'gh-moved.json']) if (sys.exists(`${oldDir}/${agent}/${name}`)) files.push([`${agent}/${name}`, name]);
+  }
+  let copied = 0;
+  for (const [rel] of files) {
+    const to = `${newDir}/${rel}`;
+    if (sys.exists(to)) continue;
+    sys.mkdir(to.slice(0, to.lastIndexOf('/')));
+    sys.write(to, sys.read(`${oldDir}/${rel}`), 0o600);
+    copied += 1;
+  }
+  return copied;
+}
+
 export function leftoverDir(sys: Sys): string | undefined {
   const dir = `${sys.home}/${LEFTOVER_DIR}`;
   return sys.exists(dir) || sys.list(dir).length > 0 ? dir : undefined;
@@ -184,7 +211,7 @@ export async function machine(sys: Sys, io: Output, args: readonly string[] = []
   const fixes: Finding[] = keyFindings(found, sys.home);
   // The folder before P-55, removed whole once the new one is written: its launcher, and any session file or record still in it.
   const oldDir = leftoverDir(sys);
-  if (oldDir) mac.push({ label: 'old folder', detail: `remove ${home(oldDir)}, its launcher and all in it` });
+  if (oldDir) mac.push({ label: 'old folder', detail: `move its session and lockout records to ${home(configDir(sys.home))}, then remove ${home(oldDir)}, its launcher and all in it` });
   const keptLeftover = (why: string): Finding => ({
     mark: '▲',
     text: `${store.leftoverItem?.(agent) ?? 'the old keychain entry'} stays: ${why}`,
@@ -321,6 +348,8 @@ export async function machine(sys: Sys, io: Output, args: readonly string[] = []
   }
   if (oldDir) {
     const { ok } = await runStep(sys, io, paint, `${home(oldDir)} removed`, async () => {
+      // A session started before 0.6.10 has its record there alone: without the copy it would lose its agent identity.
+      moveLeftoverRecords(sys, oldDir);
       sys.remove(oldDir);
       return leftoverDir(sys) === undefined;
     });
