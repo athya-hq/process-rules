@@ -1,4 +1,3 @@
-import { CLI, OLD_CLI, OLD_CONFIG_DIR } from './names.ts';
 import {
   EXPIRY_WARNING_DAYS,
   account,
@@ -14,10 +13,9 @@ import {
   checkToken,
   keyBody,
   keyPairProblem,
-  OLD_LAUNCHER,
   launcherPath,
+  pathsFor,
   sessionFileIs,
-  sessionPaths,
   signingKeys,
   tokenInfo,
 } from './agent.ts';
@@ -28,11 +26,12 @@ import { typesDrift } from './issue-types.ts';
 import { type Finding, closing, findingLines, heading, painter, tilde } from './layout.ts';
 import { exposure, exposureFindings, movedFindings, readDeclined, setAside } from './lockout.ts';
 import { CLOUD_SETUP_PATH, HOOKS_PATH } from './onboard-pull.ts';
+import { leftoverDir, leftoverToken } from './machine.ts';
 import { missingAutoFixRules } from './onboard.ts';
 import { isOrganisation } from './owner-login.ts';
 import { leftBehind } from './owner-step.ts';
 import { repoRoot } from './session-start.ts';
-import { tokenStore, unsupported } from './token-store.ts';
+import { type TokenStore, tokenStore, unsupported } from './token-store.ts';
 import type { Output, Sys } from './types.ts';
 import { installedFindings } from './upgrade.ts';
 import { packageVersion } from './version.ts';
@@ -73,8 +72,7 @@ export async function doctor(sys: Sys, io: Output, named?: string): Promise<numb
     error instanceof Error ? error : new Error(String(error)),
   );
   const agent = found instanceof Error ? typed : found.login;
-  // The session file session-start reads: the config folder's, else the one machine wrote there before P-55.
-  const paths = sessionPaths(sys, agent);
+  const paths = pathsFor(sys.home, agent);
   const home = (path: string): string => tilde(sys.home, path);
 
   const keyProblem = keyPairProblem(sys, paths.key);
@@ -87,14 +85,13 @@ export async function doctor(sys: Sys, io: Output, named?: string): Promise<numb
       if (found instanceof Error) throw found;
       const is = sessionFileIs(sys.read(paths.session), agent, found.id, paths, store);
       if (!is) return { mark: '✗', text: 'session file out of date', fix: MACHINE };
-      if (paths.old) return { mark: '▲', text: `session file only in ~/${OLD_CONFIG_DIR}, niyam's old folder; it still works`, fix: MACHINE };
       return is === 'current'
         ? { mark: '✓', text: 'session file' }
         : { mark: '▲', text: 'session file from an older release; it still works', fix: MACHINE };
     }),
   ];
 
-  mac.push(...launcherFindings(sys), ...(await installedFindings(sys)));
+  mac.push(launcherFinding(sys), ...leftoverFindings(sys, store, agent), ...(await installedFindings(sys)));
   const { left, kept } = setAside(exposure(sys, agent), readDeclined(sys, agent));
   mac.push(...kept.map((text): Finding => ({ mark: '✓', text })), ...exposureFindings(left, sys.home), ...movedFindings(sys, agent), ...leftBehind(sys));
 
@@ -122,34 +119,36 @@ export async function doctor(sys: Sys, io: Output, named?: string): Promise<numb
   ]);
 }
 
-/**
- * The launchers the hooks run: the one `machine` writes, ✓ when it runs
- * niyam, and the one it wrote before P-55, which this release's hooks fall
- * back to and hooks 0.6.8 and 0.6.9 wrote run whenever it is there. Alone,
- * a working old one is ▲, as `machine` writes the new one. Either way a
- * broken old one is ✗: `niyam upgrade` points one that runs process-rules at
- * niyam, and one that does not run at all is best removed, since those older
- * hooks then run niyam on PATH.
- */
-function launcherFindings(sys: Sys): Finding[] {
-  // Beside the new launcher, machine leaves the old one as it is, so the fixes are upgrade's repoint, or removing it.
-  const problem = (launcher: string, name: string, fixes = { broken: MACHINE, stale: `${CLI} upgrade, or ${MACHINE}` }): Finding | undefined => {
-    const runs = sys.exec(launcher, ['--version'], { env: { ...sys.env, PATH: '/usr/bin:/bin' } });
-    if (runs.code !== 0) return { mark: '✗', text: `${name} does not run (${runs.stderr.trim() || `exit ${runs.code}`}); its node removed?`, fix: fixes.broken };
-    return OLD_LAUNCHER.test(sys.read(launcher))
-      ? { mark: '✗', text: `${name} runs ${OLD_CLI}, niyam's old command, which this release no longer installs, so hooks may find no CLI`, fix: fixes.stale }
-      : undefined;
-  };
+/** The launcher the hooks run, which `machine` writes: ✓ when it runs. */
+function launcherFinding(sys: Sys): Finding {
   const launcher = launcherPath(sys.home);
-  const old = launcherPath(sys.home, true);
-  const oldName = `the old launcher ${tilde(sys.home, old)}`;
-  if (sys.exists(launcher)) {
-    const besideNew = { broken: `rm ${tilde(sys.home, old)}`, stale: `${CLI} upgrade` };
-    const oldProblem = sys.exists(old) ? problem(old, `${oldName}, which hooks 0.6.8 and 0.6.9 wrote run,`, besideNew) : undefined;
-    return [problem(launcher, 'launcher') ?? { mark: '✓', text: 'launcher' }, ...(oldProblem ? [oldProblem] : [])];
-  }
-  if (!sys.exists(old)) return [{ mark: '✗', text: 'launcher missing, so hooks need node on PATH', fix: MACHINE }];
-  return [problem(old, oldName) ?? { mark: '▲', text: `launcher only at ${tilde(sys.home, old)}, in niyam's old folder; the hooks still find it`, fix: MACHINE }];
+  if (!sys.exists(launcher)) return { mark: '✗', text: 'launcher missing, so hooks need node on PATH', fix: MACHINE };
+  const runs = sys.exec(launcher, ['--version'], { env: { ...sys.env, PATH: '/usr/bin:/bin' } });
+  return runs.code === 0
+    ? { mark: '✓', text: 'launcher' }
+    : { mark: '✗', text: `launcher does not run (${runs.stderr.trim() || `exit ${runs.code}`}); its node removed?`, fix: MACHINE };
+}
+
+/**
+ * What is left on this Mac from before niyam, which no release reads since
+ * P-57: the folder before P-55, and the keychain's entry before niyam. Each
+ * is ▲, as `machine` removes it; an entry holding another token than the
+ * current one `machine` leaves, so its fix is the delete by hand.
+ */
+function leftoverFindings(sys: Sys, store: TokenStore, agent: string): Finding[] {
+  const dir = leftoverDir(sys);
+  const token = leftoverToken(sys, store, agent);
+  const item = store.leftoverItem?.(agent) ?? 'the old keychain entry';
+  return [
+    ...(dir ? [{ mark: '▲' as const, text: `${tilde(sys.home, dir)}, niyam's folder before P-55, is still here; nothing reads it`, fix: MACHINE }] : []),
+    ...(token === undefined
+      ? []
+      : [
+          token.same
+            ? { mark: '▲' as const, text: `${item}, from before niyam, is still in ${store.where}; nothing reads it`, fix: MACHINE }
+            : { mark: '▲' as const, text: `${item}, from before niyam, is still in ${store.where}, and ${token.why}`, fix: `once nothing needs it, ${store.dropLeftoverCommand?.(agent) ?? 'delete it'}` },
+        ]),
+  ];
 }
 
 /**

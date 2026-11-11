@@ -133,7 +133,7 @@ describe('checks of features that are off', () => {
       GITHUB_REPOSITORY: 'example-org/example-app',
       GH_TOKEN: 'ghs_run',
       FIGMA_TOKEN: 'figd',
-      PROCESS_RULES_AGENT: AGENT,
+      NIYAM_AGENT: AGENT,
     };
     return sys;
   }
@@ -211,7 +211,7 @@ describe('checks on a personal repository', () => {
       GH_TOKEN: 'ghs_run',
       FIGMA_TOKEN: 'figd',
       FIGMA_LIBRARY: 'abc',
-      PROCESS_RULES_AGENT: AGENT,
+      NIYAM_AGENT: AGENT,
     };
     return sys;
   }

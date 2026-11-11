@@ -9,7 +9,7 @@ const THREAD = 'PRRT_kwDOabc123';
 /** An agent session, with GitHub showing THREAD on pull request #40 of this repository. */
 function session(pull: Record<string, unknown> = {}, isResolved = false): FakeSys {
   const sys = new FakeSys();
-  sys.env = { PROCESS_RULES_AGENT: AGENT, GH_TOKEN: 'ghp_good' };
+  sys.env = { NIYAM_AGENT: AGENT, GH_TOKEN: 'ghp_good' };
   sys.acceptToken('ghp_good', AGENT);
   sys.route('POST', '/graphql', () => {
     const query = (sys.requests.at(-1)?.body as { query: string }).query;

@@ -937,7 +937,7 @@ describe('prePush', () => {
   const ZERO = '0'.repeat(40);
   function session(log: string): FakeSys {
     const sys = new FakeSys();
-    sys.env = { PROCESS_RULES_AGENT: AGENT, GH_TOKEN: 'ghp_good' };
+    sys.env = { NIYAM_AGENT: AGENT, GH_TOKEN: 'ghp_good' };
     sys.execOverride = (call) => (call.args[0] === 'log' ? { code: 0, stdout: log, stderr: '' } : undefined);
     github(sys, graph().issue);
     sys.acceptToken('ghp_good', AGENT);
@@ -1018,9 +1018,9 @@ describe('prePush', () => {
   });
 
   it('refuses an agent session with no token, at the identity guard', async () => {
-    // Both placeholders, this release's and 0.6.9's, are no token; the agent by either name (P-55).
-    for (const token of [undefined, 'process-rules-no-agent-token', 'niyam-no-agent-token']) {
-      for (const name of ['PROCESS_RULES_AGENT', 'NIYAM_AGENT']) {
+    // The lock's placeholder is no token.
+    for (const token of [undefined, 'niyam-no-agent-token']) {
+      for (const name of ['NIYAM_AGENT']) {
         const sys = session('Slice: #12');
         sys.env = { [name]: AGENT, ...(token ? { GH_TOKEN: token } : {}) };
         const { code, err } = await push(sys, `refs/heads/work ${LOCAL} refs/heads/work ${REMOTE}`);
@@ -1031,7 +1031,7 @@ describe('prePush', () => {
 
   it('refuses work rules it cannot read when git pushes as the agent without GH_TOKEN', async () => {
     const sys = session('Slice: #12');
-    sys.env = { PROCESS_RULES_AGENT: AGENT };
+    sys.env = { NIYAM_AGENT: AGENT };
     const log = sys.execOverride;
     sys.execOverride = (call) =>
       call.args.join(' ') === 'credential fill' ? { code: 0, stdout: 'password=ghp_good\n', stderr: '' } : log(call);
@@ -1493,7 +1493,7 @@ describe('propose', () => {
   /** An agent session, slice #12 added after approval, and state #30 of it dropped after approval. */
   function session(g = graph()): { sys: FakeSys; g: ReturnType<typeof graph> } {
     const sys = new FakeSys();
-    sys.env = { PROCESS_RULES_AGENT: AGENT, GH_TOKEN: 'ghp_good' };
+    sys.env = { NIYAM_AGENT: AGENT, GH_TOKEN: 'ghp_good' };
     sys.acceptToken('ghp_good', AGENT);
     github(sys, g.issue);
     let made = 0;
@@ -1779,10 +1779,12 @@ describe('propose', () => {
 
   it('refuses a session with no token, or not working as the agent', async () => {
     const { sys } = session();
-    sys.env = { GH_TOKEN: 'process-rules-no-agent-token' };
+    sys.env = {};
     assert.equal((await run(sys)).err[0], '✗ this session has no token; run niyam doctor');
     sys.env = { GH_TOKEN: 'niyam-no-agent-token' };
-    assert.equal((await run(sys)).err[0], '✗ this session has no token; run niyam doctor', "this release's placeholder too (P-55)");
+    assert.equal((await run(sys)).err[0], '✗ this session has no token; run niyam doctor', "the lock's placeholder");
+    sys.env = { GH_TOKEN: 'process-rules-no-agent-token' };
+    assert.equal((await run(sys)).err[0], "✗ propose posts as ExampleBot, but this session's token is refused", "0.6.9's placeholder is a token GitHub refuses (P-57)");
     sys.env = { GH_TOKEN: 'ghp_owner' };
     assert.equal((await run(sys)).err[0], "✗ propose posts as ExampleBot, but this session's token is refused");
     sys.acceptToken('ghp_owner', OWNER);
@@ -1908,7 +1910,7 @@ describe('with two owners and two agents', () => {
     const push = async (login: string): Promise<{ code: number; err: string[] }> => {
       const sys = new FakeSys();
       sys.files.set(`${ROOT}/.github/niyam.json`, TEAM_SETTINGS);
-      sys.env = { PROCESS_RULES_AGENT: login, GH_TOKEN: 'ghp_good' };
+      sys.env = { NIYAM_AGENT: login, GH_TOKEN: 'ghp_good' };
       sys.execOverride = (call) => (call.args[0] === 'log' ? { code: 0, stdout: 'Slice: #12\n', stderr: '' } : undefined);
       github(sys, graph().issue);
       sys.acceptToken('ghp_good', login);
@@ -1926,7 +1928,7 @@ describe('with two owners and two agents', () => {
   it('proposes as the second agent, asking both owners', async () => {
     const sys = new FakeSys();
     sys.files.set(`${ROOT}/.github/niyam.json`, TEAM_SETTINGS);
-    sys.env = { PROCESS_RULES_AGENT: AGENT_2, GH_TOKEN: 'ghp_good' };
+    sys.env = { NIYAM_AGENT: AGENT_2, GH_TOKEN: 'ghp_good' };
     sys.acceptToken('ghp_good', AGENT_2);
     github(sys, added().issue);
     sys.route('POST', `/repos/${SLUG}/issues/12/comments`, { status: 201, json: { html_url: `https://github.com/${SLUG}/issues/12#issuecomment-9` } });

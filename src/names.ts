@@ -20,20 +20,8 @@ export function tarballName(version: string, pkg: string = PACKAGE): string {
   return `${pkg.replace(/^@/, '').replace('/', '-')}-${version}.tgz`;
 }
 
-/**
- * This Mac's files, under the home folder: the agents' folders, the session
- * records, the locked gh folder and the launcher. Before P-55 they were under
- * the old folder, which `machine` leaves in place and every reader still
- * takes where the new one has nothing, until P-57.
- */
+/** This Mac's files, under the home folder: the agents' folders, the session records, the locked gh folder and the launcher. */
 export const CONFIG_DIR = '.config/niyam';
-export const OLD_CONFIG_DIR = '.config/process-rules';
 
-/**
- * The variable naming the agent in an agent session's shells, and its name
- * before P-55, still set beside it: pre-push hooks, older CLIs and adopters'
- * scripts that read only the old name would otherwise take the session for
- * the owner's.
- */
+/** The variable naming the agent in an agent session's shells. */
 export const AGENT_VAR = 'NIYAM_AGENT';
-export const OLD_AGENT_VAR = 'PROCESS_RULES_AGENT';

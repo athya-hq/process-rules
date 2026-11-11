@@ -121,7 +121,7 @@ describe('run', () => {
     assert.match((await capture(['pr-work-rules'], () => new FakeSys())).err[0] ?? '', /pr-work-rules runs in GitHub Actions/);
     assert.match((await capture(['pr-merged'], () => new FakeSys())).err[0] ?? '', /pr-merged runs in GitHub Actions/);
     const agent = new FakeSys();
-    agent.env = { PROCESS_RULES_AGENT: 'ExampleBot' };
+    agent.env = { NIYAM_AGENT: 'ExampleBot' };
     agent.stdin = `refs/heads/work ${'a'.repeat(40)} refs/heads/work ${'b'.repeat(40)}\n`;
     const refused = await capture(['pre-push', 'origin', 'https://github.com/a/b.git'], () => agent);
     assert.equal(refused.code, 1);

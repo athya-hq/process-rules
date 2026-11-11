@@ -14,9 +14,9 @@ import { CLOUD_SETUP_PATH, OLD_CLOUD_SETUP_PATH, OLD_WORKFLOW_PATH, WORKFLOW_PAT
 const SHA = 'ab'.repeat(32);
 
 describe('cloudToken', () => {
-  it("takes a token the environment set, else the proxy's placeholder, never a lock's, this release's or 0.6.9's (P-55)", () => {
+  it("takes a token the environment set, else the proxy's placeholder, never the lock's; 0.6.9's lock token is one GitHub refuses (P-57)", () => {
     const sys = new FakeSys();
-    for (const [token, used] of [[undefined, PROXY_TOKEN], ['', PROXY_TOKEN], ['niyam-no-agent-token', PROXY_TOKEN], ['process-rules-no-agent-token', PROXY_TOKEN], ['ghp_set', 'ghp_set']] as const) {
+    for (const [token, used] of [[undefined, PROXY_TOKEN], ['', PROXY_TOKEN], ['niyam-no-agent-token', PROXY_TOKEN], ['process-rules-no-agent-token', 'process-rules-no-agent-token'], ['ghp_set', 'ghp_set']] as const) {
       sys.env = { GH_TOKEN: token };
       assert.equal(cloudToken(sys), used, String(token));
     }

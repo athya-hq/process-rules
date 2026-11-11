@@ -5,12 +5,12 @@ import {
   loadSettings,
   sameLogin,
   sessionEnv,
+  pathsFor,
   sessionNames,
-  sessionPaths,
   sessionRecord,
   sessionFileIs,
 } from './agent.ts';
-import { AGENT_VAR, OLD_AGENT_VAR } from './names.ts';
+import { AGENT_VAR } from './names.ts';
 import { cloudToken } from './cloud.ts';
 import { recordedAgent, reachesGitHub, refusal } from './guard.ts';
 import { GUARD_COMMAND, HOOK_COMMAND, OLDER_GUARD_COMMANDS, OLDER_HOOK_COMMANDS } from './onboard.ts';
@@ -90,8 +90,7 @@ function defined(env: Record<string, string | undefined>): Record<string, string
 function macEnv(sys: Sys, agent: string): Env {
   const store = tokenStore(sys);
   if (!store) return { problem: unsupported(sys) };
-  // As session-start finds it: the config folder's, else the one machine wrote before P-55.
-  const paths = sessionPaths(sys, agent);
+  const paths = pathsFor(sys.home, agent);
   let script: string;
   try {
     script = sys.read(paths.session);
@@ -114,7 +113,7 @@ function macEnv(sys: Sys, agent: string): Env {
  */
 function cloudEnv(sys: Sys, agent: string): Env {
   const token = cloudToken(sys);
-  return { env: defined({ ...unlocked(sys), GH_TOKEN: token, GITHUB_TOKEN: token, [AGENT_VAR]: agent, [OLD_AGENT_VAR]: agent }) };
+  return { env: defined({ ...unlocked(sys), GH_TOKEN: token, GITHUB_TOKEN: token, [AGENT_VAR]: agent }) };
 }
 
 /** The settings files a client's hooks live in. */

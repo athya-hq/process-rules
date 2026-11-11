@@ -6,7 +6,7 @@ import { AGENT, AGENT_ID, CLASSIC, CLI, FakeSys, HOME, NODE, KEY, PRIVATE_KEY, P
 import { declinedPath, movedPath, ownerFixes, readMoved } from './lockout.ts';
 import { TOKEN_PAGE, machine, machineArgs, tokenInstructions } from './machine.ts';
 import { KEYCHAIN } from './token-store.ts';
-import { SESSION_069 } from './older-texts.test.ts';
+import { SESSION_0610, SESSION_069 } from './older-texts.test.ts';
 
 const SESSION = `${HOME}/.config/niyam/examplebot/session.sh`;
 const LAUNCHER = launcherPath(HOME);
@@ -181,66 +181,124 @@ describe('machine', () => {
     assert.ok(!sys.calls.some((c) => c.command === 'ssh-keygen' && c.args[0] !== '-y'));
   });
 
-  describe('a Mac set up before niyam (P-50)', () => {
-    const OLD_READ = `/usr/bin/security find-generic-password -s process-rules -a ${AGENT} -w 2>/dev/null`;
-    /** done(), with the token under the old keychain service alone and the session file an older release wrote. */
-    const before = (): FakeSys => {
+  describe('what is left from before niyam (P-57)', () => {
+    const OLD_DIR = `${HOME}/.config/process-rules`;
+    const OLD_ITEM = `process-rules/${AGENT}`;
+    /** done(), as 0.6.10 left a Mac: its session file, the folder before P-55 with 0.6.9's files, and the old keychain entry. */
+    const before = (oldToken: string | undefined = TOKEN): FakeSys => {
       const sys = done();
-      const token = sys.keychain.get(`niyam/${AGENT}`) as string;
-      sys.keychain.delete(`niyam/${AGENT}`);
-      sys.keychain.set(`process-rules/${AGENT}`, token);
-      sys.files.set(SESSION, sessionScript(AGENT, AGENT_ID, pathsFor(HOME, AGENT), KEYCHAIN, OLD_READ));
+      sys.files.set(SESSION, SESSION_0610);
+      sys.files.set(`${OLD_DIR}/examplebot/session.sh`, SESSION_069);
+      sys.files.set(`${OLD_DIR}/bin/process-rules`, launcherScript(NODE, CLI));
+      sys.files.set(`${OLD_DIR}/sessions/s1.json`, '{"agent":"ExampleBot"}\n');
+      if (oldToken !== undefined) sys.keychain.set(OLD_ITEM, oldToken);
       return sys;
     };
+    const oldFiles = (sys: FakeSys): string[] => [...sys.files.keys()].filter((path) => path.startsWith(`${OLD_DIR}/`));
 
-    it('copies the token to the niyam service, keeping the old entry, and rewrites the session file', async () => {
+    it('plans removing the old folder and deleting the old keychain entry, which holds the same token, by name', async () => {
       const sys = before();
-      const token = sys.keychain.get(`process-rules/${AGENT}`);
-      const { code, out } = await setUp(sys, '--yes');
+      const { code, out } = await setUp(sys, '--dry-run');
       assert.equal(code, 0);
-      assert.ok(out.some((line) => new RegExp(`token\\s+copied to service niyam, account ${AGENT}`).test(line)), out.join('\n'));
-      assert.ok(out.some((line) => /session file\s+updated/.test(line)), out.join('\n'));
-      assert.equal(sys.keychain.get(`niyam/${AGENT}`), token);
-      assert.equal(sys.keychain.get(`process-rules/${AGENT}`), token, 'older CLIs still read the old entry');
-      assert.equal(sys.files.get(SESSION), sessionScript(AGENT, AGENT_ID, pathsFor(HOME, AGENT)));
+      assert.deepEqual(out.slice(2, 6), [
+        '◇  This Mac',
+        '│    keychain      delete service process-rules, account ExampleBot: service niyam, account ExampleBot holds the same token',
+        '│    session file  updated',
+        '│    old folder    remove ~/.config/process-rules, its launcher and all in it',
+      ]);
+      assert.equal(oldFiles(sys).length, 3, 'a dry run changes nothing');
+      assert.equal(sys.keychain.get(OLD_ITEM), TOKEN);
     });
 
-    it('stops, saying the old entry still works, when the keychain does not take the copy', async () => {
-      const sys = before();
-      sys.execOverride = (call) => (call.args[0] === '-i' ? { code: 1, stdout: '', stderr: '' } : undefined);
-      const { code, err } = await setUp(sys, '--yes');
-      assert.deepEqual({ code, err }, { code: 1, err: [`machine: this Mac's keychain did not take the token under service niyam, account ${AGENT}; the old entry still works`] });
-    });
-  });
-
-  describe('a Mac set up under 0.6.9, before P-55 (P-55)', () => {
-    const OLD_SESSION = pathsFor(HOME, AGENT, true).session;
-    const OLD_LAUNCHER = launcherPath(HOME, true);
-    const oldLauncher = launcherScript(NODE, CLI);
-    /** done(), with the session file and the launcher in the old folder alone, as 0.6.9's machine left them. */
-    const before = (): FakeSys => {
-      const sys = done();
-      sys.files.delete(SESSION);
-      sys.files.delete(launcherPath(HOME));
-      sys.files.set(OLD_SESSION, SESSION_069);
-      sys.files.set(OLD_LAUNCHER, oldLauncher);
-      return sys;
-    };
-
-    it('writes the session file and the launcher in the new folder, leaving the old ones for older hooks and CLIs', async () => {
+    it('removes the folder, whole, once the new one is written, and deletes the entry after reading both again', async () => {
       const sys = before();
       const { code, out } = await setUp(sys, '--yes');
       assert.equal(code, 0, out.join('\n'));
-      assert.ok(out.some((line) => /session file\s+new/.test(line)), out.join('\n'));
-      assert.ok(out.includes('│    launcher      ~/.config/niyam/bin/niyam'), out.join('\n'));
+      assert.deepEqual(oldFiles(sys), []);
+      assert.ok(sys.removed.includes(OLD_DIR));
+      assert.equal(sys.keychain.has(OLD_ITEM), false);
+      assert.equal(sys.keychain.get(`niyam/${AGENT}`), TOKEN);
       assert.equal(sys.files.get(SESSION), sessionScript(AGENT, AGENT_ID, pathsFor(HOME, AGENT)));
-      assert.equal(sys.files.get(launcherPath(HOME)), launcherScript(NODE, CLI));
-      assert.equal(sys.modes.get(launcherPath(HOME)), 0o755);
-      assert.ok(sys.dirs.includes(`${HOME}/.config/niyam/examplebot/gh`));
-      assert.equal(sys.files.get(OLD_SESSION), SESSION_069, 'the old session file stays');
-      assert.equal(sys.files.get(OLD_LAUNCHER), oldLauncher, 'the old launcher stays');
-      assert.deepEqual(sys.removed, []);
+      const deleted = sys.calls.findIndex((call) => call.args[0] === 'delete-generic-password');
+      const written = sys.calls.findIndex((call) => call.command === '/usr/bin/security' && call.args[0] === '-i');
+      assert.ok(deleted > 0 && written === -1, 'the token stays; only the old entry goes');
+      assert.ok(out.some((line) => line.includes('~/.config/process-rules removed')), out.join('\n'));
+      assert.ok(out.some((line) => line.includes('service process-rules, account ExampleBot deleted')), out.join('\n'));
       assert.equal((await setUp(sys)).out.at(-1), `└  ${AGENT} is ready on this Mac`, 'then nothing more to do');
+    });
+
+    it('leaves the old entry, saying why and how to delete it by hand, when it holds another token', async () => {
+      const sys = before('ghp_other');
+      const { code, out } = await setUp(sys, '--yes');
+      assert.equal(code, 0, out.join('\n'));
+      assert.equal(sys.keychain.get(OLD_ITEM), 'ghp_other');
+      assert.ok(!out.some((line) => /keychain\s+delete/.test(line)), 'not in the plan');
+      assert.ok(
+        out.includes(
+          '▲  service process-rules, account ExampleBot stays: it holds another token than service niyam, account ExampleBot → once nothing needs it, /usr/bin/security delete-generic-password -s process-rules -a ExampleBot',
+        ),
+        out.join('\n'),
+      );
+      assert.deepEqual(oldFiles(sys), [], 'the folder goes all the same');
+    });
+
+    it('says so with nothing else to do, too', async () => {
+      const sys = done();
+      sys.keychain.set(OLD_ITEM, 'ghp_other');
+      const { code, out } = await setUp(sys);
+      assert.equal(code, 0);
+      assert.ok(out.some((line) => line.includes('service process-rules, account ExampleBot stays: it holds another token')), out.join('\n'));
+      assert.deepEqual(sys.chosen, [], 'nothing to ask');
+    });
+
+    it('reads no token from the old entry: with niyam holding none, it asks for one, and leaves the old entry unless it holds that one', async () => {
+      const sys = before('ghp_old');
+      sys.keychain.delete(`niyam/${AGENT}`);
+      sys.secrets = [TOKEN];
+      const { code, out } = await setUp(sys, '--yes');
+      assert.equal(code, 0, out.join('\n'));
+      assert.ok(out.some((line) => /token\s+classic, in the keychain \(new\)/.test(line)), out.join('\n'));
+      assert.equal(sys.keychain.get(`niyam/${AGENT}`), TOKEN);
+      assert.equal(sys.keychain.get(OLD_ITEM), 'ghp_old');
+      assert.ok(out.some((line) => line.includes('stays: it holds another token than service niyam')), out.join('\n'));
+    });
+
+    it('leaves an old entry holding the token just pasted, which the plan did not name, for the next run', async () => {
+      const sys = before(TOKEN);
+      sys.keychain.delete(`niyam/${AGENT}`);
+      sys.secrets = [TOKEN];
+      const { code, out } = await setUp(sys, '--yes');
+      assert.equal(code, 0, out.join('\n'));
+      assert.equal(sys.keychain.get(OLD_ITEM), TOKEN);
+      assert.ok(out.some((line) => line.includes("holds the token just stored, and this run's plan did not delete it → niyam machine")), out.join('\n'));
+    });
+
+    it('does not delete an entry that changed since the plan, and says when the keychain keeps it', async () => {
+      const changed = before();
+      changed.answers = ['y'];
+      changed.tty = true;
+      const choose = changed.choose.bind(changed);
+      changed.choose = async (question: string) => {
+        changed.keychain.set(OLD_ITEM, 'ghp_changed');
+        return choose(question);
+      };
+      const first = await setUp(changed);
+      assert.equal(changed.keychain.get(OLD_ITEM), 'ghp_changed', first.out.join('\n'));
+      assert.ok(first.out.some((line) => line.includes('stays: it holds another token')), first.out.join('\n'));
+
+      const kept = before();
+      kept.undeletable.add(OLD_ITEM);
+      const second = await setUp(kept, '--yes');
+      assert.equal(kept.keychain.get(OLD_ITEM), TOKEN);
+      assert.ok(second.out.some((line) => line.includes("stays: this Mac's keychain did not delete it")), second.out.join('\n'));
+    });
+
+    it('says so when the old folder cannot be removed', async () => {
+      const sys = before(undefined);
+      sys.remove = () => undefined;
+      const { code, out } = await setUp(sys, '--yes');
+      assert.equal(code, 0);
+      assert.ok(out.some((line) => line.includes("~/.config/process-rules, niyam's folder before P-55, is still here → rm -r ~/.config/process-rules")), out.join('\n'));
     });
   });
 

@@ -1,4 +1,4 @@
-import { AGENT_VAR, CLI, CONFIG_DIR, OLD_AGENT_VAR, OLD_CLI, OLD_CONFIG_DIR, OLD_PRODUCT, PRODUCT } from './names.ts';
+import { AGENT_VAR, CLI, CONFIG_DIR, OLD_CLI, OLD_PRODUCT, PRODUCT } from './names.ts';
 import {
   API,
   BASE_ENV,
@@ -55,9 +55,8 @@ export const SETUP_FIRST = "If the repo has its own Setup script, put this first
 /** This product's repository: clients call its shared workflow. */
 export { PRODUCT } from './names.ts';
 export { HOOKS_PATH, WORKFLOW_PATH } from './onboard-pull.ts';
-/** The launcher `machine` writes, and the one it wrote before P-55, as a hook's shell spells them. */
+/** The launcher `machine` writes, as a hook's shell spells it. */
 const HOOK_LAUNCHER = `$HOME/${CONFIG_DIR}/bin/${CLI}`;
-const OLD_HOOK_LAUNCHER = `$HOME/${OLD_CONFIG_DIR}/bin/${OLD_CLI}`;
 
 /**
  * The pre-push git hook: before a local agent session pushes, that it
@@ -69,9 +68,8 @@ export const PRE_PUSH_HOOK = [
   '#!/bin/sh',
   '# Written by niyam onboard: before an agent session pushes, that it pushes as the agent, then the work rules.',
   '# Anyone else\'s push goes ahead. Without the CLI nothing can check an agent session\'s push, so it is refused.',
-  `[ -z "$${AGENT_VAR}" ] && [ -z "$${OLD_AGENT_VAR}" ] && [ "$CLAUDECODE" != 1 ] && exit 0`,
+  `[ -z "$${AGENT_VAR}" ] && [ "$CLAUDECODE" != 1 ] && exit 0`,
   `cli="${HOOK_LAUNCHER}"`,
-  `[ -x "$cli" ] || cli="${OLD_HOOK_LAUNCHER}"`,
   `[ -x "$cli" ] || cli=${CLI}`,
   'if ! command -v "$cli" >/dev/null 2>&1; then',
   '  echo "niyam: the CLI is not installed, so this agent push cannot be checked" >&2',
@@ -83,6 +81,22 @@ export const PRE_PUSH_HOOK = [
 
 /** The pre-push hooks older releases wrote, which onboard replaces with this release's. */
 export const OLDER_PRE_PUSH_HOOKS = [
+  // 0.6.10's, before P-57: the agent by either variable, the launcher in the new folder, else the old one.
+  [
+    '#!/bin/sh',
+    '# Written by niyam onboard: before an agent session pushes, that it pushes as the agent, then the work rules.',
+    '# Anyone else\'s push goes ahead. Without the CLI nothing can check an agent session\'s push, so it is refused.',
+    '[ -z "$NIYAM_AGENT" ] && [ -z "$PROCESS_RULES_AGENT" ] && [ "$CLAUDECODE" != 1 ] && exit 0',
+    'cli="$HOME/.config/niyam/bin/niyam"',
+    '[ -x "$cli" ] || cli="$HOME/.config/process-rules/bin/process-rules"',
+    '[ -x "$cli" ] || cli=niyam',
+    'if ! command -v "$cli" >/dev/null 2>&1; then',
+    '  echo "niyam: the CLI is not installed, so this agent push cannot be checked" >&2',
+    '  exit 1',
+    'fi',
+    'exec "$cli" pre-push "$@"',
+    '',
+  ].join('\n'),
   // 0.6.8 and 0.6.9's, before P-55: the agent by its old variable alone, the launcher in the old folder alone.
   [
     '#!/bin/sh',
@@ -158,12 +172,10 @@ export function prePushHook(sys: Sys, root: string): { path: string; file: strin
   return { path, file, state: /^\s*(?:exec\s+)?(?:"\$cli"|process-rules|niyam)\s+pre-push\b/m.test(text) ? 'ours' : 'own' };
 }
 
-/**
- * How a hook finds the CLI: the launcher `machine` writes, else the one it
- * wrote before P-55, which a Mac not set up again since has alone, else
- * niyam on PATH.
- */
-const FIND_CLI = `cli="${HOOK_LAUNCHER}"; [ -x "$cli" ] || cli="${OLD_HOOK_LAUNCHER}"; [ -x "$cli" ] || cli=${CLI}; `;
+/** How a hook finds the CLI: the launcher `machine` writes, else niyam on PATH. */
+const FIND_CLI = `cli="${HOOK_LAUNCHER}"; [ -x "$cli" ] || cli=${CLI}; `;
+/** How hooks from P-55 to P-57 (0.6.10) found it: the launcher, else the one in the folder before P-55, else niyam on PATH. */
+const P55_FIND_CLI = 'cli="$HOME/.config/niyam/bin/niyam"; [ -x "$cli" ] || cli="$HOME/.config/process-rules/bin/process-rules"; [ -x "$cli" ] || cli=niyam; ';
 /** How hooks from P-53 to P-55 found it: the launcher in the old folder, else niyam on PATH. */
 const P53_FIND_CLI = 'cli="$HOME/.config/process-rules/bin/process-rules"; [ -x "$cli" ] || cli=niyam; ';
 /** How hooks before P-53 found it: the launcher, else process-rules on PATH. */
@@ -234,6 +246,8 @@ export function missingAutoFixRules(settings: unknown): string[] {
 
 /** The hook commands older releases wrote, which onboard replaces with this release's. */
 export const OLDER_HOOK_COMMANDS = [
+  // 0.6.10's, before P-57.
+  P55_FIND_CLI + HOOK_RUN,
   // 0.6.8 and 0.6.9's, before P-55: the launcher in the old folder alone.
   P53_FIND_CLI + HOOK_RUN,
   OLD_FIND_CLI +
@@ -252,6 +266,8 @@ export const OLDER_HOOK_COMMANDS = [
 
 /** The guard commands older releases wrote, which onboard replaces with this release's. */
 export const OLDER_GUARD_COMMANDS = [
+  // 0.6.10's, before P-57.
+  GUARD_SKIP + P55_FIND_CLI + GUARD_RUN,
   // 0.6.8 and 0.6.9's, before P-55.
   GUARD_SKIP + P53_FIND_CLI + GUARD_RUN,
   'input=$(cat); ' +
