@@ -453,7 +453,7 @@ describe('doctor', () => {
       assert.deepEqual(marked((await check(sys)).out, '✗'), ['✗  launcher missing, so hooks need node on PATH → niyam machine']);
     });
 
-    it('refuses the old launcher when it is the only one and broken; beside the new one, judges the new one alone', async () => {
+    it('refuses the old launcher when it is the only one and broken', async () => {
       const sys = older();
       sys.files.set(OLD_LAUNCHER, launcherScript('/opt/node/bin/node', '/x/dist/cli.js', '/home/u/Library/pnpm/bin/process-rules'));
       assert.deepEqual(marked((await check(sys)).out, '✗'), [
@@ -461,12 +461,25 @@ describe('doctor', () => {
       ]);
       sys.execOverride = (call) => (call.command === OLD_LAUNCHER ? { code: 127, stdout: '', stderr: 'node: not found\n' } : undefined);
       assert.deepEqual(marked((await check(sys)).out, '✗'), ['✗  the old launcher ~/.config/process-rules/bin/process-rules does not run (node: not found); its node removed? → niyam machine']);
-      // What machine then writes: the old one stays as it was, and the hooks this release writes no longer run it.
+    });
+
+    it('checks the old launcher beside the new one too, since hooks 0.6.8 and 0.6.9 wrote still run it', async () => {
+      const sys = older();
       sys.files.set(LAUNCHER, launcherScript('/opt/node/bin/node', '/x/dist/cli.js'));
-      const both = await check(sys);
-      assert.ok(both.out.includes('✓  launcher'));
-      assert.deepEqual(marked(both.out, '✗'), []);
-      assert.equal(both.code, 0);
+      const fine = await check(sys);
+      assert.ok(fine.out.includes('✓  launcher'));
+      assert.deepEqual(marked(fine.out, '✗'), [], 'a working old one beside the new one is fine');
+      sys.files.set(OLD_LAUNCHER, launcherScript('/opt/node/bin/node', '/x/dist/cli.js', '/home/u/Library/pnpm/bin/process-rules'));
+      const stale = await check(sys);
+      assert.equal(stale.code, 1);
+      assert.ok(stale.out.includes('✓  launcher'));
+      assert.deepEqual(marked(stale.out, '✗'), [
+        "✗  the old launcher ~/.config/process-rules/bin/process-rules, which hooks 0.6.8 and 0.6.9 wrote run, runs process-rules, niyam's old command, which this release no longer installs, so hooks may find no CLI → niyam upgrade",
+      ]);
+      sys.execOverride = (call) => (call.command === OLD_LAUNCHER ? { code: 127, stdout: '', stderr: 'node: not found\n' } : undefined);
+      assert.deepEqual(marked((await check(sys)).out, '✗'), [
+        '✗  the old launcher ~/.config/process-rules/bin/process-rules, which hooks 0.6.8 and 0.6.9 wrote run, does not run (node: not found); its node removed? → rm ~/.config/process-rules/bin/process-rules',
+      ]);
     });
   });
 });

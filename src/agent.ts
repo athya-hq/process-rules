@@ -136,6 +136,9 @@ export function agentsSetUp(sys: Sys): string[] {
   return found.filter((agent, i) => found.findIndex((other) => sameLogin(agent, other)) === i);
 }
 
+/** What the config folders hold beside the agents' folders: the launcher's, the session records' and the locked gh folder's. */
+export const NOT_AGENTS: readonly string[] = ['bin', 'sessions', 'locked'];
+
 /** The folder this Mac's files are in, or the one before P-55. */
 export function configDir(home: string, old = false): string {
   return `${home}/${old ? OLD_CONFIG_DIR : CONFIG_DIR}`;

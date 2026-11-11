@@ -123,24 +123,33 @@ export async function doctor(sys: Sys, io: Output, named?: string): Promise<numb
 }
 
 /**
- * The launcher the hooks run, the first there of the one `machine` writes
- * and the one it wrote before P-55: ✓ when the new one runs niyam; ▲ when
- * only the old one is there, which this release's hooks fall back to and
- * `machine` replaces with the new one.
+ * The launchers the hooks run: the one `machine` writes, ✓ when it runs
+ * niyam, and the one it wrote before P-55, which this release's hooks fall
+ * back to and hooks 0.6.8 and 0.6.9 wrote run whenever it is there. Alone,
+ * a working old one is ▲, as `machine` writes the new one. Either way a
+ * broken old one is ✗: `niyam upgrade` points one that runs process-rules at
+ * niyam, and one that does not run at all is best removed, since those older
+ * hooks then run niyam on PATH.
  */
 function launcherFindings(sys: Sys): Finding[] {
-  const problem = (launcher: string, name: string): Finding | undefined => {
+  // Beside the new launcher, machine leaves the old one as it is, so the fixes are upgrade's repoint, or removing it.
+  const problem = (launcher: string, name: string, fixes = { broken: MACHINE, stale: `${CLI} upgrade, or ${MACHINE}` }): Finding | undefined => {
     const runs = sys.exec(launcher, ['--version'], { env: { ...sys.env, PATH: '/usr/bin:/bin' } });
-    if (runs.code !== 0) return { mark: '✗', text: `${name} does not run (${runs.stderr.trim() || `exit ${runs.code}`}); its node removed?`, fix: MACHINE };
+    if (runs.code !== 0) return { mark: '✗', text: `${name} does not run (${runs.stderr.trim() || `exit ${runs.code}`}); its node removed?`, fix: fixes.broken };
     return OLD_LAUNCHER.test(sys.read(launcher))
-      ? { mark: '✗', text: `${name} runs ${OLD_CLI}, niyam's old command, which this release no longer installs, so hooks may find no CLI`, fix: `${CLI} upgrade, or ${MACHINE}` }
+      ? { mark: '✗', text: `${name} runs ${OLD_CLI}, niyam's old command, which this release no longer installs, so hooks may find no CLI`, fix: fixes.stale }
       : undefined;
   };
   const launcher = launcherPath(sys.home);
   const old = launcherPath(sys.home, true);
-  if (sys.exists(launcher)) return [problem(launcher, 'launcher') ?? { mark: '✓', text: 'launcher' }];
+  const oldName = `the old launcher ${tilde(sys.home, old)}`;
+  if (sys.exists(launcher)) {
+    const besideNew = { broken: `rm ${tilde(sys.home, old)}`, stale: `${CLI} upgrade` };
+    const oldProblem = sys.exists(old) ? problem(old, `${oldName}, which hooks 0.6.8 and 0.6.9 wrote run,`, besideNew) : undefined;
+    return [problem(launcher, 'launcher') ?? { mark: '✓', text: 'launcher' }, ...(oldProblem ? [oldProblem] : [])];
+  }
   if (!sys.exists(old)) return [{ mark: '✗', text: 'launcher missing, so hooks need node on PATH', fix: MACHINE }];
-  return [problem(old, `the old launcher ${tilde(sys.home, old)}`) ?? { mark: '▲', text: `launcher only at ${tilde(sys.home, old)}, in niyam's old folder; the hooks still find it`, fix: MACHINE }];
+  return [problem(old, oldName) ?? { mark: '▲', text: `launcher only at ${tilde(sys.home, old)}, in niyam's old folder; the hooks still find it`, fix: MACHINE }];
 }
 
 /**

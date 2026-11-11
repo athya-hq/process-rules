@@ -1,4 +1,4 @@
-import { agentFile, configDirs, pathsFor, sameLogin } from './agent.ts';
+import { NOT_AGENTS, agentFile, configDirs, pathsFor, sameLogin } from './agent.ts';
 import { type Finding, tilde } from './layout.ts';
 import type { Sys } from './types.ts';
 import { GITHUB_HOST, GITHUB_HOST_RE, GITHUB_SSH, GITHUB_WEB } from './host.ts';
@@ -39,7 +39,9 @@ export function exposure(sys: Sys, agent: string): Exposure {
   );
   const gitPassword = sys.exec('/usr/bin/security', KEYCHAIN_QUERY).code === 0;
   // Every agent machine set up here keeps its signing key, passphrase-free on purpose: its folder may be in either config folder.
-  const agentKeys = new Set([agent, ...configDirs(sys.home).flatMap((dir) => sys.list(dir))].map((name) => `${name.toLowerCase()}_signing`));
+  // The launcher's, records' and locked gh folders there name no agent, so an owner key such as bin_signing is still checked.
+  const folders = configDirs(sys.home).flatMap((dir) => sys.list(dir)).filter((name) => !NOT_AGENTS.includes(name));
+  const agentKeys = new Set([agent, ...folders].map((name) => `${name.toLowerCase()}_signing`));
   const ssh = `${sys.home}/.ssh`;
   const openKeys = sys
     .list(ssh)

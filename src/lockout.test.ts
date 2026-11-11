@@ -61,6 +61,17 @@ describe('exposure', () => {
     assert.deepEqual(exposure(sys, AGENT).openKeys, [`${HOME}/.ssh/id_ed25519`]);
   });
 
+  it("still checks an owner key named like the launcher's, records' or locked gh folder, in either config folder", () => {
+    const sys = new FakeSys().ready();
+    for (const dir of ['niyam', 'process-rules']) {
+      sys.files.set(`${HOME}/.config/${dir}/bin/x`, '');
+      sys.files.set(`${HOME}/.config/${dir}/sessions/s.json`, '{}');
+      sys.mkdir(`${HOME}/.config/${dir}/locked/gh`);
+    }
+    for (const name of ['bin', 'sessions', 'locked']) sys.files.set(`${HOME}/.ssh/${name}_signing`, 'open:owner');
+    assert.deepEqual(exposure(sys, AGENT).openKeys, ['bin', 'sessions', 'locked'].map((name) => `${HOME}/.ssh/${name}_signing`));
+  });
+
   it("spares the signing key of an agent whose folder is empty", () => {
     const sys = new FakeSys().ready();
     sys.mkdir(`${HOME}/.config/process-rules/emptybot`);

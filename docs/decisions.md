@@ -1354,10 +1354,14 @@
     with either keychain read, as P-50's did. A session started under 0.6.9
     keeps its record there and keeps working after the upgrade, with no
     `machine` run. `doctor` marks ▲ a session file or launcher only in the
-    old folder, and ✗ an old launcher that is the only one and is broken or
-    runs `process-rules`. Beside the new launcher it judges the new one
-    alone, as the hooks this release writes do; `machine` does not touch the
-    old one, so a fix it names could not clear it.
+    old folder, and ✗ an old launcher, alone or beside the new one, that
+    cannot run or runs `process-rules`: hooks 0.6.8 and 0.6.9 wrote run it
+    whenever it is there. Beside the new one the fix is `niyam upgrade`,
+    which points it at `niyam`, or removing one that cannot run, since those
+    hooks then run `niyam` on PATH; `machine` does not touch it. Entries in
+    either config folder that are not agents (`bin`, `sessions`, `locked`)
+    no longer exempt an owner's SSH key of that name from the lockout check
+    (review).
   - Until P-57 the old folder, its launcher, `PROCESS_RULES_AGENT` and the
     old placeholder are still read or set. P-57 removes them once every Mac
     has run `niyam machine`. The workflow, its job ids, `process-rules-ref`,
