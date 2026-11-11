@@ -453,17 +453,20 @@ describe('doctor', () => {
       assert.deepEqual(marked((await check(sys)).out, '✗'), ['✗  launcher missing, so hooks need node on PATH → niyam machine']);
     });
 
-    it('names the old launcher when it is broken, beside the new one or alone, since hooks older releases wrote still run it', async () => {
+    it('refuses the old launcher when it is the only one and broken; beside the new one, judges the new one alone', async () => {
       const sys = older();
       sys.files.set(OLD_LAUNCHER, launcherScript('/opt/node/bin/node', '/x/dist/cli.js', '/home/u/Library/pnpm/bin/process-rules'));
-      const oldOne = "✗  the old launcher ~/.config/process-rules/bin/process-rules runs process-rules, niyam's old command, which this release no longer installs, so hooks may find no CLI → niyam upgrade, or niyam machine";
-      assert.deepEqual(marked((await check(sys)).out, '✗'), [oldOne], 'alone');
-      sys.files.set(LAUNCHER, launcherScript('/opt/node/bin/node', '/x/dist/cli.js'));
-      const both = (await check(sys)).out;
-      assert.ok(both.includes('✓  launcher'));
-      assert.deepEqual(marked(both, '✗'), [oldOne], 'beside the new one');
+      assert.deepEqual(marked((await check(sys)).out, '✗'), [
+        "✗  the old launcher ~/.config/process-rules/bin/process-rules runs process-rules, niyam's old command, which this release no longer installs, so hooks may find no CLI → niyam upgrade, or niyam machine",
+      ]);
       sys.execOverride = (call) => (call.command === OLD_LAUNCHER ? { code: 127, stdout: '', stderr: 'node: not found\n' } : undefined);
       assert.deepEqual(marked((await check(sys)).out, '✗'), ['✗  the old launcher ~/.config/process-rules/bin/process-rules does not run (node: not found); its node removed? → niyam machine']);
+      // What machine then writes: the old one stays as it was, and the hooks this release writes no longer run it.
+      sys.files.set(LAUNCHER, launcherScript('/opt/node/bin/node', '/x/dist/cli.js'));
+      const both = await check(sys);
+      assert.ok(both.out.includes('✓  launcher'));
+      assert.deepEqual(marked(both.out, '✗'), []);
+      assert.equal(both.code, 0);
     });
   });
 });

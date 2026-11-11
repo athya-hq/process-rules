@@ -123,10 +123,10 @@ export async function doctor(sys: Sys, io: Output, named?: string): Promise<numb
 }
 
 /**
- * The launcher the hooks run: the one `machine` writes, ✓ when it runs
- * niyam; ▲ when only the one it wrote before P-55 is there, which this
- * release's hooks fall back to. That old one stays for hooks older releases
- * wrote, so it is checked too, and named only when it is broken.
+ * The launcher the hooks run, the first there of the one `machine` writes
+ * and the one it wrote before P-55: ✓ when the new one runs niyam; ▲ when
+ * only the old one is there, which this release's hooks fall back to and
+ * `machine` replaces with the new one.
  */
 function launcherFindings(sys: Sys): Finding[] {
   const problem = (launcher: string, name: string): Finding | undefined => {
@@ -138,13 +138,9 @@ function launcherFindings(sys: Sys): Finding[] {
   };
   const launcher = launcherPath(sys.home);
   const old = launcherPath(sys.home, true);
-  const oldName = `the old launcher ${tilde(sys.home, old)}`;
-  if (sys.exists(launcher)) {
-    const oldProblem = sys.exists(old) ? problem(old, oldName) : undefined;
-    return [problem(launcher, 'launcher') ?? { mark: '✓', text: 'launcher' }, ...(oldProblem ? [oldProblem] : [])];
-  }
+  if (sys.exists(launcher)) return [problem(launcher, 'launcher') ?? { mark: '✓', text: 'launcher' }];
   if (!sys.exists(old)) return [{ mark: '✗', text: 'launcher missing, so hooks need node on PATH', fix: MACHINE }];
-  return [problem(old, oldName) ?? { mark: '▲', text: `launcher only at ${tilde(sys.home, old)}, in niyam's old folder; the hooks still find it`, fix: MACHINE }];
+  return [problem(old, `the old launcher ${tilde(sys.home, old)}`) ?? { mark: '▲', text: `launcher only at ${tilde(sys.home, old)}, in niyam's old folder; the hooks still find it`, fix: MACHINE }];
 }
 
 /**

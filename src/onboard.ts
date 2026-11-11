@@ -1,4 +1,4 @@
-import { CLI, OLD_CLI, OLD_PRODUCT, PRODUCT } from './names.ts';
+import { AGENT_VAR, CLI, CONFIG_DIR, OLD_AGENT_VAR, OLD_CLI, OLD_CONFIG_DIR, OLD_PRODUCT, PRODUCT } from './names.ts';
 import {
   API,
   BASE_ENV,
@@ -42,6 +42,10 @@ export const SETUP_FIRST = "If the repo has its own Setup script, put this first
 /** This product's repository: clients call its shared workflow. */
 export { PRODUCT } from './names.ts';
 export { HOOKS_PATH, WORKFLOW_PATH } from './onboard-pull.ts';
+/** The launcher `machine` writes, and the one it wrote before P-55, as a hook's shell spells them. */
+const HOOK_LAUNCHER = `$HOME/${CONFIG_DIR}/bin/${CLI}`;
+const OLD_HOOK_LAUNCHER = `$HOME/${OLD_CONFIG_DIR}/bin/${OLD_CLI}`;
+
 /**
  * The pre-push git hook: before a local agent session pushes, that it
  * reaches GitHub as the agent, then the work rules. It needs no Claude Code
@@ -52,10 +56,10 @@ export const PRE_PUSH_HOOK = [
   '#!/bin/sh',
   '# Written by niyam onboard: before an agent session pushes, that it pushes as the agent, then the work rules.',
   '# Anyone else\'s push goes ahead. Without the CLI nothing can check an agent session\'s push, so it is refused.',
-  '[ -z "$NIYAM_AGENT" ] && [ -z "$PROCESS_RULES_AGENT" ] && [ "$CLAUDECODE" != 1 ] && exit 0',
-  'cli="$HOME/.config/niyam/bin/niyam"',
-  '[ -x "$cli" ] || cli="$HOME/.config/process-rules/bin/process-rules"',
-  '[ -x "$cli" ] || cli=niyam',
+  `[ -z "$${AGENT_VAR}" ] && [ -z "$${OLD_AGENT_VAR}" ] && [ "$CLAUDECODE" != 1 ] && exit 0`,
+  `cli="${HOOK_LAUNCHER}"`,
+  `[ -x "$cli" ] || cli="${OLD_HOOK_LAUNCHER}"`,
+  `[ -x "$cli" ] || cli=${CLI}`,
   'if ! command -v "$cli" >/dev/null 2>&1; then',
   '  echo "niyam: the CLI is not installed, so this agent push cannot be checked" >&2',
   '  exit 1',
@@ -146,7 +150,7 @@ export function prePushHook(sys: Sys, root: string): { path: string; file: strin
  * wrote before P-55, which a Mac not set up again since has alone, else
  * niyam on PATH.
  */
-const FIND_CLI = 'cli="$HOME/.config/niyam/bin/niyam"; [ -x "$cli" ] || cli="$HOME/.config/process-rules/bin/process-rules"; [ -x "$cli" ] || cli=niyam; ';
+const FIND_CLI = `cli="${HOOK_LAUNCHER}"; [ -x "$cli" ] || cli="${OLD_HOOK_LAUNCHER}"; [ -x "$cli" ] || cli=${CLI}; `;
 /** How hooks from P-53 to P-55 found it: the launcher in the old folder, else niyam on PATH. */
 const P53_FIND_CLI = 'cli="$HOME/.config/process-rules/bin/process-rules"; [ -x "$cli" ] || cli=niyam; ';
 /** How hooks before P-53 found it: the launcher, else process-rules on PATH. */

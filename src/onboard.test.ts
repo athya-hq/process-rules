@@ -829,6 +829,18 @@ describe('onboard', () => {
     assert.equal(sys.files.get(PRE_PUSH), PRE_PUSH_HOOK);
   });
 
+  it('finds the CLI in the new launcher, then the old, then on PATH, in every hook (P-55)', () => {
+    const find = 'cli="$HOME/.config/niyam/bin/niyam"; [ -x "$cli" ] || cli="$HOME/.config/process-rules/bin/process-rules"; [ -x "$cli" ] || cli=niyam; ';
+    assert.ok(HOOK_COMMAND.startsWith(find), HOOK_COMMAND);
+    assert.ok(GUARD_COMMAND.includes(find), GUARD_COMMAND);
+    assert.ok(
+      PRE_PUSH_HOOK.includes(
+        '[ -z "$NIYAM_AGENT" ] && [ -z "$PROCESS_RULES_AGENT" ] && [ "$CLAUDECODE" != 1 ] && exit 0\ncli="$HOME/.config/niyam/bin/niyam"\n[ -x "$cli" ] || cli="$HOME/.config/process-rules/bin/process-rules"\n[ -x "$cli" ] || cli=niyam\n',
+      ),
+      PRE_PUSH_HOOK,
+    );
+  });
+
   it("replaces 0.6.9's hooks, pre-push hook and lock in place, which name the old folder, variable and token (P-55)", async () => {
     assert.ok(OLDER_HOOK_COMMANDS.includes(HOOK_COMMAND_069) && OLDER_GUARD_COMMANDS.includes(GUARD_COMMAND_069) && OLDER_PRE_PUSH_HOOKS.includes(PRE_PUSH_HOOK_069));
     const sys = fresh();
