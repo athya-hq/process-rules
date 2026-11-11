@@ -12,6 +12,7 @@ import { FROM_SETUP, PROXY_TOKEN, cloudRepoScript } from './cloud.ts';
 import { CLOUD_SETUP_PATH } from './onboard-pull.ts';
 import { OLDER_PRE_PUSH_HOOKS, PRE_PUSH_HOOK, workflow } from './onboard.ts';
 import { packageVersion } from './version.ts';
+import { SESSION_069, SESSION_BEFORE_P50 } from './older-texts.test.ts';
 import { AUTO_FIX, CLOUD_INSTALL_MS, sessionStart } from './session-start.ts';
 
 const OWNER_LOGIN = 'example-owner';
@@ -86,6 +87,53 @@ describe('sessionStart', () => {
     assert.equal(env, `\n${lockScript(HOME)}\n${older}`);
   });
 
+  describe('on a Mac machine set up under 0.6.9, before P-55, and has not set up since', () => {
+    const OLD_SESSION = pathsFor(HOME, AGENT, true).session;
+    const older = (session = SESSION_069): FakeSys => {
+      const sys = ready();
+      sys.files.delete(SESSION);
+      sys.files.set(OLD_SESSION, session);
+      return sys;
+    };
+
+    it("gives the agent identity from 0.6.9's session file in the old folder, writing the lock and the record in the new", async () => {
+      const sys = older();
+      sys.stdin = JSON.stringify({ session_id: 'abc-123' });
+      const { out, env } = await start(sys);
+      assert.deepEqual(out, [`niyam: this session works as ExampleBot on GitHub. ${AUTO_FIX}`]);
+      assert.equal(env, `\n${lockScript(HOME)}\n${SESSION_069}`);
+      assert.equal(sys.files.get(`${HOME}/.config/niyam/sessions/abc-123.json`), '{"agent":"ExampleBot"}\n');
+      assert.equal(sys.files.has(`${HOME}/.config/process-rules/sessions/abc-123.json`), false, 'nothing written in the old folder');
+    });
+
+    it('gives it from a session file a release before P-50 wrote there, with the token under the old keychain service alone', async () => {
+      const sys = older(SESSION_BEFORE_P50);
+      const token = sys.keychain.get(`niyam/${AGENT}`) as string;
+      sys.keychain.delete(`niyam/${AGENT}`);
+      sys.keychain.set(`process-rules/${AGENT}`, token);
+      const { out, env } = await start(sys);
+      assert.deepEqual(out, [`niyam: this session works as ExampleBot on GitHub. ${AUTO_FIX}`]);
+      assert.equal(env, `\n${lockScript(HOME)}\n${SESSION_BEFORE_P50}`);
+    });
+
+    it("takes the new folder's session file over the old one's", async () => {
+      const sys = older();
+      sys.files.set(SESSION, SCRIPT);
+      assert.equal((await start(sys)).env, `\n${lockScript(HOME)}\n${SCRIPT}`);
+      sys.files.set(SESSION, 'export GH_TOKEN=x\n');
+      sys.files.delete(ENV);
+      const { out, env } = await start(sys);
+      assert.equal(env, `\n${lockScript(HOME)}`, 'a broken new one locks; the old one is not tried');
+      assert.match(out[0] ?? '', /^niyam: GitHub is locked out of this session: \/home\/u\/\.config\/niyam\/examplebot\/session\.sh is out of date/);
+    });
+
+    it('stays locked when the old folder holds a session file machine did not write', async () => {
+      const { out, env } = await start(older(SESSION_069.replace("GIT_TERMINAL_PROMPT='0'", "GIT_TERMINAL_PROMPT='1'")));
+      assert.equal(env, `\n${lockScript(HOME)}`);
+      assert.match(out[0] ?? '', /\/home\/u\/\.config\/process-rules\/examplebot\/session\.sh is out of date, or not the file niyam machine writes/);
+    });
+  });
+
   it('locks, then gives the session the agent identity', async () => {
     const { code, out, env } = await start(ready());
     assert.equal(code, 0);
@@ -120,7 +168,7 @@ describe('sessionStart', () => {
       const sys = cloud(AGENT);
       const { out, env } = await start(sys);
       assert.deepEqual(out, ['niyam: this cloud session works as ExampleBot on GitHub.']);
-      assert.equal(env, `\nunset ${Object.keys(BASE_ENV).join(' ')}\nexport GH_TOKEN=proxy-injected GITHUB_TOKEN=proxy-injected PROCESS_RULES_AGENT=ExampleBot\n`);
+      assert.equal(env, `\nunset ${Object.keys(BASE_ENV).join(' ')}\nexport GH_TOKEN=proxy-injected GITHUB_TOKEN=proxy-injected NIYAM_AGENT=ExampleBot PROCESS_RULES_AGENT=ExampleBot\n`);
       assert.equal(sys.files.get(RECORD), '{"agent":"ExampleBot"}\n');
       assert.equal(sys.requests.at(-1)?.token, PROXY_TOKEN, 'the proxy placeholder, never the lock');
     });
@@ -441,7 +489,7 @@ describe('sessionStart', () => {
       assert.equal(env, `\n${lockScript(HOME)}`);
       assert.deepEqual(out, [
         locked(
-          '.github/niyam.json names the agents OtherBot or ExampleBot, and niyam machine has set up OtherBot and ExampleBot on this machine, so which one this session works as cannot be told; remove the others\' folders under ~/.config/process-rules',
+          '.github/niyam.json names the agents OtherBot or ExampleBot, and niyam machine has set up OtherBot and ExampleBot on this machine, so which one this session works as cannot be told; remove the others\' folders under ~/.config/niyam and ~/.config/process-rules',
         ),
       ]);
     });
@@ -486,6 +534,7 @@ describe('sessionNames', () => {
   it("reads the agent and id from machine's file", async () => {
     assert.deepEqual(sessionNames(SCRIPT), { agent: AGENT, id: AGENT_ID });
     assert.equal(sessionNames('export PROCESS_RULES_AGENT=\'x\'\n'), undefined);
+    assert.deepEqual(sessionNames(SESSION_069), { agent: AGENT, id: AGENT_ID }, "0.6.9's, by PROCESS_RULES_AGENT alone");
   });
 });
 
@@ -521,6 +570,7 @@ describe('lockScript, sourced by a real shell', () => {
 
   it('gives gh a token GitHub refuses and drops the owner\'s', async () => {
     assert.equal(shell('printf %s "$GH_TOKEN|${GITHUB_TOKEN-unset}|${GIT_ASKPASS-unset}|${GIT_CONFIG_PARAMETERS-unset}"').stdout, `${NO_TOKEN}|unset|unset|unset`);
+    assert.equal(shell('printf %s "$GH_CONFIG_DIR"').stdout, `${dir}/.config/niyam/locked/gh`);
   });
 
   it('gives git no credential for GitHub', async () => {
@@ -533,6 +583,6 @@ describe('lockScript, sourced by a real shell', () => {
     assert.equal(shell('git ls-remote --get-url git@github.com:a/b.git').stdout, 'https://github.com/a/b.git\n');
     const result = shell('git ls-remote ssh://git@example.invalid/a/b.git');
     assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /SSH is off in agent sessions/);
+    assert.match(result.stderr, /^niyam: SSH is off in agent sessions; GitHub goes over HTTPS$/m);
   });
 });

@@ -1,4 +1,4 @@
-import { API, NO_TOKEN, type Settings, anyLogin, either, loadSettings, repoAt } from './agent.ts';
+import { API, type Settings, anyLogin, either, isNoToken, loadSettings, repoAt } from './agent.ts';
 import { PERSONAL_REPO, isOn, isPersonal, notAdoptedLine, offLine, readRepo } from './features.ts';
 import { agentSession, pushIdentityProblem } from './push-identity.ts';
 import { cloudToken } from './cloud.ts';
@@ -458,7 +458,8 @@ const ZERO = /^0+$/;
 export function sessionToken(sys: Sys): string | undefined {
   if (sys.env.CLAUDE_CODE_REMOTE === 'true') return cloudToken(sys);
   const token = sys.env.GH_TOKEN;
-  return token && token !== NO_TOKEN ? token : undefined;
+  // A lock's placeholder, this release's or one an older release wrote, is no token.
+  return token && !isNoToken(token) ? token : undefined;
 }
 
 function gitLog(sys: Sys, root: string, args: string[]): string {

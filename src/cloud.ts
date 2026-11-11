@@ -1,4 +1,4 @@
-import { API, NO_TOKEN } from './agent.ts';
+import { API, isNoToken } from './agent.ts';
 import { SETUP_FIRST, workflowPins } from './onboard.ts';
 import { OLD_PACKAGE, PRODUCT, tarballName } from './names.ts';
 import type { Output, Sys } from './types.ts';
@@ -13,10 +13,10 @@ import { isNewer } from './version.ts';
  */
 export const PROXY_TOKEN = 'proxy-injected';
 
-/** The token a cloud session reaches GitHub with: one its environment set, else the proxy's placeholder, never the lock's. */
+/** The token a cloud session reaches GitHub with: one its environment set, else the proxy's placeholder, never a lock's, this release's or an older one's. */
 export function cloudToken(sys: Sys): string {
   const token = sys.env.GH_TOKEN;
-  return token && token !== NO_TOKEN ? token : PROXY_TOKEN;
+  return token && !isNoToken(token) ? token : PROXY_TOKEN;
 }
 
 /** The account a cloud session reaches GitHub as, through its proxy, or why it cannot be told. */

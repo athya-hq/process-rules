@@ -85,7 +85,7 @@ describe('upgrade', () => {
       const { code, out } = await upgraded(sys, running);
       assert.equal(code, 0, out.join('\n'));
       assert.equal(sys.files.get(launcher), launcherScript('/opt/node/bin/node', '/x/dist/cli.js', `${PNPM_BIN}/niyam`));
-      assert.ok(out.includes('upgrade: the launcher ~/.config/process-rules/bin/process-rules now runs ~/Library/pnpm/bin/niyam, not process-rules'), out.join('\n'));
+      assert.ok(out.includes('upgrade: the launcher ~/.config/niyam/bin/niyam now runs ~/Library/pnpm/bin/niyam, not process-rules'), out.join('\n'));
     }
     const kept = machine({ [PNPM_BIN]: NEW });
     const own = launcherScript('/opt/node/bin/node', '/x/dist/cli.js', `${PNPM_BIN}/niyam`);
@@ -94,6 +94,28 @@ describe('upgrade', () => {
     assert.equal(kept.files.get(launcher), own, 'one that runs niyam stays');
     const lone = machine({ [PNPM_BIN]: NEW });
     lone.files.set(launcher, launcherScript('/opt/node/bin/node', '/x/dist/cli.js', '/elsewhere/process-rules'));
+    const { code, err } = await upgraded(lone, NEW);
+    assert.equal(code, 1);
+    assert.deepEqual(err, ['upgrade: the launcher ~/.config/niyam/bin/niyam runs process-rules, and no /elsewhere/niyam is there to run instead; run niyam machine']);
+  });
+
+  it('points the old launcher, which hooks older releases wrote run, at niyam too, beside the new one or alone (P-55)', async () => {
+    const launcher = launcherPath(HOME);
+    const old = launcherPath(HOME, true);
+    const runs = (command: string) => launcherScript('/opt/node/bin/node', '/x/dist/cli.js', `${PNPM_BIN}/${command}`);
+    for (const both of [false, true]) {
+      const sys = machine({ [PNPM_BIN]: NEW });
+      sys.files.set(old, runs('process-rules'));
+      if (both) sys.files.set(launcher, runs('niyam'));
+      const { code, out } = await upgraded(sys, NEW);
+      assert.equal(code, 0, out.join('\n'));
+      assert.equal(sys.files.get(old), runs('niyam'));
+      assert.ok(out.includes('upgrade: the launcher ~/.config/process-rules/bin/process-rules now runs ~/Library/pnpm/bin/niyam, not process-rules'), out.join('\n'));
+      assert.equal(sys.files.get(launcher), both ? runs('niyam') : undefined, 'the new one stays as it was');
+    }
+    const lone = machine({ [PNPM_BIN]: NEW });
+    lone.files.set(launcher, runs('niyam'));
+    lone.files.set(old, launcherScript('/opt/node/bin/node', '/x/dist/cli.js', '/elsewhere/process-rules'));
     const { code, err } = await upgraded(lone, NEW);
     assert.equal(code, 1);
     assert.deepEqual(err, ['upgrade: the launcher ~/.config/process-rules/bin/process-rules runs process-rules, and no /elsewhere/niyam is there to run instead; run niyam machine']);

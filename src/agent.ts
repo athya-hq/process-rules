@@ -1,6 +1,7 @@
 import { KEYCHAIN, type TokenStore, tokenStore } from './token-store.ts';
 import type { Sys } from './types.ts';
 import { GITHUB_API, GITHUB_HOST_RE, GITHUB_NOREPLY, GITHUB_SSH, GITHUB_SSH_443, GITHUB_WEB } from './host.ts';
+import { AGENT_VAR, CLI, CONFIG_DIR, OLD_AGENT_VAR, OLD_CLI, OLD_CONFIG_DIR } from './names.ts';
 
 /** The adopting repo's settings file, written by `onboard`. */
 export const SETTINGS_PATH = '.github/niyam.json';
@@ -17,7 +18,24 @@ export function hasSettings(sys: Sys, root: string): boolean {
   return sys.exists(`${root}/${settingsPathIn(sys, root)}`);
 }
 /** What GH_TOKEN holds when the token store has none, so nothing falls back to the owner. */
-export const NO_TOKEN = 'process-rules-no-agent-token';
+export const NO_TOKEN = 'niyam-no-agent-token';
+/** The same before P-55, still in a session file, a lock or a client's settings an older release wrote. */
+export const OLD_NO_TOKEN = 'process-rules-no-agent-token';
+
+/** Whether `token` is a lock's placeholder, this release's or an older one's: no token at all. */
+export function isNoToken(token: string | undefined): boolean {
+  return token === NO_TOKEN || token === OLD_NO_TOKEN;
+}
+
+/**
+ * The agent an agent session's environment names, by the variable's name or
+ * its old one, or undefined in anyone else's shell. Either counts, an empty
+ * one beside a set one too: a reader that missed one would take an agent
+ * session for the owner's.
+ */
+export function agentIn(env: Readonly<Record<string, string | undefined>>): string | undefined {
+  return env[AGENT_VAR] || env[OLD_AGENT_VAR] || undefined;
+}
 export const API = GITHUB_API;
 const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/;
 /** The GitHub remotes `repoAt` accepts: HTTPS, scp-like SSH, or SSH URLs, on GitHub's host only. */
@@ -35,7 +53,9 @@ const INCLUDED_BY: Record<string, string[]> = {
 export const EXPIRY_WARNING_DAYS = 14;
 const DAY_MS = 86_400_000;
 /** What a session runs instead of ssh: GitHub goes over HTTPS, so no SSH key of the owner's is used. */
-export const NO_SSH = `echo 'process-rules: SSH is off in agent sessions; GitHub goes over HTTPS' >&2; false`;
+export const NO_SSH = `echo '${CLI}: SSH is off in agent sessions; GitHub goes over HTTPS' >&2; false`;
+/** The same before P-55. */
+export const OLD_NO_SSH = `echo '${OLD_CLI}: SSH is off in agent sessions; GitHub goes over HTTPS' >&2; false`;
 
 /** GitHub logins are case-insensitive. */
 export function sameLogin(a: string | undefined, b: string): boolean {
@@ -101,14 +121,32 @@ function logins(raw: unknown, name: string, file: string): string[] {
   return (list as string[]).filter((login, i) => list.findIndex((other) => sameLogin(login, other as string)) === i);
 }
 
-/** The agent accounts `machine` has set up on this machine, as their session files spell them. */
+/**
+ * The agent accounts `machine` has set up on this machine, as their session
+ * files spell them: in the config folder, and in the one before P-55, once each.
+ */
 export function agentsSetUp(sys: Sys): string[] {
-  const dir = `${sys.home}/.config/process-rules`;
-  return sys.list(dir).flatMap((name) => {
-    const session = `${dir}/${name}/session.sh`;
-    const agent = sys.exists(session) ? sessionNames(sys.read(session))?.agent : undefined;
-    return agent ? [agent] : [];
-  });
+  const found = configDirs(sys.home).flatMap((dir) =>
+    sys.list(dir).flatMap((name) => {
+      const session = `${dir}/${name}/session.sh`;
+      const agent = sys.exists(session) ? sessionNames(sys.read(session))?.agent : undefined;
+      return agent ? [agent] : [];
+    }),
+  );
+  return found.filter((agent, i) => found.findIndex((other) => sameLogin(agent, other)) === i);
+}
+
+/** What the config folders hold beside the agents' folders: the launcher's, the session records' and the locked gh folder's. */
+export const NOT_AGENTS: readonly string[] = ['bin', 'sessions', 'locked'];
+
+/** The folder this Mac's files are in, or the one before P-55. */
+export function configDir(home: string, old = false): string {
+  return `${home}/${old ? OLD_CONFIG_DIR : CONFIG_DIR}`;
+}
+
+/** Both folders, the one read first first. */
+export function configDirs(home: string): [string, string] {
+  return [configDir(home), configDir(home, true)];
 }
 
 /**
@@ -123,7 +161,7 @@ export function agentHere(sys: Sys, agents: readonly string[], file: string = SE
   return {
     problem: here.length === 0
       ? `${file} names the agents ${either(agents)}, and niyam machine has set up none of them on this machine`
-      : `${file} names the agents ${either(agents)}, and niyam machine has set up ${here.join(' and ')} on this machine, so which one this session works as cannot be told; remove the others' folders under ~/.config/process-rules`,
+      : `${file} names the agents ${either(agents)}, and niyam machine has set up ${here.join(' and ')} on this machine, so which one this session works as cannot be told; remove the others' folders under ~/${CONFIG_DIR} and ~/${OLD_CONFIG_DIR}`,
   };
 }
 
@@ -170,15 +208,38 @@ export interface Paths {
   gh: string;
 }
 
-/** Where `machine` keeps an agent account's files on this machine: one folder per account. */
-export function pathsFor(home: string, agent: string): Paths {
-  const dir = `${home}/.config/process-rules/${agent.toLowerCase()}`;
+/**
+ * Where `machine` keeps an agent account's files on this machine: one folder
+ * per account, in the config folder, or with `old` in the one before P-55.
+ */
+export function pathsFor(home: string, agent: string, old = false): Paths {
+  const dir = `${configDir(home, old)}/${agent.toLowerCase()}`;
   return {
     key: `${home}/.ssh/${agent.toLowerCase()}_signing`,
     dir,
     session: `${dir}/session.sh`,
     gh: `${dir}/gh`,
   };
+}
+
+/**
+ * The agent's folder its session file is in: the config folder's, else the
+ * one before P-55 when only that has one, as `machine` 0.6.9 left it; `old`
+ * says which. With neither, the config folder's.
+ */
+export function sessionPaths(sys: Sys, agent: string): Paths & { old: boolean } {
+  const paths = pathsFor(sys.home, agent);
+  const before = pathsFor(sys.home, agent, true);
+  return !sys.exists(paths.session) && sys.exists(before.session) ? { ...before, old: true } : { ...paths, old: false };
+}
+
+/**
+ * A file in the agent's folder: the config folder's when it is there, else
+ * the one before P-55 when only that has it, else the config folder's.
+ */
+export function agentFile(sys: Sys, agent: string, name: string): string {
+  const [path, before] = [pathsFor(sys.home, agent), pathsFor(sys.home, agent, true)].map((paths) => `${paths.dir}/${name}`) as [string, string];
+  return !sys.exists(path) && sys.exists(before) ? before : path;
 }
 
 /** GitHub's no-reply address for an account: always verified on it. */
@@ -214,13 +275,28 @@ function configVars(config: [string, string][]): [string, string][] {
   ];
 }
 
+/**
+ * How a release spells the files `machine` and session-start write: the name
+ * in their first line, the placeholder token, the SSH refusal and the
+ * variables naming the agent. Before P-55 they said process-rules, and named
+ * the agent by PROCESS_RULES_AGENT alone.
+ */
+interface Dialect {
+  by: string;
+  noToken: string;
+  noSsh: string;
+  agentVars: readonly string[];
+}
+const DIALECT: Dialect = { by: CLI, noToken: NO_TOKEN, noSsh: NO_SSH, agentVars: [AGENT_VAR, OLD_AGENT_VAR] };
+const OLD_DIALECT: Dialect = { by: OLD_CLI, noToken: OLD_NO_TOKEN, noSsh: OLD_NO_SSH, agentVars: [OLD_AGENT_VAR] };
+
 /** The variables an agent session gets, except GH_TOKEN. */
-function identityVars(agent: string, id: number, paths: Paths): [string, string][] {
+function identityVars(agent: string, id: number, paths: Paths, dialect: Dialect = DIALECT): [string, string][] {
   const email = noreplyEmail(id, agent);
   const helper = `!f() { test "$1" = get && printf 'username=%s\\npassword=%s\\n' ${agent} "$GH_TOKEN"; }; f`;
   const [reset, askpass, ...https] = LOCKED_CONFIG as [[string, string], [string, string], ...[string, string][]];
   return [
-    ['PROCESS_RULES_AGENT', agent],
+    ...dialect.agentVars.map((name): [string, string] => [name, agent]),
     ['GH_CONFIG_DIR', paths.gh],
     ['GIT_AUTHOR_NAME', agent],
     ['GIT_COMMITTER_NAME', agent],
@@ -228,7 +304,7 @@ function identityVars(agent: string, id: number, paths: Paths): [string, string]
     ['GIT_COMMITTER_EMAIL', email],
     ['GIT_TERMINAL_PROMPT', '0'],
     // Any SSH remote left (a host alias in ~/.ssh/config) fails instead of using the owner's key.
-    ['GIT_SSH_COMMAND', NO_SSH],
+    ['GIT_SSH_COMMAND', dialect.noSsh],
     ...configVars([
       ['gpg.format', 'ssh'],
       ['user.signingkey', `${paths.key}.pub`],
@@ -263,14 +339,32 @@ export const BASE_ENV: Record<string, string> = Object.fromEntries([
   ...configVars(LOCKED_CONFIG),
 ]);
 
-/** Where session-start records how it left one Claude Code session, for the guard to read. */
-export function sessionRecord(home: string, sessionId: string): string | undefined {
-  return /^[A-Za-z0-9_-]{1,128}$/.test(sessionId) ? `${home}/.config/process-rules/sessions/${sessionId}.json` : undefined;
+/**
+ * Where session-start records how it left one Claude Code session, for the
+ * guard to read; with `old`, where it did before P-55.
+ */
+export function sessionRecord(home: string, sessionId: string, old = false): string | undefined {
+  return /^[A-Za-z0-9_-]{1,128}$/.test(sessionId) ? `${configDir(home, old)}/sessions/${sessionId}.json` : undefined;
 }
 
-/** The launcher `machine` writes, which hooks run, so they need no node on PATH. */
-export function launcherPath(home: string): string {
-  return `${home}/.config/process-rules/bin/process-rules`;
+/**
+ * The record of a session the readers take: the config folder's when it is
+ * there, whatever it says, else the one a session started before the upgrade
+ * left in the folder before P-55. Undefined for an id that is not one.
+ */
+export function sessionRecordIn(sys: Sys, sessionId: string): string | undefined {
+  const path = sessionRecord(sys.home, sessionId);
+  const before = sessionRecord(sys.home, sessionId, true);
+  return path && !sys.exists(path) && before && sys.exists(before) ? before : path;
+}
+
+/**
+ * The launcher `machine` writes, which hooks run, so they need no node on
+ * PATH; with `old`, where `machine` wrote it before P-55, which hooks older
+ * releases wrote run, and new ones when it is the only one.
+ */
+export function launcherPath(home: string, old = false): string {
+  return old ? `${configDir(home, true)}/bin/${OLD_CLI}` : `${configDir(home)}/bin/${CLI}`;
 }
 
 /**
@@ -295,7 +389,7 @@ export function launcherScript(node: string, cli: string, command?: string): str
   const dir = node.slice(0, node.lastIndexOf('/'));
   return [
     '#!/bin/sh',
-    '# Written by process-rules machine: the CLI for hooks, with the node that ran machine, so they need no node on PATH.',
+    `# Written by ${CLI} machine: the CLI for hooks, with the node that ran machine, so they need no node on PATH.`,
     `PATH=${quote(dir)}:"$PATH"`,
     'export PATH',
     command ? `exec ${quote(command)} "$@"` : `exec ${quote(node)} ${quote(cli)} "$@"`,
@@ -311,27 +405,35 @@ export function launcherScript(node: string, cli: string, command?: string): str
  * for the same reason.
  */
 export function sessionScript(agent: string, id: number, paths: Paths, store: TokenStore = KEYCHAIN, read: string = store.readCommand(agent)): string {
+  return sessionText(agent, id, paths, read, DIALECT);
+}
+
+function sessionText(agent: string, id: number, paths: Paths, read: string, dialect: Dialect): string {
   return [
-    `# Written by process-rules machine. Makes this shell act as ${agent} on GitHub.`,
+    `# Written by ${dialect.by} machine. Makes this shell act as ${agent} on GitHub.`,
     `export GH_TOKEN="$(${read})"`,
-    `[ -n "$GH_TOKEN" ] || export GH_TOKEN=${NO_TOKEN}`,
+    `[ -n "$GH_TOKEN" ] || export GH_TOKEN=${dialect.noToken}`,
     // Inherited `git -c` and config-file injection could bring back a helper; askpass could prompt.
     `unset ${UNSET.join(' ')}`,
-    ...identityVars(agent, id, paths).map(([name, value]) => `export ${name}=${quote(value)}`),
+    ...identityVars(agent, id, paths, dialect).map(([name, value]) => `export ${name}=${quote(value)}`),
     '',
   ].join('\n');
 }
 
 /**
- * Whether `script` is a session file `machine` writes for the agent: this
- * release's, or an older release's that differs only in how it reads the
- * token (before niyam, from the keychain service `process-rules`, which is
- * still there). An older one still works; `doctor` says so, and `machine`
- * rewrites it.
+ * Whether `script`, in the agent's folder `paths`, is a session file
+ * `machine` writes for the agent: this release's, or an older release's that
+ * differs only in how it reads the token (before niyam, from the keychain
+ * service `process-rules`, which is still there, P-50) or in how it spells
+ * the names (before P-55: process-rules in its first line, placeholder and
+ * SSH refusal, and PROCESS_RULES_AGENT alone). An older one still works;
+ * `doctor` says so, and `machine` writes this release's.
  */
 export function sessionFileIs(script: string, agent: string, id: number, paths: Paths, store: TokenStore = KEYCHAIN): 'current' | 'older' | undefined {
   if (script === sessionScript(agent, id, paths, store)) return 'current';
-  return (store.olderReadCommands?.(agent) ?? []).some((read) => script === sessionScript(agent, id, paths, store, read)) ? 'older' : undefined;
+  const reads = [store.readCommand(agent), ...(store.olderReadCommands?.(agent) ?? [])];
+  const older = [DIALECT, OLD_DIALECT].some((dialect) => reads.some((read) => script === sessionText(agent, id, paths, read, dialect)));
+  return older ? 'older' : undefined;
 }
 
 /** The environment `sessionScript` gives a shell, for running git as the agent from here. */
@@ -357,13 +459,13 @@ export function sessionEnv(
  */
 export function lockScript(home: string): string {
   const vars: [string, string][] = [
-    ['GH_CONFIG_DIR', `${home}/.config/process-rules/locked/gh`],
+    ['GH_CONFIG_DIR', `${configDir(home)}/locked/gh`],
     ['GIT_TERMINAL_PROMPT', '0'],
     ['GIT_SSH_COMMAND', NO_SSH],
     ...configVars(LOCKED_CONFIG),
   ];
   return [
-    '# Written by process-rules session-start. GitHub is locked out unless an agent identity below replaces this.',
+    `# Written by ${CLI} session-start. GitHub is locked out unless an agent identity below replaces this.`,
     `export GH_TOKEN=${NO_TOKEN}`,
     `unset ${UNSET.join(' ')}`,
     ...vars.map(([name, value]) => `export ${name}=${quote(value)}`),
@@ -371,9 +473,9 @@ export function lockScript(home: string): string {
   ].join('\n');
 }
 
-/** The agent and account id a session file names, or undefined when it names none. */
+/** The agent and account id a session file names, by either variable, or undefined when it names none. */
 export function sessionNames(script: string): { agent: string; id: number } | undefined {
-  const agent = /^export PROCESS_RULES_AGENT='([^']*)'$/m.exec(script)?.[1];
+  const agent = new RegExp(`^export (?:${AGENT_VAR}|${OLD_AGENT_VAR})='([^']*)'$`, 'm').exec(script)?.[1];
   const id = /^export GIT_AUTHOR_EMAIL='(\d+)\+/m.exec(script)?.[1];
   return agent && id ? { agent, id: Number(id) } : undefined;
 }

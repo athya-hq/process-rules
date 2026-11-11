@@ -60,7 +60,10 @@ export function machineArgs(args: readonly string[]): { named?: string; yes?: tr
  * token in the token store, the key registered on GitHub, the session file
  * agent sessions source, the launcher the hooks run, and the owner's `gh`
  * logins and saved git password locked away. Needs no client repository;
- * whether the agent can push to one is `onboard`'s check.
+ * whether the agent can push to one is `onboard`'s check. The session file
+ * and the launcher go under ~/.config/niyam only (the signing key stays in
+ * ~/.ssh), and the ones a release before P-55 wrote under
+ * ~/.config/process-rules stay, since older hooks still run that launcher.
  *
  * It first works out what it would change, changing nothing, shows that as
  * one plan and asks once (`--yes` skips the question, `--dry-run` stops at

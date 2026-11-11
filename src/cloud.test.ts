@@ -5,11 +5,21 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, describe, it } from 'node:test';
 
-import { CLOUD_DIR, CLOUD_NODE, CLOUD_NODE_SHA256, INSTALL_FAILED as FAILED, cloudRepoScript, cloudScriptVersion, cloudSetup, cloudSetupSnippet, releaseTarball } from './cloud.ts';
-import { capture } from './fake.test.ts';
+import { CLOUD_DIR, CLOUD_NODE, CLOUD_NODE_SHA256, INSTALL_FAILED as FAILED, PROXY_TOKEN, cloudRepoScript, cloudScriptVersion, cloudSetup, cloudSetupSnippet, cloudToken, releaseTarball } from './cloud.ts';
+import { FakeSys, capture } from './fake.test.ts';
 import { CLOUD_SETUP_PATH, WORKFLOW_PATH } from './onboard-pull.ts';
 
 const SHA = 'ab'.repeat(32);
+
+describe('cloudToken', () => {
+  it("takes a token the environment set, else the proxy's placeholder, never a lock's, this release's or 0.6.9's (P-55)", () => {
+    const sys = new FakeSys();
+    for (const [token, used] of [[undefined, PROXY_TOKEN], ['', PROXY_TOKEN], ['niyam-no-agent-token', PROXY_TOKEN], ['process-rules-no-agent-token', PROXY_TOKEN], ['ghp_set', 'ghp_set']] as const) {
+      sys.env = { GH_TOKEN: token };
+      assert.equal(cloudToken(sys), used, String(token));
+    }
+  });
+});
 
 describe('cloudScriptVersion', () => {
   it('reads the release the cloud setup file installs, and nothing from another file', () => {

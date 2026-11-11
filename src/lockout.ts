@@ -1,4 +1,4 @@
-import { pathsFor, sameLogin } from './agent.ts';
+import { NOT_AGENTS, agentFile, configDirs, pathsFor, sameLogin } from './agent.ts';
 import { type Finding, tilde } from './layout.ts';
 import type { Sys } from './types.ts';
 import { GITHUB_HOST, GITHUB_HOST_RE, GITHUB_SSH, GITHUB_WEB } from './host.ts';
@@ -38,8 +38,13 @@ export function exposure(sys: Sys, agent: string): Exposure {
     (login) => !sameLogin(login, agent),
   );
   const gitPassword = sys.exec('/usr/bin/security', KEYCHAIN_QUERY).code === 0;
-  // Every agent machine set up here keeps its signing key, passphrase-free on purpose.
-  const agentKeys = new Set([agent, ...sys.list(`${sys.home}/.config/process-rules`)].map((name) => `${name.toLowerCase()}_signing`));
+  // Every agent machine set up here keeps its signing key, passphrase-free on purpose: its folder may be in either config folder.
+  // The launcher's, records' and locked gh folders there name no agent, so an owner key such as bin_signing is still checked,
+  // unless an agent of that very name has its session file there.
+  const folders = configDirs(sys.home).flatMap((dir) =>
+    sys.list(dir).filter((name) => !NOT_AGENTS.includes(name) || sys.exists(`${dir}/${name}/session.sh`)),
+  );
+  const agentKeys = new Set([agent, ...folders].map((name) => `${name.toLowerCase()}_signing`));
   const ssh = `${sys.home}/.ssh`;
   const openKeys = sys
     .list(ssh)
@@ -98,14 +103,17 @@ export interface Declined {
   gitPassword: boolean;
 }
 
+const DECLINED = 'lockout-declined.json';
+const MOVED = 'gh-moved.json';
+
 /** Where `machine` keeps what was declined, in the agent's folder beside its session file. */
-export function declinedPath(home: string, agent: string): string {
-  return `${pathsFor(home, agent).dir}/lockout-declined.json`;
+export function declinedPath(home: string, agent: string, old = false): string {
+  return `${pathsFor(home, agent, old).dir}/${DECLINED}`;
 }
 
-/** What was declined on this Mac; nothing when there is no record or it cannot be read. */
+/** What was declined on this Mac, in the agent's folder or, before P-55, the old one's; nothing when there is no record or it cannot be read. */
 export function readDeclined(sys: Sys, agent: string): Declined {
-  const path = declinedPath(sys.home, agent);
+  const path = agentFile(sys, agent, DECLINED);
   const none: Declined = { ghLogins: [], gitPassword: false };
   if (!sys.exists(path)) return none;
   try {
@@ -146,12 +154,12 @@ export interface Moved {
 
 /** Where `machine` records the move, beside the session file. */
 export function movedPath(home: string, agent: string): string {
-  return `${pathsFor(home, agent).dir}/gh-moved.json`;
+  return `${pathsFor(home, agent).dir}/${MOVED}`;
 }
 
-/** The last move on this Mac; undefined when there is none or it cannot be read. */
+/** The last move on this Mac, in the agent's folder or, before P-55, the old one's; undefined when there is none or it cannot be read. */
 export function readMoved(sys: Sys, agent: string): Moved | undefined {
-  const path = movedPath(sys.home, agent);
+  const path = agentFile(sys, agent, MOVED);
   if (!sys.exists(path)) return undefined;
   try {
     const record = JSON.parse(sys.read(path)) as Partial<Moved>;
@@ -218,7 +226,10 @@ export function removeGitPassword(sys: Sys): boolean {
  * before goes, as the owner has now said yes.
  */
 export function recordMove(sys: Sys, agent: string, signedOut: string[]): Finding[] {
-  if (sys.exists(declinedPath(sys.home, agent))) sys.remove(declinedPath(sys.home, agent));
+  // In either folder: the owner has said yes, and an old record would be read where the new folder has none.
+  for (const path of [declinedPath(sys.home, agent), declinedPath(sys.home, agent, true)]) {
+    if (sys.exists(path)) sys.remove(path);
+  }
   if (signedOut.length === 0) return [];
   const pending = movedFindings(sys, agent).length > 0 ? (readMoved(sys, agent)?.logins ?? []) : [];
   const logins = [...pending.filter((login) => !signedOut.some((other) => sameLogin(other, login))), ...signedOut];

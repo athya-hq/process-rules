@@ -6,31 +6,47 @@ import { join } from 'node:path';
 import { after, describe, it } from 'node:test';
 
 import {
+  BASE_ENV,
+  NO_SSH,
   NO_TOKEN,
+  OLD_NO_TOKEN,
   OLD_SETTINGS_PATH,
   SETTINGS_PATH,
   account,
+  agentFile,
   agentFrom,
   agentHere,
+  agentIn,
   agentsSetUp,
   anyLogin,
   checkToken,
   either,
   hasSettings,
+  isNoToken,
   keyBody,
   keyPairProblem,
+  launcherPath,
+  launcherScript,
   loadSettings,
+  lockScript,
   noreplyEmail,
   pathsFor,
   repoAt,
   sameLogin,
   sessionEnv,
+  sessionFileIs,
+  sessionNames,
+  sessionPaths,
+  sessionRecord,
+  sessionRecordIn,
   sessionScript,
   settingsPathIn,
   signingKeys,
   tokenInfo,
 } from './agent.ts';
 import { AGENT, AGENT_ID, CLASSIC, FakeSys, HOME, KEY, NOW, PRIVATE_KEY, PUBLIC_KEY, ROOT, TOKEN } from './fake.test.ts';
+import { LOCK_069, SESSION_069, SESSION_BEFORE_P50 } from './older-texts.test.ts';
+import { KEYCHAIN } from './token-store.ts';
 
 /** A FakeSys whose settings are `settings`, with `machine`'s session file for each of `setUp`. */
 function withSettings(settings: object, setUp: string[] = []): FakeSys {
@@ -251,11 +267,117 @@ describe('pathsFor and noreplyEmail', () => {
   it('keeps the key in ~/.ssh and the rest in a folder per agent account', () => {
     assert.deepEqual(pathsFor(HOME, AGENT), {
       key: `${HOME}/.ssh/examplebot_signing`,
-      dir: `${HOME}/.config/process-rules/examplebot`,
-      session: `${HOME}/.config/process-rules/examplebot/session.sh`,
-      gh: `${HOME}/.config/process-rules/examplebot/gh`,
+      dir: `${HOME}/.config/niyam/examplebot`,
+      session: `${HOME}/.config/niyam/examplebot/session.sh`,
+      gh: `${HOME}/.config/niyam/examplebot/gh`,
     });
     assert.equal(noreplyEmail(AGENT_ID, AGENT), '42+ExampleBot@users.noreply.github.com');
+  });
+});
+
+describe("this Mac's files under ~/.config/niyam, and the old folder still read (P-55)", () => {
+  const OLD = `${HOME}/.config/process-rules`;
+  const NEW = `${HOME}/.config/niyam`;
+
+  it('puts the agent folders, session records, launcher and locked gh folder in the new folder, and names the old', () => {
+    assert.equal(pathsFor(HOME, AGENT, true).session, `${OLD}/examplebot/session.sh`);
+    assert.equal(pathsFor(HOME, AGENT, true).gh, `${OLD}/examplebot/gh`);
+    assert.equal(pathsFor(HOME, AGENT, true).key, KEY, 'the key stays in ~/.ssh');
+    assert.equal(sessionRecord(HOME, 's1'), `${NEW}/sessions/s1.json`);
+    assert.equal(sessionRecord(HOME, 's1', true), `${OLD}/sessions/s1.json`);
+    assert.equal(sessionRecord(HOME, '../x'), undefined);
+    assert.equal(launcherPath(HOME), `${NEW}/bin/niyam`);
+    assert.equal(launcherPath(HOME, true), `${OLD}/bin/process-rules`);
+    assert.match(lockScript(HOME), new RegExp(`^export GH_CONFIG_DIR='${NEW}/locked/gh'$`, 'm'));
+  });
+
+  it("says niyam in the files machine and session-start write, with niyam's placeholder and SSH refusal", () => {
+    const script = sessionScript(AGENT, AGENT_ID, pathsFor(HOME, AGENT));
+    assert.match(script, /^# Written by niyam machine\. Makes this shell act as ExampleBot on GitHub\.$/m);
+    assert.match(script, /^\[ -n "\$GH_TOKEN" \] \|\| export GH_TOKEN=niyam-no-agent-token$/m);
+    assert.match(script, /^export NIYAM_AGENT='ExampleBot'\nexport PROCESS_RULES_AGENT='ExampleBot'$/m);
+    assert.ok(script.includes(`export GIT_SSH_COMMAND='echo '\\''niyam: SSH is off in agent sessions; GitHub goes over HTTPS'\\'' >&2; false'`), script);
+    assert.equal(NO_SSH, "echo 'niyam: SSH is off in agent sessions; GitHub goes over HTTPS' >&2; false");
+    assert.match(lockScript(HOME), /^# Written by niyam session-start\. GitHub is locked out unless an agent identity below replaces this\.\nexport GH_TOKEN=niyam-no-agent-token\n/);
+    assert.notEqual(lockScript(HOME), LOCK_069);
+    assert.match(launcherScript('/n/node', '/c/cli.js'), /^#!\/bin\/sh\n# Written by niyam machine: the CLI for hooks/);
+    assert.deepEqual([BASE_ENV.GH_TOKEN, BASE_ENV.GITHUB_TOKEN, BASE_ENV.GIT_SSH_COMMAND], [NO_TOKEN, NO_TOKEN, NO_SSH]);
+  });
+
+  it('counts both placeholders as no token, and nothing else', () => {
+    assert.deepEqual([NO_TOKEN, OLD_NO_TOKEN], ['niyam-no-agent-token', 'process-rules-no-agent-token']);
+    assert.deepEqual([NO_TOKEN, OLD_NO_TOKEN, 'ghp_good', '', undefined].map(isNoToken), [true, true, false, false, false]);
+  });
+
+  it('names the agent by NIYAM_AGENT or PROCESS_RULES_AGENT, an empty one beside a set one too', () => {
+    assert.equal(agentIn({ NIYAM_AGENT: AGENT }), AGENT);
+    assert.equal(agentIn({ PROCESS_RULES_AGENT: AGENT }), AGENT);
+    assert.equal(agentIn({ NIYAM_AGENT: AGENT, PROCESS_RULES_AGENT: 'OtherBot' }), AGENT, 'the new name first');
+    assert.equal(agentIn({ NIYAM_AGENT: '', PROCESS_RULES_AGENT: AGENT }), AGENT);
+    assert.equal(agentIn({ NIYAM_AGENT: '', PROCESS_RULES_AGENT: '' }), undefined);
+    assert.equal(agentIn({}), undefined);
+  });
+
+  it('reads the agent and id from a session file by either variable', () => {
+    assert.deepEqual(sessionNames(sessionScript(AGENT, AGENT_ID, pathsFor(HOME, AGENT))), { agent: AGENT, id: AGENT_ID });
+    assert.deepEqual(sessionNames(SESSION_069), { agent: AGENT, id: AGENT_ID });
+    const email = "export GIT_AUTHOR_EMAIL='42+ExampleBot@users.noreply.github.com'\n";
+    assert.deepEqual(sessionNames(`export NIYAM_AGENT='ExampleBot'\n${email}`), { agent: AGENT, id: AGENT_ID });
+    assert.deepEqual(sessionNames(`export PROCESS_RULES_AGENT='ExampleBot'\n${email}`), { agent: AGENT, id: AGENT_ID });
+    assert.equal(sessionNames(`export OTHER_AGENT='ExampleBot'\n${email}`), undefined);
+  });
+
+  it("counts 0.6.9's session file, and one from before P-50, in the old folder as older; nowhere else", () => {
+    const old = pathsFor(HOME, AGENT, true);
+    assert.equal(sessionFileIs(SESSION_069, AGENT, AGENT_ID, old, KEYCHAIN), 'older');
+    assert.equal(sessionFileIs(SESSION_BEFORE_P50, AGENT, AGENT_ID, old, KEYCHAIN), 'older');
+    assert.equal(sessionFileIs(SESSION_069, AGENT, AGENT_ID, pathsFor(HOME, AGENT), KEYCHAIN), undefined, 'its gh folder is the old one');
+    assert.equal(sessionFileIs(SESSION_069, 'OtherBot', AGENT_ID, old, KEYCHAIN), undefined);
+    assert.equal(sessionFileIs(SESSION_069.replace('false', 'true'), AGENT, AGENT_ID, old, KEYCHAIN), undefined, 'anything else in it');
+    const now = pathsFor(HOME, AGENT);
+    assert.equal(sessionFileIs(sessionScript(AGENT, AGENT_ID, now), AGENT, AGENT_ID, now, KEYCHAIN), 'current');
+  });
+
+  it('takes the session file in the new folder, else the old, else names the new', () => {
+    const sys = new FakeSys();
+    assert.deepEqual(sessionPaths(sys, AGENT), { ...pathsFor(HOME, AGENT), old: false });
+    sys.files.set(`${OLD}/examplebot/session.sh`, SESSION_069);
+    assert.deepEqual(sessionPaths(sys, AGENT), { ...pathsFor(HOME, AGENT, true), old: true });
+    sys.files.set(`${NEW}/examplebot/session.sh`, '');
+    assert.deepEqual(sessionPaths(sys, AGENT), { ...pathsFor(HOME, AGENT), old: false });
+  });
+
+  it('takes a file in the agent folder from the new folder, else the old, else names the new', () => {
+    const sys = new FakeSys();
+    assert.equal(agentFile(sys, AGENT, 'x.json'), `${NEW}/examplebot/x.json`);
+    sys.files.set(`${OLD}/examplebot/x.json`, '{}');
+    assert.equal(agentFile(sys, AGENT, 'x.json'), `${OLD}/examplebot/x.json`);
+    sys.files.set(`${NEW}/examplebot/x.json`, '{}');
+    assert.equal(agentFile(sys, AGENT, 'x.json'), `${NEW}/examplebot/x.json`);
+  });
+
+  it("takes a session's record from the new folder whenever it is there, whatever it says, else the old", () => {
+    const sys = new FakeSys();
+    assert.equal(sessionRecordIn(sys, 's1'), `${NEW}/sessions/s1.json`);
+    sys.files.set(`${OLD}/sessions/s1.json`, '{"agent":"ExampleBot"}\n');
+    assert.equal(sessionRecordIn(sys, 's1'), `${OLD}/sessions/s1.json`, 'a session started under 0.6.9');
+    sys.files.set(`${NEW}/sessions/s1.json`, '{"problem":"locked"}\n');
+    assert.equal(sessionRecordIn(sys, 's1'), `${NEW}/sessions/s1.json`);
+    assert.equal(sessionRecordIn(sys, '../s1'), undefined);
+  });
+
+  it('finds the agents set up in either folder, each once', () => {
+    const sys = new FakeSys();
+    sys.files.set(`${OLD}/examplebot/session.sh`, SESSION_069);
+    assert.deepEqual(agentsSetUp(sys), [AGENT], 'the old folder only');
+    sys.files.set(`${NEW}/examplebot/session.sh`, sessionScript(AGENT, AGENT_ID, pathsFor(HOME, AGENT)));
+    assert.deepEqual(agentsSetUp(sys), [AGENT], 'both: once');
+    sys.files.set(`${OLD}/otherbot/session.sh`, sessionScript('OtherBot', 43, pathsFor(HOME, 'OtherBot', true)));
+    sys.files.set(`${NEW}/thirdbot/session.sh`, sessionScript('ThirdBot', 44, pathsFor(HOME, 'ThirdBot')));
+    assert.deepEqual(agentsSetUp(sys), [AGENT, 'ThirdBot', 'OtherBot']);
+    sys.files.delete(`${OLD}/examplebot/session.sh`);
+    sys.files.delete(`${OLD}/otherbot/session.sh`);
+    assert.deepEqual(agentsSetUp(sys), [AGENT, 'ThirdBot'], 'the new folder only');
   });
 });
 
@@ -364,7 +486,8 @@ describe('sessionScript, sourced by a real shell', () => {
     assert.equal(env.GH_TOKEN, 'tok');
     assert.equal(env.GITHUB_TOKEN, undefined);
     assert.equal(env.KEEP, '1');
-    const names = Object.keys(env).filter((name) => /^(GIT_|GH_CONFIG|PROCESS_RULES)/.test(name) && env[name] !== undefined);
+    assert.deepEqual([env.NIYAM_AGENT, env.PROCESS_RULES_AGENT], [agent, agent], 'both names');
+    const names = Object.keys(env).filter((name) => /^(GIT_|GH_CONFIG|PROCESS_RULES|NIYAM)/.test(name) && env[name] !== undefined);
     for (const name of names) {
       assert.equal(shell(`printf %s "$${name}"`), env[name], name);
     }

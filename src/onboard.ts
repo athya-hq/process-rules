@@ -1,4 +1,4 @@
-import { CLI, OLD_CLI, OLD_PRODUCT, PRODUCT } from './names.ts';
+import { AGENT_VAR, CLI, CONFIG_DIR, OLD_AGENT_VAR, OLD_CLI, OLD_CONFIG_DIR, OLD_PRODUCT, PRODUCT } from './names.ts';
 import {
   API,
   BASE_ENV,
@@ -6,6 +6,7 @@ import {
   SETTINGS_PATH,
   account,
   agentHere,
+  agentIn,
   agentsSetUp,
   anyLogin,
   checkToken,
@@ -41,6 +42,10 @@ export const SETUP_FIRST = "If the repo has its own Setup script, put this first
 /** This product's repository: clients call its shared workflow. */
 export { PRODUCT } from './names.ts';
 export { HOOKS_PATH, WORKFLOW_PATH } from './onboard-pull.ts';
+/** The launcher `machine` writes, and the one it wrote before P-55, as a hook's shell spells them. */
+const HOOK_LAUNCHER = `$HOME/${CONFIG_DIR}/bin/${CLI}`;
+const OLD_HOOK_LAUNCHER = `$HOME/${OLD_CONFIG_DIR}/bin/${OLD_CLI}`;
+
 /**
  * The pre-push git hook: before a local agent session pushes, that it
  * reaches GitHub as the agent, then the work rules. It needs no Claude Code
@@ -51,9 +56,10 @@ export const PRE_PUSH_HOOK = [
   '#!/bin/sh',
   '# Written by niyam onboard: before an agent session pushes, that it pushes as the agent, then the work rules.',
   '# Anyone else\'s push goes ahead. Without the CLI nothing can check an agent session\'s push, so it is refused.',
-  '[ -z "$PROCESS_RULES_AGENT" ] && [ "$CLAUDECODE" != 1 ] && exit 0',
-  'cli="$HOME/.config/process-rules/bin/process-rules"',
-  '[ -x "$cli" ] || cli=niyam',
+  `[ -z "$${AGENT_VAR}" ] && [ -z "$${OLD_AGENT_VAR}" ] && [ "$CLAUDECODE" != 1 ] && exit 0`,
+  `cli="${HOOK_LAUNCHER}"`,
+  `[ -x "$cli" ] || cli="${OLD_HOOK_LAUNCHER}"`,
+  `[ -x "$cli" ] || cli=${CLI}`,
   'if ! command -v "$cli" >/dev/null 2>&1; then',
   '  echo "niyam: the CLI is not installed, so this agent push cannot be checked" >&2',
   '  exit 1',
@@ -64,6 +70,21 @@ export const PRE_PUSH_HOOK = [
 
 /** The pre-push hooks older releases wrote, which onboard replaces with this release's. */
 export const OLDER_PRE_PUSH_HOOKS = [
+  // 0.6.8 and 0.6.9's, before P-55: the agent by its old variable alone, the launcher in the old folder alone.
+  [
+    '#!/bin/sh',
+    '# Written by niyam onboard: before an agent session pushes, that it pushes as the agent, then the work rules.',
+    '# Anyone else\'s push goes ahead. Without the CLI nothing can check an agent session\'s push, so it is refused.',
+    '[ -z "$PROCESS_RULES_AGENT" ] && [ "$CLAUDECODE" != 1 ] && exit 0',
+    'cli="$HOME/.config/process-rules/bin/process-rules"',
+    '[ -x "$cli" ] || cli=niyam',
+    'if ! command -v "$cli" >/dev/null 2>&1; then',
+    '  echo "niyam: the CLI is not installed, so this agent push cannot be checked" >&2',
+    '  exit 1',
+    'fi',
+    'exec "$cli" pre-push "$@"',
+    '',
+  ].join('\n'),
   [
     '#!/bin/sh',
     '# Written by process-rules onboard: before an agent session pushes, that it pushes as the agent, then the work rules.',
@@ -124,10 +145,21 @@ export function prePushHook(sys: Sys, root: string): { path: string; file: strin
   return { path, file, state: /^\s*(?:exec\s+)?(?:"\$cli"|process-rules|niyam)\s+pre-push\b/m.test(text) ? 'ours' : 'own' };
 }
 
-/** How a hook finds the CLI: the launcher `machine` writes, else niyam on PATH. */
-const FIND_CLI = 'cli="$HOME/.config/process-rules/bin/process-rules"; [ -x "$cli" ] || cli=niyam; ';
+/**
+ * How a hook finds the CLI: the launcher `machine` writes, else the one it
+ * wrote before P-55, which a Mac not set up again since has alone, else
+ * niyam on PATH.
+ */
+const FIND_CLI = `cli="${HOOK_LAUNCHER}"; [ -x "$cli" ] || cli="${OLD_HOOK_LAUNCHER}"; [ -x "$cli" ] || cli=${CLI}; `;
+/** How hooks from P-53 to P-55 found it: the launcher in the old folder, else niyam on PATH. */
+const P53_FIND_CLI = 'cli="$HOME/.config/process-rules/bin/process-rules"; [ -x "$cli" ] || cli=niyam; ';
 /** How hooks before P-53 found it: the launcher, else process-rules on PATH. */
 const OLD_FIND_CLI = 'cli="$HOME/.config/process-rules/bin/process-rules"; [ -x "$cli" ] || cli=process-rules; ';
+
+/** The SessionStart hook after it has found the CLI. */
+const HOOK_RUN =
+  'if said=$("$cli" session-start 2>&1); then printf \'%s\\n\' "$said"; ' +
+  'else printf \'%s\\n\' "niyam: STOP. niyam session-start did not run here ($said), so this session cannot be given the agent identity and GitHub is locked out of it. Do not push, fetch, or run gh in this session; tell the owner."; fi';
 
 /**
  * What the client's SessionStart hook runs, on a Mac and in a Claude cloud
@@ -135,10 +167,18 @@ const OLD_FIND_CLI = 'cli="$HOME/.config/process-rules/bin/process-rules"; [ -x 
  * the session inside a line telling it to stop; the settings' `env` has
  * already locked GitHub out.
  */
-export const HOOK_COMMAND =
-  FIND_CLI +
-  'if said=$("$cli" session-start 2>&1); then printf \'%s\\n\' "$said"; ' +
-  'else printf \'%s\\n\' "niyam: STOP. niyam session-start did not run here ($said), so this session cannot be given the agent identity and GitHub is locked out of it. Do not push, fetch, or run gh in this session; tell the owner."; fi';
+export const HOOK_COMMAND = FIND_CLI + HOOK_RUN;
+
+/** The PreToolUse hook before it finds the CLI: a command naming neither gh nor git goes ahead. */
+const GUARD_SKIP =
+  'input=$(cat); ' +
+  // The command alone, not the rest of the input, such as its description and paths.
+  'cmd=$(printf \'%s\' "$input" | sed -nE \'s/.*"command"[[:space:]]*:[[:space:]]*"(([^"\\\\]|\\\\.)*)".*/\\1/p\'); ' +
+  'printf \'%s\' "$cmd" | grep -Eq \'(^|[^[:alnum:]_-])(gh|git)([^[:alnum:]_-]|$)\' || exit 0; ';
+/** The PreToolUse hook after it has found the CLI. */
+const GUARD_RUN =
+  'printf \'%s\' "$input" | "$cli" guard && exit 0; [ $? -eq 2 ] && exit 2; ' +
+  'echo "niyam: refused, because the niyam CLI did not run here to check this command. Do not work around it; tell the owner." >&2; exit 2';
 
 /**
  * What the client's PreToolUse hook runs before each Bash command: `guard`
@@ -146,14 +186,7 @@ export const HOOK_COMMAND =
  * not naming either as a word goes ahead without starting the CLI. When the CLI cannot
  * run, every command naming either is refused, so a broken CLI fails closed.
  */
-export const GUARD_COMMAND =
-  'input=$(cat); ' +
-  // The command alone, not the rest of the input, such as its description and paths.
-  'cmd=$(printf \'%s\' "$input" | sed -nE \'s/.*"command"[[:space:]]*:[[:space:]]*"(([^"\\\\]|\\\\.)*)".*/\\1/p\'); ' +
-  'printf \'%s\' "$cmd" | grep -Eq \'(^|[^[:alnum:]_-])(gh|git)([^[:alnum:]_-]|$)\' || exit 0; ' +
-  FIND_CLI +
-  'printf \'%s\' "$input" | "$cli" guard && exit 0; [ $? -eq 2 ] && exit 2; ' +
-  'echo "niyam: refused, because the niyam CLI did not run here to check this command. Do not work around it; tell the owner." >&2; exit 2';
+export const GUARD_COMMAND = GUARD_SKIP + FIND_CLI + GUARD_RUN;
 
 /**
  * The permission rule that lets agent sessions answer review threads on
@@ -188,6 +221,8 @@ export function missingAutoFixRules(settings: unknown): string[] {
 
 /** The hook commands older releases wrote, which onboard replaces with this release's. */
 export const OLDER_HOOK_COMMANDS = [
+  // 0.6.8 and 0.6.9's, before P-55: the launcher in the old folder alone.
+  P53_FIND_CLI + HOOK_RUN,
   OLD_FIND_CLI +
     'if said=$("$cli" session-start 2>&1); then printf \'%s\\n\' "$said"; ' +
     'else printf \'%s\\n\' "process-rules: STOP. process-rules session-start did not run here ($said), so this session cannot be given the agent identity and GitHub is locked out of it. Do not push, fetch, or run gh in this session; tell the owner."; fi',
@@ -204,6 +239,8 @@ export const OLDER_HOOK_COMMANDS = [
 
 /** The guard commands older releases wrote, which onboard replaces with this release's. */
 export const OLDER_GUARD_COMMANDS = [
+  // 0.6.8 and 0.6.9's, before P-55.
+  GUARD_SKIP + P53_FIND_CLI + GUARD_RUN,
   'input=$(cat); ' +
     'cmd=$(printf \'%s\' "$input" | sed -nE \'s/.*"command"[[:space:]]*:[[:space:]]*"(([^"\\\\]|\\\\.)*)".*/\\1/p\'); ' +
     'printf \'%s\' "$cmd" | grep -Eq \'(^|[^[:alnum:]_-])(gh|git)([^[:alnum:]_-]|$)\' || exit 0; ' +
@@ -802,13 +839,14 @@ export function claudeSettings(before: string | undefined): { text: string; chan
     const current = typeof env === 'object' && env !== null ? (env as Record<string, unknown>) : {};
     const missing = Object.entries(BASE_ENV).filter(([name, value]) => current[name] !== value);
     for (const [name, value] of missing) text = setMember(text, ['env'], name, value);
-    const names = missing.map(([name]) => name);
-    const named = names.length <= 3 ? names.join(', ') : `${names.slice(0, 2).join(', ')} and ${names.length - 2} more`;
+    // A variable an older release set, such as its placeholder token or SSH refusal, is updated; one not there is set.
+    const updated = missing.filter(([name]) => typeof current[name] === 'string').map(([name]) => name);
+    const added = missing.filter(([name]) => typeof current[name] !== 'string').map(([name]) => name);
+    const named = (names: string[]): string => (names.length <= 3 ? names.join(', ') : `${names.slice(0, 2).join(', ')} and ${names.length - 2} more`);
     if (hooksChanged) labels.push(`hooks ${hooksChanged}`);
-    if (missing.length > 0) {
-      changes.push(`set ${named} in env, so GitHub is locked out until session-start gives the agent identity`);
-      labels.push('lock');
-    }
+    if (added.length > 0) changes.push(`set ${named(added)} in env, so GitHub is locked out until session-start gives the agent identity`);
+    if (updated.length > 0) changes.push(`update ${named(updated)} in env to this release's lock`);
+    if (missing.length > 0) labels.push(added.length > 0 ? 'lock' : 'lock updated');
     // The rule under the old command becomes niyam's, in its place, unless niyam's is there already.
     const allow = (parsed() as { permissions?: { allow?: unknown } }).permissions?.allow;
     const has = Array.isArray(allow) && allow.includes(REVIEW_THREAD_RULE);
@@ -956,7 +994,7 @@ function planHead(paint: Paint, head: { from?: string | undefined; version: stri
  */
 export async function onboard(sys: Sys, io: Output, args: readonly string[] = []): Promise<number> {
   const { named, features: chosen, add, yes, dryRun } = onboardArgs(args);
-  if (sys.env.PROCESS_RULES_AGENT) {
+  if (agentIn(sys.env)) {
     io.err('onboard: run it in your own terminal, not in an agent session');
     return 1;
   }

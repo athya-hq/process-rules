@@ -176,10 +176,15 @@ export async function upgrade(sys: Sys, io: Output, running: string = packageVer
  * Points a launcher an older `machine` wrote, which runs pnpm's
  * process-rules, at the niyam beside it, which a release after P-53 alone
  * installs: without it the hooks would find no CLI and lock GitHub out.
- * Exit 1 when it runs process-rules and no niyam is there to run.
+ * Both launchers: the one `machine` writes, and the one it wrote before
+ * P-55, which hooks older releases wrote still run. Exit 1 when one runs
+ * process-rules and no niyam is there to run.
  */
 function repoint(sys: Sys, io: Output): number {
-  const launcher = launcherPath(sys.home);
+  return Math.max(...[launcherPath(sys.home), launcherPath(sys.home, true)].map((launcher) => repointOne(sys, io, launcher)));
+}
+
+function repointOne(sys: Sys, io: Output, launcher: string): number {
   const moved = sys.exists(launcher) ? repointedLauncher(sys.read(launcher)) : undefined;
   if (moved === undefined) return 0;
   if (!sys.exists(moved.command)) {

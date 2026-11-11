@@ -30,7 +30,13 @@ describe('agentSession', () => {
     sys.env = { CLAUDECODE: '1' };
     assert.equal(agentSession(sys), true);
     sys.env = { PROCESS_RULES_AGENT: AGENT };
-    assert.equal(agentSession(sys), true);
+    assert.equal(agentSession(sys), true, 'by the name before P-55');
+    sys.env = { NIYAM_AGENT: AGENT };
+    assert.equal(agentSession(sys), true, 'by the name since P-55');
+    sys.env = { NIYAM_AGENT: '', PROCESS_RULES_AGENT: AGENT };
+    assert.equal(agentSession(sys), true, 'an empty new name beside the old');
+    sys.env = { NIYAM_AGENT: '', PROCESS_RULES_AGENT: '' };
+    assert.equal(agentSession(sys), false);
     sys.env = { CLAUDECODE: '1', CLAUDE_CODE_REMOTE: 'true' };
     assert.equal(agentSession(sys), true, 'a cloud session is one too');
   });
