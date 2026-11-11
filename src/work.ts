@@ -394,10 +394,11 @@ function report(io: Output, where: string, problems: string[]): number {
  * pull requests pass; an agent's must name exactly one slice, as a line
  * `Slice: #N`, that may be built, and name with lines `State: #N` only States
  * under it, at least one open one when the slice is closed already (a fix);
- * but for onboard's own: from ONBOARD_BRANCH (or the one before P-56)
- * in this repository, changing only the files onboard writes and deleting
- * none but the two it moves, each only where its new file is written or is
- * on the base branch, which the owner confirmed at the terminal and merges.
+ * but for onboard's own: from ONBOARD_BRANCH alone in this repository,
+ * changing only the files onboard writes and deleting none but the cloud
+ * setup file under its name before P-56 (MOVED_FILES), only where the new
+ * one is written or is on the base branch, which the owner confirmed at the
+ * terminal and merges.
  */
 export async function prWorkRules(sys: Sys, io: Output): Promise<number> {
   const { GITHUB_EVENT_PATH: eventPath, GITHUB_REPOSITORY: slug, GH_TOKEN: token } = sys.env;

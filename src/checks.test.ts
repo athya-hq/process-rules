@@ -34,14 +34,15 @@ describe('checks.yml', () => {
     }
   });
 
-  it('takes niyam-ref alone, and keys the decisions job by niyam (P-57)', () => {
+  it('takes niyam-ref alone, and keeps the decisions job on the key every release shares (P-57)', () => {
     const inputs = (parse(CHECKS) as { on: { workflow_call: { inputs: Record<string, { type: string; default: string }> } } }).on.workflow_call.inputs;
     assert.deepEqual(Object.keys(inputs), ['niyam-ref']);
     for (const input of Object.values(inputs)) assert.deepEqual([input.type, input.default], ['string', ''], 'unset is empty, so main is taken');
     const env = jobs.settings?.steps.find((step) => step.name === 'Check niyam-ref names the release that runs') as Step & { env?: Record<string, string> };
     assert.equal(env.env?.REF, `\${{ ${REF} }}`);
-    assert.match(CHECKS, /^ {6}group: niyam-decisions-\$\{\{ github\.repository \}\}$/m);
-    assert.doesNotMatch(CHECKS, /process-rules|PROCESS_RULES/);
+    // A dispatch can run the job from a branch at an older release, which uses this key, so it stays one more release.
+    assert.match(CHECKS, /^ {6}group: process-rules-decisions-\$\{\{ github\.repository \}\}$/m);
+    assert.deepEqual(CHECKS.match(/process-rules|PROCESS_RULES/g), ['process-rules'], 'the key alone');
   });
 
   // actionlint resolves a local reusable workflow's inputs, so callers passing each input lint clean and one

@@ -313,8 +313,9 @@ export async function machine(sys: Sys, io: Output, args: readonly string[] = []
   if (now !== undefined && !now.same) {
     if (dropLeftover || replacing) fixes.push(keptLeftover(now.why));
   } else if (now !== undefined && dropLeftover) {
-    const { ok } = await runStep(sys, io, paint, `${store.leftoverItem?.(agent) ?? 'old keychain entry'} deleted`, async () => store.dropLeftover?.(sys, agent) === true);
-    if (!ok) fixes.push(keptLeftover(`${store.where} did not delete it`));
+    let why: string | undefined;
+    await runStep(sys, io, paint, `${store.leftoverItem?.(agent) ?? 'old keychain entry'} deleted`, async () => (why = store.dropLeftover?.(sys, agent)) === undefined);
+    if (why !== undefined) fixes.push(keptLeftover(why));
   } else if (now !== undefined) {
     fixes.push({ mark: '▲', text: `${store.leftoverItem?.(agent) ?? 'the old keychain entry'} holds the token just stored, and this run's plan did not delete it`, fix: 'niyam machine' });
   }

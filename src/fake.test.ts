@@ -255,7 +255,8 @@ export class FakeSys implements Sys {
     }
     if (command === '/usr/bin/security' && args[0] === 'find-generic-password') {
       const token = this.keychain.get(`${args[args.indexOf('-s') + 1] ?? ''}/${args[args.indexOf('-a') + 1] ?? ''}`);
-      return token ? ok(`${token}\n`) : fail('not found');
+      // security's own exit code for an item the keychain does not have.
+      return token ? ok(`${token}\n`) : { code: 44, stdout: '', stderr: 'security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.' };
     }
     if (command === '/usr/bin/security' && args[0] === 'delete-generic-password') {
       const item = `${args[args.indexOf('-s') + 1] ?? ''}/${args[args.indexOf('-a') + 1] ?? ''}`;

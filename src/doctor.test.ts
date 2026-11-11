@@ -294,6 +294,16 @@ describe('doctor', () => {
     assert.equal(sys.calls.find((c) => c.command === LAUNCHER)?.env?.PATH, '/usr/bin:/bin', 'runs it without the PATH of this shell');
   });
 
+  it('refuses a launcher that still runs process-rules, the command before niyam, with machine as the fix (P-57)', async () => {
+    const sys = healthy();
+    sys.files.set(LAUNCHER, launcherScript('/opt/node/bin/node', '/x/dist/cli.js', '/home/u/Library/pnpm/bin/process-rules'));
+    const { code, out } = await check(sys);
+    assert.equal(code, 1);
+    assert.deepEqual(marked(out, '✗'), ['✗  launcher runs process-rules, the command before niyam, which no release installs, so hooks may find no CLI → niyam machine']);
+    sys.files.set(LAUNCHER, launcherScript('/opt/node/bin/node', '/x/dist/cli.js', '/home/u/Library/pnpm/bin/niyam'));
+    assert.deepEqual(marked((await check(sys)).out, '✗'), []);
+  });
+
   it('takes the launcher alone, and refuses when it is missing', async () => {
     const sys = healthy();
     assert.ok((await check(sys)).out.includes('✓  launcher'));

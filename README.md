@@ -368,9 +368,11 @@ Claude cloud sessions below).
    every run (see Claude cloud sessions below); the first time, the plan
    lists the one paste into the cloud environment's Setup script. Where the
    repo still has `.github/process-rules/cloud-setup.sh`, which releases up
-   to 0.6.10 wrote beside it, the pull request deletes it, and the
-   description says to paste the new snippet once if the Setup script was
-   pasted before 0.6.10. It checks the agent can
+   to 0.6.10 wrote beside it, the pull request deletes it, but only where it
+   leaves `.github/niyam/cloud-setup.sh` (one the run could not write, as
+   when GitHub names no sha256 for the release, keeps the old file too), and
+   the description says to paste the new snippet once if the Setup script
+   was pasted before 0.6.10. It checks the agent can
    push. With no access, or read access only (a public repo, or an
    organisation's base permission), the plan gives it write access as you
    and accepts the invitation as the agent; and `onboard` names
@@ -1110,10 +1112,10 @@ pnpm add -g https://github.com/veda-hq/niyam/releases/download/v0.6.10/veda-hq-n
 ```
 
 The package puts one command on `PATH`, `niyam`. Since P-57 a release
-attaches nothing under the name before niyam, so a Mac that still runs
-`process-rules` (0.6.x, under the package `@athya-hq/process-rules`) takes
-the line above, after `pnpm remove -g @athya-hq/process-rules`, since pnpm
-refuses two global packages with the same bin.
+attaches nothing under the name before niyam, so a Mac that still has the
+package `@athya-hq/process-rules` (0.6.x) takes the line above. Remove the
+old package first, with `pnpm remove -g @athya-hq/process-rules`, so only
+one package puts commands on `PATH`.
 
 After that, update it with one command on each machine:
 
@@ -1190,8 +1192,9 @@ the checks; P-54 dropped the `process-rules` command; P-55 moved this Mac's file
 `~/.config/niyam/` and the agent variable to `NIYAM_AGENT`; P-56 renamed what
 `onboard` writes in a repository (the workflow, its job ids, `niyam-ref`, the cloud
 setup file and the onboard branch). Each of those still read the old names beside
-the new ones. P-57, after every repository and this Mac had moved, stopped: no
-release reads or writes a `process-rules` name.
+the new ones. P-57, for a release cut once every repository and this Mac have
+moved, ends that: no release uses a `process-rules` name to read settings,
+tokens, files or checks, or writes one; what is left is in the table below.
 
 What P-57 removed for good, by hand where it is on a machine:
 
@@ -1201,9 +1204,13 @@ What P-57 removed for good, by hand where it is on a machine:
   token; when they differ, or the read fails, it leaves the entry and says why,
   with the `security delete-generic-password` line to run once nothing needs it.
   `doctor` marks either one still there ▲.
-- `niyam onboard` deletes `.github/process-rules/cloud-setup.sh`, and writes and
-  runs none under that name; a Setup snippet pasted before 0.6.10 needs the new
-  one pasted once.
+- `niyam onboard` deletes `.github/process-rules/cloud-setup.sh` wherever it
+  leaves `.github/niyam/cloud-setup.sh`, and writes and runs none under that
+  name; a Setup snippet pasted before 0.6.10 needs the new one pasted once.
+- `niyam owner-step required-checks` takes each `process-rules / …` check out of
+  a ruleset: no workflow reports one since P-53, so it would hold every pull
+  request. The `niyam / …` check of the same job takes its place where the
+  workflow runs that job.
 - Releases no longer attach the bridge archive `athya-hq-process-rules-<version>.tgz`,
   and `upgrade` asks veda-hq/niyam alone: a Mac still on `@athya-hq/process-rules`
   installs niyam with the `pnpm add -g` line in Releases and upgrading.
@@ -1213,8 +1220,12 @@ What still says process-rules, and why:
 | What | Why it stays |
 | ---- | ------------ |
 | The reviews' reader for `<!-- process-rules vetted sha256:… -->` marks | data in decisions already vetted: dropping it would un-vet them |
-| The hook texts and session file of releases before P-57, in `onboard`'s `OLDER_` lists and `sessionFileIs` | data compared against, so `onboard` replaces an older hook in place and a session started before `machine` runs again is not locked out; nothing runs them |
-| The names `machine` and `doctor` look for to remove: `~/.config/process-rules/`, the keychain service `process-rules`, `.github/process-rules/cloud-setup.sh` | each is named only to delete it, or to say it is still there |
+| The hook texts of releases before P-57, in `onboard`'s `OLDER_` lists | data compared against, so `onboard` replaces an older hook in place; nothing runs them |
+| 0.6.10's session file, which `sessionFileIs` still takes as an older one | `session-start` and `as-agent` use it, so a session started before `machine` runs again is not locked out, until `machine` rewrites it; its token read falls back to the keychain service `process-rules`, and it sets `PROCESS_RULES_AGENT`, which `as-agent` keeps from the commands it runs |
+| `~/.config/process-rules/` and the keychain service `process-rules` | `machine` removes them; `doctor` reports them while they are there |
+| `.github/process-rules/cloud-setup.sh` | `onboard` deletes it wherever it leaves `.github/niyam/cloud-setup.sh` |
+| `/usr/local/bin/process-rules` in a cloud environment, a launcher that runs `process-rules`, a required `process-rules / …` check | named only to remove them: the cloud setup file removes the first, `doctor` marks the second ✗ (fixed by `niyam machine`), `owner-step required-checks` takes the third out |
+| The decisions job's concurrency key `process-rules-decisions-<repo>` | a `workflow_dispatch` can run that job from any branch, and a branch pinning a release before P-57 uses this key; one key shared by every release keeps two runs from both opening an undo issue. A later release renames it |
 | GitHub's redirect from athya-hq/process-rules | GitHub's, not niyam's |
 | The titles of tokens and signing keys made before P-56, and the Project titled "process-rules work" | on GitHub already; nothing reads them |
 | The history in docs/decisions.md and docs/roadmap.md | a record of what was decided then |

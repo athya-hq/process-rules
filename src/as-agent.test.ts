@@ -72,6 +72,10 @@ describe('as-agent', () => {
     assert.equal(env.GH_TOKEN, TOKEN);
     assert.equal(env.NIYAM_AGENT, AGENT);
     assert.equal('PROCESS_RULES_AGENT' in env, false, 'not the name before P-55 (P-57)');
+    const inherited = hookSys();
+    inherited.env = { ...inherited.env, PROCESS_RULES_AGENT: 'OtherBot' };
+    inherited.execOverride = (call) => (call.interactive ? { code: 0, stdout: '', stderr: '' } : undefined);
+    assert.equal('PROCESS_RULES_AGENT' in ((asAgentIn(inherited).ran[0] as Call).env ?? {}), false, 'an inherited one is not passed on');
     assert.equal(env.GH_CONFIG_DIR, pathsFor(HOME, AGENT).gh);
     assert.equal(env.GIT_AUTHOR_EMAIL, noreplyEmail(AGENT_ID, AGENT));
     assert.equal(env.PATH, '/usr/bin:/bin');
@@ -141,7 +145,7 @@ describe('as-agent', () => {
     sys.platform = 'linux';
     sys.files.delete(SESSION);
     sys.keychain.clear();
-    sys.env = { ...sys.env, CLAUDE_CODE_REMOTE: 'true', HTTPS_PROXY: 'http://proxy' };
+    sys.env = { ...sys.env, CLAUDE_CODE_REMOTE: 'true', HTTPS_PROXY: 'http://proxy', PROCESS_RULES_AGENT: AGENT };
     const [call] = asAgentIn(sys).ran as [Call];
     const env = call.env ?? {};
     assert.deepEqual([env.GH_TOKEN, env.GITHUB_TOKEN, env.NIYAM_AGENT, env.PROCESS_RULES_AGENT, env.HTTPS_PROXY], [PROXY_TOKEN, PROXY_TOKEN, AGENT, undefined, 'http://proxy']);

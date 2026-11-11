@@ -17,6 +17,12 @@ export const FOLDER_PREFIX = 'niyam-owner-step-';
 export const OWNER_LABELS = ['approved', 'do-not-merge'] as const;
 /** The start of each check FEATURE_CHECKS names: the client workflow's job, by the `name: niyam` onboard gives it. */
 const CHECK_PREFIX = `${CLI} / `;
+/**
+ * The start of a check a ruleset may still require from before P-53, which
+ * no workflow reports since then: named only so required-checks takes it
+ * out, putting the niyam one in its place where the workflow runs it (P-57).
+ */
+const LEFTOVER_CHECK_PREFIX = 'process-rules / ';
 /** The checks of each feature, as the client's workflow names them (its read-only job, then the shared checks' job). */
 export const FEATURE_CHECKS: Partial<Record<Feature, string>> = {
   'pr-identity': `${CHECK_PREFIX}PR identity`,
@@ -379,9 +385,15 @@ function requiredChecks(gh: Gh, { repo, ruleset }: Extract<Step, { step: 'requir
   const before = read();
   const { file, checks: turnedOn } = wantedChecks(gh, repo);
   const required = contexts(before.rules);
-  const had = [...new Set(required)];
-  const jobs = turnedOn.some((check) => !had.includes(check)) ? workflowJobs(gh, repo) : new Set<string>();
+  // A check required under its name before P-53 never reports, so it holds every pull request: it goes, and the
+  // niyam check of the same job takes its place where the workflow runs that job.
+  const stale = (check: string): boolean => check.startsWith(LEFTOVER_CHECK_PREFIX);
+  const renamed = (check: string): string => `${CHECK_PREFIX}${check.slice(LEFTOVER_CHECK_PREFIX.length)}`;
+  const had = [...new Set(required.filter((check) => !stale(check)))];
+  const jobs = turnedOn.some((check) => !had.includes(check)) || required.some(stale) ? workflowJobs(gh, repo) : new Set<string>();
   const runs = (check: string): boolean => had.includes(check) || (jobs instanceof Set && jobs.has(check.slice(CHECK_PREFIX.length)));
+  const swaps = [...new Set(required.filter(stale))].map((from) => ({ from, to: runs(renamed(from)) ? renamed(from) : undefined }));
+  const target = (check: string): string | undefined => (stale(check) ? swaps.find((swap) => swap.from === check)?.to : check);
   const checks = turnedOn.filter(runs);
   const why = (check: string): string => ('problem' in jobs ? jobs.problem : `the shared checks ${WORKFLOW_PATH} calls run no ${check.slice(CHECK_PREFIX.length)} job`);
   const skipped = turnedOn
@@ -391,19 +403,29 @@ function requiredChecks(gh: Gh, { repo, ruleset }: Extract<Step, { step: 'requir
       text: `not adding ${check}: ${why(check)}, so it would never report and would hold every pull request`,
       fix: `${CLI} onboard there, then run this again`,
     }));
-  const missing = checks.filter((check) => !had.includes(check));
-  const after = [...had, ...missing];
+  const unique = (names: string[]): string[] => [...new Set(names)];
+  const afterSwaps = unique(required.flatMap((check) => target(check) ?? []));
+  const missing = checks.filter((check) => !afterSwaps.includes(check));
+  const after = [...afterSwaps, ...missing];
   const list = (names: string[]): string => (names.length === 0 ? 'none' : names.join(', '));
   const notes = [`${file} turns on the checks ${list(turnedOn)}`, `before: ${list(required)}`, `after:  ${list(after)}`];
-  if (missing.length === 0) return { changes: [], notes, skipped, already: `the ruleset ${before.name} requires every check ${file} turns on` };
+  if (missing.length === 0 && swaps.length === 0) return { changes: [], notes, skipped, already: `the ruleset ${before.name} requires every check ${file} turns on` };
   // Built on the ruleset as it is just before the write, so an edit made while the owner read the plan is kept.
   const withChecks = (current: Rule[]): Rule[] => {
-    const kept = (current.find((rule) => rule.type === 'required_status_checks')?.parameters?.required_status_checks ?? []).map((check) => check.context);
+    // Each check before P-53 in its place under its niyam name, its app kept, or gone; a second copy of a name goes.
+    const moved = (list: { context: string; integration_id?: number }[]): { context: string; integration_id?: number }[] =>
+      list
+        .flatMap((check) => {
+          const to = stale(check.context) ? (runs(renamed(check.context)) ? renamed(check.context) : undefined) : check.context;
+          return to === undefined ? [] : [{ ...check, context: to }];
+        })
+        .filter((check, at, all) => all.findIndex((one) => one.context === check.context) === at);
+    const kept = moved(current.find((rule) => rule.type === 'required_status_checks')?.parameters?.required_status_checks ?? []).map((check) => check.context);
     const added = checks.filter((check) => !kept.includes(check)).map((context) => ({ context, integration_id: ACTIONS_APP }));
     return current.some((rule) => rule.type === 'required_status_checks')
       ? current.map((rule) =>
           rule.type === 'required_status_checks'
-            ? { ...rule, parameters: { ...rule.parameters, required_status_checks: [...(rule.parameters?.required_status_checks ?? []), ...added] } }
+            ? { ...rule, parameters: { ...rule.parameters, required_status_checks: [...moved(rule.parameters?.required_status_checks ?? []), ...added] } }
             : rule,
         )
       : [...current, { type: 'required_status_checks', parameters: { strict_required_status_checks_policy: false, do_not_enforce_on_create: false, required_status_checks: added } }];
@@ -411,14 +433,19 @@ function requiredChecks(gh: Gh, { repo, ruleset }: Extract<Step, { step: 'requir
   return {
     changes: [
       {
-        plan: `make the ruleset ${before.name} of ${repo} also require ${missing.join(', ')}`,
+        plan: [
+          ...swaps.map(({ from, to }) => (to ? `require ${to} in place of ${from}` : `drop ${from}, which no workflow reports since P-53`)),
+          ...(missing.length > 0 ? [`also require ${missing.join(', ')}`] : []),
+        ].reduce((plan, part, at) => `${plan}${at === 0 ? ' ' : ', and '}${part}`, `make the ruleset ${before.name} of ${repo}`),
         apply: async (checkpoint) => {
           const current = read();
           await checkpoint();
           must(gh.api(`repos/${repo}/rulesets/${id}`, { method: 'PUT', body: { rules: withChecks(current.rules) } }), `updating the ruleset ${before.name}`);
           const now = read();
-          const lacking = checks.filter((check) => !contexts(now.rules).includes(check));
+          const lacking = unique([...checks, ...swaps.flatMap(({ to }) => to ?? [])]).filter((check) => !contexts(now.rules).includes(check));
           if (lacking.length > 0) throw new Error(`GitHub shows the ruleset without ${lacking.join(', ')} afterwards`);
+          const left = contexts(now.rules).filter(stale);
+          if (left.length > 0) throw new Error(`GitHub shows the ruleset still requiring ${left.join(', ')} afterwards`);
           if (others(now.rules) !== others(current.rules)) throw new Error(`GitHub shows the ruleset's other rules changed afterwards; check it at ${GITHUB_WEB}/${repo}/rules/${id}`);
           return `the ruleset ${now.name} requires ${list(contexts(now.rules))}`;
         },

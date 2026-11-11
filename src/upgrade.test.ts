@@ -345,6 +345,10 @@ describe('upgrade without the name before niyam (P-57)', () => {
     sys.env = { PATH: `${STRAY}:${PNPM_BIN}` };
     assert.equal((await upgraded(sys)).code, 0);
     assert.ok(!sys.calls.some((call) => call.command.endsWith('/process-rules')));
-    assert.deepEqual(await installedFindings(machine({ [PNPM_BIN]: NEW }), NEW), [{ mark: '✓', text: `niyam ${NEW}, the newest release` }]);
+    const doctorSys = machine({ [PNPM_BIN]: NEW });
+    for (const dir of [STRAY, PNPM_BIN]) doctorSys.files.set(`${dir}/process-rules`, '#!/usr/bin/env node');
+    doctorSys.env = { PATH: `${PNPM_BIN}:${STRAY}` };
+    assert.deepEqual(await installedFindings(doctorSys, NEW), [{ mark: '✓', text: `niyam ${NEW}, the newest release` }], 'doctor names no stray process-rules either');
+    assert.ok(!doctorSys.calls.some((call) => call.command.endsWith('/process-rules')), 'nor runs one');
   });
 });

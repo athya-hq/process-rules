@@ -24,13 +24,14 @@ export interface TokenStore {
   /**
    * The item an older release kept the token in, for messages; with
    * `leftover`, the token still in it, or undefined when there is none, and
-   * `dropLeftover`, which deletes it and is true once it is gone. Only
+   * `dropLeftover`, which deletes it: undefined once the store says it is
+   * gone, else why it may not be. Only
    * `machine` deletes it and only `doctor` reports it; nothing reads a token
    * from it.
    */
   leftoverItem?(agent: string): string;
   leftover?(sys: Sys, agent: string): string | undefined;
-  dropLeftover?(sys: Sys, agent: string): boolean;
+  dropLeftover?(sys: Sys, agent: string): string | undefined;
   /** The shell command that deletes the leftover item by hand. */
   dropLeftoverCommand?(agent: string): string;
 }
@@ -45,6 +46,8 @@ export const KEYCHAIN_SERVICE = 'niyam';
 /** The service before niyam (P-50), named only to delete it. */
 export const LEFTOVER_SERVICE = 'process-rules';
 const SECURITY = '/usr/bin/security';
+/** The exit code `security` gives when the keychain has no such item: the one answer that says it is gone. */
+const NOT_FOUND = 44;
 
 function find(service: string, agent: string): string {
   return `${SECURITY} find-generic-password -s ${service} -a ${agent} -w 2>/dev/null`;
@@ -73,8 +76,13 @@ export const KEYCHAIN: TokenStore = {
   leftoverItem: (agent) => `service ${LEFTOVER_SERVICE}, account ${agent}`,
   leftover: (sys, agent) => readFrom(sys, LEFTOVER_SERVICE, agent),
   dropLeftover(sys, agent) {
-    sys.exec(SECURITY, ['delete-generic-password', '-s', LEFTOVER_SERVICE, '-a', agent]);
-    return sys.exec(SECURITY, ['find-generic-password', '-s', LEFTOVER_SERVICE, '-a', agent]).code !== 0;
+    const deleted = sys.exec(SECURITY, ['delete-generic-password', '-s', LEFTOVER_SERVICE, '-a', agent]);
+    const found = sys.exec(SECURITY, ['find-generic-password', '-s', LEFTOVER_SERVICE, '-a', agent]);
+    if (found.code === NOT_FOUND) return undefined;
+    const said = (result: { code: number; stderr: string }): string => result.stderr.trim() || `exit ${result.code}`;
+    return found.code === 0
+      ? `the keychain still holds it after the delete (${said(deleted)})`
+      : `the keychain could not say whether it is gone (${said(found)})`;
   },
   dropLeftoverCommand: (agent) => `${SECURITY} delete-generic-password -s ${LEFTOVER_SERVICE} -a ${agent}`,
 };

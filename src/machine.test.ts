@@ -290,7 +290,19 @@ describe('machine', () => {
       kept.undeletable.add(OLD_ITEM);
       const second = await setUp(kept, '--yes');
       assert.equal(kept.keychain.get(OLD_ITEM), TOKEN);
-      assert.ok(second.out.some((line) => line.includes("stays: this Mac's keychain did not delete it")), second.out.join('\n'));
+      assert.ok(second.out.some((line) => line.includes('stays: the keychain still holds it after the delete (not deleted)')), second.out.join('\n'));
+
+      // A check that fails for any reason but "not found" deletes nothing in machine's eyes: it says why.
+      const unsure = before();
+      const inner = unsure.execOverride;
+      unsure.execOverride = (call) =>
+        call.args[0] === 'find-generic-password' && call.args.includes('process-rules') && unsure.calls.some((one) => one.args[0] === 'delete-generic-password')
+          ? { code: 51, stdout: '', stderr: 'User interaction is not allowed.' }
+          : inner(call);
+      const third = await setUp(unsure, '--yes');
+      assert.equal(third.code, 0);
+      assert.ok(third.out.some((line) => line.includes('■  service process-rules, account ExampleBot deleted')), third.out.join('\n'));
+      assert.ok(third.out.some((line) => line.includes('stays: the keychain could not say whether it is gone (User interaction is not allowed.)')), third.out.join('\n'));
     });
 
     it('says so when the old folder cannot be removed', async () => {

@@ -414,6 +414,17 @@ describe('open issues with no type', () => {
     // Read again at the run, it is still left, and nothing is late.
     assert.deepEqual(withinApproved(await typesPlan(sys, OWNER_TOKEN, 'example-org'), plan).late, []);
   });
+  it('retypes an issue that only a settings file before niyam names as the Approvals issue (P-57)', async () => {
+    const { sys, board } = org();
+    board.issueTypes = [...MODEL];
+    board.issues = [{ repo: OTHER, number: 40, type: null }];
+    settingsAt(sys, OTHER, { approvals: 40 }, '.github/process-rules.json');
+    const plan = await typesPlan(sys, OWNER_TOKEN, 'example-org');
+    assert.deepEqual(plan.retype.map((issue) => issue.number), [40]);
+    assert.deepEqual(plan.exempt, []);
+    assert.ok(!sys.requests.some((request) => request.url.includes('process-rules.json')), 'the file before niyam is not even asked for');
+  });
+
 
   it('types an Approvals issue settings that do not parse, or name none, leave unnamed; and says why it cannot read them', async () => {
     const { sys, board } = org();

@@ -74,7 +74,7 @@ describe('the keychain entry before niyam, which nothing reads (P-57)', () => {
     assert.equal(KEYCHAIN.leftoverItem?.(AGENT), 'service process-rules, account ExampleBot');
     assert.equal(KEYCHAIN.leftover?.(sys, AGENT), 'ghp_old');
     assert.equal(KEYCHAIN.dropLeftoverCommand?.(AGENT), '/usr/bin/security delete-generic-password -s process-rules -a ExampleBot');
-    assert.equal(KEYCHAIN.dropLeftover?.(sys, AGENT), true);
+    assert.equal(KEYCHAIN.dropLeftover?.(sys, AGENT), undefined);
     assert.deepEqual(Object.fromEntries(sys.keychain), { 'niyam/ExampleBot': 'ghp_new' });
     assert.equal(KEYCHAIN.leftover?.(sys, AGENT), undefined);
   });
@@ -82,8 +82,18 @@ describe('the keychain entry before niyam, which nothing reads (P-57)', () => {
   it('says false when the keychain keeps the leftover entry', () => {
     const sys = withEntries({ 'process-rules': 'ghp_old' });
     sys.undeletable.add(`process-rules/${AGENT}`);
-    assert.equal(KEYCHAIN.dropLeftover?.(sys, AGENT), false);
+    assert.equal(KEYCHAIN.dropLeftover?.(sys, AGENT), 'the keychain still holds it after the delete (not deleted)');
     assert.equal(KEYCHAIN.leftover?.(sys, AGENT), 'ghp_old');
+  });
+
+  it('takes only "item not found" (exit 44) as gone: any other failure of the check is a problem, not a delete', () => {
+    const sys = withEntries({ 'process-rules': 'ghp_old' });
+    sys.execOverride = (call) => (call.args[0] === 'find-generic-password' ? { code: 51, stdout: '', stderr: 'User interaction is not allowed.' } : undefined);
+    assert.equal(KEYCHAIN.dropLeftover?.(sys, AGENT), 'the keychain could not say whether it is gone (User interaction is not allowed.)');
+    const silent = withEntries({ 'process-rules': 'ghp_old' });
+    silent.undeletable.add(`process-rules/${AGENT}`);
+    silent.execOverride = (call) => (call.args[0] === 'delete-generic-password' ? { code: 1, stdout: '', stderr: '' } : undefined);
+    assert.equal(KEYCHAIN.dropLeftover?.(silent, AGENT), 'the keychain still holds it after the delete (exit 1)');
   });
 
   it("takes 0.6.10's session file, whose read falls back to the old entry, as an older one, not a stranger's", () => {

@@ -457,6 +457,9 @@ describe('owner-step required-checks', () => {
     const first = capture();
     assert.equal(await ownerStep(settingsBefore.sys, first.io, ['required-checks', 'veda-hq/niyam', 'main']), 1);
     assert.match(first.out.join('\n'), /✗ veda-hq\/niyam has no \.github\/niyam\.json on its default branch/);
+    /** Whether a run asked GitHub for a path before niyam. */
+    const askedLegacy = (made: ReturnType<typeof rulesWorld>): boolean => made.api.some((call) => call.args.some((arg) => /process-rules\.(?:json|yml)/.test(arg)));
+    assert.equal(askedLegacy(settingsBefore), false, 'the settings file before niyam is not even asked for');
     for (const extra of [
       { 'GET repos/veda-hq/niyam/contents/.github/workflows/niyam.yml': { status: 404, json: { message: 'Not Found' } }, 'GET repos/veda-hq/niyam/contents/.github/workflows/process-rules.yml': encoded(OLD_WORKFLOW) },
       { 'GET repos/veda-hq/niyam/contents/.github/workflows/niyam.yml': encoded(OLD_WORKFLOW) },
@@ -466,6 +469,7 @@ describe('owner-step required-checks', () => {
       assert.equal(await ownerStep(made.sys, said.io, ['required-checks', 'veda-hq/niyam', 'main']), 1);
       assert.match(said.out.join('\n'), /✗ not adding niyam \/ PR identity: (?:veda-hq\/niyam has no \.github\/workflows\/niyam\.yml on its default branch|\.github\/workflows\/niyam\.yml has no niyam job calling the shared checks)/);
       assert.ok(!made.api.some((call) => call.args.includes('PUT')));
+      assert.equal(askedLegacy(made), false, 'the workflow before P-56 is not even asked for');
     }
   });
 
@@ -573,14 +577,38 @@ describe('owner-step required-checks', () => {
     }
   });
 
-  it('leaves a check required under its process-rules name as it is, adding the niyam ones beside it (P-57)', async () => {
-    const made = rulesWorld([{ type: 'deletion' }, checks('Typecheck, test, build', 'process-rules / Work rules')]);
+  it('requires each check before P-53 under its niyam name in its place, its app kept, and drops one no job runs, showing it in the plan (P-57)', async () => {
+    const made = rulesWorld([{ type: 'deletion' }, checks('Typecheck, test, build', 'process-rules / Work rules', 'process-rules / Old job')]);
     const { io, out } = capture();
     assert.equal(await ownerStep(made.sys, io, ['required-checks', 'veda-hq/niyam', 'main']), 0, out.join('\n'));
-    assert.match(out.join('\n'), /make the ruleset main of veda-hq\/niyam also require niyam \/ PR identity, niyam \/ Work rules/);
-    assert.deepEqual(made.now(), [{ type: 'deletion' }, checks('Typecheck, test, build', 'process-rules / Work rules', 'niyam / PR identity', 'niyam / Work rules')]);
+    const text = out.join('\n');
+    assert.match(text, /make the ruleset main of veda-hq\/niyam require niyam \/ Work rules in place of process-rules \/ Work rules, and drop process-rules \/ Old job, which no workflow reports since P-53, and also require niyam \/ PR identity/);
+    assert.match(text, /before: Typecheck, test, build, process-rules \/ Work rules, process-rules \/ Old job\n {2}after: {2}Typecheck, test, build, niyam \/ Work rules, niyam \/ PR identity/);
+    assert.deepEqual(made.now(), [{ type: 'deletion' }, checks('Typecheck, test, build', 'niyam / Work rules', 'niyam / PR identity')]);
     assert.ok(!made.api.some((call) => call.args.some((arg) => arg.includes('branches/'))), 'no onboard branch asked for');
   });
+
+  it('drops a check before P-53 beside its niyam one, and with every check required otherwise, still writes', async () => {
+    const made = rulesWorld([checks('niyam / PR identity', 'process-rules / PR identity', 'niyam / Work rules')]);
+    const { io, out } = capture();
+    assert.equal(await ownerStep(made.sys, io, ['required-checks', 'veda-hq/niyam', 'main']), 0, out.join('\n'));
+    assert.match(out.join('\n'), /make the ruleset main of veda-hq\/niyam require niyam \/ PR identity in place of process-rules \/ PR identity/);
+    assert.deepEqual(made.now(), [checks('niyam / PR identity', 'niyam / Work rules')]);
+  });
+
+  it('drops a check before P-53 when the workflow cannot be read, and refuses a result that still requires it', async () => {
+    const unread = rulesWorld([checks('niyam / PR identity', 'niyam / Work rules', 'process-rules / Work rules')], {
+      'GET repos/veda-hq/niyam/contents/.github/workflows/niyam.yml': { status: 404, json: { message: 'Not Found' } },
+    });
+    const first = capture();
+    assert.equal(await ownerStep(unread.sys, first.io, ['required-checks', 'veda-hq/niyam', 'main']), 0, first.out.join('\n'));
+    assert.deepEqual(unread.now(), [checks('niyam / PR identity', 'niyam / Work rules')]);
+    const kept = rulesWorld([checks('process-rules / PR identity')], {}, (body) => [...body.rules.map(() => checks('process-rules / PR identity', 'niyam / PR identity', 'niyam / Work rules'))]);
+    const second = capture();
+    assert.equal(await ownerStep(kept.sys, second.io, ['required-checks', 'veda-hq/niyam', 'main']), 1);
+    assert.match(second.out.join('\n'), /GitHub shows the ruleset still requiring process-rules \/ PR identity afterwards/);
+  });
+
 
   it('reads a workflow committed with CRLF line endings as the same workflow', async () => {
     const made = rulesWorld([checks('niyam / PR identity')], { 'GET repos/veda-hq/niyam/contents/.github/workflows/niyam.yml': encoded(WORKFLOW.replaceAll('\n', '\r\n')) });

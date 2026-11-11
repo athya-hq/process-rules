@@ -119,14 +119,21 @@ export async function doctor(sys: Sys, io: Output, named?: string): Promise<numb
   ]);
 }
 
-/** The launcher the hooks run, which `machine` writes: ✓ when it runs. */
+/**
+ * A launcher that runs the package manager's command before niyam, which no
+ * release installs since P-54: named only so doctor says so (P-57).
+ */
+const LEFTOVER_LAUNCHER = /^exec '[^'\n]*\/process-rules' "\$@"$/m;
+
+/** The launcher the hooks run, which `machine` writes: ✓ when it runs, and runs niyam. */
 function launcherFinding(sys: Sys): Finding {
   const launcher = launcherPath(sys.home);
   if (!sys.exists(launcher)) return { mark: '✗', text: 'launcher missing, so hooks need node on PATH', fix: MACHINE };
   const runs = sys.exec(launcher, ['--version'], { env: { ...sys.env, PATH: '/usr/bin:/bin' } });
-  return runs.code === 0
-    ? { mark: '✓', text: 'launcher' }
-    : { mark: '✗', text: `launcher does not run (${runs.stderr.trim() || `exit ${runs.code}`}); its node removed?`, fix: MACHINE };
+  if (runs.code !== 0) return { mark: '✗', text: `launcher does not run (${runs.stderr.trim() || `exit ${runs.code}`}); its node removed?`, fix: MACHINE };
+  return LEFTOVER_LAUNCHER.test(sys.read(launcher))
+    ? { mark: '✗', text: "launcher runs process-rules, the command before niyam, which no release installs, so hooks may find no CLI", fix: MACHINE }
+    : { mark: '✓', text: 'launcher' };
 }
 
 /**

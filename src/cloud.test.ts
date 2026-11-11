@@ -79,8 +79,8 @@ describe('cloudRepoScript', () => {
     assert.ok(script.includes(`-o "$dir/niyam.tgz" ${releaseTarball('9.8.7')}\n`));
     assert.equal(releaseTarball('9.8.7'), 'https://github.com/veda-hq/niyam/releases/download/v9.8.7/veda-hq-niyam-9.8.7.tgz');
     assert.equal(releaseTarball('0.6.1'), 'https://github.com/veda-hq/niyam/releases/download/v0.6.1/veda-hq-niyam-0.6.1.tgz', 'niyam\'s archive alone: onboard pins only its own release (P-57)');
-    assert.ok(script.includes('rm -f /usr/local/bin/niyam\n'));
-    assert.doesNotMatch(script, /process-rules|PROCESS_RULES/, 'no name before niyam (P-57)');
+    assert.ok(script.includes('rm -f /usr/local/bin/niyam /usr/local/bin/process-rules\n'), 'the command before niyam removed as a leftover');
+    assert.deepEqual(script.match(/process-rules|PROCESS_RULES/g), ['process-rules'], 'named only in that removal (P-57)');
     assert.equal(cloudScriptVersion(script), '9.8.7');
     assert.equal(cloudScriptVersion('# process-rules 0.6.6 for Claude cloud sessions: Node'), undefined, 'a file a release before P-53 wrote');
     assert.ok(script.includes(`echo "${SHA}  $dir/niyam.tgz" | sha256sum -c --quiet -\n`));
@@ -145,7 +145,7 @@ describe('cloudRepoScript', () => {
       assert.equal(existsSync(join(opt, 'from-setup')), false, 'not run by the Setup snippet');
     });
 
-    it("replaces a release's before P-53, where niyam linked to process-rules", () => {
+    it("replaces a release's before P-53, where niyam linked to process-rules, and removes that leftover", () => {
       const { result, local } = setup('older', 0, {
         before: (dir) => {
           writeFileSync(join(dir, 'process-rules'), '#!/bin/sh\nexec old\n', { mode: 0o755 });
@@ -155,6 +155,7 @@ describe('cloudRepoScript', () => {
       assert.equal(result.status, 0, result.stderr);
       assert.equal(lstatSync(join(local, 'niyam')).isSymbolicLink(), false, 'niyam is a file of its own now');
       assert.match(readFileSync(join(local, 'niyam'), 'utf8'), /cli-9\.8\.7\/package\/dist\/cli\.js/);
+      assert.equal(existsSync(join(local, 'process-rules')), false, 'the command before niyam is gone');
     });
 
     it('keeps a Node already unpacked at its version, fetching the CLI alone', () => {

@@ -157,8 +157,9 @@ export function cloudRepoScript(version: string, sha256: string): string {
     'mkdir -p "$cli"',
     'tar -xz -f "$dir/niyam.tgz" -C "$cli"',
     'rm "$dir/niyam.tgz"',
-    // Gone first: an environment set up before P-53 has it as a link, which the write would follow.
-    'rm -f /usr/local/bin/niyam',
+    // Gone first: an environment set up before P-53 has niyam as a link, which the write would follow. And the
+    // command before niyam, a leftover nothing runs since P-54, named only to remove it, as the LEFTOVER_ names are.
+    'rm -f /usr/local/bin/niyam /usr/local/bin/process-rules',
     'printf \'#!/bin/sh\\nexec %s %s "$@"\\n\' "$bin" "$cli/package/dist/cli.js" > /usr/local/bin/niyam',
     'chmod 755 /usr/local/bin/niyam',
     // The path it ran from, the Setup snippet's mark.

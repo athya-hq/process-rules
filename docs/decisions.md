@@ -1455,8 +1455,9 @@
 - **2026-11-11 — Record: the old process-rules names go (P-57).** P-55 and
   P-56 wrote niyam's names and still read the old ones. The owner said in
   chat on 2026-11-11, "I want to fix everything", so once this Mac and every
-  repository had moved, the reads go too: no release reads or writes a
-  `process-rules` name.
+  repository have moved, the operational reads and writes go too: no release
+  reads settings, tokens, files or checks under a `process-rules` name, or
+  writes one. The data and leftover names below stay.
   - This Mac and the lock: nothing reads `~/.config/process-rules/`, its
     launcher, session files or session records. `NIYAM_AGENT` alone names
     the agent, and nothing sets `PROCESS_RULES_AGENT`.
@@ -1466,7 +1467,8 @@
     pre-push hook checks `NIYAM_AGENT` and `CLAUDECODE` alone. 0.6.10's
     hooks and pre-push hook join `onboard`'s older lists, so it replaces
     them in place.
-  - Destructive steps, each named in the plan before the one yes:
+  - Destructive steps, the two on this Mac each named in `machine`'s plan
+    before its one yes:
     - `machine` removes `~/.config/process-rules/`, whole, the old
       launcher and any session file, record or lockout record still in it,
       once the new folder is written.
@@ -1494,22 +1496,35 @@
     deletes it in its own pull request wherever the new file is left. The
     work rules allow that deletion, as they did the moves of P-56. The
     Setup snippet runs `.github/niyam/cloud-setup.sh` alone and sets
-    `NIYAM_SETUP` alone. `checks.yml` declares `niyam-ref` alone, and the
-    decisions job's concurrency group is `niyam-decisions-<repo>`.
-    `owner-step` finds the `niyam` job alone and requires `niyam / …`
-    checks with no swap, and `onboard` no longer reads rulesets for the
-    old check names.
+    `NIYAM_SETUP` alone. `checks.yml` declares `niyam-ref` alone.
+    `owner-step` finds the `niyam` job alone; `required-checks` takes each
+    `process-rules / …` check out of the ruleset, since none reports, and
+    requires the `niyam / …` one of the same job in its place where the
+    workflow runs that job (review). `onboard` no longer reads rulesets for
+    the old check names.
   - What stays, and why:
     - The reader for `<!-- process-rules vetted sha256:… -->` marks: they
       are data in decisions already vetted, and dropping it would un-vet
       them.
-    - The `OLDER_` hook texts, and 0.6.10's session file, which
-      `sessionFileIs` still counts as older: data compared against. Without
-      that file, a session started between the upgrade and `machine` would
-      lock out. Nothing runs these texts, and `machine` rewrites the
-      session file.
-    - The three names `machine`, `doctor` and `onboard` delete or report
-      as left over.
+    - The `OLDER_` hook texts: data `onboard` compares against, which
+      nothing runs.
+    - 0.6.10's session file, which `sessionFileIs` still counts as older:
+      without it, a session started between the upgrade and `machine`
+      would lock out. session-start and as-agent use that file, which
+      reads the keychain service `process-rules` where `niyam`'s is
+      missing, until `machine` rewrites it (review).
+    - The names `machine`, `doctor`, `onboard`, `owner-step` and the cloud
+      setup file look for only to remove or report a leftover:
+      `~/.config/process-rules/`, the keychain service, the old cloud setup
+      file, `/usr/local/bin/process-rules`, a launcher that runs
+      `process-rules` (doctor's ✗) and a required `process-rules / …`
+      check; and `PROCESS_RULES_AGENT`, which `as-agent` keeps from the
+      commands it runs (review).
+    - The decisions job's concurrency key, `process-rules-decisions-<repo>`,
+      for one more release (review): a `workflow_dispatch` can run that job
+      from any branch, a branch pinning a release before P-57 uses that
+      key, and only one key shared by every release serializes them, so
+      two runs cannot both open an undo issue.
     - GitHub's redirect from athya-hq/process-rules, and the titles of
       tokens, signing keys and the Project made before.
     - The history in this file and docs/roadmap.md.
@@ -1517,8 +1532,8 @@
     request branch carries P-55/P-56 hook text, this Mac has run
     `machine`, and the new Setup snippet is pasted. A checkout still on
     older hooks is locked out of GitHub until it merges main.
-  - Rejected: keeping the bridge archive for one more release, since
-    every Mac has moved to `@veda-hq/niyam`; copying the old folder's
+  - Rejected: keeping the bridge archive for one more release, since the
+    release waits until every Mac has moved to `@veda-hq/niyam`; copying the old folder's
     lockout records into the new one before removing it, as of P-55
     `machine` writes them in the new folder alone, so at worst `doctor`
     warns again of a login the owner once chose to keep.

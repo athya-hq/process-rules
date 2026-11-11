@@ -74,9 +74,15 @@ export function asAgent(sys: Sys, io: Output, parsed: ReturnType<typeof asAgentA
 
 type Env = { env: Record<string, string> } | { problem: string };
 
-/** The hook's environment without the lock the settings' `env` gave it. */
+/**
+ * The agent's variable before P-55, which an older release's shell may still
+ * pass down: named only so the command never gets it (P-57).
+ */
+const LEFTOVER_AGENT_VAR = 'PROCESS_RULES_AGENT';
+
+/** The hook's environment without the lock the settings' `env` gave it, or the agent's variable before P-55. */
 function unlocked(sys: Sys): Record<string, string | undefined> {
-  return Object.fromEntries(Object.entries(sys.env).filter(([name]) => !Object.hasOwn(BASE_ENV, name)));
+  return Object.fromEntries(Object.entries(sys.env).filter(([name]) => !Object.hasOwn(BASE_ENV, name) && name !== LEFTOVER_AGENT_VAR));
 }
 
 function defined(env: Record<string, string | undefined>): Record<string, string> {
