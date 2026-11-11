@@ -39,8 +39,11 @@ export function exposure(sys: Sys, agent: string): Exposure {
   );
   const gitPassword = sys.exec('/usr/bin/security', KEYCHAIN_QUERY).code === 0;
   // Every agent machine set up here keeps its signing key, passphrase-free on purpose: its folder may be in either config folder.
-  // The launcher's, records' and locked gh folders there name no agent, so an owner key such as bin_signing is still checked.
-  const folders = configDirs(sys.home).flatMap((dir) => sys.list(dir)).filter((name) => !NOT_AGENTS.includes(name));
+  // The launcher's, records' and locked gh folders there name no agent, so an owner key such as bin_signing is still checked,
+  // unless an agent of that very name has its session file there.
+  const folders = configDirs(sys.home).flatMap((dir) =>
+    sys.list(dir).filter((name) => !NOT_AGENTS.includes(name) || sys.exists(`${dir}/${name}/session.sh`)),
+  );
   const agentKeys = new Set([agent, ...folders].map((name) => `${name.toLowerCase()}_signing`));
   const ssh = `${sys.home}/.ssh`;
   const openKeys = sys

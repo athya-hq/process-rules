@@ -72,6 +72,15 @@ describe('exposure', () => {
     assert.deepEqual(exposure(sys, AGENT).openKeys, ['bin', 'sessions', 'locked'].map((name) => `${HOME}/.ssh/${name}_signing`));
   });
 
+  it('spares the key of an agent named like one of those folders, where its session file is', () => {
+    const sys = new FakeSys().ready();
+    sys.files.set(`${HOME}/.config/niyam/bin/session.sh`, '# the agent "bin"');
+    sys.files.set(`${HOME}/.config/niyam/bin/niyam`, '');
+    sys.files.set(`${HOME}/.ssh/bin_signing`, 'open:agent');
+    sys.files.set(`${HOME}/.ssh/locked_signing`, 'open:owner');
+    assert.deepEqual(exposure(sys, AGENT).openKeys, [`${HOME}/.ssh/locked_signing`]);
+  });
+
   it("spares the signing key of an agent whose folder is empty", () => {
     const sys = new FakeSys().ready();
     sys.mkdir(`${HOME}/.config/process-rules/emptybot`);
