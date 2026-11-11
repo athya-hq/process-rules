@@ -36,7 +36,7 @@ function weekly(decisions: Node[], checks: Record<string, number> = {}, undos: N
     const code = checks[call.args[7] ?? ''] ?? 0;
     return code === 124
       ? { code: 124, stdout: 'line\n', stderr: '' }
-      : { code: 0, stdout: `line\nprocess-rules-check-exit=${code === 125 ? 124 : code}\n`, stderr: 'why it failed\n' };
+      : { code: 0, stdout: `line\nniyam-check-exit=${code === 125 ? 124 : code}\n`, stderr: 'why it failed\n' };
   };
   for (const d of decisions) sys.route('GET', `/repos/${SLUG}/issues/${d.number}/comments?per_page=100&page=1`, { status: 200, json: [] });
   return sys;
@@ -69,7 +69,7 @@ describe('decisionsWeekly', () => {
     const sys = weekly([decision(5, 'Kind: Risk\nCheck: `pnpm test`')]);
     assert.deepEqual(await run(sys), { code: 0, out: ['#5: holds', 'decisions-weekly: 1 open decision checked'] });
     const call = sys.calls.find((c) => c.command === 'timeout');
-    assert.deepEqual(call?.args, ['-k', '5', '120', 'sh', '-c', 'sh -c "$1"; echo "process-rules-check-exit=$?"', 'process-rules', 'pnpm test']);
+    assert.deepEqual(call?.args, ['-k', '5', '120', 'sh', '-c', 'sh -c "$1"; echo "niyam-check-exit=$?"', 'niyam', 'pnpm test']);
     assert.equal(call?.cwd, ROOT);
     assert.deepEqual(call?.env, { PATH: '/bin', HOME: '/home/runner' });
     assert.equal(call?.timeoutMs, 130_000);
@@ -93,7 +93,7 @@ describe('decisionsWeekly', () => {
   it('leaves the output out of the comment when the check printed none', async () => {
     const sys = weekly([decision(6, 'Check: `test -f gone`')], { 'test -f gone': 1 });
     const inner = sys.execOverride;
-    sys.execOverride = (call) => (call.command === 'timeout' ? { code: 0, stdout: 'process-rules-check-exit=1\n', stderr: '' } : inner(call));
+    sys.execOverride = (call) => (call.command === 'timeout' ? { code: 0, stdout: 'niyam-check-exit=1\n', stderr: '' } : inner(call));
     await run(sys);
     assert.equal((posts(sys)[1]?.body as { body: string }).body, 'Tripped on 2026-10-30: `test -f gone` exited 1.\n\nOpened #99 to undo it.');
   });

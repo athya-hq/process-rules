@@ -22,7 +22,7 @@ import type { Output, Sys } from './types.ts';
 import { GITHUB_HOST, GITHUB_WEB } from './host.ts';
 
 /** GitHub's classic-token page, with the note and scopes filled in. */
-export const TOKEN_PAGE = `${GITHUB_WEB}/settings/tokens/new?description=process-rules%20agent&scopes=${TOKEN_SCOPES.join(',')}`;
+export const TOKEN_PAGE = `${GITHUB_WEB}/settings/tokens/new?description=${CLI}%20agent&scopes=${TOKEN_SCOPES.join(',')}`;
 const KEY_PAGE = `${GITHUB_WEB}/settings/ssh/new`;
 
 /**
@@ -244,7 +244,7 @@ export async function machine(sys: Sys, io: Output, args: readonly string[] = []
     const posted = await spinning(sys, 'signing key registered', async () =>
       (await listed())
         ? true
-        : (await sys.http(`${API}/user/ssh_signing_keys`, { method: 'POST', token: mine, body: { title: 'process-rules signing', key: publicKey } })).status,
+        : (await sys.http(`${API}/user/ssh_signing_keys`, { method: 'POST', token: mine, body: { title: `${CLI} signing`, key: publicKey } })).status,
     );
     if (posted !== true && posted !== 201) {
       io.out(`${paint.done('◇')}  signing key: add it in the browser, as ${agent}`);

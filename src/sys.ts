@@ -18,6 +18,7 @@ import { createInterface as askFrom } from 'node:readline/promises';
 import { createInterface } from 'node:readline';
 import { isatty } from 'node:tty';
 
+import { CLI } from './names.ts';
 import type { Sys } from './types.ts';
 
 /** The real machine: processes, files, the terminal and GitHub's REST API. */
@@ -55,7 +56,7 @@ export function realSys(): Sys {
     append: (path, data) => appendFileSync(path, data),
     mkdir: (path) => mkdirSync(path, { recursive: true, mode: 0o700 }),
     list: (path) => (existsSync(path) ? readdirSync(path) : []),
-    tempDir: (prefix) => mkdtempSync(prefix ?? join(tmpdir(), 'process-rules-')),
+    tempDir: (prefix) => mkdtempSync(prefix ?? join(tmpdir(), `${CLI}-`)),
     remove: (path) => rmSync(path, { recursive: true, force: true }),
     async http(url, options = {}) {
       const method = (options.method ?? 'GET').toUpperCase();

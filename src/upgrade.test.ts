@@ -296,7 +296,7 @@ describe('upgrade', () => {
     sys.env = { ...sys.env, CLAUDE_CODE_REMOTE: 'true' };
     const { code, err } = await upgraded(sys);
     assert.equal(code, 1);
-    assert.match(err[0] ?? '', /a Claude cloud session runs the release \.github\/process-rules\/cloud-setup\.sh installs/);
+    assert.match(err[0] ?? '', /a Claude cloud session runs the release \.github\/niyam\/cloud-setup\.sh installs/);
     assert.deepEqual(sys.requests, [], 'asks GitHub nothing');
     assert.deepEqual(installs(sys), []);
   });

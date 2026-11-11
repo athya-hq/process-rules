@@ -9,19 +9,35 @@ import { BUILT_IN, Board, COPY_URL, OWNER_TOKEN, URL, repoJson, settledViews } f
 import { FIELDS, ISSUE_TYPES, LABELS } from './board.ts';
 import { AGENT, AGENT_ID, FakeSys, HOME, PULL_URL, RELEASE_SHA256, ROOT, TOKEN, capture } from './fake.test.ts';
 import { cloudRepoScript, releaseAsset } from './cloud.ts';
-import { CLOUD_SETUP_PATH } from './onboard-pull.ts';
+import { CLOUD_SETUP_PATH, OLD_CLOUD_SETUP_PATH, OLD_WORKFLOW_PATH } from './onboard-pull.ts';
 import type { HttpResult } from './types.ts';
 import { pathsFor, sessionScript } from './agent.ts';
 import { FEATURES } from './features.ts';
 import { packageVersion } from './version.ts';
 import { GUARD_COMMAND, HOOK_COMMAND, HOOKS_PATH, OLDER_GUARD_COMMANDS, OLDER_HOOK_COMMANDS, OLDER_PRE_PUSH_HOOKS, PRE_PUSH_HOOK, AUTO_FIX_RULES, OLDER_REVIEW_THREAD_RULE, REVIEW_THREAD_RULE, SETUP_FIRST, WORKFLOW_PATH, claudeSettings, jobsWithoutLibrary, olderWorkflows, onboard, onboardArgs, workflow, workflowPins, workflowUpdate } from './onboard.ts';
 import { BASE_ENV } from './agent.ts';
-import { BASE_ENV_069, GUARD_COMMAND_069, HOOK_COMMAND_069, PRE_PUSH_HOOK_069 } from './older-texts.test.ts';
+import {
+  BASE_ENV_069,
+  CLOUD_SETUP_068,
+  GUARD_COMMAND_069,
+  HOOK_COMMAND_069,
+  PRE_PUSH_HOOK_069,
+  SETTINGS_068_MONO,
+  SETTINGS_068_NIYAM,
+  SETTINGS_068_SANDBOX,
+  WORKFLOW_068_MONO,
+  WORKFLOW_068_NIYAM,
+  WORKFLOW_068_SANDBOX,
+} from './older-texts.test.ts';
 import { actionsKey, sealedValue } from './fake-secrets.test.ts';
 
 const SETTINGS = `${ROOT}/.github/niyam.json`;
 const HOOKS = `${ROOT}/${HOOKS_PATH}`;
 const WORKFLOW = `${ROOT}/${WORKFLOW_PATH}`;
+/** The workflow under its name before P-56, which onboard moves. */
+const OLD_WORKFLOW = `${ROOT}/${OLD_WORKFLOW_PATH}`;
+/** A workflow as releases before P-56 wrote it: the job ids and the input naming the release say process-rules. */
+const oldIds = (text: string): string => text.replace(/^ {2}niyam(-weekly|-merged|-asks)?:$/gm, '  process-rules$1:').replaceAll('      niyam-ref:', '      process-rules-ref:');
 const PRE_PUSH = `${ROOT}/.git/hooks/pre-push`;
 const REPO = '/repos/example-org/example-app';
 const COLLABORATOR = `${REPO}/collaborators/ExampleBot`;
@@ -59,14 +75,16 @@ function checkout(sys: FakeSys): Map<string, string> {
 
 /** The repository's files as onboard's pull request leaves them: what it committed, else what the checkout has. */
 function repo(sys: FakeSys): { get(path: string): string | undefined; has(path: string): boolean } {
-  const get = (path: string): string | undefined => sys.committed.get(path.slice(ROOT.length + 1)) ?? sys.files.get(path);
+  const get = (path: string): string | undefined => (sys.deleted.has(path.slice(ROOT.length + 1)) ? undefined : (sys.committed.get(path.slice(ROOT.length + 1)) ?? sys.files.get(path)));
   return { get, has: (path) => get(path) !== undefined };
 }
 
 /** As when the owner merges onboard's pull request: what it committed is now in the checkout. */
 function merge(sys: FakeSys): void {
   for (const [path, text] of sys.committed) sys.files.set(`${ROOT}/${path}`, text);
+  for (const path of sys.deleted) sys.files.delete(`${ROOT}/${path}`);
   sys.committed.clear();
+  sys.deleted.clear();
 }
 
 /** How many times onboard had the owner sign in in the browser. */
@@ -86,6 +104,8 @@ async function run(sys: FakeSys, named: string[] = ['example-owner', AGENT]): Pr
 /** The plan's items under the group whose title starts with `title`: "label: detail", or the label alone. */
 /** The repo's cloud setup file, as this release writes it. */
 const CLOUD = `${ROOT}/${CLOUD_SETUP_PATH}`;
+/** The same under its name before P-56, which onboard writes alike for a Setup script pasted before. */
+const OLD_CLOUD = `${ROOT}/${OLD_CLOUD_SETUP_PATH}`;
 const CLOUD_FILE = cloudRepoScript(packageVersion(), RELEASE_SHA256);
 
 function planned(out: string[], title: string): string[] {
@@ -188,24 +208,26 @@ describe('onboard', () => {
       'init -q',
       'fetch -q',
       'read-tree FETCH_HEAD',
-      ...['settings', 'hooks', 'cloud setup', 'workflow'].flatMap(() => ['rev-parse --verify', 'hash-object -w', 'update-index --add']),
+      ...['settings', 'hooks', 'cloud setup', 'old cloud setup', 'workflow'].flatMap(() => ['rev-parse --verify', 'hash-object -w', 'update-index --add']),
       'write-tree --missing-ok',
       'commit-tree -S',
       'push -q',
     ]);
     assert.ok(git.every((c) => c.env?.GH_TOKEN === TOKEN && c.env.GIT_COMMITTER_EMAIL === '42+ExampleBot@users.noreply.github.com'), 'every git step as the agent');
-    assert.ok(git.slice(6).every((c) => c.cwd === '/tmp/process-rules-2'), 'the pull request is made in a temporary repository');
-    assert.deepEqual(git.at(-1)?.args, ['push', '-q', 'https://github.com/example-org/example-app.git', '+abc123:refs/heads/process-rules/onboard']);
-    assert.ok(sys.removed.includes('/tmp/process-rules-2'), 'the temporary repository is deleted');
-    assert.deepEqual([...sys.committed.keys()], ['.github/niyam.json', '.claude/settings.json', CLOUD_SETUP_PATH, '.github/workflows/process-rules.yml']);
+    assert.ok(git.slice(6).every((c) => c.cwd === '/tmp/niyam-2'), 'the pull request is made in a temporary repository');
+    assert.deepEqual(git.at(-1)?.args, ['push', '-q', 'https://github.com/example-org/example-app.git', '+abc123:refs/heads/niyam/onboard']);
+    assert.ok(sys.removed.includes('/tmp/niyam-2'), 'the temporary repository is deleted');
+    assert.deepEqual([...sys.committed.keys()], ['.github/niyam.json', '.claude/settings.json', CLOUD_SETUP_PATH, OLD_CLOUD_SETUP_PATH, '.github/workflows/niyam.yml']);
+    assert.deepEqual([...sys.deleted], [], 'nothing to move in a fresh repo');
     assert.equal(sys.committed.get(CLOUD_SETUP_PATH), cloudRepoScript(v, RELEASE_SHA256), 'the cloud setup file, at the pin, checked against the release');
+    assert.equal(sys.committed.get(OLD_CLOUD_SETUP_PATH), sys.committed.get(CLOUD_SETUP_PATH), 'and alike under its old name, for a Setup script pasted before P-56');
     const pull = sys.requests.find((r) => r.method === 'POST' && r.url.endsWith(`${REPO}/pulls`));
     assert.equal(pull?.token, TOKEN, 'the agent opens the pull request');
     const { title, head, base, body } = pull?.body as { title: string; head: string; base: string; body: string };
-    assert.deepEqual([title, head, base], [`chore(niyam): onboard at v${v}`, 'process-rules/onboard', 'main']);
+    assert.deepEqual([title, head, base], [`chore(niyam): onboard at v${v}`, 'niyam/onboard', 'main']);
     assert.deepEqual(git.at(-2)?.args.slice(-2), ['-m', `chore(niyam): onboard at v${v}`], 'the commit header is the title');
     assert.match(body, /^- `\.github\/niyam\.json`: owner example-owner approves, agent ExampleBot builds, with identity, .* on$/m);
-    assert.match(body, /^- `\.github\/workflows\/process-rules\.yml`: write \.github\/workflows\/process-rules\.yml, which runs the shared niyam checks$/m);
+    assert.match(body, /^- `\.github\/workflows\/niyam\.yml`: write \.github\/workflows\/niyam\.yml, which runs the shared niyam checks$/m);
     // The long explanations the terminal no longer prints.
     assert.ok(body.includes('\nDone at the terminal, outside this pull request:\n\n- board:\n  - issue types in example-org: Work item, Slice, State, Decision, Brief\n'), body);
     assert.ok(body.includes(`\n  - Project "example-app work": ${COPY_URL}\n  - fields: Step, Decision, Review date\n`), body);
@@ -214,7 +236,7 @@ describe('onboard', () => {
     assert.ok(body.includes('\nLeft to do by hand:\n\n- The review routine: create a weekly Claude routine on example-org/example-app'), body);
     assert.ok(
       body.includes(
-        `\n- Claude cloud sessions, once: connect claude.ai's GitHub as ExampleBot, and paste what niyam cloud-setup prints into the cloud environment's Setup script, over any older process-rules part. It runs ${CLOUD_SETUP_PATH}, which onboard keeps at the pin, so a new release needs no new paste. ${SETUP_FIRST}\n`,
+        `\n- Claude cloud sessions, once: connect claude.ai's GitHub as ExampleBot, and paste what niyam cloud-setup prints into the cloud environment's Setup script, over any older niyam or process-rules part. It runs ${CLOUD_SETUP_PATH}, which onboard keeps at the pin, so a new release needs no new paste. ${SETUP_FIRST}\n`,
       ),
       body,
     );
@@ -238,7 +260,7 @@ describe('onboard', () => {
     sys.files.set(HOOKS, JSON.stringify(CLAUDE));
     sys.files.set(WORKFLOW, workflow('main', packageVersion(), true));
     sys.files.set(PRE_PUSH, PRE_PUSH_HOOK);
-    sys.files.set(CLOUD, CLOUD_FILE);
+    sys.files.set(CLOUD, CLOUD_FILE).set(OLD_CLOUD, CLOUD_FILE);
     const board = new Board(sys);
     board.issueTypes = ISSUE_TYPES.map((t) => t.name);
     board.labels = LABELS.map((l) => l.name);
@@ -255,6 +277,52 @@ describe('onboard', () => {
     assert.ok(out.includes('└  Done; no file changes, so no pull request.'), out.join('\n'));
   });
 
+  // The three repositories onboarded before P-56, as GitHub had them: each file moves to its new name, and a run
+  // again, once the pull request merges, changes nothing.
+  for (const [name, oldWorkflow, oldSettings, wanted] of [
+    ['athya_mono', WORKFLOW_068_MONO, SETTINGS_068_MONO, (v: string) => workflow('main', v, true).replace('branches: ["main"]', "branches: ['main']")],
+    ['niyam', WORKFLOW_068_NIYAM, SETTINGS_068_NIYAM, (v: string) => workflow('main', v, false)],
+    ['niyam-sandbox', WORKFLOW_068_SANDBOX, SETTINGS_068_SANDBOX, (v: string) => workflow('main', v, true)],
+  ] as const) {
+    it(`moves ${name}'s workflow, settings and cloud setup file to their niyam names, and then changes nothing (P-56)`, async () => {
+      const v = packageVersion();
+      const sys = fresh();
+      sys.files.delete(SETTINGS);
+      sys.files.set(`${ROOT}/.github/process-rules.json`, oldSettings);
+      sys.files.set(HOOKS, JSON.stringify(CLAUDE));
+      sys.files.set(OLD_WORKFLOW, oldWorkflow);
+      sys.files.set(OLD_CLOUD, CLOUD_SETUP_068);
+      sys.files.set(PRE_PUSH, PRE_PUSH_HOOK);
+      const board = new Board(sys);
+      board.issueTypes = ISSUE_TYPES.map((t) => t.name);
+      board.labels = LABELS.map((l) => l.name);
+      board.project = { fields: [...BUILT_IN, ...FIELDS.map((f) => f.name)], linked: true, views: settledViews(), grouped: true };
+      const { code, out, err } = await run(sys, []);
+      assert.deepEqual(err, []);
+      assert.equal(code, 0);
+      assert.deepEqual(planned(out, 'Pull request'), [
+        'niyam.json: moved from process-rules.json',
+        `workflow: from process-rules.yml, pins → v${v}, niyam job ids`,
+        `cloud-setup.sh: v0.6.8 → v${v}`,
+        'auto-merge: when checks pass',
+      ]);
+      assert.deepEqual(planned(out, 'Claude cloud — by hand, once'), ['Setup script: niyam cloud-setup again, once']);
+      assert.equal(repo(sys).get(WORKFLOW), wanted(v), 'every pin, id and input moved, the rest as the repo had it');
+      assert.equal(repo(sys).get(SETTINGS), oldSettings, 'byte for byte');
+      assert.equal(repo(sys).get(CLOUD), CLOUD_FILE);
+      assert.equal(repo(sys).get(OLD_CLOUD), CLOUD_FILE, 'the Setup script pasted before runs the old one, alike');
+      assert.deepEqual([...sys.deleted].sort(), ['.github/process-rules.json', OLD_WORKFLOW_PATH]);
+      assert.deepEqual([...sys.committed.keys()].sort(), ['.github/niyam.json', CLOUD_SETUP_PATH, OLD_CLOUD_SETUP_PATH, WORKFLOW_PATH].sort());
+      assert.match(byHand(out).join('\n'), /Setup script from niyam cloud-setup again, over the process-rules part/);
+      merge(sys);
+      const again = await run(sys, []);
+      assert.equal(again.code, 0);
+      assert.deepEqual(planned(again.out, 'Pull request'), [], 'a run again is a no-op');
+      assert.deepEqual(planned(again.out, 'Claude cloud — by hand, once'), []);
+      assert.ok(again.out.includes('└  Done; no file changes, so no pull request.'), again.out.join('\n'));
+    });
+  }
+
   describe('issue types outside the work model', () => {
     const settled = (): { sys: FakeSys; board: Board } => {
       const sys = fresh();
@@ -262,7 +330,7 @@ describe('onboard', () => {
       sys.files.set(HOOKS, JSON.stringify(CLAUDE));
       sys.files.set(WORKFLOW, workflow('main', packageVersion(), true));
       sys.files.set(PRE_PUSH, PRE_PUSH_HOOK);
-      sys.files.set(CLOUD, CLOUD_FILE);
+      sys.files.set(CLOUD, CLOUD_FILE).set(OLD_CLOUD, CLOUD_FILE);
       const board = new Board(sys);
       board.issueTypes = [...ISSUE_TYPES.map((t) => t.name), 'Task'];
       board.labels = LABELS.map((l) => l.name);
@@ -920,29 +988,77 @@ describe('onboard', () => {
     assert.match(repo(sys).get(WORKFLOW) ?? '', /branches: \["trunk"\]/);
   });
 
-  it("replaces an older release's single-job workflow, saying why", async () => {
+  it("replaces an older release's single-job workflow, saying why, and moves it to its new name", async () => {
     const sys = fresh();
-    sys.files.set(WORKFLOW, olderWorkflows('main', '0.5.2')[0] as string);
+    sys.files.set(OLD_WORKFLOW, olderWorkflows('main', '0.5.2')[0] as string);
     const { out } = await run(sys);
     assert.equal(out[0], `◆  niyam onboard   v0.5.2 → v${packageVersion()}`);
-    assert.ok(planned(out, 'Pull request').includes('workflow: older template replaced'), out.join('\n'));
-    assert.match(opened(sys)?.body ?? '', /^- `\.github\/workflows\/process-rules\.yml`: replace the older \.github\/workflows\/process-rules\.yml, which lets every run write to issues/m);
+    assert.ok(planned(out, 'Pull request').includes('workflow: from process-rules.yml, older template replaced'), out.join('\n'));
+    assert.match(
+      opened(sys)?.body ?? '',
+      /^- `\.github\/workflows\/niyam\.yml`: move \.github\/workflows\/process-rules\.yml here; replace the older \.github\/workflows\/process-rules\.yml, which lets every run write to issues/m,
+    );
+    assert.match(opened(sys)?.body ?? '', /^- `\.github\/workflows\/process-rules\.yml`: moved to \.github\/workflows\/niyam\.yml$/m);
     assert.equal(repo(sys).get(WORKFLOW), workflow('main', packageVersion(), true));
+    assert.equal(repo(sys).has(OLD_WORKFLOW), false, 'the old one is deleted, or both would run');
   });
 
   it('moves only the version pins of a workflow already split', async () => {
     const sys = fresh();
-    const own = workflow('main', '0.5.2', true).replace('name: process-rules\n', 'name: process-rules\n# Our own note.\n');
+    const own = workflow('main', '0.5.2', true).replace('name: niyam\n', 'name: niyam\n# Our own note.\n');
     sys.files.set(WORKFLOW, own);
     const { out } = await run(sys);
     assert.ok(planned(out, 'Pull request').includes(`workflow: pins → v${packageVersion()}`), out.join('\n'));
-    assert.ok(opened(sys)?.body.includes(`in .github/workflows/process-rules.yml, move the version pins from v0.5.2 to v${packageVersion()}, leaving the rest as it is`));
+    assert.ok(opened(sys)?.body.includes(`in .github/workflows/niyam.yml, move the version pins from v0.5.2 to v${packageVersion()}, leaving the rest as it is`));
     assert.equal(repo(sys).get(WORKFLOW), own.replaceAll('0.5.2', packageVersion()));
+    assert.deepEqual([...sys.deleted], []);
+  });
+
+  it('moves a split workflow from its old name, renaming its job ids and input, keeping what the client changed (P-56)', async () => {
+    const sys = fresh();
+    const own = oldIds(workflow('main', '0.5.2', true)).replace('name: niyam\n', 'name: niyam\n# Our own note.\n');
+    sys.files.set(OLD_WORKFLOW, own);
+    const { out } = await run(sys);
+    assert.ok(planned(out, 'Pull request').includes(`workflow: from process-rules.yml, pins → v${packageVersion()}, niyam job ids`), out.join('\n'));
+    const body = opened(sys)?.body ?? '';
+    assert.ok(
+      body.includes(
+        `- \`.github/workflows/niyam.yml\`: move .github/workflows/process-rules.yml here; in .github/workflows/process-rules.yml, move the version pins from v0.5.2 to v${packageVersion()} and rename its job ids process-rules… to niyam… and its process-rules-ref inputs to niyam-ref, leaving the check names as they are, leaving the rest as it is\n`,
+      ),
+      body,
+    );
+    assert.equal(repo(sys).get(WORKFLOW), workflow('main', packageVersion(), true).replace('name: niyam\n', 'name: niyam\n# Our own note.\n'));
+    assert.equal(repo(sys).has(OLD_WORKFLOW), false);
+    assert.deepEqual([...sys.deleted], [OLD_WORKFLOW_PATH]);
+  });
+
+  it('moves a workflow at this release from its old name as it is, but for its ids, and deletes an old one beside a new one', async () => {
+    const sys = fresh();
+    sys.files.set(OLD_WORKFLOW, oldIds(workflow('main', packageVersion(), true)));
+    const { out } = await run(sys);
+    assert.ok(planned(out, 'Pull request').includes('workflow: from process-rules.yml, niyam job ids'), out.join('\n'));
+    assert.equal(repo(sys).get(WORKFLOW), workflow('main', packageVersion(), true));
+    assert.equal(repo(sys).has(OLD_WORKFLOW), false);
+    // Both there, as by hand: the new one is kept and the old one goes, or each check would run twice.
+    const both = fresh();
+    both.files.set(WORKFLOW, workflow('main', packageVersion(), true));
+    both.files.set(OLD_WORKFLOW, oldIds(workflow('main', '0.5.2', true)));
+    const twice = await run(both);
+    assert.ok(planned(twice.out, 'Pull request').includes('workflow: process-rules.yml deleted'), twice.out.join('\n'));
+    // And beside a new one that needs its pins moved, both in the one line.
+    const behind = fresh();
+    behind.files.set(WORKFLOW, workflow('main', '0.5.2', true));
+    behind.files.set(OLD_WORKFLOW, oldIds(workflow('main', '0.5.2', true)));
+    const thrice = await run(behind);
+    assert.ok(planned(thrice.out, 'Pull request').includes(`workflow: pins → v${packageVersion()}, process-rules.yml deleted`), thrice.out.join('\n'));
+    assert.deepEqual([...behind.deleted], [OLD_WORKFLOW_PATH]);
+    assert.equal(repo(both).get(WORKFLOW), workflow('main', packageVersion(), true));
+    assert.deepEqual([...both.deleted], [OLD_WORKFLOW_PATH]);
   });
 
   it('leaves a split workflow at this release alone', async () => {
     const sys = fresh();
-    const own = workflow('main', packageVersion(), true).replace('name: process-rules\n', 'name: process-rules\n# Our own note.\n');
+    const own = workflow('main', packageVersion(), true).replace('name: niyam\n', 'name: niyam\n# Our own note.\n');
     sys.files.set(WORKFLOW, own);
     const { out } = await run(sys);
     assert.ok(!planned(out, 'Pull request').some((item) => item.startsWith('workflow')), out.join('\n'));
@@ -1415,7 +1531,7 @@ describe('onboard', () => {
       assert.equal(code, 1);
       assert.deepEqual(err, ['onboard: cannot ask GitHub whether the test commit is Verified (down); open the link above to see', 'onboard: stopped at "test commit Verified as ExampleBot"; nothing after it was changed, and no pull request was opened']);
       assert.ok(out.includes('│  Test commit https://github.com/example-org/example-app/commit/abc123'), out.join('\n'));
-      assert.ok(out.includes('│  Deleted the throwaway branch process-rules/verify-examplebot-1793361600000.'));
+      assert.ok(out.includes('│  Deleted the throwaway branch niyam/verify-examplebot-1793361600000.'));
       assert.deepEqual(sys.slept, [2000, 4000, 6000, 8000]);
       assert.equal(sys.calls.at(-1)?.command, 'rm');
     });
@@ -1450,7 +1566,7 @@ describe('onboard', () => {
         call.command === 'git' && call.args[3]?.startsWith(':') ? { code: 1, stdout: '', stderr: 'protected\n' } : undefined;
       const { code, err } = await run(sys);
       assert.equal(code, 0);
-      assert.deepEqual(err, ['onboard: could not delete process-rules/verify-examplebot-1793361600000; delete it on GitHub: protected']);
+      assert.deepEqual(err, ['onboard: could not delete niyam/verify-examplebot-1793361600000; delete it on GitHub: protected']);
     });
 
     for (const [args, message] of [
@@ -1504,9 +1620,23 @@ describe('staged adoption', () => {
     assert.deepEqual(planned(out, 'GitHub'), [], 'no board, and the agent can push');
     assert.deepEqual(planned(out, 'This Mac'), ['pre-push hook: new']);
     assert.ok(out.includes(`└  ${PULL_URL}  merges itself when checks pass`));
-    assert.deepEqual([...sys.committed.keys()], ['.github/niyam.json', '.claude/settings.json', CLOUD_SETUP_PATH]);
+    assert.deepEqual([...sys.committed.keys()], ['.github/niyam.json', '.claude/settings.json', CLOUD_SETUP_PATH, OLD_CLOUD_SETUP_PATH]);
     assert.deepEqual(byHand(out), ["cloud sessions, once: claude.ai's GitHub as ExampleBot, Setup script from niyam cloud-setup, first"]);
     assert.deepEqual(sys.chosen, ['Go ahead?']);
+  });
+
+  it('leaves a workflow under its old name as it is with identity alone, saying so in the plan (P-56)', async () => {
+    const sys = fresh();
+    sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity'] }));
+    sys.files.set(OLD_WORKFLOW, oldIds(workflow('main', '0.6.8', false)));
+    const { code, out } = await run(sys, []);
+    assert.equal(code, 0);
+    assert.ok(out.includes('│  ! .github/workflows/process-rules.yml left as it is: no feature on runs the shared checks; delete it, or turn one on'), out.join('\n'));
+    assert.equal(repo(sys).has(WORKFLOW), false);
+    assert.deepEqual([...sys.deleted], [], 'deleting it with no new one would turn its checks off');
+    const none = fresh();
+    none.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity'] }));
+    assert.ok(!(await run(none, [])).out.some((line) => line.includes('left as it is')));
   });
 
   it('turns one more feature on, keeping the other settings', async () => {
@@ -1532,17 +1662,45 @@ describe('staged adoption', () => {
     assert.equal(repo(sys).get(WORKFLOW), workflow('main', packageVersion(), false));
   });
 
-  it('keeps the settings file a repo onboarded before niyam has, under its old name (P-50)', async () => {
+  it('moves the settings file a repo onboarded before niyam has to its new name, with the change asked for (P-56)', async () => {
     const sys = fresh();
     const old = SETTINGS.replace('.github/niyam.json', '.github/process-rules.json');
     sys.files.delete(SETTINGS);
     sys.files.set(old, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity'], project: 'Example work' }));
     sys.files.set(HOOKS, JSON.stringify(CLAUDE));
-    const { code, out } = await run(sys, ['--add', 'board']);
+    const { code, out, err } = await run(sys, ['--add', 'board']);
+    assert.deepEqual(err, []);
     assert.equal(code, 0);
-    assert.deepEqual(JSON.parse(repo(sys).get(old) ?? '').features, ['identity', 'board']);
-    assert.equal(repo(sys).has(SETTINGS), false, 'writes no second settings file');
-    assert.equal(planned(out, 'Pull request')[0], 'process-rules.json: turn board on');
+    assert.deepEqual(JSON.parse(repo(sys).get(SETTINGS) ?? '').features, ['identity', 'board']);
+    assert.equal(repo(sys).has(old), false, 'leaves no second settings file');
+    assert.equal(planned(out, 'Pull request')[0], 'niyam.json: moved from process-rules.json, turn board on');
+    const body = opened(sys)?.body ?? '';
+    assert.ok(body.includes('\n- `.github/niyam.json`: move .github/process-rules.json here; turn board on\n'), body);
+    assert.ok(body.includes('\n- `.github/process-rules.json`: moved to .github/niyam.json\n'), body);
+  });
+
+  it('moves the settings file byte for byte when nothing in it changes, and deletes an old one beside a new one', async () => {
+    const sys = fresh();
+    const old = SETTINGS.replace('.github/niyam.json', '.github/process-rules.json');
+    // A client's own layout, as athya_mono's one-line features list.
+    const text = '{\n  "owner": "example-owner",\n  "agent": "ExampleBot",\n  "features": ["identity"]\n}\n';
+    sys.files.delete(SETTINGS);
+    sys.files.set(old, text);
+    sys.files.set(HOOKS, JSON.stringify(CLAUDE));
+    const { code, out } = await run(sys, []);
+    assert.equal(code, 0);
+    assert.equal(repo(sys).get(SETTINGS), text);
+    assert.equal(repo(sys).has(old), false);
+    assert.equal(planned(out, 'Pull request')[0], 'niyam.json: moved from process-rules.json');
+    const both = fresh();
+    both.files.set(SETTINGS, text);
+    both.files.set(old, text.replace('identity', 'board'));
+    both.files.set(HOOKS, JSON.stringify(CLAUDE));
+    const second = await run(both, []);
+    assert.equal(second.code, 0);
+    assert.equal(planned(second.out, 'Pull request')[0], 'niyam.json: process-rules.json deleted', 'the plan shows the one change');
+    assert.equal(repo(both).get(SETTINGS), text, 'the new one is the one read, and stays');
+    assert.deepEqual([...both.deleted], ['.github/process-rules.json']);
   });
 
   it('renames design to figma, takes the library key out of older settings and sets it as the FIGMA_LIBRARY secret', async () => {
@@ -1622,7 +1780,7 @@ describe('staged adoption', () => {
     sys.files.set(WORKFLOW, own);
     const { out } = await run(sys);
     assert.equal(repo(sys).get(WORKFLOW), own);
-    assert.ok(byHand(out).includes('pass FIGMA_LIBRARY in process-rules, process-rules-weekly, process-rules-merged, process-rules-asks → .github/workflows/process-rules.yml'), out.join('\n'));
+    assert.ok(byHand(out).includes('pass FIGMA_LIBRARY in niyam, niyam-weekly, niyam-merged, niyam-asks → .github/workflows/niyam.yml'), out.join('\n'));
     assert.ok(opened(sys) === undefined || opened(sys)?.body.includes('pass the shared checks no FIGMA_LIBRARY secret'));
     // A workflow the pull request replaces passes it: nothing to do by hand then, though the plan was made without the branch.
     const replaced = fresh();
@@ -1643,11 +1801,11 @@ describe('staged adoption', () => {
   it('names each job that passes no FIGMA_LIBRARY, and takes `secrets: inherit` as passing it', () => {
     const both = workflow('main', '0.5.5', true);
     assert.deepEqual(jobsWithoutLibrary(both), []);
-    const [head = '', weekly = ''] = both.split('  process-rules-weekly:');
-    const prOnly = `${head.replace('      FIGMA_LIBRARY: ${{ secrets.FIGMA_LIBRARY }}\n', '      OTHER: ${{ secrets.OTHER }}\n')}  process-rules-weekly:${weekly}`;
-    assert.deepEqual(jobsWithoutLibrary(prOnly), ['process-rules']);
+    const [head = '', weekly = ''] = both.split('  niyam-weekly:');
+    const prOnly = `${head.replace('      FIGMA_LIBRARY: ${{ secrets.FIGMA_LIBRARY }}\n', '      OTHER: ${{ secrets.OTHER }}\n')}  niyam-weekly:${weekly}`;
+    assert.deepEqual(jobsWithoutLibrary(prOnly), ['niyam']);
     assert.deepEqual(jobsWithoutLibrary(prOnly.replace(/ {4}secrets:\n(?: {6}.*\n)+/, '    secrets: inherit\n')), []);
-    assert.deepEqual(jobsWithoutLibrary(workflow('main', '0.5.5', false)), ['process-rules', 'process-rules-weekly', 'process-rules-merged', 'process-rules-asks']);
+    assert.deepEqual(jobsWithoutLibrary(workflow('main', '0.5.5', false)), ['niyam', 'niyam-weekly', 'niyam-merged', 'niyam-asks']);
   });
 
   it('prints no command for an older library value that is not a file key', async () => {
@@ -1674,7 +1832,7 @@ describe('staged adoption', () => {
     sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity', 'pr-identity'] }));
     sys.files.set(WORKFLOW, workflow('main', packageVersion(), false));
     sys.files.set(PRE_PUSH, PRE_PUSH_HOOK);
-    sys.files.set(CLOUD, CLOUD_FILE);
+    sys.files.set(CLOUD, CLOUD_FILE).set(OLD_CLOUD, CLOUD_FILE);
     const before = repo(sys).get(SETTINGS);
     const { out } = await run(sys, ['--add', 'pr-identity']);
     assert.deepEqual(planned(out, 'Pull request'), []);
@@ -1756,7 +1914,7 @@ describe('the plan and its one question', () => {
     assert.deepEqual({ code, err }, { code: 0, err: [] });
     const title = `🔧 chore(niyam): onboard at v${packageVersion()}`;
     assert.equal(opened(sys)?.title, title);
-    const commit = sys.calls.find((c) => c.command === 'git' && c.args[0] === 'commit-tree' && c.cwd === '/tmp/process-rules-2');
+    const commit = sys.calls.find((c) => c.command === 'git' && c.args[0] === 'commit-tree' && c.cwd === '/tmp/niyam-2');
     assert.deepEqual(commit?.args.slice(-2), ['-m', title], 'the commit header is the title');
     assert.equal(sys.requests.find((r) => r.url.includes('/commits?'))?.token, TOKEN, 'asked as the agent');
   });
@@ -1936,7 +2094,7 @@ describe("onboard's pull request", () => {
   /** onboard's git step whose arguments start with `prefix`, in the temporary repository, failing. */
   const failing = (sys: FakeSys, prefix: string): void => {
     sys.execOverride = (call) =>
-      call.cwd?.startsWith('/tmp/process-rules-') && call.args.join(' ').startsWith(prefix) ? { code: 1, stdout: '', stderr: 'boom\n' } : undefined;
+      call.cwd?.startsWith('/tmp/niyam-') && call.args.join(' ').startsWith(prefix) ? { code: 1, stdout: '', stderr: 'boom\n' } : undefined;
   };
 
   for (const [step, said] of [
@@ -1953,11 +2111,26 @@ describe("onboard's pull request", () => {
       failing(sys, step);
       const { code, err } = await run(sys);
       assert.deepEqual({ code, err }, { code: 1, err: [said, 'onboard: stopped at "pull request"; nothing after it was changed, and no pull request was opened'] });
-      const temp = sys.calls.find((c) => c.args[0] === 'init' && c.cwd?.startsWith('/tmp/process-rules-'))?.cwd;
+      const temp = sys.calls.find((c) => c.args[0] === 'init' && c.cwd?.startsWith('/tmp/niyam-'))?.cwd;
       assert.ok(temp && sys.removed.includes(temp), 'the temporary repository is deleted');
       assert.ok(!sys.requests.some((r) => r.method === 'POST' && r.url.endsWith('/pulls')));
     });
   }
+
+  it('deletes a moved file in the index, and stops when git cannot', async () => {
+    const moving = (): FakeSys => {
+      const sys = fresh();
+      sys.files.set(OLD_WORKFLOW, oldIds(workflow('main', packageVersion(), true)));
+      return sys;
+    };
+    const sys = moving();
+    assert.equal((await run(sys)).code, 0);
+    assert.ok(sys.calls.some((c) => c.cwd === '/tmp/niyam-2' && c.args.join(' ') === `update-index --force-remove ${OLD_WORKFLOW_PATH}`));
+    const failed = moving();
+    failing(failed, 'update-index --force-remove');
+    const { code, err } = await run(failed);
+    assert.deepEqual({ code, err }, { code: 1, err: [`onboard: deleting ${OLD_WORKFLOW_PATH} failed: boom`, 'onboard: stopped at "pull request"; nothing after it was changed, and no pull request was opened'] });
+  });
 
   it('refuses a file the default branch has otherwise than this checkout, pushing nothing', async () => {
     const sys = fresh();
@@ -1965,14 +2138,14 @@ describe("onboard's pull request", () => {
     const { code, err } = await run(sys);
     assert.equal(code, 1);
     assert.deepEqual(err, ['onboard: .github/niyam.json on main is not what this checkout has; bring this checkout up to date with main and run onboard again', 'onboard: stopped at "pull request"; nothing after it was changed, and no pull request was opened']);
-    assert.ok(!sys.calls.some((c) => c.args.join(' ').includes('refs/heads/process-rules/onboard')));
-    assert.ok(sys.removed.includes('/tmp/process-rules-2'));
+    assert.ok(!sys.calls.some((c) => c.args.join(' ').includes('refs/heads/niyam/onboard')));
+    assert.ok(sys.removed.includes('/tmp/niyam-2'));
   });
 
   it('updates the pull request a run before opened', async () => {
     const sys = fresh();
     sys.route('POST', `${REPO}/pulls`, { status: 422, json: { message: 'Validation Failed' } });
-    sys.route('GET', `${REPO}/pulls?state=open&head=example-org:process-rules/onboard`, { status: 200, json: [{ number: 5, html_url: 'https://github.com/example-org/example-app/pull/5' }] });
+    sys.route('GET', `${REPO}/pulls?state=open&head=example-org:niyam/onboard`, { status: 200, json: [{ number: 5, html_url: 'https://github.com/example-org/example-app/pull/5' }] });
     sys.route('PATCH', `${REPO}/pulls/5`, { status: 200, json: {} });
     const { code, out, err } = await run(sys);
     assert.deepEqual([code, err], [0, []]);
@@ -1984,17 +2157,44 @@ describe("onboard's pull request", () => {
     assert.ok(byHand(out).includes('auto-merge: GitHub refused (GitHub gave no id for the pull request); merge it yourself'), out.join('\n'));
   });
 
+  it('updates an onboard pull request a release before P-56 opened from process-rules/onboard, opening no second one', async () => {
+    const sys = fresh();
+    const old = { status: 200, json: [{ number: 9, html_url: 'https://github.com/example-org/example-app/pull/9', node_id: 'PR_9' }] };
+    sys.route('GET', `${REPO}/pulls?state=open&head=example-org:process-rules/onboard`, old);
+    sys.route('POST', `${REPO}/pulls`, { status: 422, json: { message: 'Validation Failed' } });
+    sys.route('PATCH', `${REPO}/pulls/9`, { status: 200, json: {} });
+    const { code, out, err } = await run(sys);
+    assert.deepEqual([code, err], [0, []]);
+    const push = sys.calls.filter((c) => c.command === 'git' && c.args[0] === 'push').at(-1);
+    assert.deepEqual(push?.args, ['push', '-q', 'https://github.com/example-org/example-app.git', '+abc123:refs/heads/process-rules/onboard']);
+    assert.equal((opened(sys) as { head?: string } | undefined)?.head, 'process-rules/onboard');
+    assert.ok(sys.requests.some((r) => r.method === 'PATCH' && r.url.endsWith(`${REPO}/pulls/9`)), 'the open one is updated');
+    assert.ok(out.some((line) => line.includes('https://github.com/example-org/example-app/pull/9')), out.join('\n'));
+    // With one open from each branch, the new one is updated.
+    const both = fresh();
+    both.route('GET', `${REPO}/pulls?state=open&head=example-org:process-rules/onboard`, old);
+    both.route('GET', `${REPO}/pulls?state=open&head=example-org:niyam/onboard`, { status: 200, json: [{ number: 5, html_url: 'https://github.com/example-org/example-app/pull/5' }] });
+    both.route('POST', `${REPO}/pulls`, { status: 422, json: { message: 'Validation Failed' } });
+    both.route('PATCH', `${REPO}/pulls/5`, { status: 200, json: {} });
+    assert.equal((await run(both)).code, 0);
+    assert.equal((opened(both) as { head?: string } | undefined)?.head, 'niyam/onboard');
+    const pushed = both.calls.filter((c) => c.command === 'git' && c.args[0] === 'push').at(-1);
+    assert.equal(pushed?.args.at(-1), '+abc123:refs/heads/niyam/onboard');
+    assert.ok(both.requests.some((r) => r.method === 'PATCH' && r.url.endsWith(`${REPO}/pulls/5`)), 'the niyam/onboard one is updated');
+    assert.ok(!both.requests.some((r) => r.method === 'PATCH' && r.url.endsWith(`${REPO}/pulls/9`)), 'the old one is left as it is');
+  });
+
   it('says so when the description of the open pull request cannot be updated, and goes on', async () => {
     const sys = fresh();
     sys.route('POST', `${REPO}/pulls`, { status: 422, json: { message: 'Validation Failed' } });
-    sys.route('GET', `${REPO}/pulls?state=open&head=example-org:process-rules/onboard`, { status: 200, json: [{ number: 5, html_url: 'https://github.com/example-org/example-app/pull/5' }] });
+    sys.route('GET', `${REPO}/pulls?state=open&head=example-org:niyam/onboard`, { status: 200, json: [{ number: 5, html_url: 'https://github.com/example-org/example-app/pull/5' }] });
     const { code, err } = await run(sys);
     assert.deepEqual([code, err], [0, ['onboard: could not update the description of https://github.com/example-org/example-app/pull/5 (HTTP 404)']]);
   });
 
   for (const [name, route, said] of [
-    ['refuses it', { status: 403, json: { message: 'Resource not accessible' } }, 'onboard: GitHub did not open the pull request (HTTP 403: Resource not accessible); the changes are on process-rules/onboard'],
-    ['finds no open one after a 422', { status: 422, json: null }, 'onboard: GitHub did not open the pull request (HTTP 422); the changes are on process-rules/onboard'],
+    ['refuses it', { status: 403, json: { message: 'Resource not accessible' } }, 'onboard: GitHub did not open the pull request (HTTP 403: Resource not accessible); the changes are on niyam/onboard'],
+    ['finds no open one after a 422', { status: 422, json: null }, 'onboard: GitHub did not open the pull request (HTTP 422); the changes are on niyam/onboard'],
   ] as const) {
     it(`fails when GitHub ${name}`, async () => {
       const sys = fresh();
@@ -2009,7 +2209,7 @@ describe("onboard's pull request", () => {
     sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity'], figma: { library: 'abc' } }));
     sys.files.set(HOOKS, JSON.stringify(CLAUDE));
     sys.files.set(PRE_PUSH, PRE_PUSH_HOOK);
-    sys.files.set(CLOUD, CLOUD_FILE);
+    sys.files.set(CLOUD, CLOUD_FILE).set(OLD_CLOUD, CLOUD_FILE);
     new Board(sys);
     await actionsKey(sys);
     const { code } = await run(sys, ['--add', 'board']);
@@ -2052,6 +2252,9 @@ describe('workflow', () => {
     assert.deepEqual(workflowUpdate(older, 'main', '0.1.0', false, '5 4 * * 2', '.github/process-rules.json'), { kind: 'same' });
     const moved = workflowUpdate(older, 'main', '0.1.0', false, '6 4 * * 2', '.github/process-rules.json');
     assert.match('text' in moved ? moved.text : '', /cron 6 4 \* \* 2, UTC, as "schedule" in \.github\/process-rules\.json sets it/);
+    // Since P-56 onboard moves the settings file, and the comment follows it, with the ids.
+    const renamed = workflowUpdate(oldIds(older), 'main', '0.1.0', false, '5 4 * * 2');
+    assert.deepEqual(renamed, { kind: 'repin', text: workflow('main', '0.1.0', false, '5 4 * * 2'), ids: true });
   });
 
   it('moves a pin of athya-hq/process-rules, the repo before niyam, to veda-hq/niyam at the new release', () => {
@@ -2064,7 +2267,8 @@ describe('workflow', () => {
 
   it("calls the product's shared checks on pull requests and the default branch", () => {
     const text = workflow('main', '0.1.0', true);
-    assert.match(text, /uses: veda-hq\/niyam\/\.github\/workflows\/checks\.yml@v0\.1\.0\n {4}with:\n {6}process-rules-ref: v0\.1\.0\n/);
+    assert.match(text, /uses: veda-hq\/niyam\/\.github\/workflows\/checks\.yml@v0\.1\.0\n {4}with:\n {6}niyam-ref: v0\.1\.0\n/);
+    assert.doesNotMatch(text, /process-rules/, 'nothing of the old name since P-56');
     assert.match(text, /branches: \["main"\]/);
     assert.match(text, /^# To upgrade, change the version on every line that names it \(two per job\)\.$/m);
     assert.deepEqual(workflowPins(text), Array(8).fill('0.1.0'));
@@ -2074,7 +2278,7 @@ describe('workflow', () => {
     const text = workflow('main', '0.1.0', true);
     assert.match(text, /^permissions:\n {2}contents: read\n {2}issues: read\n {2}pull-requests: read$/m);
     assert.match(text, /^ {4}types: \[opened, synchronize, reopened, edited, closed\]$/m);
-    const [, prJob = '', weeklyJob = '', mergedJob = '', asksJob = ''] = text.split(/^ {2}(?:process-rules|process-rules-weekly|process-rules-merged|process-rules-asks):$/m);
+    const [, prJob = '', weeklyJob = '', mergedJob = '', asksJob = ''] = text.split(/^ {2}(?:niyam|niyam-weekly|niyam-merged|niyam-asks):$/m);
     assert.match(prJob, /^ {4}if: \(github\.event_name == 'pull_request' && github\.event\.action != 'closed'\) \|\| github\.event_name == 'push'$/m);
     assert.doesNotMatch(prJob, /permissions:|: write/);
     assert.match(weeklyJob, /^ {4}if: \(github\.event_name == 'schedule' && github\.event\.schedule != '41 \* \* \* \*'\) \|\| github\.event_name == 'workflow_dispatch'$/m);
@@ -2139,7 +2343,7 @@ describe('workflowUpdate', () => {
     const before = workflow('main', '0.5.2', true)
       .replace("branches: [\"main\"]", "branches: ['main']")
       .replace('name: niyam\n', 'name: niyam\n# Our own note: split by hand at v0.5.2.\n')
-      .replace('process-rules-ref: v0.5.2\n    secrets', "process-rules-ref: 'v0.5.2'\n    secrets");
+      .replace('niyam-ref: v0.5.2\n    secrets', "niyam-ref: 'v0.5.2'\n    secrets");
     const update = workflowUpdate(before, 'main', '0.5.3', true);
     assert.equal(update.kind, 'repin');
     assert.ok(update.kind === 'repin');
@@ -2149,30 +2353,30 @@ describe('workflowUpdate', () => {
     assert.deepEqual(workflowPins(update.text), Array(8).fill('0.5.3'));
   });
 
-  it('names the workflow and its jobs niyam in one a release before P-53 wrote, keeping the job ids and a name of the client\'s own', () => {
+  it('names the workflow and its jobs niyam in one a release before P-53 wrote, renaming the job ids and keeping a name of the client\'s own', () => {
     /** The template as releases before P-53 wrote it: process-rules' header and name, and no job names. */
     const unnamed = (text: string): string =>
       text
         .replace('# Written by niyam onboard: the shared niyam checks at', '# Written by process-rules onboard: the shared process-rules checks at')
         .replace(/^name: niyam$/m, 'name: process-rules')
         .replace(/^ {4}name: niyam(?:-\w+)?\n/gm, '');
-    const older = unnamed(workflow('main', '0.6.7', false));
-    assert.doesNotMatch(older, /name: niyam|niyam onboard|niyam checks/, older);
-    assert.deepEqual(workflowUpdate(older, 'main', '0.6.8', false), { kind: 'repin', text: workflow('main', '0.6.8', false), from: '0.6.7', names: true });
-    assert.deepEqual(workflowUpdate(older, 'main', '0.6.7', false), { kind: 'repin', text: workflow('main', '0.6.7', false), names: true }, 'at the same release too');
+    const older = unnamed(oldIds(workflow('main', '0.6.7', false)));
+    assert.doesNotMatch(older, /name: niyam|niyam onboard|niyam checks|niyam-ref/, older);
+    assert.deepEqual(workflowUpdate(older, 'main', '0.6.8', false), { kind: 'repin', text: workflow('main', '0.6.8', false), from: '0.6.7', names: true, ids: true });
+    assert.deepEqual(workflowUpdate(older, 'main', '0.6.7', false), { kind: 'repin', text: workflow('main', '0.6.7', false), names: true, ids: true }, 'at the same release too');
     const text = workflow('main', '0.6.8', false);
-    assert.match(text, /^ {2}process-rules:\n {4}name: niyam\n/m);
-    for (const job of ['weekly', 'merged', 'asks']) assert.match(text, new RegExp(`^ {2}process-rules-${job}:\\n {4}name: niyam-${job}\\n`, 'm'));
+    assert.match(text, /^ {2}niyam:\n {4}name: niyam\n/m);
+    for (const job of ['weekly', 'merged', 'asks']) assert.match(text, new RegExp(`^ {2}niyam-${job}:\\n {4}name: niyam-${job}\\n`, 'm'));
     const own = older.replace('  process-rules-weekly:\n', '  process-rules-weekly:\n    name: our weekly\n');
     const kept = workflowUpdate(own, 'main', '0.6.8', false);
-    assert.ok(kept.kind === 'repin' && kept.names, JSON.stringify(kept));
-    assert.match(kept.text, /^ {2}process-rules-weekly:\n {4}name: our weekly\n {4}if:/m);
+    assert.ok(kept.kind === 'repin' && kept.names && kept.ids, JSON.stringify(kept));
+    assert.match(kept.text, /^ {2}niyam-weekly:\n {4}name: our weekly\n {4}if:/m);
   });
 
   it("sets each job's Figma secrets to what figma needs, leaving secrets of the client's own", () => {
     const older = workflow('main', '0.5.4', false).replaceAll(
-      '      process-rules-ref: v0.5.4\n',
-      '      process-rules-ref: v0.5.4\n    secrets:\n      FIGMA_TOKEN: ${{ secrets.FIGMA_TOKEN }}\n',
+      '      niyam-ref: v0.5.4\n',
+      '      niyam-ref: v0.5.4\n    secrets:\n      FIGMA_TOKEN: ${{ secrets.FIGMA_TOKEN }}\n',
     );
     assert.deepEqual(workflowUpdate(older, 'main', '0.5.5', true), { kind: 'repin', text: workflow('main', '0.5.5', true), from: '0.5.4', secrets: true });
     assert.deepEqual(workflowUpdate(older, 'main', '0.5.5', false), { kind: 'repin', text: workflow('main', '0.5.5', false), from: '0.5.4', secrets: true });
@@ -2189,7 +2393,7 @@ describe('workflowUpdate', () => {
     sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity', 'work-rules'] }));
     sys.files.set(HOOKS, JSON.stringify(CLAUDE));
     sys.files.set(PRE_PUSH, PRE_PUSH_HOOK);
-    sys.files.set(CLOUD, CLOUD_FILE);
+    sys.files.set(CLOUD, CLOUD_FILE).set(OLD_CLOUD, CLOUD_FILE);
     sys.files.set(WORKFLOW, workflow('main', packageVersion(), true));
     const off = await run(sys);
     assert.deepEqual(planned(off.out, 'Pull request'), ['workflow: no Figma secrets', 'auto-merge: when checks pass']);
@@ -2235,14 +2439,14 @@ describe('workflowUpdate', () => {
     sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, schedule: '30 5 * * 2' }));
     sys.files.set(HOOKS, JSON.stringify(CLAUDE));
     sys.files.set(PRE_PUSH, PRE_PUSH_HOOK);
-    sys.files.set(CLOUD, CLOUD_FILE);
-    const own = workflow('main', packageVersion(), true).replace('name: process-rules\n', 'name: process-rules\n# Our own note.\n');
+    sys.files.set(CLOUD, CLOUD_FILE).set(OLD_CLOUD, CLOUD_FILE);
+    const own = workflow('main', packageVersion(), true).replace('name: niyam\n', 'name: niyam\n# Our own note.\n');
     sys.files.set(WORKFLOW, own);
     const { code, out } = await run(sys, []);
     assert.equal(code, 0);
     assert.deepEqual(planned(out, 'Pull request'), ['workflow: schedule → 30 5 * * 2', 'auto-merge: when checks pass']);
     assert.ok(opened(sys)?.body.includes(`\n- \`${WORKFLOW_PATH}\`: in ${WORKFLOW_PATH}, run the weekly decisions job on the schedule .github/niyam.json sets, cron 30 5 * * 2 UTC, leaving the rest as it is\n`));
-    assert.equal(repo(sys).get(WORKFLOW), workflow('main', packageVersion(), true, '30 5 * * 2').replace('name: process-rules\n', 'name: process-rules\n# Our own note.\n'));
+    assert.equal(repo(sys).get(WORKFLOW), workflow('main', packageVersion(), true, '30 5 * * 2').replace('name: niyam\n', 'name: niyam\n# Our own note.\n'));
   });
 
   it('follows a changed schedule in a split workflow, keeping its quotes and leaving a cron of its own', () => {
@@ -2316,7 +2520,7 @@ describe('workflowUpdate', () => {
 
   it('replaces a workflow it does not recognise, a split one with a pin missing included', () => {
     assert.deepEqual(workflowUpdate('old', 'main', '0.5.3', true), { kind: 'replace', text: workflow('main', '0.5.3', true) });
-    const halfPinned = workflow('main', '0.5.2', true).replace(/\n {4}with:\n {6}process-rules-ref: v0\.5\.2\n {4}secrets:/, '\n    secrets:');
+    const halfPinned = workflow('main', '0.5.2', true).replace(/\n {4}with:\n {6}niyam-ref: v0\.5\.2\n {4}secrets:/, '\n    secrets:');
     assert.equal(workflowPins(halfPinned).length, 7);
     assert.equal(workflowUpdate(halfPinned, 'main', '0.5.3', true).kind, 'replace');
     const changed = twoJobs('0.5.2', true).replace("github.event_name == 'pull_request' || github.event_name == 'push'", "github.event_name == 'push'");
@@ -2329,10 +2533,10 @@ describe('workflowUpdate', () => {
     }
     const own = twoJobs('0.5.6', true)
       .replace('# The weekly job is split out so pull request and push runs stay read-only.\n', '')
-      .replace('name: process-rules\n', 'name: process-rules\n# Our own note.\n');
+      .replace('name: niyam\n', 'name: niyam\n# Our own note.\n');
     const update = workflowUpdate(`${own}\n\n`, 'main', '0.5.16', true);
     assert.ok(update.kind === 'repin' && update.merged);
-    assert.equal(update.text, `${workflow('main', '0.5.16', true).replace(/^# The weekly, merged and needs-owner jobs[^\n]*\n/m, '').replace('name: process-rules\n', 'name: process-rules\n# Our own note.\n')}`);
+    assert.equal(update.text, `${workflow('main', '0.5.16', true).replace(/^# The weekly, merged and needs-owner jobs[^\n]*\n/m, '').replace('name: niyam\n', 'name: niyam\n# Our own note.\n')}`);
   });
 
   it('asks to add the merged job', async () => {
@@ -2340,7 +2544,7 @@ describe('workflowUpdate', () => {
     sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity', 'work-rules'] }));
     sys.files.set(HOOKS, JSON.stringify(CLAUDE));
     sys.files.set(PRE_PUSH, PRE_PUSH_HOOK);
-    sys.files.set(CLOUD, CLOUD_FILE);
+    sys.files.set(CLOUD, CLOUD_FILE).set(OLD_CLOUD, CLOUD_FILE);
     sys.files.set(WORKFLOW, twoJobs('0.5.6', false));
     const { out } = await run(sys);
     assert.deepEqual(planned(out, 'Pull request'), [`workflow: pins → v${packageVersion()}, merged job, needs-owner job, issue types for new issues`, 'auto-merge: when checks pass']);
@@ -2355,10 +2559,10 @@ describe('workflowUpdate', () => {
     }
     assert.deepEqual(workflowUpdate(threeJobs('0.5.27', true), 'main', '0.5.27', true), { kind: 'repin', text: workflow('main', '0.5.27', true), asks: true, types: true });
     assert.deepEqual(workflowUpdate(threeJobs('0.5.26', true, '0 9 * * 1-5'), 'main', '0.5.27', true, '0 9 * * 1-5'), { kind: 'repin', text: workflow('main', '0.5.27', true, '0 9 * * 1-5'), from: '0.5.26', asks: true, types: true });
-    const own = threeJobs('0.5.26', true).replace(/^# The weekly and merged jobs[^\n]*\n/m, '').replace('name: process-rules\n', 'name: process-rules\n# Our own note.\n');
+    const own = threeJobs('0.5.26', true).replace(/^# The weekly and merged jobs[^\n]*\n/m, '').replace('name: niyam\n', 'name: niyam\n# Our own note.\n');
     const update = workflowUpdate(own, 'main', '0.5.27', true);
     assert.ok(update.kind === 'repin' && update.asks);
-    assert.equal(update.text, workflow('main', '0.5.27', true).replace(/^# The weekly, merged and needs-owner jobs[^\n]*\n/m, '').replace('name: process-rules\n', 'name: process-rules\n# Our own note.\n'));
+    assert.equal(update.text, workflow('main', '0.5.27', true).replace(/^# The weekly, merged and needs-owner jobs[^\n]*\n/m, '').replace('name: niyam\n', 'name: niyam\n# Our own note.\n'));
     assert.deepEqual(workflowPins(update.text), Array(8).fill('0.5.27'));
   });
 
@@ -2388,12 +2592,37 @@ describe('workflowUpdate', () => {
     sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity', 'work-rules'] }));
     sys.files.set(HOOKS, JSON.stringify(CLAUDE));
     sys.files.set(PRE_PUSH, PRE_PUSH_HOOK);
-    sys.files.set(CLOUD, CLOUD_FILE);
+    sys.files.set(CLOUD, CLOUD_FILE).set(OLD_CLOUD, CLOUD_FILE);
     sys.files.set(WORKFLOW, older(packageVersion(), false));
     const { out } = await run(sys);
     assert.deepEqual(planned(out, 'Pull request'), ['workflow: needs-owner job only for owners, members and collaborators', 'auto-merge: when checks pass']);
     assert.ok(opened(sys)?.body.includes(`\n- \`${WORKFLOW_PATH}\`: in ${WORKFLOW_PATH}, start the needs-owner job only on a comment by the owner, a member or a collaborator, leaving the rest as it is\n`));
     assert.equal(repo(sys).get(WORKFLOW), workflow('main', packageVersion(), false));
+  });
+
+  it('recognises every older template under the job ids and input before P-56, renaming them as it updates (P-56)', () => {
+    const issueTriggerOnly = (version: string) =>
+      workflow('main', version, false)
+        .replace("  # opened, reopened: an issue with no type gets the work model's.\n  issues:\n    types: [labeled, opened, reopened]\n", '  issues:\n    types: [labeled]\n')
+        .replace("      (github.event_name == 'issues' && (github.event.action == 'opened' || github.event.action == 'reopened')) ||\n", '')
+        .replace("  # An issue opened or reopened with no type gets the work model's.\n", '');
+    const anyCommenter = (version: string) => workflow('main', version, false).replace(/^ {6}contains\(fromJSON[^\n]*\n/m, '');
+    for (const [name, before, from, flags] of [
+      ['two jobs', twoJobs('0.5.6', false), '0.5.6', { merged: true, asks: true, types: true }],
+      ['three jobs', threeJobs('0.5.26', false), '0.5.26', { asks: true, types: true }],
+      ['0.5.28', anyCommenter('0.5.28'), '0.5.28', { authors: true }],
+      ['0.6.3', issueTriggerOnly('0.6.3'), '0.6.3', { types: true }],
+      ['0.6.1, at athya-hq/process-rules', workflow('main', '0.6.1', false).replaceAll('veda-hq/niyam/', 'athya-hq/process-rules/'), '0.6.1', {}],
+    ] as const) {
+      const old = oldIds(before);
+      assert.match(old, /^ {2}process-rules:$/m, name);
+      assert.match(old, /^ {6}process-rules-ref: v/m, name);
+      assert.doesNotMatch(old, /^ {2}niyam(?:-\w+)?:$|niyam-ref/m, `${name}: the fixture has the old ids alone`);
+      assert.deepEqual(workflowUpdate(old, 'main', '0.6.10', false), { kind: 'repin', text: workflow('main', '0.6.10', false), from, ...flags, ids: true }, name);
+    }
+    // A split workflow whose pin is missing is still not the template's, under either ids.
+    const halfPinned = oldIds(workflow('main', '0.5.2', true)).replace(/\n {4}with:\n {6}process-rules-ref: v0\.5\.2\n {4}secrets:/, '\n    secrets:');
+    assert.equal(workflowUpdate(halfPinned, 'main', '0.5.3', true).kind, 'replace');
   });
 
   it('replaces a three-job workflow whose weekly job or schedule is its own', () => {
@@ -2408,7 +2637,7 @@ describe('workflowUpdate', () => {
     sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity', 'work-rules'] }));
     sys.files.set(HOOKS, JSON.stringify(CLAUDE));
     sys.files.set(PRE_PUSH, PRE_PUSH_HOOK);
-    sys.files.set(CLOUD, CLOUD_FILE);
+    sys.files.set(CLOUD, CLOUD_FILE).set(OLD_CLOUD, CLOUD_FILE);
     sys.files.set(WORKFLOW, threeJobs(packageVersion(), false));
     const { out } = await run(sys);
     assert.deepEqual(planned(out, 'Pull request'), ['workflow: needs-owner job, issue types for new issues', 'auto-merge: when checks pass']);
@@ -2449,30 +2678,47 @@ describe('onboard never moves the pin backwards', () => {
     assert.equal(opened(sys), undefined);
   });
 
-  const OPEN_PULLS = `${REPO}/pulls?state=open&head=example-org:process-rules/onboard`;
+  const OPEN_PULLS = `${REPO}/pulls?state=open&head=example-org:niyam/onboard`;
 
-  it("refuses to overwrite an onboard pull request that a newer release opened", async () => {
-    const sys = fresh();
-    sys.route('GET', OPEN_PULLS, { status: 200, json: [{ number: 7 }] });
-    sys.route('GET', `${REPO}/contents/${WORKFLOW_PATH}?ref=process-rules%2Fonboard`, encoded(workflow('main', newer, false)));
-    const { code, err } = await run(sys);
-    assert.equal(code, 1);
-    assert.match(err.join('\n'), new RegExp(`v${newer} \\(\\S+ on process-rules/onboard\\)`));
-    assert.equal(opened(sys), undefined);
-    assert.equal(sys.calls.some((call) => call.command === 'git' && call.args.includes('push')), false, 'pushes nothing');
-  });
+  // The branch before P-56 too, whose workflow may be under either name.
+  for (const [branch, path] of [
+    ['niyam/onboard', WORKFLOW_PATH],
+    ['process-rules/onboard', OLD_WORKFLOW_PATH],
+    ['process-rules/onboard', WORKFLOW_PATH],
+  ] as const) {
+    it(`refuses to overwrite an onboard pull request that a newer release opened, from ${branch} with ${path}`, async () => {
+      const sys = fresh();
+      sys.route('GET', `${REPO}/pulls?state=open&head=example-org:${branch}`, { status: 200, json: [{ number: 7 }] });
+      sys.route('GET', `${REPO}/contents/${path}?ref=${encodeURIComponent(branch)}`, encoded(workflow('main', newer, false)));
+      const { code, err } = await run(sys);
+      assert.equal(code, 1);
+      assert.match(err.join('\n'), new RegExp(`v${newer} \\(${path.replaceAll('.', '\\.')} on ${branch}\\)`));
+      assert.equal(opened(sys), undefined);
+      assert.equal(sys.calls.some((call) => call.command === 'git' && call.args.includes('push')), false, 'pushes nothing');
+    });
+  }
 
   it('leaves alone an onboard branch no open pull request uses', async () => {
     const sys = fresh();
-    sys.route('GET', `${REPO}/contents/${WORKFLOW_PATH}?ref=process-rules%2Fonboard`, encoded(workflow('main', newer, false)));
+    sys.route('GET', `${REPO}/contents/${WORKFLOW_PATH}?ref=niyam%2Fonboard`, encoded(workflow('main', newer, false)));
+    sys.route('GET', `${REPO}/contents/${OLD_WORKFLOW_PATH}?ref=process-rules%2Fonboard`, encoded(workflow('main', newer, false)));
     const { code } = await run(sys);
     assert.equal(code, 0, 'a closed pull request\'s branch is pushed over');
+  });
+
+  it('refuses when the default branch pins a newer release in the workflow under its old name', async () => {
+    const sys = fresh();
+    sys.route('GET', `${REPO}/contents/${OLD_WORKFLOW_PATH}?ref=main`, encoded(workflow('main', newer, false)));
+    const { code, err } = await run(sys);
+    assert.equal(code, 1);
+    assert.match(err.join('\n'), new RegExp(`v${newer} \\(\\.github/workflows/process-rules\\.yml on main\\)`));
   });
 
   it('refuses when GitHub does not say what the repository pins', async () => {
     for (const [path, answer] of [
       [`${REPO}/contents/${WORKFLOW_PATH}?ref=main`, { status: 502, json: null }],
       [OPEN_PULLS, { status: 403, json: { message: 'Forbidden' } }],
+      [`${REPO}/pulls?state=open&head=example-org:process-rules/onboard`, { status: 403, json: { message: 'Forbidden' } }],
     ] as const) {
       const sys = fresh();
       sys.route('GET', path, answer);
@@ -2501,12 +2747,19 @@ describe('onboard never moves the pin backwards', () => {
     assert.equal(signIns(sys), 0);
   });
 
-  it('refuses when the cloud setup file installs a newer release', async () => {
-    const sys = fresh();
-    sys.files.set(`${ROOT}/${CLOUD_SETUP_PATH}`, cloudRepoScript(newer, RELEASE_SHA256));
-    const { code } = await run(sys);
-    assert.equal(code, 1);
-    assert.equal(opened(sys), undefined);
+  it('refuses when the cloud setup file installs a newer release, under either name, or the old workflow pins one', async () => {
+    for (const [path, text] of [
+      [CLOUD, cloudRepoScript(newer, RELEASE_SHA256)],
+      [OLD_CLOUD, cloudRepoScript(newer, RELEASE_SHA256)],
+      [`${ROOT}/${OLD_WORKFLOW_PATH}`, workflow('main', newer, false)],
+    ] as const) {
+      const sys = fresh();
+      sys.files.set(path, text);
+      const { code, err } = await run(sys);
+      assert.equal(code, 1, path);
+      assert.ok(err[0]?.includes(`(${path.slice(ROOT.length + 1)} in this checkout)`), err[0]);
+      assert.equal(opened(sys), undefined);
+    }
   });
 
   it('goes ahead when every pin is this release or older', async () => {

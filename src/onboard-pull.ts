@@ -2,14 +2,28 @@ import { API, OLD_SETTINGS_PATH, SETTINGS_PATH, pathsFor, sessionEnv } from './a
 import type { Output, Sys } from './types.ts';
 import { GITHUB_WEB } from './host.ts';
 
-/** The branch onboard's pull request comes from: a run again updates the same one. */
-export const ONBOARD_BRANCH = 'process-rules/onboard';
+/**
+ * The branch onboard's pull request comes from: a run again updates the same
+ * one. Before P-56 it was the old one, which an open pull request may still
+ * come from.
+ */
+export const ONBOARD_BRANCH = 'niyam/onboard';
+export const OLD_ONBOARD_BRANCH = 'process-rules/onboard';
 export const HOOKS_PATH = '.claude/settings.json';
-export const WORKFLOW_PATH = '.github/workflows/process-rules.yml';
-/** The repo's cloud setup file, which installs the pinned CLI in Claude cloud sessions. */
-export const CLOUD_SETUP_PATH = '.github/process-rules/cloud-setup.sh';
+/** The client's workflow, and its name before P-56, which onboard moves and every reader still takes where the new one is missing. */
+export const WORKFLOW_PATH = '.github/workflows/niyam.yml';
+export const OLD_WORKFLOW_PATH = '.github/workflows/process-rules.yml';
+/**
+ * The repo's cloud setup file, which installs the pinned CLI in Claude cloud
+ * sessions, and its name before P-56: onboard writes both, alike, since the
+ * Setup snippet pasted before P-56 runs the old one until the new is pasted.
+ */
+export const CLOUD_SETUP_PATH = '.github/niyam/cloud-setup.sh';
+export const OLD_CLOUD_SETUP_PATH = '.github/process-rules/cloud-setup.sh';
 /** Every file onboard's pull request may change. */
-export const ONBOARD_FILES = [SETTINGS_PATH, OLD_SETTINGS_PATH, HOOKS_PATH, WORKFLOW_PATH, CLOUD_SETUP_PATH];
+export const ONBOARD_FILES = [SETTINGS_PATH, OLD_SETTINGS_PATH, HOOKS_PATH, WORKFLOW_PATH, OLD_WORKFLOW_PATH, CLOUD_SETUP_PATH, OLD_CLOUD_SETUP_PATH];
+/** The files onboard's pull request may delete, each moved to its new name, which the pull request must write (P-56). */
+export const MOVED_FILES: Readonly<Record<string, string>> = { [OLD_WORKFLOW_PATH]: WORKFLOW_PATH, [OLD_SETTINGS_PATH]: SETTINGS_PATH };
 
 /** A subject's leading emoji, or gitmoji shortcode, and the rest of it. */
 const LEADING_EMOJI = /^(\p{Regional_Indicator}{2}|\p{Extended_Pictographic}\p{Emoji_Modifier}?️?(?:‍\p{Extended_Pictographic}\p{Emoji_Modifier}?️?)*|:[a-z0-9_+-]+:)\s+(.*)$/u;
@@ -97,11 +111,11 @@ export async function mergeQueue(sys: Sys, slug: string, branch: string, token: 
   return undefined;
 }
 
-/** A file onboard changes: what this checkout has (undefined when none), and what onboard writes. */
+/** A file onboard changes: what this checkout has (undefined when none), and what onboard writes, undefined when it deletes the file. */
 export interface Change {
   path: string;
   before: string | undefined;
-  text: string;
+  text: string | undefined;
   /** What changed, for the pull request's description. */
   what: string;
 }
@@ -120,6 +134,12 @@ export interface PullTarget {
   /** The default branch, which the pull request is opened against. */
   branch: string;
   version: string;
+  /**
+   * The branch to push to: ONBOARD_BRANCH, unless an onboard pull request
+   * from OLD_ONBOARD_BRANCH is open, which a run again then updates rather
+   * than opening a second beside it.
+   */
+  head?: string;
 }
 
 /**
@@ -134,7 +154,7 @@ export interface PullTarget {
  * description. Returns the pull request's link, or 1 having said why not.
  */
 export async function openPull(sys: Sys, io: Output, target: PullTarget, changes: readonly Change[], notes: readonly string[] = []): Promise<Pull | 1> {
-  const { agent, id, token, slug, branch, version } = target;
+  const { agent, id, token, slug, branch, version, head = ONBOARD_BRANCH } = target;
   const dir = sys.tempDir();
   const env = sessionEnv(sys.env, agent, id, token, pathsFor(sys.home, agent));
   const git = (args: string[], input?: string) => sys.exec('git', args, { cwd: dir, env, ...(input === undefined ? {} : { input }) });
@@ -160,6 +180,11 @@ export async function openPull(sys: Sys, io: Output, target: PullTarget, changes
         io.err(`onboard: ${change.path} on ${branch} is not what this checkout has; bring this checkout up to date with ${branch} and run onboard again`);
         return 1;
       }
+      if (change.text === undefined) {
+        const removed = git(['update-index', '--force-remove', change.path]);
+        if (removed.code !== 0) return failed(`deleting ${change.path}`, removed.stderr);
+        continue;
+      }
       const blob = git(['hash-object', '-w', '--stdin'], change.text);
       if (blob.code !== 0) return failed(`storing ${change.path}`, blob.stderr);
       const added = git(['update-index', '--add', '--cacheinfo', `100644,${blob.stdout.trim()},${change.path}`]);
@@ -173,7 +198,7 @@ export async function openPull(sys: Sys, io: Output, target: PullTarget, changes
     const sha = made.stdout.trim();
     if (made.code !== 0 || !sha) return failed('signing the commit', made.stderr);
     // Forced: a run again replaces what an earlier run pushed there.
-    const push = git(['push', '-q', url, `+${sha}:refs/heads/${ONBOARD_BRANCH}`]);
+    const push = git(['push', '-q', url, `+${sha}:refs/heads/${head}`]);
     if (push.code !== 0) return failed(`pushing as ${agent}`, push.stderr);
 
     const body = [
@@ -185,17 +210,17 @@ export async function openPull(sys: Sys, io: Output, target: PullTarget, changes
       `Merge it to finish onboarding; agent sessions then work as ${agent}. Running onboard again updates this pull request.`,
     ].join('\n');
     const pulls = `${API}/repos/${slug}/pulls`;
-    const opened = await sys.http(pulls, { method: 'POST', token, body: { title, head: ONBOARD_BRANCH, base: branch, body } });
+    const opened = await sys.http(pulls, { method: 'POST', token, body: { title, head, base: branch, body } });
     if (opened.status === 201) {
       const made = opened.json as { html_url: string; node_id?: unknown };
       return { url: made.html_url, id: typeof made.node_id === 'string' ? made.node_id : undefined };
     }
     // 422: the branch has a pull request open already, which the push has just updated.
-    const open = opened.status === 422 ? await sys.http(`${pulls}?state=open&head=${slug.split('/')[0]}:${ONBOARD_BRANCH}`, { token }) : undefined;
+    const open = opened.status === 422 ? await sys.http(`${pulls}?state=open&head=${slug.split('/')[0]}:${head}`, { token }) : undefined;
     const pull = Array.isArray(open?.json) ? (open.json[0] as { number: number; html_url: string; node_id?: unknown } | undefined) : undefined;
     if (!pull) {
       const why = (opened.json as { message?: unknown } | null)?.message;
-      io.err(`onboard: GitHub did not open the pull request (HTTP ${opened.status}${typeof why === 'string' ? `: ${why}` : ''}); the changes are on ${ONBOARD_BRANCH}`);
+      io.err(`onboard: GitHub did not open the pull request (HTTP ${opened.status}${typeof why === 'string' ? `: ${why}` : ''}); the changes are on ${head}`);
       return 1;
     }
     const edited = await sys.http(`${pulls}/${pull.number}`, { method: 'PATCH', token, body: { title, body } });

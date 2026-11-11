@@ -23,7 +23,7 @@ updates:
       default-days: 3
     # Our own checks workflow moves through onboard's template, never here:
     # Dependabot moves a job's uses: line alone, and checks.yml fails a run
-    # whose process-rules-ref names another release (docs/decisions.md).
+    # whose niyam-ref (or process-rules-ref) names another release (docs/decisions.md).
     ignore:
       - dependency-name: 'athya-hq/process-rules*'
       - dependency-name: 'veda-hq/niyam*'

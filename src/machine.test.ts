@@ -98,7 +98,7 @@ describe('machine', () => {
       url: 'https://api.github.com/user/ssh_signing_keys',
       method: 'POST',
       token: TOKEN,
-      body: { title: 'process-rules signing', key: PUBLIC_KEY },
+      body: { title: 'niyam signing', key: PUBLIC_KEY },
     });
     const lists = sys.requests.filter((r) => r.url.endsWith('/ssh_signing_keys') && r.method === 'GET');
     assert.deepEqual(
@@ -548,7 +548,7 @@ describe('tokenInstructions', () => {
   it('opens a page with the scopes filled in', () => {
     assert.equal(
       TOKEN_PAGE,
-      'https://github.com/settings/tokens/new?description=process-rules%20agent&scopes=repo,workflow,read:org,project,write:ssh_signing_key',
+      'https://github.com/settings/tokens/new?description=niyam%20agent&scopes=repo,workflow,read:org,project,write:ssh_signing_key',
     );
   });
 });
