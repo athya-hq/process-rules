@@ -842,7 +842,7 @@ describe('prWorkRules', () => {
 
     it('passes one changing only the files onboard writes, naming no slice', async () => {
       const sys = actions(onboardPull('Example-Org/Example-App'));
-      files(sys, [{ filename: '.github/niyam.json', status: 'modified' }, { filename: '.claude/settings.json', status: 'added' }, { filename: '.github/workflows/process-rules.yml' }, { filename: '.github/process-rules/cloud-setup.sh', status: 'added' }]);
+      files(sys, [{ filename: '.github/niyam.json', status: 'modified' }, { filename: '.claude/settings.json', status: 'added' }, { filename: '.github/workflows/niyam.yml' }, { filename: '.github/niyam/cloud-setup.sh', status: 'added' }]);
       assert.deepEqual(await check(sys), { code: 0, out: ["✓ pr-work-rules: #42 is onboard's, changing only the files onboard writes, so it names no slice"], err: [] });
       assert.equal(sys.requests[0]?.token, 'ghs_run');
     });
@@ -852,14 +852,15 @@ describe('prWorkRules', () => {
       // onboard leaves CODEOWNERS to the client, so a change to it is the work rules' to judge.
       ...(['.github/CODEOWNERS', 'CODEOWNERS', 'docs/CODEOWNERS'] as const).map((filename) => [`changes ${filename}`, [{ filename: '.github/niyam.json' }, { filename }]] as const),
       ['moves another file into one onboard writes', [{ filename: '.claude/settings.json', previous_filename: 'src/settings.json' }]],
-      ['deletes one onboard writes', [{ filename: '.github/workflows/process-rules.yml', status: 'removed' }]],
-      // Since P-56 onboard moves two files, each only into its own new name.
-      ['deletes the new workflow', [{ filename: '.github/workflows/niyam.yml', status: 'removed' }, { filename: '.github/workflows/process-rules.yml' }]],
-      ['deletes the old workflow, writing no new one', [{ filename: '.github/workflows/process-rules.yml', status: 'removed' }, { filename: '.github/niyam.json' }]],
-      ['deletes the old workflow and the new one', [{ filename: '.github/workflows/process-rules.yml', status: 'removed' }, { filename: '.github/workflows/niyam.yml', status: 'removed' }]],
-      ['deletes a cloud setup file', [{ filename: '.github/process-rules/cloud-setup.sh', status: 'removed' }, { filename: '.github/niyam/cloud-setup.sh' }]],
+      ['deletes one onboard writes', [{ filename: '.github/workflows/niyam.yml', status: 'removed' }]],
+      // Since P-57 onboard deletes one file, the cloud setup file before P-56, only into its new name.
+      ['deletes the cloud setup file before P-56, writing no new one', [{ filename: '.github/process-rules/cloud-setup.sh', status: 'removed' }, { filename: '.github/niyam.json' }]],
+      ['deletes the new cloud setup file', [{ filename: '.github/niyam/cloud-setup.sh', status: 'removed' }, { filename: '.github/process-rules/cloud-setup.sh' }]],
+      ['deletes the workflow before P-56, which no release moves since P-57', [{ filename: '.github/workflows/process-rules.yml', status: 'removed' }, { filename: '.github/workflows/niyam.yml' }]],
+      ['deletes the settings file before niyam, which no release moves since P-57', [{ filename: '.github/process-rules.json', status: 'removed' }, { filename: '.github/niyam.json' }]],
+      ['changes the workflow before P-56', [{ filename: '.github/workflows/process-rules.yml' }]],
       ['moves the hooks into the settings file', [{ filename: '.github/niyam.json', previous_filename: '.claude/settings.json', status: 'renamed' }]],
-      ['moves the old workflow into the settings file', [{ filename: '.github/niyam.json', previous_filename: '.github/workflows/process-rules.yml', status: 'renamed' }]],
+      ['moves the workflow before P-56 into the new one', [{ filename: '.github/workflows/niyam.yml', previous_filename: '.github/workflows/process-rules.yml', status: 'renamed' }]],
       ['copies a file of its own into one onboard writes', [{ filename: '.github/niyam.json', previous_filename: 'src/settings.json', status: 'copied' }]],
     ] as const) {
       it(`holds one that ${name} to the work rules`, async () => {
@@ -870,37 +871,30 @@ describe('prWorkRules', () => {
     }
 
     for (const [name, list] of [
-      ['deletes the old workflow and settings, writing the new ones', [
-        { filename: '.github/workflows/process-rules.yml', status: 'removed' },
-        { filename: '.github/workflows/niyam.yml', status: 'added' },
-        { filename: '.github/process-rules.json', status: 'removed' },
-        { filename: '.github/niyam.json', status: 'added' },
-        { filename: '.github/niyam/cloud-setup.sh', status: 'added' },
-        { filename: '.github/process-rules/cloud-setup.sh', status: 'modified' },
-      ]],
-      ['writes the cloud setup file under both names, as GitHub may show a file copied', [
+      ['deletes the cloud setup file before P-56, writing the new one', [
         { filename: '.github/niyam/cloud-setup.sh', status: 'modified' },
-        { filename: '.github/process-rules/cloud-setup.sh', previous_filename: '.github/niyam/cloud-setup.sh', status: 'copied' },
+        { filename: '.github/process-rules/cloud-setup.sh', status: 'removed' },
       ]],
-      ['moves them, as GitHub shows a file renamed', [
-        { filename: '.github/workflows/niyam.yml', previous_filename: '.github/workflows/process-rules.yml', status: 'renamed' },
-        { filename: '.github/niyam.json', previous_filename: '.github/process-rules.json', status: 'renamed' },
-      ]],
+      ['moves it, as GitHub shows a file renamed', [{ filename: '.github/niyam/cloud-setup.sh', previous_filename: '.github/process-rules/cloud-setup.sh', status: 'renamed' }]],
     ] as const) {
-      it(`passes one that ${name}, from either onboard branch (P-56)`, async () => {
-        for (const ref of ['niyam/onboard', 'process-rules/onboard']) {
-          const sys = actions(onboardPull(SLUG, ref));
-          files(sys, [...list]);
-          assert.deepEqual((await check(sys)).out, ["✓ pr-work-rules: #42 is onboard's, changing only the files onboard writes, so it names no slice"], ref);
-        }
+      it(`passes one that ${name} (P-57)`, async () => {
+        const sys = actions(onboardPull());
+        files(sys, [...list]);
+        assert.deepEqual((await check(sys)).out, ["✓ pr-work-rules: #42 is onboard's, changing only the files onboard writes, so it names no slice"]);
       });
     }
 
-    it('passes one deleting the old workflow beside a new one the base branch has already', async () => {
+    it('passes one deleting the cloud setup file before P-56 beside a new one the base branch has already', async () => {
       const sys = actions(onboardPull());
-      sys.files.set(`${sys.cwd}/.github/workflows/niyam.yml`, 'name: niyam\n');
-      files(sys, [{ filename: '.github/workflows/process-rules.yml', status: 'removed' }]);
+      sys.files.set(`${sys.cwd}/.github/niyam/cloud-setup.sh`, '#!/bin/bash\n');
+      files(sys, [{ filename: '.github/process-rules/cloud-setup.sh', status: 'removed' }]);
       assert.equal((await check(sys)).code, 0);
+    });
+
+    it('holds one from the onboard branch before P-56 to the work rules (P-57)', async () => {
+      const sys = actions(onboardPull(SLUG, 'process-rules/onboard'));
+      files(sys, [{ filename: '.github/niyam.json', status: 'modified' }]);
+      assert.deepEqual((await check(sys)).err[0], '✗ #42 names no slice; add a line "Slice: #N" to its description');
     });
 
     it("holds a fork's branch of that name to the work rules, without reading its files", async () => {
@@ -1388,13 +1382,6 @@ describe('prMerged', () => {
     assert.deepEqual([...writes(off), ...writes(before)], []);
   });
 
-  it('reads the work rules off from .github/process-rules.json in a repo onboarded before niyam (P-50)', async () => {
-    const older = actions(merged('Slice: #12'));
-    older.files.delete(`${ROOT}/.github/niyam.json`);
-    older.files.set(`${ROOT}/.github/process-rules.json`, JSON.stringify({ owner: OWNER, agent: AGENT, features: ['identity'] }));
-    assert.match((await run(older)).out[0] ?? '', /^pr-merged: work-rules is off in /);
-    assert.deepEqual(writes(older), []);
-  });
 
   it('closes nothing in a personal repository', async () => {
     const sys = actions(merged('Slice: #12'));

@@ -5,17 +5,10 @@ import { AGENT_VAR, CLI, CONFIG_DIR } from './names.ts';
 
 /** The adopting repo's settings file, written by `onboard`. */
 export const SETTINGS_PATH = '.github/niyam.json';
-/** Its name before niyam, still read where the new one is missing (P-50). */
-export const OLD_SETTINGS_PATH = '.github/process-rules.json';
 
-/** The settings file a repo at `root` has, relative to it: the new name, else the old one, else the new one. */
-export function settingsPathIn(sys: Sys, root: string): string {
-  return !sys.exists(`${root}/${SETTINGS_PATH}`) && sys.exists(`${root}/${OLD_SETTINGS_PATH}`) ? OLD_SETTINGS_PATH : SETTINGS_PATH;
-}
-
-/** Whether a repo at `root` has a settings file under either name. */
+/** Whether a repo at `root` has a settings file. */
 export function hasSettings(sys: Sys, root: string): boolean {
-  return sys.exists(`${root}/${settingsPathIn(sys, root)}`);
+  return sys.exists(`${root}/${SETTINGS_PATH}`);
 }
 /** What GH_TOKEN holds when the token store has none, so nothing falls back to the owner. */
 export const NO_TOKEN = 'niyam-no-agent-token';
@@ -73,7 +66,7 @@ export interface Settings {
 
 /** Reads and checks the settings file at `root`; throws with the reason. */
 export function loadSettings(sys: Sys, root: string): Settings {
-  const name = settingsPathIn(sys, root);
+  const name = SETTINGS_PATH;
   const path = `${root}/${name}`;
   if (!sys.exists(path)) {
     throw new Error(`${SETTINGS_PATH} not found in ${root}`);
@@ -136,14 +129,14 @@ export function configDir(home: string): string {
  * the list, that one; with more, the one `machine` set up here. None set up,
  * or more than one, is a problem: never a guess.
  */
-export function agentHere(sys: Sys, agents: readonly string[], file: string = SETTINGS_PATH): { agent: string } | { problem: string } {
+export function agentHere(sys: Sys, agents: readonly string[]): { agent: string } | { problem: string } {
   if (agents.length === 1) return { agent: agents[0] as string };
   const here = agents.filter((agent) => anyLogin(agentsSetUp(sys), agent));
   if (here.length === 1) return { agent: here[0] as string };
   return {
     problem: here.length === 0
-      ? `${file} names the agents ${either(agents)}, and niyam machine has set up none of them on this machine`
-      : `${file} names the agents ${either(agents)}, and niyam machine has set up ${here.join(' and ')} on this machine, so which one this session works as cannot be told; remove the others' folders under ~/${CONFIG_DIR}`,
+      ? `${SETTINGS_PATH} names the agents ${either(agents)}, and niyam machine has set up none of them on this machine`
+      : `${SETTINGS_PATH} names the agents ${either(agents)}, and niyam machine has set up ${here.join(' and ')} on this machine, so which one this session works as cannot be told; remove the others' folders under ~/${CONFIG_DIR}`,
   };
 }
 
@@ -162,7 +155,7 @@ export function agentFrom(sys: Sys, named: string | undefined): string {
   if (top.code !== 0 || !hasSettings(sys, root)) {
     throw new Error(`name the agent account after the command, or run it in a repo whose ${SETTINGS_PATH} names one`);
   }
-  const here = agentHere(sys, loadSettings(sys, root).agents, settingsPathIn(sys, root));
+  const here = agentHere(sys, loadSettings(sys, root).agents);
   if ('problem' in here) throw new Error(`${here.problem}; name the agent account after the command`);
   return here.agent;
 }

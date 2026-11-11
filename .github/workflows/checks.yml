@@ -6,19 +6,12 @@ name: niyam checks
 # the checks and the CLI are always one release. Settings fails a caller whose
 # niyam-ref names another release: Dependabot and Renovate move a job's
 # `uses:` line alone. GitHub Enterprise Server has no job.workflow_*, so there
-# the CLI comes from niyam-ref, as before.
-# A caller onboarded before P-56 passes process-rules-ref instead, so both are
-# declared (an undeclared input makes the caller invalid, and none of its
-# checks run), and each job takes niyam-ref, else process-rules-ref, else main.
+# the CLI comes from niyam-ref, as before, else main.
 on:
   workflow_call:
     inputs:
       niyam-ref:
         description: The niyam release the caller pins, which must be the one its uses line names
-        type: string
-        default: ''
-      process-rules-ref:
-        description: niyam-ref's name before P-56, for a caller onboard has not moved yet
         type: string
         default: ''
     secrets:
@@ -50,9 +43,7 @@ jobs:
       - name: Check .github/niyam.json
         run: |
           set -euo pipefail
-          # Repos onboarded before niyam keep .github/process-rules.json, still read when the new name is missing.
           file=.github/niyam.json
-          [ -f "$file" ] || [ ! -f .github/process-rules.json ] || file=.github/process-rules.json
           fail() { echo "::error file=$file::$1"; exit 1; }
           [ -f "$file" ] || fail "$file is missing; run niyam onboard"
           jq -e 'type == "object"' "$file" >/dev/null || fail "$file is not a JSON object"
@@ -68,16 +59,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ job.workflow_repository || 'veda-hq/niyam' }}
-          ref: ${{ job.workflow_sha || inputs.niyam-ref || inputs.process-rules-ref || 'main' }}
+          ref: ${{ job.workflow_sha || inputs.niyam-ref || 'main' }}
           path: .niyam
           sparse-checkout: package.json
           sparse-checkout-cone-mode: false
           persist-credentials: false
       - name: Check niyam-ref names the release that runs
         env:
-          REF: ${{ inputs.niyam-ref || inputs.process-rules-ref || 'main' }}
-          # The input the caller set, which the messages name.
-          INPUT: ${{ inputs.niyam-ref == '' && inputs.process-rules-ref != '' && 'process-rules-ref' || 'niyam-ref' }}
+          REF: ${{ inputs.niyam-ref || 'main' }}
           CALLER: ${{ github.workflow_ref }}
           OWN_SHA: ${{ job.workflow_sha }}
           SERVER: ${{ github.server_url }}
@@ -85,7 +74,7 @@ jobs:
           set -euo pipefail
           # Without job.workflow_sha the CLI came from the ref itself, so the two always agree here.
           if [ -z "$OWN_SHA" ] && [ "$SERVER" = https://github.com ]; then
-            echo "::warning::GitHub gave no job.workflow_sha, so the checks run the CLI at $INPUT $REF, which may not be their own release."
+            echo "::warning::GitHub gave no job.workflow_sha, so the checks run the CLI at niyam-ref $REF, which may not be their own release."
           fi
           # The caller's workflow file: owner/repo/<path>@<ref>.
           file=${CALLER#*/*/}
@@ -98,14 +87,14 @@ jobs:
           elif [[ $REF =~ ^[0-9a-f]{40}$ ]]; then
             [ "$REF" = "$sha" ] && same=1 || same=
           else
-            echo "niyam: $INPUT is the branch $REF; these checks run v$version ($sha)."
+            echo "niyam: niyam-ref is the branch $REF; these checks run v$version ($sha)."
             exit 0
           fi
           if [ -z "$same" ]; then
-            echo "::error file=$file::$INPUT is $REF, but this workflow runs the shared checks at v$version. Dependabot and Renovate move only a job's uses: line. Run niyam onboard with v$version, which moves every pin, or set $INPUT: v$version on every job."
+            echo "::error file=$file::niyam-ref is $REF, but this workflow runs the shared checks at v$version. Dependabot and Renovate move only a job's uses: line. Run niyam onboard with v$version, which moves every pin, or set niyam-ref: v$version on every job."
             exit 1
           fi
-          echo "niyam: $INPUT $REF is the release that runs, v$version ($sha)."
+          echo "niyam: niyam-ref $REF is the release that runs, v$version ($sha)."
 
   identity:
     name: PR identity
@@ -126,7 +115,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ job.workflow_repository || 'veda-hq/niyam' }}
-          ref: ${{ job.workflow_sha || inputs.niyam-ref || inputs.process-rules-ref || 'main' }}
+          ref: ${{ job.workflow_sha || inputs.niyam-ref || 'main' }}
           path: .niyam
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -155,7 +144,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ job.workflow_repository || 'veda-hq/niyam' }}
-          ref: ${{ job.workflow_sha || inputs.niyam-ref || inputs.process-rules-ref || 'main' }}
+          ref: ${{ job.workflow_sha || inputs.niyam-ref || 'main' }}
           path: .niyam
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -184,7 +173,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ job.workflow_repository || 'veda-hq/niyam' }}
-          ref: ${{ job.workflow_sha || inputs.niyam-ref || inputs.process-rules-ref || 'main' }}
+          ref: ${{ job.workflow_sha || inputs.niyam-ref || 'main' }}
           path: .niyam
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -216,7 +205,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ job.workflow_repository || 'veda-hq/niyam' }}
-          ref: ${{ job.workflow_sha || inputs.niyam-ref || inputs.process-rules-ref || 'main' }}
+          ref: ${{ job.workflow_sha || inputs.niyam-ref || 'main' }}
           path: .niyam
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -231,11 +220,9 @@ jobs:
     name: Decisions, weekly
     # Not on the hourly needs-owner sweep's cron, which the client's niyam-asks job calls these checks on.
     if: (github.event_name == 'schedule' && github.event.schedule != '41 * * * *') || github.event_name == 'workflow_dispatch'
-    # One run at a time, so two cannot both open an undo issue for one decision. The key keeps its name from
-    # before niyam: a repo's runs at an older release use it too, and only one key serializes them all. P-57
-    # renames it once no repo pins a release before the one P-56 shipped in.
+    # One run at a time, so two cannot both open an undo issue for one decision.
     concurrency:
-      group: process-rules-decisions-${{ github.repository }}
+      group: niyam-decisions-${{ github.repository }}
       cancel-in-progress: false
     runs-on: ubuntu-latest
     # Checks stop starting after 45 minutes; the rest wait for next week.
@@ -248,7 +235,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ job.workflow_repository || 'veda-hq/niyam' }}
-          ref: ${{ job.workflow_sha || inputs.niyam-ref || inputs.process-rules-ref || 'main' }}
+          ref: ${{ job.workflow_sha || inputs.niyam-ref || 'main' }}
           path: .niyam
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -278,7 +265,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ job.workflow_repository || 'veda-hq/niyam' }}
-          ref: ${{ job.workflow_sha || inputs.niyam-ref || inputs.process-rules-ref || 'main' }}
+          ref: ${{ job.workflow_sha || inputs.niyam-ref || 'main' }}
           path: .niyam
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -307,7 +294,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ job.workflow_repository || 'veda-hq/niyam' }}
-          ref: ${{ job.workflow_sha || inputs.niyam-ref || inputs.process-rules-ref || 'main' }}
+          ref: ${{ job.workflow_sha || inputs.niyam-ref || 'main' }}
           path: .niyam
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0

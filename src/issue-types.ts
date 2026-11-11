@@ -1,4 +1,4 @@
-import { API, OLD_SETTINGS_PATH, SETTINGS_PATH, loadSettings, settingsPathIn } from './agent.ts';
+import { API, SETTINGS_PATH, loadSettings } from './agent.ts';
 import { HOURLY, isOn, notAdoptedLine, offLine } from './features.ts';
 import { isOrganisation } from './owner-login.ts';
 import type { Finding } from './layout.ts';
@@ -177,26 +177,23 @@ async function untyped(sys: Sys, token: string, repo: string): Promise<Omit<Hold
 }
 
 /**
- * The Approvals issue a repository's settings name on its default branch,
- * under either name; undefined where it has none or names none. It stays
- * with no type: a standing record the owner answers batches on, never
- * closed, which no work model type fits.
+ * The Approvals issue a repository's settings name on its default branch;
+ * undefined where it has none or names none. It stays with no type: a
+ * standing record the owner answers batches on, never closed, which no work
+ * model type fits.
  */
 async function approvalsOf(sys: Sys, token: string, repo: string): Promise<number | undefined> {
-  for (const path of [SETTINGS_PATH, OLD_SETTINGS_PATH]) {
-    const { status, json } = await sys.http(`${API}/repos/${repo}/contents/${path}`, { token });
-    if (status === 404) continue;
-    const content = (json as { content?: unknown } | null)?.content;
-    if (status !== 200 || typeof content !== 'string') throw new Error(`cannot read ${path} in ${repo} (HTTP ${status})`);
-    try {
-      const approvals = (JSON.parse(Buffer.from(content, 'base64').toString('utf8')) as { approvals?: unknown } | null)?.approvals;
-      return typeof approvals === 'number' && Number.isInteger(approvals) && approvals > 0 ? approvals : undefined;
-    } catch {
-      // Settings that do not parse name no Approvals issue; onboard in that repository says what is wrong with them.
-      return undefined;
-    }
+  const { status, json } = await sys.http(`${API}/repos/${repo}/contents/${SETTINGS_PATH}`, { token });
+  if (status === 404) return undefined;
+  const content = (json as { content?: unknown } | null)?.content;
+  if (status !== 200 || typeof content !== 'string') throw new Error(`cannot read ${SETTINGS_PATH} in ${repo} (HTTP ${status})`);
+  try {
+    const approvals = (JSON.parse(Buffer.from(content, 'base64').toString('utf8')) as { approvals?: unknown } | null)?.approvals;
+    return typeof approvals === 'number' && Number.isInteger(approvals) && approvals > 0 ? approvals : undefined;
+  } catch {
+    // Settings that do not parse name no Approvals issue; onboard in that repository says what is wrong with them.
+    return undefined;
   }
-  return undefined;
 }
 
 /**
@@ -522,7 +519,7 @@ export async function issueType(sys: Sys, io: Output): Promise<number> {
     return 0;
   }
   if (!isOn(sys, sys.cwd, 'board')) {
-    io.out(offLine('issue-type', 'board', `in ${settingsPathIn(sys, sys.cwd)}`));
+    io.out(offLine('issue-type', 'board', `in ${SETTINGS_PATH}`));
     return 0;
   }
   const event = JSON.parse(sys.read(eventPath)) as IssueEvent;

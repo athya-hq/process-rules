@@ -1,4 +1,4 @@
-import { API, SETTINGS_PATH, hasSettings, settingsPathIn } from './agent.ts';
+import { API, SETTINGS_PATH, hasSettings } from './agent.ts';
 import type { HttpResult, Sys } from './types.ts';
 
 /**
@@ -49,7 +49,7 @@ export function renamedLines(raw: unknown, file: string = SETTINGS_PATH): string
 
 /** Whether the settings at `root` turn `feature` on. */
 export function isOn(sys: Sys, root: string, feature: Feature): boolean {
-  return featuresIn(JSON.parse(sys.read(`${root}/${settingsPathIn(sys, root)}`))).includes(feature);
+  return featuresIn(JSON.parse(sys.read(`${root}/${SETTINGS_PATH}`))).includes(feature);
 }
 
 /**

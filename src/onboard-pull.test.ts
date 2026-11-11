@@ -21,7 +21,7 @@ describe('pullTitle', () => {
 
   it("copies the emoji the repo used for onboard before, else the one it uses most for chores", () => {
     assert.equal(pullTitle('1.2.3', ['🔥 chore(tooling): a', '♻️ refactor: b', '🔥 chore: c', '🧹 chore(x): d']), `🔥 ${plain}`);
-    assert.equal(pullTitle('1.2.3', ['🔥 chore(tooling): a', '🔥 chore: c', '📦 chore(process-rules): onboard at v1.2.2']), `📦 ${plain}`);
+    assert.equal(pullTitle('1.2.3', ['🔥 chore(tooling): a', '🔥 chore: c', '📦 chore(process-rules): onboard at v1.2.2']), `🔥 ${plain}`, 'not an onboard before niyam (P-57)');
     assert.equal(pullTitle('1.2.3', ['♻️ refactor: a', '⬆️ chore(deps): b', '👨‍💻 feat: c']), `⬆️ ${plain}`, 'emoji of more than one code point');
     assert.equal(pullTitle('1.2.3', ['🇮🇳 chore(i18n): a', '👍🏽 feat: b', '🧑🏿‍💻 fix: c']), `🇮🇳 ${plain}`, 'flags, skin tones and joined emoji');
   });

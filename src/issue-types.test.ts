@@ -387,7 +387,7 @@ describe('open issues with no type', () => {
     assert.match(typesQuestion(plan, 'example-app') ?? '', /give 1 issue holding another type and 1 open issue with no type a work model type/);
   });
 
-  it("leaves a repository's Approvals issue with no type, as its settings name it under either name", async () => {
+  it("leaves a repository's Approvals issue with no type, as its settings name it, not the file before niyam (P-57)", async () => {
     const { sys, board } = org();
     board.issueTypes = [...MODEL];
     board.issues = [
@@ -396,7 +396,7 @@ describe('open issues with no type', () => {
       { repo: OTHER, number: 40, type: null },
     ];
     settingsAt(sys, SLUG, { owner: 'example-owner', agent: 'ExampleBot', approvals: 3376 });
-    settingsAt(sys, OTHER, { approvals: 40 }, '.github/process-rules.json');
+    settingsAt(sys, OTHER, { approvals: 40 });
     const plan = await typesPlan(sys, OWNER_TOKEN, 'example-org');
     assert.deepEqual(plan.retype.map((issue) => issue.number), [12]);
     assert.deepEqual(plan.exempt, [

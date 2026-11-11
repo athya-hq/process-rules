@@ -17,8 +17,8 @@ interface Step {
 const CHECKS = readFileSync(new URL('../.github/workflows/checks.yml', import.meta.url), 'utf8');
 const jobs = (parse(CHECKS) as { jobs: Record<string, { steps: Step[] }> }).jobs;
 const CALLER = 'example-org/example-app/.github/workflows/niyam.yml@refs/heads/main';
-/** The release each job runs, as checks.yml spells it: niyam-ref, else its name before P-56, else main. */
-const REF = "inputs.niyam-ref || inputs.process-rules-ref || 'main'";
+/** The release each job runs, as checks.yml spells it: niyam-ref, else main. */
+const REF = "inputs.niyam-ref || 'main'";
 
 describe('checks.yml', () => {
   it("runs every job's CLI from the workflow's own commit, the ref only where GitHub has no job.workflow_sha", () => {
@@ -34,21 +34,20 @@ describe('checks.yml', () => {
     }
   });
 
-  it('takes niyam-ref, and process-rules-ref from a caller onboarded before P-56, declaring both so neither caller is invalid', () => {
+  it('takes niyam-ref alone, and keys the decisions job by niyam (P-57)', () => {
     const inputs = (parse(CHECKS) as { on: { workflow_call: { inputs: Record<string, { type: string; default: string }> } } }).on.workflow_call.inputs;
-    assert.deepEqual(Object.keys(inputs), ['niyam-ref', 'process-rules-ref']);
-    for (const input of Object.values(inputs)) assert.deepEqual([input.type, input.default], ['string', ''], 'unset is empty, so the other one or main is taken');
+    assert.deepEqual(Object.keys(inputs), ['niyam-ref']);
+    for (const input of Object.values(inputs)) assert.deepEqual([input.type, input.default], ['string', ''], 'unset is empty, so main is taken');
     const env = jobs.settings?.steps.find((step) => step.name === 'Check niyam-ref names the release that runs') as Step & { env?: Record<string, string> };
     assert.equal(env.env?.REF, `\${{ ${REF} }}`);
-    assert.equal(env.env?.INPUT, "${{ inputs.niyam-ref == '' && inputs.process-rules-ref != '' && 'process-rules-ref' || 'niyam-ref' }}");
-    // The decisions job's key stays the old one, which runs at older releases share, so they never run at once.
-    assert.match(CHECKS, /^ {6}group: process-rules-decisions-\$\{\{ github\.repository \}\}$/m);
+    assert.match(CHECKS, /^ {6}group: niyam-decisions-\$\{\{ github\.repository \}\}$/m);
+    assert.doesNotMatch(CHECKS, /process-rules|PROCESS_RULES/);
   });
 
   // actionlint resolves a local reusable workflow's inputs, so callers passing each input lint clean and one
   // passing an input checks.yml does not declare is refused, as GitHub refuses the run. CI lints checks.yml itself.
   const actionlint = spawnSync('actionlint', ['-version'], { encoding: 'utf8' }).status === 0;
-  it('lints clean for a caller passing either input, and refuses one passing another, with actionlint', { skip: !actionlint && 'actionlint is not installed' }, () => {
+  it('lints clean for a caller passing niyam-ref, and refuses one passing another, the name before P-56 too, with actionlint', { skip: !actionlint && 'actionlint is not installed' }, () => {
     const dir = mkdtempSync(join(tmpdir(), 'niyam-lint-'));
     try {
       spawnSync('git', ['init', '-q', dir]);
@@ -60,14 +59,15 @@ describe('checks.yml', () => {
       }
       const result = spawnSync('actionlint', ['-format', '{{json .}}'], { cwd: dir, encoding: 'utf8' });
       const errors = (JSON.parse(result.stdout || '[]') as { filepath: string; message: string }[]).map((error) => `${error.filepath.replace(/^.*\.github\/workflows\//, '')}: ${error.message}`);
-      assert.equal(errors.length, 1, errors.join('\n'));
-      assert.match(errors[0] ?? '', /^other-ref\.yml: input "other-ref" is not defined/);
+      assert.equal(errors.length, 2, errors.join('\n'));
+      assert.match(errors.find((error) => error.startsWith('other-ref.yml')) ?? '', /^other-ref\.yml: input "other-ref" is not defined/);
+      assert.match(errors.find((error) => error.startsWith('process-rules-ref.yml')) ?? '', /^process-rules-ref\.yml: input "process-rules-ref" is not defined/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  describe("Settings' file check, which reads .github/niyam.json, else the file before niyam (P-50)", () => {
+  describe("Settings' file check, which reads .github/niyam.json alone (P-57)", () => {
     const script = jobs.settings?.steps.find((step) => step.name === 'Check .github/niyam.json')?.run ?? '';
     const repoWith = (files: Record<string, string>) => {
       const dir = mkdtempSync(join(tmpdir(), 'niyam-settings-'));
@@ -78,30 +78,26 @@ describe('checks.yml', () => {
       return result;
     };
 
-    it('reads the new file, the old one where the new one is missing, and the new one when both are there', () => {
+    it('reads .github/niyam.json, whatever else is there', () => {
       const pair = (owner: string) => `{"owner": "${owner}", "agent": "ExampleBot"}`;
-      for (const [files, owner] of [
-        [{ 'niyam.json': pair('new-owner') }, 'new-owner'],
-        [{ 'process-rules.json': pair('old-owner') }, 'old-owner'],
-        [{ 'niyam.json': pair('new-owner'), 'process-rules.json': pair('old-owner') }, 'new-owner'],
-      ] as const) {
-        const result = repoWith(files);
-        assert.equal(result.status, 0, result.stdout);
-        assert.equal(result.stdout.trim(), `niyam: owner ${owner} approves; agent ExampleBot builds.`);
-      }
+      const result = repoWith({ 'niyam.json': pair('new-owner'), 'process-rules.json': pair('old-owner') });
+      assert.equal(result.status, 0, result.stdout);
+      assert.equal(result.stdout.trim(), 'niyam: owner new-owner approves; agent ExampleBot builds.');
     });
 
-    it('names the new file when neither is there, and the file it read when that is wrong', () => {
-      const missing = repoWith({});
-      assert.equal(missing.status, 1);
-      assert.equal(missing.stdout.trim(), '::error file=.github/niyam.json::.github/niyam.json is missing; run niyam onboard');
-      const wrong = repoWith({ 'process-rules.json': '[]' });
+    it('fails without it, the file before niyam not read, and names it when it is wrong', () => {
+      for (const files of [{}, { 'process-rules.json': '{"owner": "old-owner", "agent": "ExampleBot"}' }]) {
+        const missing = repoWith(files);
+        assert.equal(missing.status, 1);
+        assert.equal(missing.stdout.trim(), '::error file=.github/niyam.json::.github/niyam.json is missing; run niyam onboard');
+      }
+      const wrong = repoWith({ 'niyam.json': '[]' });
       assert.equal(wrong.status, 1);
-      assert.match(wrong.stdout, /^::error file=\.github\/process-rules\.json::/);
+      assert.match(wrong.stdout, /^::error file=\.github\/niyam\.json::/);
     });
   });
 
-  describe("Settings' niyam-ref check, under either input's name", () => {
+  describe("Settings' niyam-ref check", () => {
     const script = jobs.settings?.steps.find((step) => step.name === 'Check niyam-ref names the release that runs')?.run ?? '';
     const dir = mkdtempSync(join(tmpdir(), 'niyam-checks-'));
     after(() => rmSync(dir, { recursive: true, force: true }));
@@ -112,35 +108,24 @@ describe('checks.yml', () => {
     git('init', '-q');
     git('-c', 'user.name=t', '-c', 'user.email=t@example.com', '-c', 'commit.gpgsign=false', 'commit', '-q', '--allow-empty', '-m', 'release');
     const sha = git('rev-parse', 'HEAD').stdout.trim();
-    const run = (ref: string, own = sha, server = 'https://github.com', input = 'niyam-ref', caller = CALLER) =>
-      spawnSync('bash', ['-c', script], { cwd: dir, encoding: 'utf8', env: { PATH: process.env.PATH, REF: ref, INPUT: input, CALLER: caller, OWN_SHA: own, SERVER: server } });
-    /** A caller onboarded before P-56: its workflow and input under their old names. */
-    const OLD_CALLER = 'example-org/example-app/.github/workflows/process-rules.yml@refs/heads/main';
+    const run = (ref: string, own = sha, server = 'https://github.com') =>
+      spawnSync('bash', ['-c', script], { cwd: dir, encoding: 'utf8', env: { PATH: process.env.PATH, REF: ref, CALLER, OWN_SHA: own, SERVER: server } });
 
-    it('passes a ref that names the release that runs, by version or by commit, naming the input it came in', () => {
+    it('passes a ref that names the release that runs, by version or by commit', () => {
       for (const ref of ['v0.5.33', sha]) {
         const result = run(ref);
         assert.equal(result.status, 0, `${ref}: ${result.stdout}${result.stderr}`);
         assert.equal(result.stdout.trim(), `niyam: niyam-ref ${ref} is the release that runs, v0.5.33 (${sha}).`);
-        const old = run(ref, sha, 'https://github.com', 'process-rules-ref', OLD_CALLER);
-        assert.equal(old.status, 0);
-        assert.equal(old.stdout.trim(), `niyam: process-rules-ref ${ref} is the release that runs, v0.5.33 (${sha}).`);
       }
     });
 
-    it('fails a ref Dependabot left behind, naming the caller file and both fixes, under the input it came in', () => {
+    it('fails a ref Dependabot left behind, naming the caller file and both fixes', () => {
       for (const ref of ['v0.5.19', 'f'.repeat(40)]) {
         const result = run(ref);
         assert.equal(result.status, 1, ref);
         assert.equal(
           result.stdout.trim(),
           `::error file=.github/workflows/niyam.yml::niyam-ref is ${ref}, but this workflow runs the shared checks at v0.5.33. Dependabot and Renovate move only a job's uses: line. Run niyam onboard with v0.5.33, which moves every pin, or set niyam-ref: v0.5.33 on every job.`,
-        );
-        const old = run(ref, sha, 'https://github.com', 'process-rules-ref', OLD_CALLER);
-        assert.equal(old.status, 1, ref);
-        assert.equal(
-          old.stdout.trim(),
-          `::error file=.github/workflows/process-rules.yml::process-rules-ref is ${ref}, but this workflow runs the shared checks at v0.5.33. Dependabot and Renovate move only a job's uses: line. Run niyam onboard with v0.5.33, which moves every pin, or set process-rules-ref: v0.5.33 on every job.`,
         );
       }
     });

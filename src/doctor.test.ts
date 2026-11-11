@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { NO_TOKEN, launcherPath, launcherScript, pathsFor, sessionScript } from './agent.ts';
-import { FROM_SETUP, OLD_FROM_SETUP, PROXY_TOKEN, cloudRepoScript } from './cloud.ts';
+import { FROM_SETUP, PROXY_TOKEN, cloudRepoScript } from './cloud.ts';
 import { doctor } from './doctor.ts';
 import { KEYCHAIN } from './token-store.ts';
 import { ISSUE_TYPES, RERUN } from './issue-types.ts';
@@ -557,27 +557,26 @@ describe('doctor in a Claude cloud session', () => {
     assert.equal((await check(sys)).out.at(-1), '└  1 to fix');
   });
 
-  it('reads the workflow, cloud setup file and Setup mark under their names before P-56, naming the files it read (P-56)', async () => {
+  it('reads no workflow, cloud setup file or Setup mark under their names before P-56 (P-57)', async () => {
     const sys = cloud();
     sys.files.delete(WORKFLOW);
     sys.files.delete(CLOUD_FILE);
     sys.files.delete(FROM_SETUP);
     sys.files.set(`${ROOT}/.github/workflows/process-rules.yml`, workflow('main', v, false));
     sys.files.set(`${ROOT}/.github/process-rules/cloud-setup.sh`, cloudRepoScript(v, 'ab'.repeat(32)));
-    sys.files.set(OLD_FROM_SETUP, '');
+    sys.files.set('/opt/process-rules/from-setup', '');
     const { code, out } = await check(sys);
-    assert.equal(code, 0, out.join('\n'));
-    assert.ok(out.includes(`✓  .github/process-rules/cloud-setup.sh installs ${v}, as .github/workflows/process-rules.yml pins`), out.join('\n'));
-    assert.ok(out.includes('✓  the Setup script runs .github/process-rules/cloud-setup.sh'), out.join('\n'));
+    assert.equal(code, 1, out.join('\n'));
+    assert.ok(out.includes(`✗  ${CLOUD_SETUP_PATH} missing, or not the file onboard writes, so the Setup script installs no niyam → niyam onboard again`), out.join('\n'));
+    assert.ok(out.some((line) => line.startsWith(`▲  ${FROM_SETUP} missing`)), out.join('\n'));
   });
 
   it('names the cloud setup file the Setup snippet ran, as its mark records it, or none where the mark names neither (P-56)', async () => {
     for (const [marks, said] of [
-      [{ [FROM_SETUP]: '/home/user/example-app/.github/process-rules/cloud-setup.sh\n' }, '.github/process-rules/cloud-setup.sh'],
+      [{ [FROM_SETUP]: '/home/user/example-app/.github/process-rules/cloud-setup.sh\n' }, "the repo's cloud setup file"],
       [{ [FROM_SETUP]: '/root/example-app/.github/niyam/cloud-setup.sh\n' }, '.github/niyam/cloud-setup.sh'],
-      [{ [OLD_FROM_SETUP]: '' }, '.github/process-rules/cloud-setup.sh'],
       [{ [FROM_SETUP]: '' }, "the repo's cloud setup file"],
-      [{ [FROM_SETUP]: 'bash\n', [OLD_FROM_SETUP]: '' }, "the repo's cloud setup file"],
+      [{ [FROM_SETUP]: 'bash\n' }, "the repo's cloud setup file"],
     ] as const) {
       const sys = cloud();
       sys.files.delete(FROM_SETUP);

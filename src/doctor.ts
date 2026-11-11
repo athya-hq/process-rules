@@ -1,5 +1,6 @@
 import {
   EXPIRY_WARNING_DAYS,
+  SETTINGS_PATH,
   account,
   agentFrom,
   agentIn,
@@ -8,7 +9,6 @@ import {
   hasSettings,
   loadSettings,
   repoAt,
-  settingsPathIn,
   sameLogin,
   checkToken,
   keyBody,
@@ -162,7 +162,7 @@ async function typesFindings(sys: Sys, token: string | undefined): Promise<Findi
   let approvals: number | undefined;
   try {
     const found = repoAt(sys);
-    const path = `${found.root}/${settingsPathIn(sys, found.root)}`;
+    const path = `${found.root}/${SETTINGS_PATH}`;
     if (!token || !sys.exists(path)) return [];
     const settings = JSON.parse(sys.read(path)) as unknown;
     if (!featuresIn(settings).includes('board')) return [];

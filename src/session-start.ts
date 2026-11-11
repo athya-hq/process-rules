@@ -1,10 +1,10 @@
 import {
   BASE_ENV,
+  SETTINGS_PATH,
   agentHere,
   anyLogin,
   either,
   loadSettings,
-  settingsPathIn,
   lockScript,
   sameLogin,
   pathsFor,
@@ -77,7 +77,7 @@ function cloudDrift(sys: Sys): string | undefined {
   const file = `${root}/${script}`;
   if (scripted === undefined) {
     if (!pinned || pinned === installed) return undefined;
-    return `niyam: this cloud session runs niyam ${installed}, but ${workflow} pins v${pinned}, and the repo has no ${CLOUD_SETUP_PATH} to install it from. Run niyam onboard again, which writes it; then paste what niyam cloud-setup prints over the process-rules part of the cloud environment's Setup script, once.`;
+    return `niyam: this cloud session runs niyam ${installed}, but ${workflow} pins v${pinned}, and the repo has no ${CLOUD_SETUP_PATH} to install it from. Run niyam onboard again, which writes it; then paste what niyam cloud-setup prints into the cloud environment's Setup script, once.`;
   }
   if (pinned && pinned !== scripted) {
     return `niyam: ${script} installs niyam ${scripted}, but ${workflow} pins v${pinned}. Run niyam onboard again, which writes the file at the pin.`;
@@ -86,7 +86,7 @@ function cloudDrift(sys: Sys): string | undefined {
   const ran = sys.exec('bash', [file], { input: '', timeoutMs: CLOUD_INSTALL_MS });
   const paste = ranFromSetup(sys)
     ? ''
-    : ` The cloud environment's Setup script installs a release of its own: paste what niyam cloud-setup prints over its process-rules part, once, and new releases then need no paste.`;
+    : ` The cloud environment's Setup script installs a release of its own: paste what niyam cloud-setup prints over its own part, once, and new releases then need no paste.`;
   if (ran.code !== 0) {
     const why = ran.stderr.trim().split('\n').at(-1) || `exit ${ran.code}`;
     return `niyam: this cloud session runs niyam ${installed}, but ${script} installs ${scripted}, and running it failed (${why}); the session works on with ${installed}.${paste}`;
@@ -194,7 +194,7 @@ function start(sys: Sys): Said {
   let file: string | undefined;
   try {
     const root = repoRoot(sys);
-    file = settingsPathIn(sys, root);
+    file = SETTINGS_PATH;
     settings = loadSettings(sys, root);
   } catch (error) {
     settingsProblem = message(error);
@@ -217,7 +217,7 @@ function start(sys: Sys): Said {
     line: `niyam: GitHub is locked out of this session: ${reason}. Do not work around the lock; ${fix}.`,
   });
   if (!settings) return locked(settingsProblem, `tell ${owner}`);
-  const here = agentHere(sys, settings.agents, file);
+  const here = agentHere(sys, settings.agents);
   if ('problem' in here) return locked(here.problem, `ask ${owner} to run niyam machine <agent> for one of them`);
   const { agent } = here;
   const paths = pathsFor(sys.home, agent);

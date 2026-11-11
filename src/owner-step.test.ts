@@ -382,23 +382,23 @@ describe('owner-step', () => {
 });
 
 const encoded = (text: string): { status: number; json: unknown } => ({ status: 200, json: { content: Buffer.from(text).toString('base64') } });
-/** A client's workflow as onboard wrote it before P-56, under its old name: its process-rules job, named niyam, calling the shared checks. */
+/** A client's workflow as onboard writes it, in .github/workflows/niyam.yml: its niyam job, named niyam, calling the shared checks. */
 const WORKFLOW = [
   'jobs:',
-  '  process-rules:',
+  '  niyam:',
   '    name: niyam',
   "    if: github.event_name == 'pull_request'",
   '    # the shared checks',
   '    uses: veda-hq/niyam/.github/workflows/checks.yml@v0.6.6',
   '    with:',
-  '      process-rules-ref: v0.6.6',
+  '      niyam-ref: v0.6.6',
   '',
-  '  process-rules-weekly:',
+  '  niyam-weekly:',
   '    uses: veda-hq/niyam/.github/workflows/checks.yml@v0.6.6',
   '',
 ].join('\n');
-/** The same as onboard writes it since P-56, in .github/workflows/niyam.yml: its job ids say niyam too. */
-const NEW_WORKFLOW = WORKFLOW.replace('  process-rules:', '  niyam:').replace('  process-rules-weekly:', '  niyam-weekly:').replace('process-rules-ref:', 'niyam-ref:');
+/** The same as onboard wrote it before P-56, under the old ids, which no release reads since P-57. */
+const OLD_WORKFLOW = WORKFLOW.replace('  niyam:', '  process-rules:').replace('  niyam-weekly:', '  process-rules-weekly:').replace('niyam-ref:', 'process-rules-ref:');
 /** The shared checks at that version, by their jobs' names. */
 const SHARED = ['jobs:', '  settings:', '    name: Settings', '  identity:', '    name: PR identity', '  work-rules:', "    name: 'Work rules'", '  design:', '    name: Design frames', ''].join('\n');
 
@@ -420,7 +420,7 @@ describe('owner-step required-checks', () => {
         return { status: 200, json: {} };
       },
       'GET repos/veda-hq/niyam/contents/.github/niyam.json': settings(['pr-identity', 'work-rules']),
-      'GET repos/veda-hq/niyam/contents/.github/workflows/process-rules.yml': encoded(WORKFLOW),
+      'GET repos/veda-hq/niyam/contents/.github/workflows/niyam.yml': encoded(WORKFLOW),
       'GET repos/veda-hq/niyam/contents/.github/workflows/checks.yml?ref=v0.6.6': encoded(SHARED),
       ...extra,
     }, 'repo');
@@ -441,15 +441,32 @@ describe('owner-step required-checks', () => {
     noLeak(made.sys, out, err);
   });
 
-  it('adds the rule when the ruleset has none, reads the old settings file, and finds the ruleset by id', async () => {
-    const made = rulesWorld([{ type: 'deletion' }], {
-      'GET repos/veda-hq/niyam/contents/.github/niyam.json': { status: 404, json: { message: 'Not Found' } },
-      'GET repos/veda-hq/niyam/contents/.github/process-rules.json': settings(),
-    });
+  it('adds the rule when the ruleset has none, and finds the ruleset by id', async () => {
+    const made = rulesWorld([{ type: 'deletion' }], { 'GET repos/veda-hq/niyam/contents/.github/niyam.json': settings() });
     const { io, out } = capture();
     assert.equal(await ownerStep(made.sys, io, ['required-checks', 'veda-hq/niyam', '5']), 0);
     assert.match(out.join('\n'), /before: none\n {2}after: {2}niyam \/ PR identity, niyam \/ Work rules, niyam \/ Design frames/);
     assert.deepEqual((made.now()[1] as { parameters: { required_status_checks: unknown[] } }).parameters.required_status_checks.length, 3);
+  });
+
+  it('reads no settings file, workflow or job id before niyam (P-57)', async () => {
+    const settingsBefore = rulesWorld([checks()], {
+      'GET repos/veda-hq/niyam/contents/.github/niyam.json': { status: 404, json: { message: 'Not Found' } },
+      'GET repos/veda-hq/niyam/contents/.github/process-rules.json': settings(),
+    });
+    const first = capture();
+    assert.equal(await ownerStep(settingsBefore.sys, first.io, ['required-checks', 'veda-hq/niyam', 'main']), 1);
+    assert.match(first.out.join('\n'), /✗ veda-hq\/niyam has no \.github\/niyam\.json on its default branch/);
+    for (const extra of [
+      { 'GET repos/veda-hq/niyam/contents/.github/workflows/niyam.yml': { status: 404, json: { message: 'Not Found' } }, 'GET repos/veda-hq/niyam/contents/.github/workflows/process-rules.yml': encoded(OLD_WORKFLOW) },
+      { 'GET repos/veda-hq/niyam/contents/.github/workflows/niyam.yml': encoded(OLD_WORKFLOW) },
+    ] as Record<string, Reply>[]) {
+      const made = rulesWorld([checks()], extra);
+      const said = capture();
+      assert.equal(await ownerStep(made.sys, said.io, ['required-checks', 'veda-hq/niyam', 'main']), 1);
+      assert.match(said.out.join('\n'), /✗ not adding niyam \/ PR identity: (?:veda-hq\/niyam has no \.github\/workflows\/niyam\.yml on its default branch|\.github\/workflows\/niyam\.yml has no niyam job calling the shared checks)/);
+      assert.ok(!made.api.some((call) => call.args.includes('PUT')));
+    }
   });
 
   it("skips, as ✗, a check the repository's workflow does not run, adding the others", async () => {
@@ -459,23 +476,12 @@ describe('owner-step required-checks', () => {
     assert.equal(await ownerStep(made.sys, io, ['required-checks', 'veda-hq/niyam', 'main']), 1);
     const text = out.join('\n');
     assert.match(text, /make the ruleset main of veda-hq\/niyam also require niyam \/ PR identity\n/);
-    assert.match(text, /✗ not adding niyam \/ Work rules: the shared checks \.github\/workflows\/process-rules\.yml calls run no Work rules job, so it would never report and would hold every pull request → niyam onboard there, then run this again/);
+    assert.match(text, /✗ not adding niyam \/ Work rules: the shared checks \.github\/workflows\/niyam\.yml calls run no Work rules job, so it would never report and would hold every pull request → niyam onboard there, then run this again/);
     assert.match(text, /✓ the ruleset main requires niyam \/ PR identity/);
-
-    // The workflow under its name since P-56, its job id niyam, is read first.
-    const moved = rulesWorld([checks()], {
-      'GET repos/veda-hq/niyam/contents/.github/workflows/niyam.yml': encoded(NEW_WORKFLOW),
-      'GET repos/veda-hq/niyam/contents/.github/workflows/process-rules.yml': encoded('jobs:\n  build:\n    runs-on: x\n'),
-      'GET repos/veda-hq/niyam/contents/.github/workflows/checks.yml?ref=v0.6.6': encoded(older),
-    });
-    const third = capture();
-    assert.equal(await ownerStep(moved.sys, third.io, ['required-checks', 'veda-hq/niyam', 'main']), 1);
-    assert.match(third.out.join('\n'), /✗ not adding niyam \/ Work rules: the shared checks \.github\/workflows\/niyam\.yml calls run no Work rules job/);
-    assert.match(third.out.join('\n'), /✓ the ruleset main requires niyam \/ PR identity/);
 
     // Its own checks, called by path, as niyam's repository does; a check required already needs no job.
     const own = rulesWorld([checks('niyam / Work rules')], {
-      'GET repos/veda-hq/niyam/contents/.github/workflows/process-rules.yml': encoded(WORKFLOW.replace('veda-hq/niyam/.github/workflows/checks.yml@v0.6.6', './.github/workflows/checks.yml')),
+      'GET repos/veda-hq/niyam/contents/.github/workflows/niyam.yml': encoded(WORKFLOW.replace('veda-hq/niyam/.github/workflows/checks.yml@v0.6.6', './.github/workflows/checks.yml')),
       'GET repos/veda-hq/niyam/contents/.github/workflows/checks.yml': encoded(SHARED),
     });
     const second = capture();
@@ -483,9 +489,8 @@ describe('owner-step required-checks', () => {
     assert.match(second.out.join('\n'), /✓ the ruleset main requires niyam \/ Work rules, niyam \/ PR identity/);
 
     const cases: [Record<string, Reply>, RegExp][] = [
-      [{ 'GET repos/veda-hq/niyam/contents/.github/workflows/process-rules.yml': { status: 404, json: { message: 'Not Found' } } }, /veda-hq\/niyam has no \.github\/workflows\/niyam\.yml on its default branch/],
-      [{ 'GET repos/veda-hq/niyam/contents/.github/workflows/process-rules.yml': encoded('jobs:\n  build:\n    runs-on: x\n') }, /\.github\/workflows\/process-rules\.yml has no niyam job calling the shared checks/],
-      [{ 'GET repos/veda-hq/niyam/contents/.github/workflows/process-rules.yml': encoded('jobs:\n  process-rules:\n    runs-on: x\n') }, /has no niyam job calling the shared checks/],
+      [{ 'GET repos/veda-hq/niyam/contents/.github/workflows/niyam.yml': { status: 404, json: { message: 'Not Found' } } }, /veda-hq\/niyam has no \.github\/workflows\/niyam\.yml on its default branch/],
+      [{ 'GET repos/veda-hq/niyam/contents/.github/workflows/niyam.yml': encoded('jobs:\n  build:\n    runs-on: x\n') }, /\.github\/workflows\/niyam\.yml has no niyam job calling the shared checks/],
       [{ 'GET repos/veda-hq/niyam/contents/.github/workflows/niyam.yml': encoded('jobs:\n  niyam:\n    runs-on: x\n') }, /\.github\/workflows\/niyam\.yml has no niyam job calling the shared checks/],
       [{ 'GET repos/veda-hq/niyam/contents/.github/workflows/checks.yml?ref=v0.6.6': { status: 404, json: { message: 'Not Found' } } }, /GitHub did not give the shared checks veda-hq\/niyam@v0\.6\.6 that .* calls \(gh: Not Found \(HTTP 404\)\)/],
     ];
@@ -568,85 +573,20 @@ describe('owner-step required-checks', () => {
     }
   });
 
-  /** The workflow as releases before P-53 wrote it: the job's id alone names its checks. */
-  const UNNAMED = WORKFLOW.replace('    name: niyam\n', '');
-  const NOT_FOUND = { status: 404, json: { message: 'Not Found' } };
-
-  it('requires each check under its niyam name in place of its process-rules one, once the workflow on the default branch reports it', async () => {
-    const made = rulesWorld([{ type: 'deletion' }, checks('Typecheck, test, build', 'process-rules / Work rules', 'process-rules / PR identity')]);
+  it('leaves a check required under its process-rules name as it is, adding the niyam ones beside it (P-57)', async () => {
+    const made = rulesWorld([{ type: 'deletion' }, checks('Typecheck, test, build', 'process-rules / Work rules')]);
     const { io, out } = capture();
     assert.equal(await ownerStep(made.sys, io, ['required-checks', 'veda-hq/niyam', 'main']), 0, out.join('\n'));
-    const text = out.join('\n');
-    assert.match(text, /make the ruleset main of veda-hq\/niyam require niyam \/ Work rules in place of process-rules \/ Work rules, niyam \/ PR identity in place of process-rules \/ PR identity/);
-    assert.match(text, /before: Typecheck, test, build, process-rules \/ Work rules, process-rules \/ PR identity\n {2}after: {2}Typecheck, test, build, niyam \/ Work rules, niyam \/ PR identity/);
-    assert.deepEqual(made.now(), [{ type: 'deletion' }, checks('Typecheck, test, build', 'niyam / Work rules', 'niyam / PR identity')], 'each in its place, its app kept');
-  });
-
-  it("renames while onboard's pull request is open, its branch naming the job niyam, and adds a check turned on beside it", async () => {
-    const made = rulesWorld([checks('process-rules / PR identity')], {
-      'GET repos/veda-hq/niyam/contents/.github/workflows/process-rules.yml': encoded(UNNAMED),
-      'GET repos/veda-hq/niyam/branches/process-rules%2Fonboard': { status: 200, json: {} },
-      'GET repos/veda-hq/niyam/contents/.github/workflows/process-rules.yml?ref=process-rules%2Fonboard': encoded(WORKFLOW),
-    });
-    const { io, out } = capture();
-    assert.equal(await ownerStep(made.sys, io, ['required-checks', 'veda-hq/niyam', 'main']), 0, out.join('\n'));
-    assert.match(out.join('\n'), /require niyam \/ PR identity in place of process-rules \/ PR identity, and make the ruleset main of veda-hq\/niyam also require niyam \/ Work rules/);
-    assert.deepEqual(made.now(), [checks('niyam / PR identity', 'niyam / Work rules')]);
-  });
-
-  it("renames while onboard's pull request since P-56 is open, from niyam/onboard with the workflow and job under their new names", async () => {
-    const made = rulesWorld([checks('process-rules / PR identity')], {
-      'GET repos/veda-hq/niyam/contents/.github/workflows/process-rules.yml': encoded(UNNAMED),
-      'GET repos/veda-hq/niyam/branches/niyam%2Fonboard': { status: 200, json: {} },
-      'GET repos/veda-hq/niyam/contents/.github/workflows/niyam.yml?ref=niyam%2Fonboard': encoded(NEW_WORKFLOW),
-    });
-    const { io, out } = capture();
-    assert.equal(await ownerStep(made.sys, io, ['required-checks', 'veda-hq/niyam', 'main']), 0, out.join('\n'));
-    assert.deepEqual(made.now(), [checks('niyam / PR identity', 'niyam / Work rules')]);
-  });
-
-  it('reads a workflow committed with CRLF line endings as the same workflow', async () => {
-    for (const [path, text] of [
-      ['niyam.yml', NEW_WORKFLOW],
-      ['process-rules.yml', WORKFLOW],
-    ] as const) {
-      const made = rulesWorld([checks('process-rules / PR identity')], {
-        'GET repos/veda-hq/niyam/contents/.github/workflows/process-rules.yml': NOT_FOUND,
-        [`GET repos/veda-hq/niyam/contents/.github/workflows/${path}`]: encoded(text.replaceAll('\n', '\r\n')),
-      });
-      const { io, out } = capture();
-      assert.equal(await ownerStep(made.sys, io, ['required-checks', 'veda-hq/niyam', 'main']), 0, out.join('\n'));
-      assert.deepEqual(made.now(), [checks('niyam / PR identity', 'niyam / Work rules')], path);
-    }
-  });
-
-  it('takes the new names as reported when the default branch has the workflow under its new name and the niyam job id', async () => {
-    const made = rulesWorld([checks('process-rules / PR identity')], {
-      'GET repos/veda-hq/niyam/contents/.github/workflows/niyam.yml': encoded(NEW_WORKFLOW),
-      'GET repos/veda-hq/niyam/contents/.github/workflows/process-rules.yml': NOT_FOUND,
-    });
-    const { io, out } = capture();
-    assert.equal(await ownerStep(made.sys, io, ['required-checks', 'veda-hq/niyam', 'main']), 0, out.join('\n'));
-    assert.deepEqual(made.now(), [checks('niyam / PR identity', 'niyam / Work rules')]);
+    assert.match(out.join('\n'), /make the ruleset main of veda-hq\/niyam also require niyam \/ PR identity, niyam \/ Work rules/);
+    assert.deepEqual(made.now(), [{ type: 'deletion' }, checks('Typecheck, test, build', 'process-rules / Work rules', 'niyam / PR identity', 'niyam / Work rules')]);
     assert.ok(!made.api.some((call) => call.args.some((arg) => arg.includes('branches/'))), 'no onboard branch asked for');
   });
 
-  it('renames nothing, and adds nothing, while the workflow reports only the old names', async () => {
-    for (const branch of [NOT_FOUND, { status: 200, json: {} }]) {
-      const made = rulesWorld([checks('process-rules / PR identity')], {
-        'GET repos/veda-hq/niyam/contents/.github/workflows/process-rules.yml': encoded(UNNAMED),
-        'GET repos/veda-hq/niyam/branches/process-rules%2Fonboard': branch,
-        'GET repos/veda-hq/niyam/contents/.github/workflows/process-rules.yml?ref=process-rules%2Fonboard': encoded(UNNAMED),
-        'GET repos/veda-hq/niyam/branches/niyam%2Fonboard': branch,
-        'GET repos/veda-hq/niyam/contents/.github/workflows/niyam.yml?ref=niyam%2Fonboard': encoded(UNNAMED),
-      });
-      const { io, out } = capture();
-      await ownerStep(made.sys, io, ['required-checks', 'veda-hq/niyam', 'main']);
-      const text = out.join('\n');
-      assert.match(text, /✗ not adding niyam \/ Work rules: \.github\/workflows\/process-rules\.yml reports its checks as process-rules \/ …, on the default branch and with no niyam\/onboard or process-rules\/onboard branch naming them niyam, so it would never report and would hold every pull request → niyam onboard there, then run this again while its pull request is open/);
-      assert.ok(!made.api.some((call) => call.args.includes('PUT')), text);
-      assert.deepEqual(made.now(), [checks('process-rules / PR identity')]);
-    }
+  it('reads a workflow committed with CRLF line endings as the same workflow', async () => {
+    const made = rulesWorld([checks('niyam / PR identity')], { 'GET repos/veda-hq/niyam/contents/.github/workflows/niyam.yml': encoded(WORKFLOW.replaceAll('\n', '\r\n')) });
+    const { io, out } = capture();
+    assert.equal(await ownerStep(made.sys, io, ['required-checks', 'veda-hq/niyam', 'main']), 0, out.join('\n'));
+    assert.deepEqual(made.now(), [checks('niyam / PR identity', 'niyam / Work rules')]);
   });
 });
 
