@@ -2,7 +2,7 @@
 
 niyam (नियम, rule) was named process-rules until 0.6.3. Its repository moved
 from athya-hq/process-rules to veda-hq/niyam, and GitHub forwards the old
-address. The old names still work for at least one release: see
+address. Since P-57 no release reads or writes the old names: see
 [Renamed from process-rules](#renamed-from-process-rules).
 
 Work rules for a repository that tracks its work in GitHub Issues and a GitHub
@@ -15,8 +15,8 @@ hooks and a shared GitHub Actions workflow.
 
 Early. The CLI runs `machine`, `doctor`, `session-start`, `guard`, `onboard`, `propose`, `upgrade` and `owner-step`. What comes next, and in what
 order: the Slice issues under
-[niyam roadmap v1](https://github.com/athya-hq/process-rules/issues/22),
-on the Project [process-rules work](https://github.com/orgs/athya-hq/projects/2);
+[niyam roadmap v1](https://github.com/veda-hq/niyam/issues/22),
+on the Project [process-rules work](https://github.com/orgs/athya-hq/projects/2) (its title from before the rename);
 [docs/roadmap.md](docs/roadmap.md) keeps version v1 as approved. Decisions:
 [docs/decisions.md](docs/decisions.md).
 
@@ -42,8 +42,7 @@ need no keychain and work as before, and `doctor` runs its cloud checks there
 one token-store interface (`src/token-store.ts`), so a Linux or Windows store
 can be added there when an adopter needs one.
 
-The adopting repo names its accounts in `.github/niyam.json` (in a repo
-onboarded before niyam, `.github/process-rules.json`, which is still read):
+The adopting repo names its accounts in `.github/niyam.json`:
 
 ```json
 { "owner": "example-owner", "agent": "ExampleBot" }
@@ -72,9 +71,10 @@ missing scopes or no expiry. It then registers the key as the agent's signing ke
 `~/.config/niyam/<agent, lowercased>/session.sh`, and writes the
 launcher `~/.config/niyam/bin/niyam`, which the Claude Code
 hooks and the pre-push git hook run. Releases before P-55 wrote both under
-`~/.config/process-rules/`, which `machine` leaves in place and every reader
-still takes where the new folder has none (see Renamed from process-rules). The
-launcher names the node that ran `machine` by its real path (not a version
+`~/.config/process-rules/`, which nothing reads since P-57: `machine` removes
+that folder, whole, once it has written the new one, and deletes the keychain
+entry under the service `process-rules` once the `niyam` one holds the same
+token (see Renamed from process-rules). The launcher names the node that ran `machine` by its real path (not a version
 manager's per-shell one, which the Claude app's hooks may not have), so the
 hooks need no node on their `PATH`. Why a classic token: [docs/decisions.md](docs/decisions.md).
 
@@ -168,9 +168,7 @@ with the reason,
 unless session-start gave this session the agent identity. Hooks cannot see
 the variables session-start gives the session's shells, so session-start
 records how it left each session in
-`~/.config/niyam/sessions/<session id>.json` and the guard reads that (for a
-session started before P-55, the record in `~/.config/process-rules/sessions/`
-where the new folder has none).
+`~/.config/niyam/sessions/<session id>.json` and the guard reads that.
 A command not naming `gh` or `git` as a word goes ahead without starting the CLI;
 when the CLI cannot run, every command naming either is refused.
 
@@ -216,8 +214,8 @@ asking (a key in the SSH agent or the keychain), as fine.
 
 Releases before 0.5.21 asked about each lockout step on its own, and recorded
 what was declined in
-`~/.config/process-rules/<agent, lowercased>/lockout-declined.json`, which is
-still read (`~/.config/niyam/…` first).
+`~/.config/niyam/<agent, lowercased>/lockout-declined.json` (under
+`~/.config/process-rules/` before P-55, which nothing reads since P-57).
 `doctor` reports a login or password in that record as your choice instead of
 warning, and an account signed in later is still a warning. Once a `machine`
 run locks them away, the record goes.
@@ -229,8 +227,7 @@ GitHub actions (Auto-fix, the PR bar) run as you, and Auto-fix refuses the
 agent's pull requests. And revoke the old token on GitHub (Settings →
 Applications → Authorized OAuth Apps → GitHub CLI): `gh auth logout` deletes
 it from the Mac but does not revoke it. `machine` records the move in
-`~/.config/niyam/<agent, lowercased>/gh-moved.json` (before P-55, under
-`~/.config/process-rules/`, still read), and `doctor`
+`~/.config/niyam/<agent, lowercased>/gh-moved.json`, and `doctor`
 repeats both steps while the desktop app was started before it. `doctor`
 cannot see whether the token was revoked, so once the app has restarted it
 no longer reminds you to revoke it.
@@ -271,7 +268,9 @@ again.
 scopes, the key's registration, the session file, that the launcher runs,
 that the CLI is the newest release (`▲` when a newer one is out, fixed by
 `niyam upgrade`) and the only `niyam` on `PATH` (`✗`
-otherwise, naming each copy and its version), and
+otherwise, naming each copy and its version), anything left from before
+niyam (`~/.config/process-rules/`, or a keychain entry under the service
+`process-rules`: `▲`, which `niyam machine` removes), and
 what of the owner's an agent session could reach, any `owner-step` folder
 left behind (`▲`, saying whether it still holds a token; see Owner steps), and, in a repository with
 the board on, the organisation's issue types (see Issue types). It shows them grouped as
@@ -349,13 +348,11 @@ Claude cloud sessions below).
    spinner while it works, and ends with the pull request and a short "By
    hand:" list of what GitHub's API cannot do.
 
-   It writes `.github/niyam.json` (in a repo onboarded before P-56 it moves
-   `.github/process-rules.json` there, byte for byte but for the changes it
-   makes, and deletes the old one), adds to `.claude/settings.json`
+   It writes `.github/niyam.json`, adds to `.claude/settings.json`
    the lock in `env`, a SessionStart hook running `niyam session-start`, a
    PreToolUse hook running `niyam guard` (each through the launcher `machine`
-   writes, else `niyam` on PATH; since P-53, hooks an older release wrote,
-   which name `process-rules`, are replaced), and `permissions.allow` rules
+   writes, else `niyam` on PATH; hooks an older release wrote are replaced
+   in place, 0.6.10's too), and `permissions.allow` rules
    for `niyam review-thread` (replacing the rule under the old command) and for
    the app's `mcp__ccd_pr__bind_pr`, `mcp__ccd_pr__get_status` and
    `mcp__ccd_pr__set_monitor`, which turn Auto-fix on (a rerun adds only
@@ -365,20 +362,15 @@ Claude cloud sessions below).
    on pull requests and pushes, read-only, and `niyam-weekly` on the
    weekly run, the only one that writes to issues. Each job carries a
    `name:` (`niyam`, `niyam-weekly`, …), so its checks read
-   `niyam / Work rules`. A workflow an older release wrote as
-   `.github/workflows/process-rules.yml`, with the job ids `process-rules`,
-   `process-rules-weekly`, … and the input `process-rules-ref`, moves to the
-   new name with niyam's ids and `niyam-ref`, keeping the client's own
-   edits, and the old file is deleted in the same pull request; the check
-   names stay, so no ruleset changes (P-56). With identity alone `onboard`
-   writes no workflow, and leaves an old one as it is, saying so in the plan. It writes
+   `niyam / Work rules`. With identity alone `onboard` writes no workflow. It writes
    `.github/niyam/cloud-setup.sh`, which installs the CLI in Claude
-   cloud sessions at the version the workflow pins, and the same file as
-   `.github/process-rules/cloud-setup.sh`, which a Setup script pasted
-   before P-56 runs, and writes both again on
+   cloud sessions at the version the workflow pins, and writes it again on
    every run (see Claude cloud sessions below); the first time, the plan
-   lists the one paste into the cloud environment's Setup script, and in a
-   repo that had only the old file, one paste of the new snippet. It checks the agent can
+   lists the one paste into the cloud environment's Setup script. Where the
+   repo still has `.github/process-rules/cloud-setup.sh`, which releases up
+   to 0.6.10 wrote beside it, the pull request deletes it, and the
+   description says to paste the new snippet once if the Setup script was
+   pasted before 0.6.10. It checks the agent can
    push. With no access, or read access only (a public repo, or an
    organisation's base permission), the plan gives it write access as you
    and accepts the invitation as the agent; and `onboard` names
@@ -423,7 +415,7 @@ Claude cloud sessions below).
    (giving the agent access, the board, the `FIGMA_LIBRARY` secret) share one browser approval, for
    that run only. The files git tracks in your checkout are never changed: once every step has run,
    `onboard` commits the files it changes as the agent, signed, on the
-   branch `niyam/onboard` (`process-rules/onboard` before P-56) from the default branch's tip, in a
+   branch `niyam/onboard` from the default branch's tip, in a
    temporary repository it deletes afterwards, pushes it as the agent and
    opens the agent's pull request (or updates the one an earlier run opened),
    titled `chore(niyam): onboard at v<version>`, as Conventional
@@ -462,8 +454,7 @@ Claude cloud sessions below).
    a feature that is off; they apply from the next pull request.
 
 The shared checks run five jobs. **Settings** validates
-`.github/niyam.json`, else `.github/process-rules.json`, and fails when a job's `niyam-ref`
-(or `process-rules-ref`, which a workflow onboard has not moved still passes)
+`.github/niyam.json`, and fails when a job's `niyam-ref`
 names another release than the `checks.yml@` line it calls (see Releases and
 upgrading). **PR identity** runs on pull requests: every
 commit that claims the agent (its login or its no-reply address) must be
@@ -753,8 +744,7 @@ pull request's description is edited. After upgrading niyam, run
 `onboard` again: it upgrades the hook entries in `.claude/settings.json` and
 the workflow. An older release's workflow, one job that let every run write
 to issues, is replaced; a workflow split into `niyam` and
-`niyam-weekly` (`process-rules` and `process-rules-weekly` before P-56, renamed
-on the way) alone gets the `niyam-merged` job, which
+`niyam-weekly` alone gets the `niyam-merged` job, which
 closes a merged pull request's slice, and runs on closed pull requests; a
 workflow with those three jobs alone gets the `niyam-asks` job, with
 the comment and label triggers and the hourly cron it runs on, and the weekly
@@ -771,11 +761,7 @@ client's own and stays as it is); any other workflow is offered a replacement. M
 features a client has turned on required on its default branch, such as
 `niyam / PR identity` with `pr-identity` and `niyam / Work rules` with
 `work-rules`; a check of a feature that is off still runs and passes, but with
-identity alone there is no workflow at all, so require none. Before P-53 these
-read `process-rules / …`: where a ruleset still requires the old names,
-`onboard` lists `niyam owner-step required-checks <repo> <ruleset>` by hand,
-to run while its pull request is open, which then merges; pull requests
-opened before it report the old names until they merge the default branch.
+identity alone there is no workflow at all, so require none.
 
 ### One feature at a time
 
@@ -833,9 +819,8 @@ repositories, a work model type from GitHub's facts about it:
 
 Each open issue with no type at all, in any of the organisation's
 repositories, gets one by the same rule, under the same yes. A repository's
-Approvals issue, the one its settings (`.github/niyam.json`, or
-`.github/process-rules.json`, on its default branch) name as `"approvals":
-N`, is left with no type, and the plan says so: it is a standing record the
+Approvals issue, the one its settings (`.github/niyam.json` on its default
+branch) name as `"approvals": N`, is left with no type, and the plan says so: it is a standing record the
 owner answers batches on, never closed, which none of the five fits, and the
 work rules find it by its number, not its type. A closed issue with no type
 is left as it is, and the plan says that too. No rule reads a title or a
@@ -917,7 +902,7 @@ JSON input:
 ```sh
 input=$(cat)
 sid=$(printf '%s' "$input" | jq -r .session_id)
-cli="$HOME/.config/niyam/bin/niyam"; [ -x "$cli" ] || cli="$HOME/.config/process-rules/bin/process-rules"; [ -x "$cli" ] || cli=niyam
+cli="$HOME/.config/niyam/bin/niyam"; [ -x "$cli" ] || cli=niyam
 printf '%s' "$input" | "$cli" as-agent --session "$sid" -- gh pr view --json state
 status=$?
 [ "$status" -eq 77 ] && exit 0  # locked: this session does not work as the agent
@@ -985,19 +970,16 @@ The cloud environment's Setup script, which runs as root once the repo is
 cloned and before Claude Code starts, installs the CLI. Claude Code has no
 API or CLI for that field, so you paste it once, by hand, and it names no
 version: `niyam cloud-setup` prints a short snippet that finds the
-clone and runs its `.github/niyam/cloud-setup.sh`, else the
-`.github/process-rules/cloud-setup.sh` of a repo `onboard` has not moved
-yet, with `NIYAM_SETUP` and `PROCESS_RULES_SETUP` set. `onboard` writes
-that file in its pull request at the version
+clone and runs its `.github/niyam/cloud-setup.sh`, with `NIYAM_SETUP` set.
+`onboard` writes that file in its pull request at the version
 `.github/workflows/niyam.yml` pins, and writes it again on every
 run, so the pin bump that upgrades the checks upgrades cloud sessions too,
-with no new paste. It writes the same file as
-`.github/process-rules/cloud-setup.sh` too, which the snippet pasted before
-P-56 runs, setting `PROCESS_RULES_SETUP` alone, so that paste keeps working
-until you paste the new snippet once. The Setup script runs from the folder that holds the
+with no new paste. A snippet pasted before 0.6.10 runs
+`.github/process-rules/cloud-setup.sh` alone, which `onboard` deletes since
+P-57: paste the new snippet over it, once. The Setup script runs from the folder that holds the
 clone (the VM's home, the clone one folder down), so the snippet looks there
 and in each home. The file unpacks Node and the CLI under
-`/opt/niyam` (`/opt/process-rules` before P-56), each once it matches the sha256 the file pins (Node's
+`/opt/niyam`, each once it matches the sha256 the file pins (Node's
 from this release, the CLI's from GitHub's record of the release archive),
 and puts `niyam` on `PATH`, leaving the image's own Node alone. The
 environment needs the network to reach nodejs.org and GitHub's release
@@ -1047,12 +1029,8 @@ This cloud session checks that `cloud-setup.sh` opens with the comment
 the workflow's pin (`✗`, fixed by running `onboard` again; a workflow that pins no one version is `▲`), that the CLI running is that
 release (`▲`: `session-start` installs it, or `bash
 .github/niyam/cloud-setup.sh` does), and that the Setup script
-runs the repo's file (`▲` without `/opt/niyam/from-setup`, or the
-`/opt/process-rules/from-setup` a cloud setup file before P-56 leaves),
-naming the file it ran: the mark holds its path, and the old mark means the
-old file. Each
-file is read under its new name, else its old one, and named as the repo
-has it. GitHub
+runs the repo's file (`▲` without `/opt/niyam/from-setup`),
+naming the file it ran: the mark holds its path. GitHub
 checks that the account the proxy acts as is one of the settings' agents,
 and that `session-start` gave the session that identity (`✗` otherwise:
 `gh` and git stay locked out). This repo lists hooks that reach GitHub
@@ -1080,23 +1058,16 @@ niyam owner-step required-checks <owner/repo> <ruleset id or name>
   request. It refuses a label the repository does not have.
 - `required-checks` makes the ruleset also require the checks of the features
   the repository's settings turn on, read from its default branch
-  (`.github/niyam.json`, or `.github/process-rules.json` where that is
-  missing): `niyam / PR identity` for `pr-identity`, `niyam / Work rules`
-  for `work-rules` and `niyam / Design frames` for `figma`. It adds a check
-  only when the repository's `.github/workflows/niyam.yml` (else, before
-  P-56, `.github/workflows/process-rules.yml`) has a `niyam` job (or a
-  `process-rules` one), named `niyam`, calling shared checks that run that
-  job, at the version it pins. A required check that never reports would
-  hold every pull request, so any other check is a `✗` saying why. Each
-  check the ruleset requires under its name before P-53, `process-rules /
-  …`, it requires as `niyam / …` in its place, once the workflow on the
-  default branch, or on onboard's branch `niyam/onboard` (or
-  `process-rules/onboard`), names the job `niyam`; before that it changes
-  nothing. It keeps every other check
-  and rule, removes none but those it renames, and shows the before and
-  after.
+  (`.github/niyam.json`): `niyam / PR identity` for `pr-identity`,
+  `niyam / Work rules` for `work-rules` and `niyam / Design frames` for
+  `figma`. It adds a check only when the repository's
+  `.github/workflows/niyam.yml` has a `niyam` job, named `niyam`, calling
+  shared checks that run that job, at the version it pins. A required check
+  that never reports would hold every pull request, so any other check is a
+  `✗` saying why. It keeps every other check and rule, removes none, and
+  shows the before and after.
 
-It refuses in an agent session (`NIYAM_AGENT` or `PROCESS_RULES_AGENT` set, or `CLAUDECODE=1`)
+It refuses in an agent session (`NIYAM_AGENT` set, or `CLAUDECODE=1`)
 and without a terminal. It makes a new folder in the user's temporary folder
 (`niyam-owner-step-…`; on macOS, `getconf DARWIN_USER_TEMP_DIR`) and runs gh
 with that folder as `GH_CONFIG_DIR`, `GH_PAGER=cat`, no `GH_TOKEN`, and
@@ -1138,12 +1109,11 @@ each machine with pnpm, once; nothing is built on install:
 pnpm add -g https://github.com/veda-hq/niyam/releases/download/v0.6.10/veda-hq-niyam-0.6.10.tgz
 ```
 
-The package puts one command on `PATH`, `niyam`; since 0.6.9 (P-54) it no
-longer installs `process-rules`, its old name. Each release also attaches the
-same CLI as `athya-hq-process-rules-<version>.tgz`, which still carries the
-old command, so `process-rules upgrade` from an install of 0.5.37 to 0.6.3
-still finds it; an install older than 0.5.37 has no `upgrade`, so it takes
-the `pnpm add -g` line above.
+The package puts one command on `PATH`, `niyam`. Since P-57 a release
+attaches nothing under the name before niyam, so a Mac that still runs
+`process-rules` (0.6.x, under the package `@athya-hq/process-rules`) takes
+the line above, after `pnpm remove -g @athya-hq/process-rules`, since pnpm
+refuses two global packages with the same bin.
 
 After that, update it with one command on each machine:
 
@@ -1166,31 +1136,30 @@ marks pnpm's own copy to keep, names the others to remove, and exits 1, since
 an older copy the shell finds first is how a Mac keeps running an old release
 after an upgrade. It works in an agent session on a Mac too; in a Claude cloud
 session it refuses, because there the repo's `cloud-setup.sh` installs the
-release the workflow pins. A CLI from before `upgrade` has none (`process-rules
-help` lists it when it is there): install the newest release with the line above. `onboard`, when the repo pins a newer release than the
+release the workflow pins. A CLI from before `upgrade` has none: install the
+newest release with the line above. `onboard`, when the repo pins a newer release than the
 CLI running, refuses and says to run `niyam upgrade` first.
 
 `onboard` pins the client's workflow to one version, the release of the CLI
 that ran it. Each job writes the pin twice, `checks.yml@vX.Y.Z` and, two lines
-below it under `with:`, `niyam-ref: vX.Y.Z`. `checks.yml` still takes
-`process-rules-ref`, its name before P-56, from a workflow `onboard` has not
-moved yet, and declares both, since GitHub refuses a caller that passes an
-input the called workflow does not declare. Every job of
+below it under `with:`, `niyam-ref: vX.Y.Z`, the one input `checks.yml`
+declares; GitHub refuses a caller that passes an input the called workflow
+does not declare, `process-rules-ref` too since P-57. Every job of
 `checks.yml` runs the CLI from the commit it was called at (GitHub's
 `job.workflow_sha`), so the checks and the CLI are always one release; on
 GitHub Enterprise Server, which has no `job.workflow_sha`, the CLI comes from
-`niyam-ref`, else `process-rules-ref`. Settings fails a run whose input names
-another release, saying which, under the input's own name, and how to fix it: Dependabot and Renovate move
+`niyam-ref`. Settings fails a run whose `niyam-ref` names
+another release, saying which and how to fix it: Dependabot and Renovate move
 a job's `uses:` line and nothing else, so their bump of niyam leaves
 the pair apart, and it also leaves out the cloud setup file's pin and any job a
-newer release adds. So leave `veda-hq/niyam` and `athya-hq/process-rules` out of their updates (a
+newer release adds. So leave `veda-hq/niyam` out of their updates (a
 Dependabot `ignore` entry, a Renovate `packageRules` entry with `enabled:
 false`). Upgrading is two steps: `niyam upgrade`, then `onboard` again,
 which moves every pin together. Editing the version by hand means changing
 every line that names it, two per job. A split workflow needs v0.5.4 or later: GitHub refuses a whole run, before
 any job's `if:`, when the called workflow asks for more than the calling job
 grants, and before v0.5.4 `checks.yml` asked for `issues: write` itself. The hooks run the
-launcher `machine` writes, else the one it wrote before P-55, else `niyam` from the `PATH`; without
+launcher `machine` writes, else `niyam` from the `PATH`; without
 either the session-start hook tells the session to stop, and the guard refuses
 `gh` and `git`. Run `machine` again after removing the node it names.
 
@@ -1214,54 +1183,38 @@ MIT
 
 ## Renamed from process-rules
 
-process-rules became niyam in the release after 0.6.3 (docs/decisions.md,
-P-49, P-50, P-53, P-54, P-55 and P-56). What changed, and what still reads or runs the old name:
+process-rules became niyam in the release after 0.6.3, in steps (docs/decisions.md,
+P-49, P-50 and P-53 to P-57). P-49 renamed the repository, the package, the command and
+the messages; P-50 the keychain service and the settings file; P-53 the hooks and
+the checks; P-54 dropped the `process-rules` command; P-55 moved this Mac's files to
+`~/.config/niyam/` and the agent variable to `NIYAM_AGENT`; P-56 renamed what
+`onboard` writes in a repository (the workflow, its job ids, `niyam-ref`, the cloud
+setup file and the onboard branch). Each of those still read the old names beside
+the new ones. P-57, after every repository and this Mac had moved, stopped: no
+release reads or writes a `process-rules` name.
 
-| What | Now | The old name |
-| ---- | --- | ------------ |
-| Repository | veda-hq/niyam | athya-hq/process-rules, which GitHub forwards |
-| Package | `@veda-hq/niyam` | each release also attaches the same CLI as `athya-hq-process-rules-<version>.tgz`, for 0.6.x's `upgrade` |
-| Command | `niyam` | none since P-54: only the bridge archive, for 0.6.x's `upgrade`, still installs `process-rules`. Since P-53 the hooks, the launcher `machine` writes and the cloud setup run `niyam`; `doctor` marks ✗ a launcher that still runs `process-rules`, and `niyam upgrade` points it at `niyam` |
-| Required checks | `niyam / Work rules`, `niyam / PR identity` (P-53) | `process-rules / …`; `owner-step required-checks` swaps them |
-| Settings file | `.github/niyam.json` | `.github/process-rules.json`, read where the new one is missing, until P-57; since P-56 `onboard` moves it to the new name and deletes it |
-| Keychain item | service `niyam` | service `process-rules`, read where the new one is missing; `machine` copies it to `niyam`, and while it is there a new token goes under both |
-| Workflow pin | `veda-hq/niyam/.github/workflows/checks.yml@v…` | `athya-hq/process-rules/…`, which `onboard` moves |
-| This Mac's files (P-55) | `~/.config/niyam/`: the agent folders and their session files, the session records, the locked `gh` folder | `~/.config/process-rules/`, which `machine` leaves in place and every reader still takes where the new folder has none, until P-57; a session file 0.6.9 wrote there still counts, and `doctor` marks it ▲ |
-| Launcher (P-55) | `~/.config/niyam/bin/niyam` | `~/.config/process-rules/bin/process-rules`, left in place: the hooks `onboard` writes run the new one, else the old one, else `niyam` on PATH; older hooks run the old one, which `niyam upgrade` also points at `niyam`. `doctor` marks ▲ a working old one that is the only one, and ✗ an old one, alone or beside the new one, that cannot run or runs `process-rules` |
-| Agent variable (P-55) | `NIYAM_AGENT` | `PROCESS_RULES_AGENT`, still set beside it, since older pre-push hooks and scripts read only it; every reader takes either |
-| Lock (P-55) | placeholder token `niyam-no-agent-token`, and the SSH refusal says `niyam:` | `process-rules-no-agent-token`, still taken as no token; `onboard` updates the lock in a repo's `.claude/settings.json` `env` |
-| Workflow (P-56) | `.github/workflows/niyam.yml`, its jobs `niyam`, `niyam-weekly`, `niyam-merged`, `niyam-asks`, each with the same `name:`, so the check names stay | `.github/workflows/process-rules.yml` and its `process-rules…` ids, which `onboard` moves and deletes, keeping the client's edits in every shape it knows (one it does not know is replaced by the template, as before, and the plan says so); `onboard`, `owner-step`, `doctor` and session-start still read it, until P-57 |
-| Workflow input (P-56) | `niyam-ref` | `process-rules-ref`, which `checks.yml` still declares and takes, until P-57 |
-| Cloud setup file (P-56) | `.github/niyam/cloud-setup.sh`, installing under `/opt/niyam`, with the Setup mark `/opt/niyam/from-setup`; the Setup snippet runs it, else the old file, setting `NIYAM_SETUP` and `PROCESS_RULES_SETUP` | `.github/process-rules/cloud-setup.sh`, which `onboard` still writes alike, since the snippet pasted before runs it until the new one is pasted once; it honours `PROCESS_RULES_SETUP`, and `/opt/process-rules/from-setup` still counts |
-| Onboard branch (P-56) | `niyam/onboard` | `process-rules/onboard`, which `owner-step required-checks`, `onboard`'s check for a newer release's pull request and the work rules still take; a pull request still open from it, when it is the only open onboard pull request, is updated there rather than left beside a new one; when both branches have one open, `niyam/onboard`'s is updated and the old one is left for you to close |
-| Decisions concurrency key | unchanged, `process-rules-decisions-<repo>` | kept, so runs at older releases and this one never run at once; P-57 renames it once no repo pins a release before P-56's |
-| Board template (P-56) | the Project titled "niyam template" (athya-hq #4) | "process-rules template"; `onboard` finds it by number, so the title changed nothing it reads |
-| Internal names (P-56) | the decisions check's mark `niyam-check-exit=`, temporary folders `niyam-…`, the test commit's branch `niyam/verify-…`, a new token's description `niyam agent` and signing key's title `niyam signing` | none read; tokens and keys made before keep their titles |
+What P-57 removed for good, by hand where it is on a machine:
 
-Still read, and P-57 stops: `~/.config/process-rules/` and its launcher,
-`PROCESS_RULES_AGENT`, `process-rules-no-agent-token`, the keychain service
-`process-rules`, `.github/process-rules.json`, `.github/workflows/process-rules.yml`
-with its ids, `process-rules-ref`, `.github/process-rules/cloud-setup.sh`,
-which `onboard` writes until then, `/opt/process-rules/from-setup`,
-`PROCESS_RULES_SETUP` and `process-rules/onboard`; the decisions job's
-concurrency key `process-rules-decisions-…`, which P-57 renames; and the bridge archive for
-0.6.x's `upgrade`. Unchanged for good: the `process-rules vetted` marks on
-decisions vetted before the rename, which the reviews still read; GitHub's
-redirect from athya-hq/process-rules; the titles of tokens and signing keys
-made before; and the history in docs/decisions.md and docs/roadmap.md.
+- `niyam machine` removes `~/.config/process-rules/`, launcher and all, once the
+  new folder is written, and deletes the keychain entry under the service
+  `process-rules` once it has read back that the `niyam` entry holds the same
+  token; when they differ, or the read fails, it leaves the entry and says why,
+  with the `security delete-generic-password` line to run once nothing needs it.
+  `doctor` marks either one still there ▲.
+- `niyam onboard` deletes `.github/process-rules/cloud-setup.sh`, and writes and
+  runs none under that name; a Setup snippet pasted before 0.6.10 needs the new
+  one pasted once.
+- Releases no longer attach the bridge archive `athya-hq-process-rules-<version>.tgz`,
+  and `upgrade` asks veda-hq/niyam alone: a Mac still on `@athya-hq/process-rules`
+  installs niyam with the `pnpm add -g` line in Releases and upgrading.
 
-From a 0.6.x install, `process-rules upgrade` installs the old-name archive,
-which replaces the old package in place; pnpm refuses a second global package
-with the same bin. Then `niyam upgrade` moves it to `@veda-hq/niyam`: it
-removes the old package, adds the new one, and puts the old one back if the add
-fails. pnpm keeps the `process-rules` command at the same path, so the
-launcher `machine` wrote keeps working until `niyam upgrade` points it at `niyam`; since P-54 the package installs no `process-rules`.
-`niyam upgrade` and `niyam machine` point the launcher at `niyam`. Run `niyam machine` once afterwards to
-copy the token to the `niyam` keychain service and write the session file and
-the launcher under `~/.config/niyam/`; until then the old ones still work, and
-a session started before the upgrade keeps its record and its identity. The
-old folder stays for hooks and CLIs that still read it.
+What still says process-rules, and why:
 
-The old folder, launcher, `PROCESS_RULES_AGENT` and placeholder token of
-P-55's rows stay for one release: P-57 removes the folder and the launcher and
-stops reading the old names, once every Mac has run `niyam machine`.
+| What | Why it stays |
+| ---- | ------------ |
+| The reviews' reader for `<!-- process-rules vetted sha256:… -->` marks | data in decisions already vetted: dropping it would un-vet them |
+| The hook texts and session file of releases before P-57, in `onboard`'s `OLDER_` lists and `sessionFileIs` | data compared against, so `onboard` replaces an older hook in place and a session started before `machine` runs again is not locked out; nothing runs them |
+| The names `machine` and `doctor` look for to remove: `~/.config/process-rules/`, the keychain service `process-rules`, `.github/process-rules/cloud-setup.sh` | each is named only to delete it, or to say it is still there |
+| GitHub's redirect from athya-hq/process-rules | GitHub's, not niyam's |
+| The titles of tokens and signing keys made before P-56, and the Project titled "process-rules work" | on GitHub already; nothing reads them |
+| The history in docs/decisions.md and docs/roadmap.md | a record of what was decided then |

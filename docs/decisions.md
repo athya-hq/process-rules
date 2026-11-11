@@ -1452,3 +1452,73 @@
     repo not yet moved would run no checks, holding every pull request);
     stopping writes to the old cloud setup file (the pasted snippet would
     find nothing until the owner pastes again).
+- **2026-11-11 — Record: the old process-rules names go (P-57).** P-55 and
+  P-56 wrote niyam's names and still read the old ones. The owner said in
+  chat on 2026-11-11, "I want to fix everything", so once this Mac and every
+  repository had moved, the reads go too: no release reads or writes a
+  `process-rules` name.
+  - This Mac and the lock: nothing reads `~/.config/process-rules/`, its
+    launcher, session files or session records. `NIYAM_AGENT` alone names
+    the agent, and nothing sets `PROCESS_RULES_AGENT`.
+    `process-rules-no-agent-token` is a token like any other, which GitHub
+    refuses. The keychain store reads and writes the service `niyam` alone.
+    The hooks run `~/.config/niyam/bin/niyam`, else `niyam` on PATH, and the
+    pre-push hook checks `NIYAM_AGENT` and `CLAUDECODE` alone. 0.6.10's
+    hooks and pre-push hook join `onboard`'s older lists, so it replaces
+    them in place.
+  - Destructive steps, each named in the plan before the one yes:
+    - `machine` removes `~/.config/process-rules/`, whole, the old
+      launcher and any session file, record or lockout record still in it,
+      once the new folder is written.
+    - `machine` deletes the keychain entry under the service
+      `process-rules`, but only after reading back that the `niyam` entry
+      holds the same token, read again just before the delete. When they
+      differ or a read fails, it leaves the entry and says why, under
+      "Worth fixing", with the `security delete-generic-password` line to
+      run once nothing needs it. `doctor` marks a leftover folder or entry
+      ▲, fixed by `niyam machine`, or by that line where the tokens differ.
+    - Releases stop attaching the bridge archive
+      `athya-hq-process-rules-<v>.tgz`, and `src/old-cli.ts` is deleted.
+      `upgrade` asks veda-hq/niyam alone and no longer handles
+      `@athya-hq/process-rules`. A Mac still on it installs niyam with the
+      README's `pnpm add -g` line, after `pnpm remove -g` of the old
+      package. The `LAST_OLD_RELEASE` mapping goes too: `onboard` pins only
+      the release that runs and `upgrade` installs only the newest, so
+      nothing installs a release at or before 0.6.3.
+  - The repository: nothing reads `.github/process-rules.json`,
+    `.github/workflows/process-rules.yml` or its `process-rules…` ids,
+    `process-rules-ref`, an `athya-hq/process-rules` pin,
+    `/opt/process-rules/from-setup`, `PROCESS_RULES_SETUP`, the
+    `process-rules/onboard` branch or a `chore(process-rules)` subject.
+    `onboard` stops writing `.github/process-rules/cloud-setup.sh`, and
+    deletes it in its own pull request wherever the new file is left. The
+    work rules allow that deletion, as they did the moves of P-56. The
+    Setup snippet runs `.github/niyam/cloud-setup.sh` alone and sets
+    `NIYAM_SETUP` alone. `checks.yml` declares `niyam-ref` alone, and the
+    decisions job's concurrency group is `niyam-decisions-<repo>`.
+    `owner-step` finds the `niyam` job alone and requires `niyam / …`
+    checks with no swap, and `onboard` no longer reads rulesets for the
+    old check names.
+  - What stays, and why:
+    - The reader for `<!-- process-rules vetted sha256:… -->` marks: they
+      are data in decisions already vetted, and dropping it would un-vet
+      them.
+    - The `OLDER_` hook texts, and 0.6.10's session file, which
+      `sessionFileIs` still counts as older: data compared against. Without
+      that file, a session started between the upgrade and `machine` would
+      lock out. Nothing runs these texts, and `machine` rewrites the
+      session file.
+    - The three names `machine`, `doctor` and `onboard` delete or report
+      as left over.
+    - GitHub's redirect from athya-hq/process-rules, and the titles of
+      tokens, signing keys and the Project made before.
+    - The history in this file and docs/roadmap.md.
+  - Cost: one release, only once every niyam worktree and athya_mono pull
+    request branch carries P-55/P-56 hook text, this Mac has run
+    `machine`, and the new Setup snippet is pasted. A checkout still on
+    older hooks is locked out of GitHub until it merges main.
+  - Rejected: keeping the bridge archive for one more release, since
+    every Mac has moved to `@veda-hq/niyam`; copying the old folder's
+    lockout records into the new one before removing it, as of P-55
+    `machine` writes them in the new folder alone, so at worst `doctor`
+    warns again of a login the owner once chose to keep.
