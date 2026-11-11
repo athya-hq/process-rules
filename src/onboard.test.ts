@@ -14,7 +14,7 @@ import type { HttpResult } from './types.ts';
 import { pathsFor, sessionScript } from './agent.ts';
 import { FEATURES } from './features.ts';
 import { packageVersion } from './version.ts';
-import { GUARD_COMMAND, HOOK_COMMAND, HOOKS_PATH, OLDER_HOOK_COMMANDS, OLDER_PRE_PUSH_HOOKS, PRE_PUSH_HOOK, AUTO_FIX_RULES, OLDER_REVIEW_THREAD_RULE, REVIEW_THREAD_RULE, SETUP_FIRST, WORKFLOW_PATH, claudeSettings, jobsWithoutLibrary, olderWorkflows, onboard, onboardArgs, workflow, workflowPins, workflowUpdate } from './onboard.ts';
+import { GUARD_COMMAND, HOOK_COMMAND, HOOKS_PATH, OLDER_GUARD_COMMANDS, OLDER_HOOK_COMMANDS, OLDER_PRE_PUSH_HOOKS, PRE_PUSH_HOOK, AUTO_FIX_RULES, OLDER_REVIEW_THREAD_RULE, REVIEW_THREAD_RULE, SETUP_FIRST, WORKFLOW_PATH, claudeSettings, jobsWithoutLibrary, olderWorkflows, onboard, onboardArgs, workflow, workflowPins, workflowUpdate } from './onboard.ts';
 import { BASE_ENV } from './agent.ts';
 import { BASE_ENV_069, GUARD_COMMAND_069, HOOK_COMMAND_069, PRE_PUSH_HOOK_069 } from './older-texts.test.ts';
 import { actionsKey, sealedValue } from './fake-secrets.test.ts';
@@ -724,6 +724,52 @@ describe('onboard', () => {
       cli(launcher, 'exit 1');
       assert.equal(shell(GUARD_COMMAND, {}, input('gh pr list')).status, 2);
     });
+
+    describe('with the launcher in either folder (P-55)', () => {
+      const now = join(home, '.config/niyam/bin/niyam');
+      /** Which launchers there are, each saying which it is; none leaves niyam on PATH, from `bin`. */
+      const launchers = (which: { now?: boolean; old?: boolean }): void => {
+        rmSync(now, { force: true });
+        rmSync(launcher, { force: true });
+        if (which.now) cli(now, 'echo "new launcher ran $*"');
+        if (which.old) cli(launcher, 'echo "old launcher ran $*"');
+        cli(join(bin, 'niyam'), 'echo "niyam on PATH ran $*"');
+      };
+      const path = { PATH: `${bin}:/usr/bin:/bin` };
+      for (const [state, which, ran] of [
+        ['the new launcher only', { now: true }, 'new launcher'],
+        ['the old launcher only, as a Mac machine has not run on since', { old: true }, 'old launcher'],
+        ['both, the new one first', { now: true, old: true }, 'new launcher'],
+        ['neither, niyam on PATH', {}, 'niyam on PATH'],
+      ] as const) {
+        it(`this release's hooks run ${ran} with ${state}`, () => {
+          launchers(which);
+          assert.equal(shell(HOOK_COMMAND, path, '{}').stdout, `${ran} ran session-start\n`);
+          assert.equal(shell(GUARD_COMMAND, path, JSON.stringify({ tool_input: { command: 'gh pr list' } })).stdout, `${ran} ran guard\n`);
+          const pushed = spawnSync('sh', ['-c', PRE_PUSH_HOOK, 'pre-push', 'origin', 'url'], { encoding: 'utf8', env: { HOME: home, ...path, CLAUDECODE: '1' } });
+          assert.equal(pushed.stdout, `${ran} ran pre-push origin url\n`);
+        });
+      }
+
+      it("0.6.9's hooks, not yet replaced, run the new CLI through the old launcher machine leaves in place", () => {
+        launchers({ now: true, old: true });
+        assert.equal(shell(HOOK_COMMAND_069, path, '{}').stdout, 'old launcher ran session-start\n');
+        assert.equal(shell(GUARD_COMMAND_069, path, JSON.stringify({ tool_input: { command: 'gh pr list' } })).stdout, 'old launcher ran guard\n');
+        const pushed = spawnSync('sh', ['-c', PRE_PUSH_HOOK_069, 'pre-push', 'origin', 'url'], { encoding: 'utf8', env: { HOME: home, ...path, PROCESS_RULES_AGENT: AGENT } });
+        assert.equal(pushed.stdout, 'old launcher ran pre-push origin url\n');
+      });
+
+      it("the pre-push hook checks an agent session's push named by either variable, and lets anyone else's go", () => {
+        launchers({ now: true });
+        const hook = (env: Record<string, string>) => spawnSync('sh', ['-c', PRE_PUSH_HOOK, 'pre-push', 'origin', 'url'], { encoding: 'utf8', env: { HOME: home, ...path, ...env } });
+        for (const env of [{ NIYAM_AGENT: AGENT }, { PROCESS_RULES_AGENT: AGENT }, { NIYAM_AGENT: AGENT, PROCESS_RULES_AGENT: AGENT }, { NIYAM_AGENT: '', PROCESS_RULES_AGENT: AGENT }, { CLAUDECODE: '1' }]) {
+          assert.equal(hook(env).stdout, 'new launcher ran pre-push origin url\n', JSON.stringify(env));
+        }
+        for (const env of [{}, { NIYAM_AGENT: '' }, { CLAUDECODE: '0' }]) {
+          assert.deepEqual((({ status, stdout }) => ({ status, stdout }))(hook(env)), { status: 0, stdout: '' }, JSON.stringify(env));
+        }
+      });
+    });
   });
 
   it('adds the hook when the command only appears elsewhere', async () => {
@@ -780,6 +826,20 @@ describe('onboard', () => {
     const { out } = await run(sys);
     assert.deepEqual(planned(out, 'This Mac'), ['pre-push hook: older one replaced']);
     assert.match(opened(sys)?.body ?? '', /^ {2}- replaced the older pre-push git hook \.git\/hooks\/pre-push, which checks/m);
+    assert.equal(sys.files.get(PRE_PUSH), PRE_PUSH_HOOK);
+  });
+
+  it("replaces 0.6.9's hooks, pre-push hook and lock in place, which name the old folder, variable and token (P-55)", async () => {
+    assert.ok(OLDER_HOOK_COMMANDS.includes(HOOK_COMMAND_069) && OLDER_GUARD_COMMANDS.includes(GUARD_COMMAND_069) && OLDER_PRE_PUSH_HOOKS.includes(PRE_PUSH_HOOK_069));
+    const sys = fresh();
+    const entry = (command: string, extra = {}) => ({ ...extra, hooks: [{ type: 'command', command }] });
+    sys.files.set(HOOKS, JSON.stringify({ hooks: { SessionStart: [entry(HOOK_COMMAND_069)], PreToolUse: [entry(GUARD_COMMAND_069, { matcher: 'Bash' })] }, env: BASE_ENV_069, permissions: { allow: ALLOW } }, null, 2));
+    sys.files.set(PRE_PUSH, PRE_PUSH_HOOK_069);
+    const { out } = await run(sys);
+    assert.ok(planned(out, 'Pull request').includes('settings.json: hooks updated, lock updated'), out.join('\n'));
+    assert.deepEqual(planned(out, 'This Mac'), ['pre-push hook: older one replaced']);
+    assert.match(opened(sys)?.body ?? '', /update GH_TOKEN, GITHUB_TOKEN, GIT_SSH_COMMAND in env to this release's lock/);
+    assert.deepEqual(JSON.parse(repo(sys).get(HOOKS) ?? ''), { hooks: { SessionStart: [SESSION_ENTRY], PreToolUse: [GUARD_ENTRY] }, env: BASE_ENV, permissions: { allow: ALLOW } });
     assert.equal(sys.files.get(PRE_PUSH), PRE_PUSH_HOOK);
   });
 
@@ -877,10 +937,12 @@ describe('onboard', () => {
     assert.equal(repo(sys).get(WORKFLOW), own);
   });
 
-  it('refuses inside an agent session', async () => {
-    const sys = fresh();
-    sys.env.PROCESS_RULES_AGENT = AGENT;
-    assert.deepEqual(await run(sys), { code: 1, out: [], err: ['onboard: run it in your own terminal, not in an agent session'] });
+  it('refuses inside an agent session, named by NIYAM_AGENT or the PROCESS_RULES_AGENT an older release set', async () => {
+    for (const env of [{ PROCESS_RULES_AGENT: AGENT }, { NIYAM_AGENT: AGENT }, { NIYAM_AGENT: '', PROCESS_RULES_AGENT: AGENT }]) {
+      const sys = fresh();
+      Object.assign(sys.env, env);
+      assert.deepEqual(await run(sys), { code: 1, out: [], err: ['onboard: run it in your own terminal, not in an agent session'] }, JSON.stringify(env));
+    }
   });
 
   for (const [name, named, change, message] of [

@@ -6,6 +6,7 @@ import { AGENT, AGENT_ID, CLASSIC, CLI, FakeSys, HOME, NODE, KEY, PRIVATE_KEY, P
 import { declinedPath, movedPath, ownerFixes, readMoved } from './lockout.ts';
 import { TOKEN_PAGE, machine, machineArgs, tokenInstructions } from './machine.ts';
 import { KEYCHAIN } from './token-store.ts';
+import { SESSION_069 } from './older-texts.test.ts';
 
 const SESSION = `${HOME}/.config/niyam/examplebot/session.sh`;
 const LAUNCHER = launcherPath(HOME);
@@ -209,6 +210,37 @@ describe('machine', () => {
       sys.execOverride = (call) => (call.args[0] === '-i' ? { code: 1, stdout: '', stderr: '' } : undefined);
       const { code, err } = await setUp(sys, '--yes');
       assert.deepEqual({ code, err }, { code: 1, err: [`machine: this Mac's keychain did not take the token under service niyam, account ${AGENT}; the old entry still works`] });
+    });
+  });
+
+  describe('a Mac set up under 0.6.9, before P-55 (P-55)', () => {
+    const OLD_SESSION = pathsFor(HOME, AGENT, true).session;
+    const OLD_LAUNCHER = launcherPath(HOME, true);
+    const oldLauncher = launcherScript(NODE, CLI);
+    /** done(), with the session file and the launcher in the old folder alone, as 0.6.9's machine left them. */
+    const before = (): FakeSys => {
+      const sys = done();
+      sys.files.delete(SESSION);
+      sys.files.delete(launcherPath(HOME));
+      sys.files.set(OLD_SESSION, SESSION_069);
+      sys.files.set(OLD_LAUNCHER, oldLauncher);
+      return sys;
+    };
+
+    it('writes the session file and the launcher in the new folder, leaving the old ones for older hooks and CLIs', async () => {
+      const sys = before();
+      const { code, out } = await setUp(sys, '--yes');
+      assert.equal(code, 0, out.join('\n'));
+      assert.ok(out.some((line) => /session file\s+new/.test(line)), out.join('\n'));
+      assert.ok(out.includes('│    launcher      ~/.config/niyam/bin/niyam'), out.join('\n'));
+      assert.equal(sys.files.get(SESSION), sessionScript(AGENT, AGENT_ID, pathsFor(HOME, AGENT)));
+      assert.equal(sys.files.get(launcherPath(HOME)), launcherScript(NODE, CLI));
+      assert.equal(sys.modes.get(launcherPath(HOME)), 0o755);
+      assert.ok(sys.dirs.includes(`${HOME}/.config/niyam/examplebot/gh`));
+      assert.equal(sys.files.get(OLD_SESSION), SESSION_069, 'the old session file stays');
+      assert.equal(sys.files.get(OLD_LAUNCHER), oldLauncher, 'the old launcher stays');
+      assert.deepEqual(sys.removed, []);
+      assert.equal((await setUp(sys)).out.at(-1), `└  ${AGENT} is ready on this Mac`, 'then nothing more to do');
     });
   });
 

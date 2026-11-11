@@ -95,7 +95,7 @@ describe('owner-step arguments', () => {
 
 describe('owner-step', () => {
   it('refuses in an agent session, and without a terminal, before any folder or sign-in', async () => {
-    for (const env of [{ PROCESS_RULES_AGENT: 'ExampleBot' }, { CLAUDECODE: '1' }]) {
+    for (const env of [{ PROCESS_RULES_AGENT: 'ExampleBot' }, { NIYAM_AGENT: 'ExampleBot' }, { CLAUDECODE: '1' }]) {
       const { sys } = world();
       sys.env = env;
       const { io, err } = capture();

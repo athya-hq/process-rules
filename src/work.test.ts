@@ -976,11 +976,14 @@ describe('prePush', () => {
   });
 
   it('refuses an agent session with no token, at the identity guard', async () => {
-    for (const token of [undefined, 'process-rules-no-agent-token']) {
-      const sys = session('Slice: #12');
-      sys.env = { PROCESS_RULES_AGENT: AGENT, ...(token ? { GH_TOKEN: token } : {}) };
-      const { code, err } = await push(sys, `refs/heads/work ${LOCAL} refs/heads/work ${REMOTE}`);
-      assert.deepEqual({ code, last: err.at(-1) }, { code: 1, last: `pre-push: refused; an agent session pushes to GitHub only as ${AGENT}` });
+    // Both placeholders, this release's and 0.6.9's, are no token; the agent by either name (P-55).
+    for (const token of [undefined, 'process-rules-no-agent-token', 'niyam-no-agent-token']) {
+      for (const name of ['PROCESS_RULES_AGENT', 'NIYAM_AGENT']) {
+        const sys = session('Slice: #12');
+        sys.env = { [name]: AGENT, ...(token ? { GH_TOKEN: token } : {}) };
+        const { code, err } = await push(sys, `refs/heads/work ${LOCAL} refs/heads/work ${REMOTE}`);
+        assert.deepEqual({ code, last: err.at(-1) }, { code: 1, last: `pre-push: refused; an agent session pushes to GitHub only as ${AGENT}` }, `${name} ${token}`);
+      }
     }
   });
 
@@ -1736,6 +1739,8 @@ describe('propose', () => {
     const { sys } = session();
     sys.env = { GH_TOKEN: 'process-rules-no-agent-token' };
     assert.equal((await run(sys)).err[0], '✗ this session has no token; run niyam doctor');
+    sys.env = { GH_TOKEN: 'niyam-no-agent-token' };
+    assert.equal((await run(sys)).err[0], '✗ this session has no token; run niyam doctor', "this release's placeholder too (P-55)");
     sys.env = { GH_TOKEN: 'ghp_owner' };
     assert.equal((await run(sys)).err[0], "✗ propose posts as ExampleBot, but this session's token is refused");
     sys.acceptToken('ghp_owner', OWNER);
