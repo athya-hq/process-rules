@@ -173,7 +173,7 @@ describe('as-agent from a hook', () => {
   mkdirSync(join(repo, '.github'), { recursive: true });
   writeFileSync(join(repo, '.github/niyam.json'), JSON.stringify({ owner: 'example-owner', agent: AGENT }));
   spawnSync('git', ['init', '-q', repo]);
-  mkdirSync(join(home, '.config/process-rules/sessions'), { recursive: true });
+  mkdirSync(join(home, '.config/niyam/sessions'), { recursive: true });
   writeFileSync(join(launcher), launcherScript(process.execPath, fileURLToPath(new URL('./cli.ts', import.meta.url))), { mode: 0o755 });
   const env = { ...BASE_ENV, PATH: '/usr/bin:/bin', HOME: home, CLAUDE_PROJECT_DIR: repo, CLAUDE_CODE_REMOTE: 'true' };
   const child = 'read line; echo "out:$line:$GH_TOKEN:${GIT_CONFIG_PARAMETERS-unset}"; echo err >&2; exit 7';
@@ -189,7 +189,7 @@ describe('as-agent from a hook', () => {
   });
 
   it("passes stdin, stdout, stderr and the exit code straight through once it did", () => {
-    writeFileSync(join(home, `.config/process-rules/sessions/${ID}.json`), JSON.stringify({ agent: AGENT }));
+    writeFileSync(join(home, `.config/niyam/sessions/${ID}.json`), JSON.stringify({ agent: AGENT }));
     const result = hook();
     assert.deepEqual([result.status, result.stdout, result.stderr], [7, `out:hi:${PROXY_TOKEN}:unset\n`, 'err\n']);
   });

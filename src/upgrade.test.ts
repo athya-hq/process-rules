@@ -85,7 +85,7 @@ describe('upgrade', () => {
       const { code, out } = await upgraded(sys, running);
       assert.equal(code, 0, out.join('\n'));
       assert.equal(sys.files.get(launcher), launcherScript('/opt/node/bin/node', '/x/dist/cli.js', `${PNPM_BIN}/niyam`));
-      assert.ok(out.includes('upgrade: the launcher ~/.config/process-rules/bin/process-rules now runs ~/Library/pnpm/bin/niyam, not process-rules'), out.join('\n'));
+      assert.ok(out.includes('upgrade: the launcher ~/.config/niyam/bin/niyam now runs ~/Library/pnpm/bin/niyam, not process-rules'), out.join('\n'));
     }
     const kept = machine({ [PNPM_BIN]: NEW });
     const own = launcherScript('/opt/node/bin/node', '/x/dist/cli.js', `${PNPM_BIN}/niyam`);
@@ -96,7 +96,7 @@ describe('upgrade', () => {
     lone.files.set(launcher, launcherScript('/opt/node/bin/node', '/x/dist/cli.js', '/elsewhere/process-rules'));
     const { code, err } = await upgraded(lone, NEW);
     assert.equal(code, 1);
-    assert.deepEqual(err, ['upgrade: the launcher ~/.config/process-rules/bin/process-rules runs process-rules, and no /elsewhere/niyam is there to run instead; run niyam machine']);
+    assert.deepEqual(err, ['upgrade: the launcher ~/.config/niyam/bin/niyam runs process-rules, and no /elsewhere/niyam is there to run instead; run niyam machine']);
   });
 
   it('says so and installs nothing when this is the newest release', async () => {

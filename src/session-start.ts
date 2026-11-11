@@ -6,13 +6,14 @@ import {
   loadSettings,
   settingsPathIn,
   lockScript,
-  pathsFor,
   sameLogin,
   sessionNames,
+  sessionPaths,
   sessionRecord,
   sessionFileIs,
   type Settings,
 } from './agent.ts';
+import { AGENT_VAR, OLD_AGENT_VAR } from './names.ts';
 import { FROM_SETUP, cloudLogin, cloudToken, repoReleases } from './cloud.ts';
 import { CLOUD_SETUP_PATH, WORKFLOW_PATH } from './onboard-pull.ts';
 import { PRE_PUSH_HOOK, prePushHook } from './onboard.ts';
@@ -175,7 +176,8 @@ async function cloudStart(sys: Sys): Promise<Said> {
   try {
     // gh needs a token to run at all: the proxy's placeholder, which it swaps for the connected account's.
     const token = cloudToken(sys);
-    sys.append(envFile, `\nunset ${Object.keys(BASE_ENV).join(' ')}\nexport GH_TOKEN=${token} GITHUB_TOKEN=${token} PROCESS_RULES_AGENT=${asked.login}\n`);
+    // The agent under both names: pre-push hooks and scripts an older release wrote read only the old one.
+    sys.append(envFile, `\nunset ${Object.keys(BASE_ENV).join(' ')}\nexport GH_TOKEN=${token} GITHUB_TOKEN=${token} ${AGENT_VAR}=${asked.login} ${OLD_AGENT_VAR}=${asked.login}\n`);
   } catch (error) {
     return { line: `niyam: STOP. Writing to CLAUDE_ENV_FILE failed (${message(error)}), so this cloud session cannot be given the agent identity. ${stop}` };
   }
@@ -219,7 +221,8 @@ function start(sys: Sys): Said {
   const here = agentHere(sys, settings.agents, file);
   if ('problem' in here) return locked(here.problem, `ask ${owner} to run niyam machine <agent> for one of them`);
   const { agent } = here;
-  const paths = pathsFor(sys.home, agent);
+  // The config folder's session file, else the one machine wrote before P-55, which still counts until machine runs.
+  const paths = sessionPaths(sys, agent);
   const fix = `ask ${owner} to run niyam machine ${agent} (niyam doctor ${agent} names what is missing)`;
   const store = tokenStore(sys);
   if (!store) return locked(unsupported(sys), `tell ${owner}`);

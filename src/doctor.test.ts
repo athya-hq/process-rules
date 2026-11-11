@@ -12,7 +12,7 @@ import { AUTO_FIX_RULES, workflow } from './onboard.ts';
 import { AGENT, AGENT_ID, CLASSIC, FakeSys, HOME, KEY, NOW, ROOT, TOKEN, capture } from './fake.test.ts';
 import { packageVersion } from './version.ts';
 
-const SESSION = `${HOME}/.config/process-rules/examplebot/session.sh`;
+const SESSION = `${HOME}/.config/niyam/examplebot/session.sh`;
 const LAUNCHER = launcherPath(HOME);
 
 function healthy(): FakeSys {

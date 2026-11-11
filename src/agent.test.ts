@@ -251,9 +251,9 @@ describe('pathsFor and noreplyEmail', () => {
   it('keeps the key in ~/.ssh and the rest in a folder per agent account', () => {
     assert.deepEqual(pathsFor(HOME, AGENT), {
       key: `${HOME}/.ssh/examplebot_signing`,
-      dir: `${HOME}/.config/process-rules/examplebot`,
-      session: `${HOME}/.config/process-rules/examplebot/session.sh`,
-      gh: `${HOME}/.config/process-rules/examplebot/gh`,
+      dir: `${HOME}/.config/niyam/examplebot`,
+      session: `${HOME}/.config/niyam/examplebot/session.sh`,
+      gh: `${HOME}/.config/niyam/examplebot/gh`,
     });
     assert.equal(noreplyEmail(AGENT_ID, AGENT), '42+ExampleBot@users.noreply.github.com');
   });

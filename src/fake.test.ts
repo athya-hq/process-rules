@@ -156,7 +156,8 @@ export class FakeSys implements Sys {
     if (override) return override;
     const ok = (stdout = ''): ExecResult => ({ code: 0, stdout, stderr: '' });
     const fail = (stderr = 'failed'): ExecResult => ({ code: 1, stdout: '', stderr });
-    if (command === launcherPath(HOME)) return this.files.has(command) ? ok('0.0.0\n') : fail('not found');
+    // Either launcher: the one machine writes, or the one it wrote before P-55.
+    if (command === launcherPath(HOME) || command === launcherPath(HOME, true)) return this.files.has(command) ? ok('0.0.0\n') : fail('not found');
     // The temporary repository onboard commits its changes in.
     if (command === 'git' && args.slice(0, 3).join(' ') === 'rev-parse --verify -q') {
       const path = (args[3] ?? '').replace(/^FETCH_HEAD:/, '');

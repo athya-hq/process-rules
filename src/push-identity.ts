@@ -1,4 +1,4 @@
-import { API, anyLogin, either } from './agent.ts';
+import { API, agentIn, anyLogin, either } from './agent.ts';
 import { cloudLogin } from './cloud.ts';
 import type { Sys } from './types.ts';
 import { GITHUB_HOST, GITHUB_HOST_RE } from './host.ts';
@@ -9,11 +9,12 @@ const HTTPS_GITHUB = new RegExp(`^https://(?:[^@/\\s]+@)?${GITHUB_HOST_RE}(?::\\
 
 /**
  * Whether this shell is an agent session's, on a Mac or in a Claude cloud
- * session: one session-start gave the agent identity, or any shell Claude
- * Code runs (it sets CLAUDECODE), so a session whose hooks never ran is one too.
+ * session: one session-start gave the agent identity, by NIYAM_AGENT or the
+ * PROCESS_RULES_AGENT an older release set, or any shell Claude Code runs (it
+ * sets CLAUDECODE), so a session whose hooks never ran is one too.
  */
 export function agentSession(sys: Sys): boolean {
-  return !!sys.env.PROCESS_RULES_AGENT || sys.env.CLAUDECODE === '1';
+  return agentIn(sys.env) !== undefined || sys.env.CLAUDECODE === '1';
 }
 
 /**

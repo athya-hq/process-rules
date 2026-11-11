@@ -16,6 +16,7 @@ import { FEATURES } from './features.ts';
 import { packageVersion } from './version.ts';
 import { GUARD_COMMAND, HOOK_COMMAND, HOOKS_PATH, OLDER_HOOK_COMMANDS, OLDER_PRE_PUSH_HOOKS, PRE_PUSH_HOOK, AUTO_FIX_RULES, OLDER_REVIEW_THREAD_RULE, REVIEW_THREAD_RULE, SETUP_FIRST, WORKFLOW_PATH, claudeSettings, jobsWithoutLibrary, olderWorkflows, onboard, onboardArgs, workflow, workflowPins, workflowUpdate } from './onboard.ts';
 import { BASE_ENV } from './agent.ts';
+import { BASE_ENV_069, GUARD_COMMAND_069, HOOK_COMMAND_069, PRE_PUSH_HOOK_069 } from './older-texts.test.ts';
 import { actionsKey, sealedValue } from './fake-secrets.test.ts';
 
 const SETTINGS = `${ROOT}/.github/niyam.json`;
@@ -533,7 +534,20 @@ describe('onboard', () => {
   it('sets only the lock variables that differ, keeping the client\'s own', () => {
     const { text, changes } = claudeSettings(JSON.stringify({ ...CLAUDE, env: { ...BASE_ENV, A: '1', GH_TOKEN: 'mine' } }));
     assert.deepEqual(JSON.parse(text).env, { ...BASE_ENV, A: '1' });
-    assert.deepEqual(changes, ['set GH_TOKEN in env, so GitHub is locked out until session-start gives the agent identity']);
+    assert.deepEqual(changes, ["update GH_TOKEN in env to this release's lock"]);
+    const { changes: unset, labels } = claudeSettings(JSON.stringify({ ...CLAUDE, env: { ...BASE_ENV, GH_TOKEN: undefined } }));
+    assert.deepEqual(unset, ['set GH_TOKEN in env, so GitHub is locked out until session-start gives the agent identity']);
+    assert.deepEqual(labels, ['lock']);
+  });
+
+  it("updates 0.6.9's lock in env to niyam's placeholder token and SSH refusal, in place (P-55)", () => {
+    const { text, changes, labels } = claudeSettings(JSON.stringify({ ...CLAUDE, env: { ...BASE_ENV_069, A: '1' } }, null, 2));
+    assert.deepEqual(JSON.parse(text).env, { ...BASE_ENV, A: '1' });
+    assert.equal(BASE_ENV.GH_TOKEN, 'niyam-no-agent-token');
+    assert.equal(BASE_ENV.GIT_SSH_COMMAND, "echo 'niyam: SSH is off in agent sessions; GitHub goes over HTTPS' >&2; false");
+    assert.deepEqual(changes, ["update GH_TOKEN, GITHUB_TOKEN, GIT_SSH_COMMAND in env to this release's lock"]);
+    assert.deepEqual(labels, ['lock updated']);
+    assert.deepEqual(claudeSettings(text).changes, [], 'once updated, nothing more');
   });
 
   it("adds the review-thread rule to the client's own allow list once", () => {

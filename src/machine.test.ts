@@ -7,7 +7,7 @@ import { declinedPath, movedPath, ownerFixes, readMoved } from './lockout.ts';
 import { TOKEN_PAGE, machine, machineArgs, tokenInstructions } from './machine.ts';
 import { KEYCHAIN } from './token-store.ts';
 
-const SESSION = `${HOME}/.config/process-rules/examplebot/session.sh`;
+const SESSION = `${HOME}/.config/niyam/examplebot/session.sh`;
 const LAUNCHER = launcherPath(HOME);
 const INSTALLED = '/home/u/Library/pnpm/global/5/node_modules/@athya-hq/process-rules/dist/cli.js';
 
@@ -49,7 +49,7 @@ const FRESH_PLAN = [
   '│    signing key   ~/.ssh/examplebot_signing (new)',
   '│    token         classic, in the keychain (new)',
   '│    session file  new',
-  '│    launcher      ~/.config/process-rules/bin/process-rules',
+  '│    launcher      ~/.config/niyam/bin/niyam',
   '│',
   '◇  GitHub — as ExampleBot',
   '│    signing key  register',
@@ -107,7 +107,7 @@ describe('machine', () => {
     );
     assert.equal(sys.modes.get(SESSION), 0o600);
     assert.ok(sys.dirs.includes(`${HOME}/.ssh`));
-    assert.ok(sys.dirs.includes(`${HOME}/.config/process-rules/examplebot/gh`));
+    assert.ok(sys.dirs.includes(`${HOME}/.config/niyam/examplebot/gh`));
     const keygen = sys.calls.find((c) => c.command === 'ssh-keygen');
     assert.deepEqual(keygen?.args, ['-q', '-t', 'ed25519', '-C', 'ExampleBot signing', '-N', '', '-f', KEY]);
     assert.ok(!sys.calls.some((c) => c.command === 'git' && c.args[0] !== 'rev-parse'), 'touches no repository');
@@ -452,7 +452,7 @@ describe('machine', () => {
     assert.equal(sys.files.get(LAUNCHER), launcherScript(NODE, INSTALLED, '/home/u/Library/pnpm/bin/niyam'));
     assert.equal(sys.modes.get(LAUNCHER), 0o755);
     assert.match(sys.files.get(LAUNCHER) ?? '', /^PATH='\/opt\/node\/bin':"\$PATH"$/m);
-    assert.ok(sys.dirs.includes(`${HOME}/.config/process-rules/bin`));
+    assert.ok(sys.dirs.includes(`${HOME}/.config/niyam/bin`));
   });
 
   it("runs the CLI's own script from a checkout, whatever is on PATH, or when nothing is", async () => {
@@ -474,7 +474,7 @@ describe('machine', () => {
     sys.answers = ['y'];
     const { code, out } = await setUp(sys);
     assert.equal(code, 0);
-    assert.deepEqual(out.slice(2, 4), ['◇  This Mac', '│    launcher  ~/.config/process-rules/bin/process-rules']);
+    assert.deepEqual(out.slice(2, 4), ['◇  This Mac', '│    launcher  ~/.config/niyam/bin/niyam']);
     assert.equal(sys.files.get(LAUNCHER), launcherScript(NODE, CLI));
   });
 

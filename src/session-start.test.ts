@@ -120,7 +120,7 @@ describe('sessionStart', () => {
       const sys = cloud(AGENT);
       const { out, env } = await start(sys);
       assert.deepEqual(out, ['niyam: this cloud session works as ExampleBot on GitHub.']);
-      assert.equal(env, `\nunset ${Object.keys(BASE_ENV).join(' ')}\nexport GH_TOKEN=proxy-injected GITHUB_TOKEN=proxy-injected PROCESS_RULES_AGENT=ExampleBot\n`);
+      assert.equal(env, `\nunset ${Object.keys(BASE_ENV).join(' ')}\nexport GH_TOKEN=proxy-injected GITHUB_TOKEN=proxy-injected NIYAM_AGENT=ExampleBot PROCESS_RULES_AGENT=ExampleBot\n`);
       assert.equal(sys.files.get(RECORD), '{"agent":"ExampleBot"}\n');
       assert.equal(sys.requests.at(-1)?.token, PROXY_TOKEN, 'the proxy placeholder, never the lock');
     });
@@ -441,7 +441,7 @@ describe('sessionStart', () => {
       assert.equal(env, `\n${lockScript(HOME)}`);
       assert.deepEqual(out, [
         locked(
-          '.github/niyam.json names the agents OtherBot or ExampleBot, and niyam machine has set up OtherBot and ExampleBot on this machine, so which one this session works as cannot be told; remove the others\' folders under ~/.config/process-rules',
+          '.github/niyam.json names the agents OtherBot or ExampleBot, and niyam machine has set up OtherBot and ExampleBot on this machine, so which one this session works as cannot be told; remove the others\' folders under ~/.config/niyam and ~/.config/process-rules',
         ),
       ]);
     });
