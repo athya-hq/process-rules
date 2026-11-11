@@ -2174,8 +2174,14 @@ describe("onboard's pull request", () => {
     const both = fresh();
     both.route('GET', `${REPO}/pulls?state=open&head=example-org:process-rules/onboard`, old);
     both.route('GET', `${REPO}/pulls?state=open&head=example-org:niyam/onboard`, { status: 200, json: [{ number: 5, html_url: 'https://github.com/example-org/example-app/pull/5' }] });
+    both.route('POST', `${REPO}/pulls`, { status: 422, json: { message: 'Validation Failed' } });
+    both.route('PATCH', `${REPO}/pulls/5`, { status: 200, json: {} });
     assert.equal((await run(both)).code, 0);
     assert.equal((opened(both) as { head?: string } | undefined)?.head, 'niyam/onboard');
+    const pushed = both.calls.filter((c) => c.command === 'git' && c.args[0] === 'push').at(-1);
+    assert.equal(pushed?.args.at(-1), '+abc123:refs/heads/niyam/onboard');
+    assert.ok(both.requests.some((r) => r.method === 'PATCH' && r.url.endsWith(`${REPO}/pulls/5`)), 'the niyam/onboard one is updated');
+    assert.ok(!both.requests.some((r) => r.method === 'PATCH' && r.url.endsWith(`${REPO}/pulls/9`)), 'the old one is left as it is');
   });
 
   it('says so when the description of the open pull request cannot be updated, and goes on', async () => {

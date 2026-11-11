@@ -1387,7 +1387,10 @@
     input renamed, and then goes through the same steps as before: adding
     the merged and needs-owner jobs, and moving pins, branch, schedule and
     secrets. The 0.6.8 and 0.6.9 workflow, copied from athya_mono, niyam and
-    niyam-sandbox, moves with the client's own edits kept. Wherever
+    niyam-sandbox, moves with the client's own edits kept; a workflow in
+    none of the shapes these steps know is replaced by this release's
+    template, as before P-56, so edits of the client's own in it go (the
+    plan says "replaced"). Wherever
     `onboard` writes the workflow (a feature on runs the shared checks), it
     deletes `.github/workflows/process-rules.yml` in the same pull request,
     also where a new one is already there, since both would run every check
