@@ -1,10 +1,9 @@
 import { API, isNoToken } from './agent.ts';
 import { SETUP_FIRST, workflowPins } from './onboard.ts';
-import { OLD_PACKAGE, PRODUCT, tarballName } from './names.ts';
+import { PRODUCT, tarballName } from './names.ts';
 import type { Output, Sys } from './types.ts';
 import { CLOUD_SETUP_PATH, WORKFLOW_PATH } from './onboard-pull.ts';
 import { GITHUB_WEB } from './host.ts';
-import { isNewer } from './version.ts';
 
 /**
  * What a cloud session's GH_TOKEN reads when its environment sets none; the
@@ -97,17 +96,9 @@ export function repoReleases(sys: Sys, root: string): { pinned: string | undefin
   return { pinned, scripted, workflow, script };
 }
 
-/** The last release made under the old name: it attached only athya-hq-process-rules-<version>.tgz. */
-export const LAST_OLD_RELEASE = '0.6.3';
-
-/** The CLI archive a release attaches: niyam's from the first niyam release on, the old name's before. */
-export function releaseAsset(version: string): string {
-  return isNewer(version, LAST_OLD_RELEASE) ? tarballName(version) : tarballName(version, OLD_PACKAGE);
-}
-
 /** The release archive of `version`, as GitHub serves it. */
 export function releaseTarball(version: string): string {
-  return `${GITHUB_WEB}/${PRODUCT}/releases/download/v${version}/${releaseAsset(version)}`;
+  return `${GITHUB_WEB}/${PRODUCT}/releases/download/v${version}/${tarballName(version)}`;
 }
 
 /**
@@ -116,7 +107,7 @@ export function releaseTarball(version: string): string {
  * cloud install checks the CLI it unpacks as it checks Node.
  */
 export async function releaseSha256(sys: Sys, version: string, token: string): Promise<{ sha256: string } | { problem: string }> {
-  const name = releaseAsset(version);
+  const name = tarballName(version);
   try {
     const { status, json } = await sys.http(`${API}/repos/${PRODUCT}/releases/tags/v${version}`, { token });
     if (status !== 200) return { problem: `GitHub answered HTTP ${status} for the v${version} release` };

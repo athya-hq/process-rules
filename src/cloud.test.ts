@@ -78,7 +78,7 @@ describe('cloudRepoScript', () => {
     assert.ok(script.includes('https://nodejs.org/dist/v$node/node-v$node-linux-$arch.tar.xz'));
     assert.ok(script.includes(`-o "$dir/niyam.tgz" ${releaseTarball('9.8.7')}\n`));
     assert.equal(releaseTarball('9.8.7'), 'https://github.com/veda-hq/niyam/releases/download/v9.8.7/veda-hq-niyam-9.8.7.tgz');
-    assert.equal(releaseTarball('0.6.1'), 'https://github.com/veda-hq/niyam/releases/download/v0.6.1/athya-hq-process-rules-0.6.1.tgz', 'a release before niyam: its old asset');
+    assert.equal(releaseTarball('0.6.1'), 'https://github.com/veda-hq/niyam/releases/download/v0.6.1/veda-hq-niyam-0.6.1.tgz', 'niyam\'s archive alone: onboard pins only its own release (P-57)');
     assert.ok(script.includes('rm -f /usr/local/bin/niyam\n'));
     assert.doesNotMatch(script, /process-rules|PROCESS_RULES/, 'no name before niyam (P-57)');
     assert.equal(cloudScriptVersion(script), '9.8.7');

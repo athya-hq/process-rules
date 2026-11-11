@@ -1,12 +1,11 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { FakeSys } from './fake.test.ts';
 import { USAGE, packageVersion, proposeArgs, run, versionOf } from './run.ts';
-import { nameOf, packageName } from './version.ts';
 
 const manifest: unknown = JSON.parse(
   readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
@@ -256,36 +255,11 @@ describe('cli entry', () => {
     assert.match(result.stderr, /unknown command "nope"/);
   });
 
-  it('runs the same CLI as process-rules, the old bin, which names niyam to the owner alone (P-49)', () => {
-    const old = fileURLToPath(new URL('./old-cli.ts', import.meta.url));
-    assert.equal(execFileSync(process.execPath, [old, '--version'], { encoding: 'utf8' }), `${String(expectedVersion)}\n`, 'what upgrade and hooks parse stays bare');
-    const help = spawnSync(process.execPath, [old, 'help'], { encoding: 'utf8' });
-    assert.equal(help.status, 0);
-    assert.equal(help.stderr, 'process-rules is now niyam: run niyam help. The old name still works for now.\n');
-    assert.equal(help.stdout, `${USAGE}\n`);
-  });
-
-  it('names niyam only for the commands the owner types', async () => {
-    const said = async (args: string[], invokedAs?: string): Promise<string[]> => {
-      const err: string[] = [];
-      await run(args, { out: () => {}, err: (line) => err.push(line) }, () => new FakeSys(), invokedAs);
-      return err;
-    };
-    assert.deepEqual(await said([], 'process-rules'), ['process-rules is now niyam: run niyam. The old name still works for now.']);
-    assert.deepEqual(await said(['version'], 'process-rules'), [], 'not version');
-    assert.deepEqual(await said(['help']), [], 'not as niyam');
+  it('ships no process-rules bin, and names no old name to the owner (P-57)', () => {
+    assert.equal(existsSync(fileURLToPath(new URL('./old-cli.ts', import.meta.url))), false);
+    const help = spawnSync(process.execPath, [cli, 'help'], { encoding: 'utf8' });
+    assert.equal(help.stderr, '');
+    assert.doesNotMatch(help.stdout, /process-rules/);
   });
 });
 
-describe('nameOf', () => {
-  it("reads the package's name, as the bridge release's archive renames it", () => {
-    assert.equal(nameOf({ name: '@athya-hq/process-rules', version: '1.0.0' }), '@athya-hq/process-rules');
-    assert.equal(packageName(), '@veda-hq/niyam');
-  });
-
-  for (const raw of [null, 'x', {}, { name: 1 }]) {
-    it(`throws for ${JSON.stringify(raw)}`, () => {
-      assert.throws(() => nameOf(raw), /no string "name"/);
-    });
-  }
-});

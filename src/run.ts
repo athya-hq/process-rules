@@ -17,7 +17,7 @@ import { upgrade } from './upgrade.ts';
 import { prMerged, prePush, prWorkRules, propose } from './work.ts';
 import type { Output, Sys } from './types.ts';
 
-import { CLI, OLD_CLI } from './names.ts';
+import { CLI } from './names.ts';
 import { packageVersion } from './version.ts';
 
 export type { Output } from './types.ts';
@@ -63,15 +63,12 @@ Commands:
 
 as-agent's command gets the session's agent identity, stdin, stdout and stderr, and its
 exit code is as-agent's; exit ${LOCKED} means the session does not work as the agent, and nothing ran.
-Without [agent], machine and doctor use the agent account .github/niyam.json (or .github/process-rules.json) names
+Without [agent], machine and doctor use the agent account .github/niyam.json names
 in the repo around the working directory.
 onboard suggests the owner and agent the first time (or name them); after that it reads them from that file.
 Features: identity (always on), pr-identity, board, work-rules, figma, decisions, review.
 --features lists them the first time (all when left out); --add turns one more on.
 machine and onboard print one plan and ask once; --yes goes ahead without asking, --dry-run stops at the plan.`;
-
-/** The commands the owner runs at a terminal: run as process-rules, they also name niyam. Hooks and workflows stay quiet. */
-const OWNER_COMMANDS = new Set(['machine', 'doctor', 'onboard', 'upgrade', 'owner-step', 'cloud-setup', 'help', '--help', '-h', undefined]);
 
 /**
  * propose's issue numbers, one or several, and the page its comments link
@@ -98,17 +95,9 @@ export function proposeArgs(args: readonly string[]): { numbers: number[]; page?
   return { numbers: issues.map((arg) => Number(arg.replace('#', ''))), ...(page === undefined ? {} : { page }) };
 }
 
-/** Runs one command and returns its exit code: 0 done, 1 failed, 2 bad usage. `invokedAs` is the bin that ran it. */
-export async function run(
-  args: readonly string[],
-  io: Output,
-  sys: () => Sys | Promise<Sys>,
-  invokedAs: string = CLI,
-): Promise<number> {
+/** Runs one command and returns its exit code: 0 done, 1 failed, 2 bad usage. */
+export async function run(args: readonly string[], io: Output, sys: () => Sys | Promise<Sys>): Promise<number> {
   const [command, ...rest] = args;
-  if (invokedAs === OLD_CLI && OWNER_COMMANDS.has(command)) {
-    io.err(`${OLD_CLI} is now ${CLI}: run ${[CLI, ...args].join(' ')}. The old name still works for now.`);
-  }
   const allowed = command === 'onboard' || command === 'machine' || command === 'review-thread' || command === 'as-agent' || command === 'propose' || command === 'owner-step' ? Infinity : command === 'pre-push' ? 2 : command === 'doctor' ? 1 : 0;
   const extra = rest[allowed];
   if (extra !== undefined) {

@@ -310,119 +310,41 @@ describe("doctor's findings about the CLI", () => {
   });
 });
 
-describe('upgrade from process-rules, the old name (P-49)', () => {
-  const BRIDGE = `https://github.com/athya-hq/process-rules/releases/download/v${OLD}/athya-hq-process-rules-${OLD}.tgz`;
-  const pnpmCalls = (sys: FakeSys): string[] => sys.calls.filter((call) => call.command === 'pnpm' && call.args[0] !== 'bin').map((call) => call.args.join(' '));
-  /** `machine()`, with pnpm's answer to `remove` and `add` replaced, each by its arguments. */
-  const withPnpm = (sys: FakeSys, answer: (args: readonly string[]) => ExecResult | undefined): FakeSys => {
-    const inner = sys.execOverride;
-    sys.execOverride = (call) => (call.command === 'pnpm' ? (answer(call.args) ?? inner(call)) : inner(call));
-    return sys;
-  };
-  const fromOld = (sys: FakeSys, running = OLD) => {
-    const { io, out, err } = capture();
-    return upgrade(sys, io, running, '@athya-hq/process-rules').then((code) => ({ code, out, err }));
-  };
-
-  it('asks athya-hq/process-rules for the newest release while veda-hq/niyam is not there', async () => {
+describe('upgrade without the name before niyam (P-57)', () => {
+  it('asks veda-hq/niyam alone, failing on its 404 rather than asking athya-hq/process-rules', async () => {
     const sys = machine();
     sys.route('GET', LATEST, { status: 404, json: { message: 'Not Found' } });
     sys.route('GET', OLD_LATEST, { status: 200, json: { tag_name: `v${NEW}`, assets: [{ name: `veda-hq-niyam-${NEW}.tgz` }] } });
-    assert.equal((await upgraded(sys)).code, 0);
-    assert.deepEqual(
-      sys.requests.map((request) => request.url.replace('https://api.github.com', '')),
-      [LATEST, OLD_LATEST],
-    );
-    assert.deepEqual(installs(sys), [['add', '-g', `https://github.com/athya-hq/process-rules/releases/download/v${NEW}/veda-hq-niyam-${NEW}.tgz`]], 'downloads from the repository that answered');
+    const { code, err } = await upgraded(sys);
+    assert.equal(code, 1);
+    assert.deepEqual(err, ['upgrade: GitHub answered HTTP 404 when asked for the newest release; nothing installed']);
+    assert.deepEqual(sys.requests.map((request) => request.url.replace('https://api.github.com', '')), [LATEST]);
+    assert.deepEqual(installs(sys), []);
   });
 
-  it('names the repository that answered in its install hint too', async () => {
+  it('installs from veda-hq/niyam, removing no package first', async () => {
+    const sys = machine();
+    const { code, out } = await upgraded(sys);
+    assert.equal(code, 0);
+    assert.deepEqual(out, [`upgrade: niyam ${OLD} → ${NEW}`, `  pnpm add -g ${releaseTarball(NEW)}`, `upgrade: the shell runs niyam ${NEW} (${PNPM_BIN}/niyam)`]);
+    assert.ok(!sys.calls.some((call) => call.command === 'pnpm' && call.args[0] === 'remove'));
+    assert.match(releaseTarball(NEW), /^https:\/\/github\.com\/veda-hq\/niyam\/releases\/download\/v[\d.]+\/veda-hq-niyam-[\d.]+\.tgz$/);
+  });
+
+  it('takes a release that attaches only the archive under the name before niyam as not packaged', async () => {
+    const sys = machine();
+    sys.route('GET', LATEST, { status: 200, json: { tag_name: `v${NEW}`, assets: [{ name: `athya-hq-process-rules-${NEW}.tgz` }] } });
+    const { code, err } = await upgraded(sys);
+    assert.equal(code, 1);
+    assert.match(err[0] ?? '', new RegExp(`has no veda-hq-niyam-${NEW.replaceAll('.', '\\.')}\\.tgz yet`));
+  });
+
+  it('looks for no process-rules on PATH, beside niyam or apart from it', async () => {
     const sys = machine({ [PNPM_BIN]: OLD });
-    sys.route('GET', LATEST, { status: 404, json: { message: 'Not Found' } });
-    sys.route('GET', OLD_LATEST, { status: 200, json: { tag_name: `v${NEW}`, assets: [{ name: `veda-hq-niyam-${NEW}.tgz` }] } });
-    const { code, err } = await upgraded(sys, NEW);
-    assert.equal(code, 1);
-    assert.match(err.at(-1) ?? '', new RegExp(`pnpm add -g https://github\\.com/athya-hq/process-rules/releases/download/v${NEW}/veda-hq-niyam-${NEW}\\.tgz`));
-  });
-
-  it('removes the old package first, since pnpm refuses two with the same bin, then adds niyam', async () => {
-    const sys = machine();
-    const { code, out } = await fromOld(sys);
-    assert.equal(code, 0);
-    assert.deepEqual(out, [
-      `upgrade: niyam ${OLD} → ${NEW}`,
-      '  pnpm remove -g @athya-hq/process-rules',
-      `  pnpm add -g ${releaseTarball(NEW)}`,
-      `upgrade: the shell runs niyam ${NEW} (${PNPM_BIN}/niyam)`,
-    ]);
-    assert.deepEqual(pnpmCalls(sys), ['remove -g @athya-hq/process-rules', `add -g ${releaseTarball(NEW)}`]);
-  });
-
-  it('moves the newest release from the old package to @veda-hq/niyam, at the same version', async () => {
-    const sys = machine({ [PNPM_BIN]: NEW });
-    const { code, out } = await fromOld(sys, NEW);
-    assert.equal(code, 0);
-    assert.equal(out[0], `upgrade: niyam ${NEW}, from @athya-hq/process-rules to @veda-hq/niyam`);
-    assert.deepEqual(pnpmCalls(sys), ['remove -g @athya-hq/process-rules', `add -g ${releaseTarball(NEW)}`]);
-  });
-
-  it('leaves a release before niyam alone: it had no niyam package to move to', async () => {
-    const sys = machine({ [PNPM_BIN]: '0.6.1' });
-    sys.route('GET', LATEST, { status: 200, json: { tag_name: 'v0.6.1', assets: [{ name: 'athya-hq-process-rules-0.6.1.tgz' }] } });
-    const { code, out } = await fromOld(sys, '0.6.1');
-    assert.equal(code, 0);
-    assert.equal(out[0], 'upgrade: niyam 0.6.1 is the newest release');
-    assert.deepEqual(pnpmCalls(sys), []);
-  });
-
-  it('puts the old package back when niyam fails to install, and says so', async () => {
-    const sys = withPnpm(machine(), (args) => (args[0] === 'add' && args[2] === releaseTarball(NEW) ? { code: 1, stdout: '', stderr: 'ERR_PNPM_FETCH_404' } : args[0] === 'remove' || args[0] === 'add' ? { code: 0, stdout: '', stderr: '' } : undefined));
-    const { code, err } = await fromOld(sys);
-    assert.equal(code, 1);
-    assert.deepEqual(err, [`upgrade: pnpm add -g failed (exit 1), so niyam is still ${OLD}:`, '  ERR_PNPM_FETCH_404', `  @athya-hq/process-rules ${OLD} is installed again`]);
-    assert.deepEqual(pnpmCalls(sys), ['remove -g @athya-hq/process-rules', `add -g ${releaseTarball(NEW)}`, `add -g ${BRIDGE}`]);
-  });
-
-  it('names the install to run by hand when putting the old package back fails too', async () => {
-    const sys = withPnpm(machine(), (args) => (args[0] === 'add' ? { code: 1, stdout: '', stderr: 'offline' } : args[0] === 'remove' ? { code: 0, stdout: '', stderr: '' } : undefined));
-    const { err } = await fromOld(sys);
-    assert.equal(err.at(-1), `  putting @athya-hq/process-rules ${OLD} back failed too (exit 1); install it with pnpm add -g ${BRIDGE}`);
-  });
-
-  it('installs nothing when pnpm cannot remove the old package', async () => {
-    const sys = withPnpm(machine(), (args) => (args[0] === 'remove' ? { code: 1, stdout: '', stderr: 'not installed globally' } : undefined));
-    const { code, err } = await fromOld(sys);
-    assert.equal(code, 1);
-    assert.deepEqual(err, [`upgrade: pnpm remove -g failed (exit 1), so niyam is still ${OLD}:`, '  not installed globally']);
-    assert.deepEqual(pnpmCalls(sys), ['remove -g @athya-hq/process-rules']);
-  });
-
-  it('judges a process-rules beside niyam with it, and fails on one apart from it', async () => {
-    const beside = machine({ [PNPM_BIN]: OLD });
-    beside.files.set(`${PNPM_BIN}/process-rules`, '#!/usr/bin/env node');
-    assert.equal((await upgraded(beside)).code, 0, "one package's two bins");
-    const apart = machine({ [PNPM_BIN]: OLD });
-    apart.files.set(`${STRAY}/process-rules`, '#!/usr/bin/env node');
-    apart.env = { PATH: `${STRAY}:${PNPM_BIN}` };
-    const { code, err } = await upgraded(apart);
-    assert.equal(code, 1);
-    assert.deepEqual(err, [
-      `upgrade: process-rules, niyam's old name, is on PATH apart from niyam: ${STRAY}/process-rules does not run`,
-      `  Remove ${STRAY}/process-rules, or uninstall what put it there.`,
-    ]);
-  });
-
-  it("tells doctor of an old package's install and of a process-rules apart from niyam", async () => {
-    assert.deepEqual(await installedFindings(machine({ [PNPM_BIN]: NEW }), NEW, '@athya-hq/process-rules'), [
-      { mark: '▲', text: `niyam ${NEW} runs here, installed as @athya-hq/process-rules`, fix: 'niyam upgrade' },
-    ]);
-    const sys = machine({ [PNPM_BIN]: NEW });
     sys.files.set(`${STRAY}/process-rules`, '#!/usr/bin/env node');
-    sys.env = { PATH: `${PNPM_BIN}:${STRAY}` };
-    assert.deepEqual((await installedFindings(sys, NEW)).at(-1), {
-      mark: '✗',
-      text: `process-rules on PATH apart from niyam: ${STRAY}/process-rules does not run`,
-      fix: 'remove it, then niyam upgrade',
-    });
+    sys.env = { PATH: `${STRAY}:${PNPM_BIN}` };
+    assert.equal((await upgraded(sys)).code, 0);
+    assert.ok(!sys.calls.some((call) => call.command.endsWith('/process-rules')));
+    assert.deepEqual(await installedFindings(machine({ [PNPM_BIN]: NEW }), NEW), [{ mark: '✓', text: `niyam ${NEW}, the newest release` }]);
   });
 });

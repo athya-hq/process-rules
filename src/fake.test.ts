@@ -1,4 +1,4 @@
-import { releaseAsset } from './cloud.ts';
+import { tarballName } from './names.ts';
 import { createHash } from 'node:crypto';
 
 import { launcherPath, launcherScript } from './agent.ts';
@@ -357,9 +357,9 @@ export class FakeSys implements Sys {
     // The newest release is the one this checkout builds, unless a test routes it.
     if (url === 'https://api.github.com/repos/veda-hq/niyam/releases/latest') {
       const version = packageVersion();
-      return { status: 200, json: { tag_name: `v${version}`, assets: [{ name: releaseAsset(version) }] } };
+      return { status: 200, json: { tag_name: `v${version}`, assets: [{ name: tarballName(version) }] } };
     }
-    if (release) return { status: 200, json: { assets: [{ name: releaseAsset(release[1] as string), digest: `sha256:${RELEASE_SHA256}` }] } };
+    if (release) return { status: 200, json: { assets: [{ name: tarballName(release[1] as string), digest: `sha256:${RELEASE_SHA256}` }] } };
     if (url === 'https://api.github.com/repos/example-org/example-app') return { status: 200, json: { owner: { login: 'example-org', type: this.ownerType } } };
     if (url === 'https://api.github.com/users/example-org') return { status: 200, json: { login: 'example-org', type: this.ownerType } };
     // The organisation has this repository alone, and no open issue with no type, unless a test routes them.

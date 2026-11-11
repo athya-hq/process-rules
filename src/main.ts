@@ -1,8 +1,8 @@
 import { run } from './run.ts';
 import { realSys } from './sys.ts';
 
-/** Runs the command line given, as the bin `invokedAs`, and sets the exit code. */
-export async function main(invokedAs: string): Promise<void> {
+/** Runs the command line given, and sets the exit code. */
+export async function main(): Promise<void> {
   process.exitCode = await run(
     process.argv.slice(2),
     {
@@ -10,6 +10,5 @@ export async function main(invokedAs: string): Promise<void> {
       err: (line) => process.stderr.write(`${line}\n`),
     },
     realSys,
-    invokedAs,
   );
 }
