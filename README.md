@@ -1106,14 +1106,15 @@ release, attaching the CLI package it built and tested. Install that package on
 each machine with pnpm, once; nothing is built on install:
 
 ```bash
-pnpm add -g https://github.com/veda-hq/niyam/releases/download/v0.6.8/veda-hq-niyam-0.6.8.tgz
+pnpm add -g https://github.com/veda-hq/niyam/releases/download/v0.6.9/veda-hq-niyam-0.6.9.tgz
 ```
 
-The package puts two commands on `PATH`: `niyam`, and `process-rules`, its
-old name. Each release also attaches the same CLI as
-`athya-hq-process-rules-<version>.tgz`, so `process-rules upgrade` from an
-install of 0.5.37 to 0.6.3 still finds it; an install older than 0.5.37 has
-no `upgrade`, so it takes the `pnpm add -g` line above.
+The package puts one command on `PATH`, `niyam`; since 0.6.9 (P-54) it no
+longer installs `process-rules`, its old name. Each release also attaches the
+same CLI as `athya-hq-process-rules-<version>.tgz`, which still carries the
+old command, so `process-rules upgrade` from an install of 0.5.37 to 0.6.3
+still finds it; an install older than 0.5.37 has no `upgrade`, so it takes
+the `pnpm add -g` line above.
 
 After that, update it with one command on each machine:
 
