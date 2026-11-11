@@ -1407,8 +1407,10 @@
     byte for byte, but for any change the run makes, and deletes the old
     one. The work rules let onboard's own pull request delete exactly these
     two files, each only into its own new name, written in the pull request
-    or already on its base. A rename GitHub shows counts the same. Any other
-    deletion or rename is held to the work rules, as before.
+    or already on its base. A rename GitHub shows counts the same, and a
+    copy between onboard's files deletes nothing. Any other deletion or
+    rename is held to the work rules, as before. The plan names each
+    deletion, a delete-only one too.
   - onboard's branch is `niyam/onboard`. Its check for an onboard pull
     request a newer release opened reads both branches and both workflow
     names, as `owner-step required-checks` does, and the work rules take

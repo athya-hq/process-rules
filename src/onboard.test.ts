@@ -1045,6 +1045,13 @@ describe('onboard', () => {
     both.files.set(OLD_WORKFLOW, oldIds(workflow('main', '0.5.2', true)));
     const twice = await run(both);
     assert.ok(planned(twice.out, 'Pull request').includes('workflow: process-rules.yml deleted'), twice.out.join('\n'));
+    // And beside a new one that needs its pins moved, both in the one line.
+    const behind = fresh();
+    behind.files.set(WORKFLOW, workflow('main', '0.5.2', true));
+    behind.files.set(OLD_WORKFLOW, oldIds(workflow('main', '0.5.2', true)));
+    const thrice = await run(behind);
+    assert.ok(planned(thrice.out, 'Pull request').includes(`workflow: pins → v${packageVersion()}, process-rules.yml deleted`), thrice.out.join('\n'));
+    assert.deepEqual([...behind.deleted], [OLD_WORKFLOW_PATH]);
     assert.equal(repo(both).get(WORKFLOW), workflow('main', packageVersion(), true));
     assert.deepEqual([...both.deleted], [OLD_WORKFLOW_PATH]);
   });
@@ -1675,7 +1682,9 @@ describe('staged adoption', () => {
     both.files.set(SETTINGS, text);
     both.files.set(old, text.replace('identity', 'board'));
     both.files.set(HOOKS, JSON.stringify(CLAUDE));
-    assert.equal((await run(both, [])).code, 0);
+    const second = await run(both, []);
+    assert.equal(second.code, 0);
+    assert.equal(planned(second.out, 'Pull request')[0], 'niyam.json: process-rules.json deleted', 'the plan shows the one change');
     assert.equal(repo(both).get(SETTINGS), text, 'the new one is the one read, and stays');
     assert.deepEqual([...both.deleted], ['.github/process-rules.json']);
   });
@@ -2548,6 +2557,31 @@ describe('workflowUpdate', () => {
     assert.deepEqual(planned(out, 'Pull request'), ['workflow: needs-owner job only for owners, members and collaborators', 'auto-merge: when checks pass']);
     assert.ok(opened(sys)?.body.includes(`\n- \`${WORKFLOW_PATH}\`: in ${WORKFLOW_PATH}, start the needs-owner job only on a comment by the owner, a member or a collaborator, leaving the rest as it is\n`));
     assert.equal(repo(sys).get(WORKFLOW), workflow('main', packageVersion(), false));
+  });
+
+  it('recognises every older template under the job ids and input before P-56, renaming them as it updates (P-56)', () => {
+    const issueTriggerOnly = (version: string) =>
+      workflow('main', version, false)
+        .replace("  # opened, reopened: an issue with no type gets the work model's.\n  issues:\n    types: [labeled, opened, reopened]\n", '  issues:\n    types: [labeled]\n')
+        .replace("      (github.event_name == 'issues' && (github.event.action == 'opened' || github.event.action == 'reopened')) ||\n", '')
+        .replace("  # An issue opened or reopened with no type gets the work model's.\n", '');
+    const anyCommenter = (version: string) => workflow('main', version, false).replace(/^ {6}contains\(fromJSON[^\n]*\n/m, '');
+    for (const [name, before, from, flags] of [
+      ['two jobs', twoJobs('0.5.6', false), '0.5.6', { merged: true, asks: true, types: true }],
+      ['three jobs', threeJobs('0.5.26', false), '0.5.26', { asks: true, types: true }],
+      ['0.5.28', anyCommenter('0.5.28'), '0.5.28', { authors: true }],
+      ['0.6.3', issueTriggerOnly('0.6.3'), '0.6.3', { types: true }],
+      ['0.6.1, at athya-hq/process-rules', workflow('main', '0.6.1', false).replaceAll('veda-hq/niyam/', 'athya-hq/process-rules/'), '0.6.1', {}],
+    ] as const) {
+      const old = oldIds(before);
+      assert.match(old, /^ {2}process-rules:$/m, name);
+      assert.match(old, /^ {6}process-rules-ref: v/m, name);
+      assert.doesNotMatch(old, /^ {2}niyam(?:-\w+)?:$|niyam-ref/m, `${name}: the fixture has the old ids alone`);
+      assert.deepEqual(workflowUpdate(old, 'main', '0.6.10', false), { kind: 'repin', text: workflow('main', '0.6.10', false), from, ...flags, ids: true }, name);
+    }
+    // A split workflow whose pin is missing is still not the template's, under either ids.
+    const halfPinned = oldIds(workflow('main', '0.5.2', true)).replace(/\n {4}with:\n {6}process-rules-ref: v0\.5\.2\n {4}secrets:/, '\n    secrets:');
+    assert.equal(workflowUpdate(halfPinned, 'main', '0.5.3', true).kind, 'replace');
   });
 
   it('replaces a three-job workflow whose weekly job or schedule is its own', () => {

@@ -860,6 +860,7 @@ describe('prWorkRules', () => {
       ['deletes a cloud setup file', [{ filename: '.github/process-rules/cloud-setup.sh', status: 'removed' }, { filename: '.github/niyam/cloud-setup.sh' }]],
       ['moves the hooks into the settings file', [{ filename: '.github/niyam.json', previous_filename: '.claude/settings.json', status: 'renamed' }]],
       ['moves the old workflow into the settings file', [{ filename: '.github/niyam.json', previous_filename: '.github/workflows/process-rules.yml', status: 'renamed' }]],
+      ['copies a file of its own into one onboard writes', [{ filename: '.github/niyam.json', previous_filename: 'src/settings.json', status: 'copied' }]],
     ] as const) {
       it(`holds one that ${name} to the work rules`, async () => {
         const sys = actions(onboardPull());
@@ -876,6 +877,10 @@ describe('prWorkRules', () => {
         { filename: '.github/niyam.json', status: 'added' },
         { filename: '.github/niyam/cloud-setup.sh', status: 'added' },
         { filename: '.github/process-rules/cloud-setup.sh', status: 'modified' },
+      ]],
+      ['writes the cloud setup file under both names, as GitHub may show a file copied', [
+        { filename: '.github/niyam/cloud-setup.sh', status: 'modified' },
+        { filename: '.github/process-rules/cloud-setup.sh', previous_filename: '.github/niyam/cloud-setup.sh', status: 'copied' },
       ]],
       ['moves them, as GitHub shows a file renamed', [
         { filename: '.github/workflows/niyam.yml', previous_filename: '.github/workflows/process-rules.yml', status: 'renamed' },

@@ -439,7 +439,8 @@ export async function prWorkRules(sys: Sys, io: Output): Promise<number> {
     const moved = files.every((file) =>
       file.status === 'removed'
         ? MOVED_FILES[file.filename] !== undefined && kept(MOVED_FILES[file.filename] as string)
-        : file.previous_filename === undefined || file.previous_filename === file.filename || MOVED_FILES[file.previous_filename] === file.filename,
+        : // A copy deletes nothing, as GitHub may show the cloud setup file written under both names.
+          file.status === 'copied' || file.previous_filename === undefined || file.previous_filename === file.filename || MOVED_FILES[file.previous_filename] === file.filename,
     );
     if (names.every((name) => ONBOARD_FILES.includes(name)) && moved) {
       io.out(`✓ pr-work-rules: #${pull.number} is onboard's, changing only the files onboard writes, so it names no slice`);

@@ -27,10 +27,10 @@ jobs:
         with:
           node-version-file: .nvmrc
       - run: pnpm install --frozen-lockfile
-      - run: pnpm check
-      # Clients run checks.yml, so every workflow here must lint clean.
+      # Clients run checks.yml, so every workflow here must lint clean, and the
+      # tests lint callers passing each input it takes (P-56), so it comes first.
       # Pinned by version and by the sha256 its release checksums publish.
-      - name: actionlint
+      - name: Install actionlint
         env:
           ACTIONLINT_VERSION: 1.7.12
           ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
@@ -41,7 +41,10 @@ jobs:
             "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/${TAR}"
           echo "${ACTIONLINT_SHA256}  $RUNNER_TEMP/$TAR" | sha256sum -c -
           tar -xzf "$RUNNER_TEMP/$TAR" -C "$RUNNER_TEMP" actionlint
-          "$RUNNER_TEMP/actionlint" -color
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - run: pnpm check
+      - name: actionlint
+        run: actionlint -color
 
   secrets:
     name: Secret scans

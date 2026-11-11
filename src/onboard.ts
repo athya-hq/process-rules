@@ -1110,7 +1110,10 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     change(SETTINGS_PATH, fileAt(OLD_SETTINGS_PATH) as string, `move ${OLD_SETTINGS_PATH} here`);
     settingsItem(`moved from ${OLD_SETTINGS_PATH.slice('.github/'.length)}`);
   }
-  // Read before the pull request's step, which deletes the old file once the new one is there.
+  // Beside the new file, the old one goes too: nothing reads it there.
+  if (settingsFile === SETTINGS_PATH && fileAt(SETTINGS_PATH) !== undefined && fileAt(OLD_SETTINGS_PATH) !== undefined) {
+    settingsItem(`${OLD_SETTINGS_PATH.slice('.github/'.length)} deleted`);
+  }
   if (fileAt(SETTINGS_PATH) !== undefined) remove(OLD_SETTINGS_PATH, `moved to ${SETTINGS_PATH}`);
   const warnings: string[] = [];
   const byHand: string[] = [];
@@ -1373,10 +1376,14 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
   };
   if (workflowNeeded) {
     const update = planned === undefined ? undefined : workflowUpdate(fileAt(workflowSource), planned, version, on('figma'), schedule);
-    const moved = workflowMoved ? [`from ${OLD_WORKFLOW_PATH.slice('.github/workflows/'.length)}`] : [];
-    if (update === undefined) pull.push({ label: 'workflow', detail: [...moved, fileAt(workflowSource) === undefined ? 'new' : 'write or update'].join(', ') });
-    else if (update.kind !== 'same' || moved.length > 0) pull.push({ label: 'workflow', detail: [...moved, ...(update.kind === 'same' ? [] : [workflowDetail(update, version, on('figma'))])].join(', ') });
-    else if (fileAt(OLD_WORKFLOW_PATH) !== undefined) pull.push({ label: 'workflow', detail: `${OLD_WORKFLOW_PATH.slice('.github/workflows/'.length)} deleted` });
+    const old = OLD_WORKFLOW_PATH.slice('.github/workflows/'.length);
+    const detail = [
+      ...(workflowMoved ? [`from ${old}`] : []),
+      ...(update === undefined ? [fileAt(workflowSource) === undefined ? 'new' : 'write or update'] : update.kind === 'same' ? [] : [workflowDetail(update, version, on('figma'))]),
+      // Beside a new one, the old one is deleted, or both would run.
+      ...(!workflowMoved && fileAt(OLD_WORKFLOW_PATH) !== undefined ? [`${old} deleted`] : []),
+    ];
+    if (detail.length > 0) pull.push({ label: 'workflow', detail: detail.join(', ') });
     // Since P-53 the checks report as niyam / …: a ruleset still requiring process-rules / … holds this pull request
     // and every one after it until the owner swaps the names, which only the owner's account can do.
     for (const ruleset of await oldNamedRulesets(sys, slug, token)) {

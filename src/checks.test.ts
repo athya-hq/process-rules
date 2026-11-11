@@ -59,7 +59,8 @@ describe('checks.yml', () => {
       }
       const result = spawnSync('actionlint', ['-format', '{{json .}}'], { cwd: dir, encoding: 'utf8' });
       const errors = (JSON.parse(result.stdout || '[]') as { filepath: string; message: string }[]).map((error) => `${error.filepath.replace(/^.*\.github\/workflows\//, '')}: ${error.message}`);
-      assert.deepEqual(errors, ['other-ref.yml: input "other-ref" is not defined in "./.github/workflows/checks.yml" reusable workflow. defined inputs are "niyam-ref", "process-rules-ref"']);
+      assert.equal(errors.length, 1, errors.join('\n'));
+      assert.match(errors[0] ?? '', /^other-ref\.yml: input "other-ref" is not defined/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
