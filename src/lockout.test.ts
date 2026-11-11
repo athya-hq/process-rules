@@ -17,7 +17,7 @@ function exposed(): FakeSys {
   sys.files.set(`${HOME}/.ssh/id_rsa.pub`, 'ssh-rsa OWNER');
   sys.files.set(`${HOME}/.ssh/config`, 'Host x');
   // Another agent set up on this Mac: its key has no passphrase on purpose.
-  sys.files.set(`${HOME}/.config/process-rules/otherbot/session.sh`, '');
+  sys.files.set(`${HOME}/.config/niyam/otherbot/session.sh`, '');
   sys.files.set(`${HOME}/.ssh/otherbot_signing`, 'open:agent');
   // An owner key with no .pub beside it, named like a signing key.
   sys.files.set(`${HOME}/.ssh/work_signing`, 'open:owner');
@@ -51,23 +51,21 @@ describe('exposure', () => {
     assert.deepEqual(call?.env, { GH_TOKEN: undefined, GITHUB_TOKEN: undefined, GH_CONFIG_DIR: undefined, KEEP: '1' });
   });
 
-  it("spares the signing keys of agents set up in either folder, the old one's included (P-55)", () => {
+  it("spares the signing keys of agents set up in the config folder, not of a folder before P-55 (P-57)", () => {
     const sys = new FakeSys().ready();
     sys.files.set(`${HOME}/.config/niyam/newbot/session.sh`, '');
     sys.files.set(`${HOME}/.ssh/newbot_signing`, 'open:agent');
     sys.files.set(`${HOME}/.config/process-rules/oldbot/session.sh`, '');
     sys.files.set(`${HOME}/.ssh/oldbot_signing`, 'open:agent');
     sys.files.set(`${HOME}/.ssh/id_ed25519`, 'open:key');
-    assert.deepEqual(exposure(sys, AGENT).openKeys, [`${HOME}/.ssh/id_ed25519`]);
+    assert.deepEqual(exposure(sys, AGENT).openKeys, [`${HOME}/.ssh/oldbot_signing`, `${HOME}/.ssh/id_ed25519`]);
   });
 
-  it("still checks an owner key named like the launcher's, records' or locked gh folder, in either config folder", () => {
+  it("still checks an owner key named like the launcher's, records' or locked gh folder", () => {
     const sys = new FakeSys().ready();
-    for (const dir of ['niyam', 'process-rules']) {
-      sys.files.set(`${HOME}/.config/${dir}/bin/x`, '');
-      sys.files.set(`${HOME}/.config/${dir}/sessions/s.json`, '{}');
-      sys.mkdir(`${HOME}/.config/${dir}/locked/gh`);
-    }
+    sys.files.set(`${HOME}/.config/niyam/bin/x`, '');
+    sys.files.set(`${HOME}/.config/niyam/sessions/s.json`, '{}');
+    sys.mkdir(`${HOME}/.config/niyam/locked/gh`);
     for (const name of ['bin', 'sessions', 'locked']) sys.files.set(`${HOME}/.ssh/${name}_signing`, 'open:owner');
     assert.deepEqual(exposure(sys, AGENT).openKeys, ['bin', 'sessions', 'locked'].map((name) => `${HOME}/.ssh/${name}_signing`));
   });
@@ -83,7 +81,7 @@ describe('exposure', () => {
 
   it("spares the signing key of an agent whose folder is empty", () => {
     const sys = new FakeSys().ready();
-    sys.mkdir(`${HOME}/.config/process-rules/emptybot`);
+    sys.mkdir(`${HOME}/.config/niyam/emptybot`);
     sys.files.set(`${HOME}/.ssh/emptybot_signing`, 'open:agent');
     assert.deepEqual(exposure(sys, AGENT).openKeys, []);
   });
@@ -151,34 +149,20 @@ describe('locking the owner away', () => {
     assert.equal(sys.exists(movedPath(HOME, AGENT)), false, 'nothing moved');
   });
 
-  describe('records an older release kept in the old folder (P-55)', () => {
+  it('reads and records in the agent folder of the config folder alone, not the folder before P-55 (P-57)', () => {
+    const sys = exposed();
     const OLD_DIR = `${HOME}/.config/process-rules/examplebot`;
-
-    it('reads what was declined, and the last move, from the old folder where the new one has none, and the new one first', () => {
-      const sys = new FakeSys();
-      assert.equal(declinedPath(HOME, AGENT), `${HOME}/.config/niyam/examplebot/lockout-declined.json`);
-      assert.equal(declinedPath(HOME, AGENT, true), `${OLD_DIR}/lockout-declined.json`);
-      assert.equal(movedPath(HOME, AGENT), `${HOME}/.config/niyam/examplebot/gh-moved.json`);
-      sys.files.set(`${OLD_DIR}/lockout-declined.json`, JSON.stringify({ ghLogins: ['example-owner'], gitPassword: true }));
-      sys.files.set(`${OLD_DIR}/gh-moved.json`, JSON.stringify({ at: NOW.toISOString(), logins: ['example-owner'] }));
-      assert.deepEqual(readDeclined(sys, AGENT), { ghLogins: ['example-owner'], gitPassword: true });
-      assert.deepEqual(readMoved(sys, AGENT), { at: NOW.toISOString(), logins: ['example-owner'] });
-      sys.files.set(declinedPath(HOME, AGENT), JSON.stringify({ ghLogins: [], gitPassword: false }));
-      sys.files.set(movedPath(HOME, AGENT), JSON.stringify({ at: NOW.toISOString(), logins: ['other-owner'] }));
-      assert.deepEqual(readDeclined(sys, AGENT), { ghLogins: [], gitPassword: false });
-      assert.deepEqual(readMoved(sys, AGENT)?.logins, ['other-owner']);
-    });
-
-    it('removes what was declined in either folder once the owner says yes, and records the move in the new one', () => {
-      const sys = exposed();
-      sys.files.set(declinedPath(HOME, AGENT, true), JSON.stringify({ ghLogins: ['example-owner'], gitPassword: true }));
-      sys.files.set(declinedPath(HOME, AGENT), JSON.stringify({ ghLogins: ['example-owner'], gitPassword: true }));
-      recordMove(sys, AGENT, ['example-owner']);
-      assert.equal(sys.exists(declinedPath(HOME, AGENT, true)), false);
-      assert.equal(sys.exists(declinedPath(HOME, AGENT)), false);
-      assert.equal(sys.exists(movedPath(HOME, AGENT)), true);
-      assert.equal(sys.exists(`${OLD_DIR}/gh-moved.json`), false);
-    });
+    assert.equal(declinedPath(HOME, AGENT), `${HOME}/.config/niyam/examplebot/lockout-declined.json`);
+    assert.equal(movedPath(HOME, AGENT), `${HOME}/.config/niyam/examplebot/gh-moved.json`);
+    sys.files.set(`${OLD_DIR}/lockout-declined.json`, JSON.stringify({ ghLogins: ['example-owner'], gitPassword: true }));
+    sys.files.set(`${OLD_DIR}/gh-moved.json`, JSON.stringify({ at: NOW.toISOString(), logins: ['example-owner'] }));
+    assert.deepEqual(readDeclined(sys, AGENT), { ghLogins: [], gitPassword: false });
+    assert.equal(readMoved(sys, AGENT), undefined);
+    sys.files.set(declinedPath(HOME, AGENT), JSON.stringify({ ghLogins: ['example-owner'], gitPassword: true }));
+    recordMove(sys, AGENT, ['example-owner']);
+    assert.equal(sys.exists(declinedPath(HOME, AGENT)), false);
+    assert.equal(sys.exists(movedPath(HOME, AGENT)), true);
+    assert.equal(sys.exists(`${OLD_DIR}/lockout-declined.json`), true, 'machine removes that folder, not this');
   });
 });
 

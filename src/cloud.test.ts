@@ -5,43 +5,42 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, describe, it } from 'node:test';
 
-import { CLOUD_DIR, CLOUD_NODE, CLOUD_NODE_SHA256, FROM_SETUP, INSTALL_FAILED as FAILED, OLD_FROM_SETUP, PROXY_TOKEN, cloudRepoScript, cloudScriptVersion, cloudSetup, cloudSetupSnippet, cloudToken, fileFromSetup, ranFromSetup, releaseTarball, repoReleases } from './cloud.ts';
+import { CLOUD_DIR, CLOUD_NODE, CLOUD_NODE_SHA256, FROM_SETUP, INSTALL_FAILED as FAILED, PROXY_TOKEN, cloudRepoScript, cloudScriptVersion, cloudSetup, cloudSetupSnippet, cloudToken, fileFromSetup, ranFromSetup, releaseTarball, repoReleases } from './cloud.ts';
 import { CLOUD_SETUP_068 } from './older-texts.test.ts';
 import { workflow } from './onboard.ts';
 import { FakeSys, capture } from './fake.test.ts';
-import { CLOUD_SETUP_PATH, OLD_CLOUD_SETUP_PATH, OLD_WORKFLOW_PATH, WORKFLOW_PATH } from './onboard-pull.ts';
+import { CLOUD_SETUP_PATH, LEFTOVER_CLOUD_SETUP_PATH, WORKFLOW_PATH } from './onboard-pull.ts';
 
 const SHA = 'ab'.repeat(32);
 
 describe('cloudToken', () => {
-  it("takes a token the environment set, else the proxy's placeholder, never a lock's, this release's or 0.6.9's (P-55)", () => {
+  it("takes a token the environment set, else the proxy's placeholder, never the lock's; 0.6.9's lock token is one GitHub refuses (P-57)", () => {
     const sys = new FakeSys();
-    for (const [token, used] of [[undefined, PROXY_TOKEN], ['', PROXY_TOKEN], ['niyam-no-agent-token', PROXY_TOKEN], ['process-rules-no-agent-token', PROXY_TOKEN], ['ghp_set', 'ghp_set']] as const) {
+    for (const [token, used] of [[undefined, PROXY_TOKEN], ['', PROXY_TOKEN], ['niyam-no-agent-token', PROXY_TOKEN], ['process-rules-no-agent-token', 'process-rules-no-agent-token'], ['ghp_set', 'ghp_set']] as const) {
       sys.env = { GH_TOKEN: token };
       assert.equal(cloudToken(sys), used, String(token));
     }
   });
 });
 
-describe('the cloud files under their names since P-56, and before', () => {
-  it('installs under /opt/niyam, and takes the Setup mark there or where a cloud setup file before P-56 leaves it', () => {
+describe('the cloud files under their names since P-56, the ones before not read (P-57)', () => {
+  it('installs under /opt/niyam, and takes the Setup mark there alone', () => {
     assert.equal(CLOUD_DIR, '/opt/niyam');
     assert.equal(FROM_SETUP, '/opt/niyam/from-setup');
-    assert.equal(OLD_FROM_SETUP, '/opt/process-rules/from-setup');
-    for (const [marks, ran] of [[[], false], [[FROM_SETUP], true], [[OLD_FROM_SETUP], true], [[FROM_SETUP, OLD_FROM_SETUP], true]] as const) {
+    for (const [marks, ran] of [[[], false], [[FROM_SETUP], true], [['/opt/process-rules/from-setup'], false]] as const) {
       const sys = new FakeSys();
       for (const mark of marks) sys.files.set(mark, '');
       assert.equal(ranFromSetup(sys), ran, marks.join(', '));
     }
   });
 
-  it('names the file the Setup snippet ran, from the path its mark holds, the old one by the old mark', () => {
+  it('names the file the Setup snippet ran, from the path its mark holds, when that is the cloud setup file', () => {
     for (const [marks, file] of [
       [{}, undefined],
       [{ [FROM_SETUP]: `/home/u/example-app/${CLOUD_SETUP_PATH}\n` }, CLOUD_SETUP_PATH],
-      [{ [FROM_SETUP]: `/home/u/example-app/${OLD_CLOUD_SETUP_PATH}\n` }, OLD_CLOUD_SETUP_PATH],
-      [{ [OLD_FROM_SETUP]: '' }, OLD_CLOUD_SETUP_PATH],
-      [{ [FROM_SETUP]: '' , [OLD_FROM_SETUP]: '' }, undefined],
+      [{ [FROM_SETUP]: `/home/u/example-app/${LEFTOVER_CLOUD_SETUP_PATH}\n` }, undefined],
+      [{ '/opt/process-rules/from-setup': '' }, undefined],
+      [{ [FROM_SETUP]: '' }, undefined],
     ] as const) {
       const sys = new FakeSys();
       for (const [path, text] of Object.entries(marks)) sys.files.set(path, text);
@@ -49,20 +48,17 @@ describe('the cloud files under their names since P-56, and before', () => {
     }
   });
 
-  it("reads the repo's workflow and cloud setup file under the new name, else the old one, and names the one it read", () => {
+  it("reads the repo's workflow and cloud setup file under their names alone", () => {
     const root = '/repo';
     const at = (files: Record<string, string>) => {
       const sys = new FakeSys();
       for (const [path, text] of Object.entries(files)) sys.files.set(`${root}/${path}`, text);
       return repoReleases(sys, root);
     };
-    assert.deepEqual(at({}), { pinned: undefined, scripted: undefined, workflow: WORKFLOW_PATH, script: CLOUD_SETUP_PATH });
-    assert.deepEqual(at({ [OLD_WORKFLOW_PATH]: workflow('main', '0.6.8', false), [OLD_CLOUD_SETUP_PATH]: CLOUD_SETUP_068 }), { pinned: '0.6.8', scripted: '0.6.8', workflow: OLD_WORKFLOW_PATH, script: OLD_CLOUD_SETUP_PATH });
-    assert.deepEqual(
-      at({ [WORKFLOW_PATH]: workflow('main', '0.7.0', false), [OLD_WORKFLOW_PATH]: workflow('main', '0.6.8', false), [CLOUD_SETUP_PATH]: cloudRepoScript('0.7.0', SHA), [OLD_CLOUD_SETUP_PATH]: CLOUD_SETUP_068 }),
-      { pinned: '0.7.0', scripted: '0.7.0', workflow: WORKFLOW_PATH, script: CLOUD_SETUP_PATH },
-      'the new ones when both are there',
-    );
+    const none = { pinned: undefined, scripted: undefined, workflow: WORKFLOW_PATH, script: CLOUD_SETUP_PATH };
+    assert.deepEqual(at({}), none);
+    assert.deepEqual(at({ '.github/workflows/process-rules.yml': workflow('main', '0.6.8', false), [LEFTOVER_CLOUD_SETUP_PATH]: CLOUD_SETUP_068 }), none);
+    assert.deepEqual(at({ [WORKFLOW_PATH]: workflow('main', '0.7.0', false), [CLOUD_SETUP_PATH]: cloudRepoScript('0.7.0', SHA) }), { ...none, pinned: '0.7.0', scripted: '0.7.0' });
   });
 });
 
@@ -82,18 +78,18 @@ describe('cloudRepoScript', () => {
     assert.ok(script.includes('https://nodejs.org/dist/v$node/node-v$node-linux-$arch.tar.xz'));
     assert.ok(script.includes(`-o "$dir/niyam.tgz" ${releaseTarball('9.8.7')}\n`));
     assert.equal(releaseTarball('9.8.7'), 'https://github.com/veda-hq/niyam/releases/download/v9.8.7/veda-hq-niyam-9.8.7.tgz');
-    assert.equal(releaseTarball('0.6.1'), 'https://github.com/veda-hq/niyam/releases/download/v0.6.1/athya-hq-process-rules-0.6.1.tgz', 'a release before niyam: its old asset');
-    assert.ok(!script.includes('/usr/local/bin/process-rules '), 'since P-54 the old name is only removed');
-    assert.ok(script.includes('rm -f /usr/local/bin/niyam /usr/local/bin/process-rules\n'));
+    assert.equal(releaseTarball('0.6.1'), 'https://github.com/veda-hq/niyam/releases/download/v0.6.1/veda-hq-niyam-0.6.1.tgz', 'niyam\'s archive alone: onboard pins only its own release (P-57)');
+    assert.ok(script.includes('rm -f /usr/local/bin/niyam /usr/local/bin/process-rules\n'), 'the command before niyam removed as a leftover');
+    assert.deepEqual(script.match(/process-rules|PROCESS_RULES/g), ['process-rules'], 'named only in that removal (P-57)');
     assert.equal(cloudScriptVersion(script), '9.8.7');
-    assert.equal(cloudScriptVersion('# process-rules 0.6.6 for Claude cloud sessions: Node'), '0.6.6', 'a file a release before P-53 wrote');
+    assert.equal(cloudScriptVersion('# process-rules 0.6.6 for Claude cloud sessions: Node'), undefined, 'a file a release before P-53 wrote');
     assert.ok(script.includes(`echo "${SHA}  $dir/niyam.tgz" | sha256sum -c --quiet -\n`));
     assert.ok(script.includes(`at the version ${WORKFLOW_PATH} pins`));
     assert.equal(spawnSync('bash', ['-n', '-c', script]).status, 0, 'bash reads it');
   });
 
   describe('run by a real shell, with the downloads stood in for', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'process-rules-cloud-'));
+    const dir = mkdtempSync(join(tmpdir(), 'niyam-cloud-'));
     after(() => rmSync(dir, { recursive: true, force: true }));
 
     /**
@@ -147,10 +143,9 @@ describe('cloudRepoScript', () => {
       );
       assert.equal(fetched, `https://nodejs.org/dist/v${CLOUD_NODE}/node-v${CLOUD_NODE}-linux-arm64.tar.xz\n${opt}\n${releaseTarball('9.8.7')}\n${opt}/cli-9.8.7\n`);
       assert.equal(existsSync(join(opt, 'from-setup')), false, 'not run by the Setup snippet');
-      assert.equal(existsSync(join(local, 'process-rules')), false, 'no old name since P-54');
     });
 
-    it("replaces a release's before P-53, where niyam linked to process-rules", () => {
+    it("replaces a release's before P-53, where niyam linked to process-rules, and removes that leftover", () => {
       const { result, local } = setup('older', 0, {
         before: (dir) => {
           writeFileSync(join(dir, 'process-rules'), '#!/bin/sh\nexec old\n', { mode: 0o755 });
@@ -160,7 +155,7 @@ describe('cloudRepoScript', () => {
       assert.equal(result.status, 0, result.stderr);
       assert.equal(lstatSync(join(local, 'niyam')).isSymbolicLink(), false, 'niyam is a file of its own now');
       assert.match(readFileSync(join(local, 'niyam'), 'utf8'), /cli-9\.8\.7\/package\/dist\/cli\.js/);
-      assert.equal(existsSync(join(local, 'process-rules')), false, 'the old command is gone');
+      assert.equal(existsSync(join(local, 'process-rules')), false, 'the command before niyam is gone');
     });
 
     it('keeps a Node already unpacked at its version, fetching the CLI alone', () => {
@@ -172,17 +167,13 @@ describe('cloudRepoScript', () => {
       assert.match(other.fetched, /^https:\/\/nodejs\.org\//, 'another Node is fetched again');
     });
 
-    it('leaves a mark naming the file it ran from when the Setup snippet ran it, the one pasted before P-56 too, which sets the old name alone', () => {
-      for (const [env, file] of [
-        [{ NIYAM_SETUP: '1', PROCESS_RULES_SETUP: '1' }, CLOUD_SETUP_PATH],
-        [{ NIYAM_SETUP: '1' }, CLOUD_SETUP_PATH],
-        [{ PROCESS_RULES_SETUP: '1' }, OLD_CLOUD_SETUP_PATH],
-      ] as const) {
-        const name = `marked-${Object.keys(env).join('-')}`;
-        const { result, opt } = setup(name, 0, { env, file });
-        assert.equal(result.status, 0, result.stderr);
-        assert.equal(readFileSync(join(opt, 'from-setup'), 'utf8'), `${join(dir, name, 'example-app', file)}\n`, JSON.stringify(env));
-      }
+    it('leaves a mark naming the file it ran from when the Setup snippet ran it, by NIYAM_SETUP alone (P-57)', () => {
+      const { result, opt } = setup('marked', 0, { env: { NIYAM_SETUP: '1' }, file: CLOUD_SETUP_PATH });
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(readFileSync(join(opt, 'from-setup'), 'utf8'), `${join(dir, 'marked', 'example-app', CLOUD_SETUP_PATH)}\n`);
+      const old = setup('old-mark', 0, { env: { PROCESS_RULES_SETUP: '1' }, file: CLOUD_SETUP_PATH });
+      assert.equal(old.result.status, 0, old.result.stderr);
+      assert.equal(existsSync(join(old.opt, 'from-setup')), false, 'the snippet pasted before P-56 sets the old name alone');
     });
 
     it('stops, unpacking nothing and writing no niyam, when a download does not match its sha256', () => {
@@ -223,7 +214,7 @@ describe('cloudSetupSnippet', () => {
   });
 
   describe('run by a real shell', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'process-rules-snippet-'));
+    const dir = mkdtempSync(join(tmpdir(), 'niyam-snippet-'));
     after(() => rmSync(dir, { recursive: true, force: true }));
     const then = 'echo "repo setup ran"\nexit 0\n';
 
@@ -236,9 +227,9 @@ describe('cloudSetupSnippet', () => {
     /** A clone at `clone` whose cloud setup file, at `file`, says which it is, how it ran, and exits `code`. */
     function clone(at: string, code = 0, file: string = CLOUD_SETUP_PATH): void {
       mkdirSync(join(at, dirname(file)), { recursive: true });
-      writeFileSync(join(at, file), `echo "ran ${file} mark=$NIYAM_SETUP,$PROCESS_RULES_SETUP stdin=$(cat)"\nexit ${code}\n`);
+      writeFileSync(join(at, file), `echo "ran ${file} mark=$NIYAM_SETUP,\${PROCESS_RULES_SETUP-unset} stdin=$(cat)"\nexit ${code}\n`);
     }
-    const RAN = `ran ${CLOUD_SETUP_PATH} mark=1,1 stdin=\nrepo setup ran\n`;
+    const RAN = `ran ${CLOUD_SETUP_PATH} mark=1,unset stdin=\nrepo setup ran\n`;
 
     it("runs the clone's cloud setup file from the folder that holds the clone, then the repo's own setup", () => {
       const home = join(dir, 'home');
@@ -252,19 +243,15 @@ describe('cloudSetupSnippet', () => {
       assert.deepEqual(setup(app), { status: 0, stdout: RAN, stderr: '' });
     });
 
-    it('runs the file under its old name in a clone onboard has not moved, marking it under both names, and the new one where both are', () => {
+    it('runs no file under its name before P-56 (P-57)', () => {
+      assert.doesNotMatch(snippet, /process-rules|PROCESS_RULES/);
       const old = join(dir, 'old');
-      clone(join(old, 'example-app'), 0, OLD_CLOUD_SETUP_PATH);
-      assert.deepEqual(setup(old), { status: 0, stdout: `ran ${OLD_CLOUD_SETUP_PATH} mark=1,1 stdin=\nrepo setup ran\n`, stderr: '' });
+      clone(join(old, 'example-app'), 0, LEFTOVER_CLOUD_SETUP_PATH);
+      assert.equal(setup(old).stdout, 'repo setup ran\n');
       const both = join(dir, 'both');
-      clone(join(both, 'example-app'), 0, OLD_CLOUD_SETUP_PATH);
+      clone(join(both, 'example-app'), 0, LEFTOVER_CLOUD_SETUP_PATH);
       clone(join(both, 'example-app'));
       assert.deepEqual(setup(both), { status: 0, stdout: RAN, stderr: '' });
-      // A new file in any clone comes before an old one in another.
-      const mixed = join(dir, 'mixed');
-      clone(join(mixed, 'a-app'), 0, OLD_CLOUD_SETUP_PATH);
-      clone(join(mixed, 'b-app'));
-      assert.deepEqual(setup(mixed), { status: 0, stdout: RAN, stderr: '' });
     });
 
     it("says so when the install fails, and runs the repo's own setup", () => {

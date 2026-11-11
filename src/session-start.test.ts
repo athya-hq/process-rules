@@ -8,11 +8,11 @@ import { after, describe, it } from 'node:test';
 import { BASE_ENV, NO_TOKEN, lockScript, pathsFor, sessionNames, sessionRecord, sessionScript } from './agent.ts';
 import { KEYCHAIN } from './token-store.ts';
 import { AGENT, AGENT_ID, FakeSys, HOME, ROOT, capture } from './fake.test.ts';
-import { FROM_SETUP, OLD_FROM_SETUP, PROXY_TOKEN, cloudRepoScript } from './cloud.ts';
-import { CLOUD_SETUP_PATH } from './onboard-pull.ts';
+import { FROM_SETUP, PROXY_TOKEN, cloudRepoScript } from './cloud.ts';
+import { CLOUD_SETUP_PATH, WORKFLOW_PATH } from './onboard-pull.ts';
 import { OLDER_PRE_PUSH_HOOKS, PRE_PUSH_HOOK, workflow } from './onboard.ts';
 import { packageVersion } from './version.ts';
-import { SESSION_069, SESSION_BEFORE_P50 } from './older-texts.test.ts';
+import { SESSION_0610, SESSION_069, SESSION_BEFORE_P50 } from './older-texts.test.ts';
 import { AUTO_FIX, CLOUD_INSTALL_MS, sessionStart } from './session-start.ts';
 
 const OWNER_LOGIN = 'example-owner';
@@ -73,65 +73,33 @@ describe('sessionStart', () => {
     assert.deepEqual((await start(sys)).out, [`niyam: this session works as ExampleBot on GitHub. ${AUTO_FIX}`]);
   });
 
-  it('gives the agent identity with a session file a release before niyam wrote, which reads the old keychain entry (P-50)', async () => {
+  it("gives the agent identity with 0.6.10's session file, which machine has not rewritten since the upgrade (P-57)", async () => {
     const sys = ready();
-    // A Mac set up before niyam: the token under the old keychain service alone.
-    const token = sys.keychain.get(`niyam/${AGENT}`) as string;
-    sys.keychain.delete(`niyam/${AGENT}`);
-    sys.keychain.set(`process-rules/${AGENT}`, token);
-    const older = sessionScript(AGENT, AGENT_ID, pathsFor(HOME, AGENT), KEYCHAIN, '/usr/bin/security find-generic-password -s process-rules -a ExampleBot -w 2>/dev/null');
-    sys.files.set(SESSION, older);
+    sys.files.set(SESSION, SESSION_0610);
     const { code, out, env } = await start(sys);
     assert.equal(code, 0);
     assert.deepEqual(out, [`niyam: this session works as ExampleBot on GitHub. ${AUTO_FIX}`]);
-    assert.equal(env, `\n${lockScript(HOME)}\n${older}`);
+    assert.equal(env, `\n${lockScript(HOME)}\n${SESSION_0610}`);
   });
 
-  describe('on a Mac machine set up under 0.6.9, before P-55, and has not set up since', () => {
-    const OLD_SESSION = pathsFor(HOME, AGENT, true).session;
-    const older = (session = SESSION_069): FakeSys => {
+  it('stays locked with a session file only in the folder before P-55, which no release reads since P-57', async () => {
+    for (const old of [SESSION_069, SESSION_BEFORE_P50]) {
       const sys = ready();
       sys.files.delete(SESSION);
-      sys.files.set(OLD_SESSION, session);
-      return sys;
-    };
-
-    it("gives the agent identity from 0.6.9's session file in the old folder, writing the lock and the record in the new", async () => {
-      const sys = older();
-      sys.stdin = JSON.stringify({ session_id: 'abc-123' });
+      sys.files.set(`${HOME}/.config/process-rules/examplebot/session.sh`, old);
+      sys.keychain.set(`process-rules/${AGENT}`, sys.keychain.get(`niyam/${AGENT}`) as string);
       const { out, env } = await start(sys);
-      assert.deepEqual(out, [`niyam: this session works as ExampleBot on GitHub. ${AUTO_FIX}`]);
-      assert.equal(env, `\n${lockScript(HOME)}\n${SESSION_069}`);
-      assert.equal(sys.files.get(`${HOME}/.config/niyam/sessions/abc-123.json`), '{"agent":"ExampleBot"}\n');
-      assert.equal(sys.files.has(`${HOME}/.config/process-rules/sessions/abc-123.json`), false, 'nothing written in the old folder');
-    });
-
-    it('gives it from a session file a release before P-50 wrote there, with the token under the old keychain service alone', async () => {
-      const sys = older(SESSION_BEFORE_P50);
-      const token = sys.keychain.get(`niyam/${AGENT}`) as string;
-      sys.keychain.delete(`niyam/${AGENT}`);
-      sys.keychain.set(`process-rules/${AGENT}`, token);
-      const { out, env } = await start(sys);
-      assert.deepEqual(out, [`niyam: this session works as ExampleBot on GitHub. ${AUTO_FIX}`]);
-      assert.equal(env, `\n${lockScript(HOME)}\n${SESSION_BEFORE_P50}`);
-    });
-
-    it("takes the new folder's session file over the old one's", async () => {
-      const sys = older();
-      sys.files.set(SESSION, SCRIPT);
-      assert.equal((await start(sys)).env, `\n${lockScript(HOME)}\n${SCRIPT}`);
-      sys.files.set(SESSION, 'export GH_TOKEN=x\n');
-      sys.files.delete(ENV);
-      const { out, env } = await start(sys);
-      assert.equal(env, `\n${lockScript(HOME)}`, 'a broken new one locks; the old one is not tried');
-      assert.match(out[0] ?? '', /^niyam: GitHub is locked out of this session: \/home\/u\/\.config\/niyam\/examplebot\/session\.sh is out of date/);
-    });
-
-    it('stays locked when the old folder holds a session file machine did not write', async () => {
-      const { out, env } = await start(older(SESSION_069.replace("GIT_TERMINAL_PROMPT='0'", "GIT_TERMINAL_PROMPT='1'")));
       assert.equal(env, `\n${lockScript(HOME)}`);
-      assert.match(out[0] ?? '', /\/home\/u\/\.config\/process-rules\/examplebot\/session\.sh is out of date, or not the file niyam machine writes/);
-    });
+      assert.match(out[0] ?? '', /^niyam: GitHub is locked out of this session: \/home\/u\/\.config\/niyam\/examplebot\/session\.sh is missing/);
+    }
+  });
+
+  it('stays locked with a session file the folder before P-55 had, copied into the new one', async () => {
+    const sys = ready();
+    sys.files.set(SESSION, SESSION_069);
+    const { out, env } = await start(sys);
+    assert.equal(env, `\n${lockScript(HOME)}`);
+    assert.match(out[0] ?? '', /^niyam: GitHub is locked out of this session: /);
   });
 
   it('locks, then gives the session the agent identity', async () => {
@@ -168,7 +136,7 @@ describe('sessionStart', () => {
       const sys = cloud(AGENT);
       const { out, env } = await start(sys);
       assert.deepEqual(out, ['niyam: this cloud session works as ExampleBot on GitHub.']);
-      assert.equal(env, `\nunset ${Object.keys(BASE_ENV).join(' ')}\nexport GH_TOKEN=proxy-injected GITHUB_TOKEN=proxy-injected NIYAM_AGENT=ExampleBot PROCESS_RULES_AGENT=ExampleBot\n`);
+      assert.equal(env, `\nunset ${Object.keys(BASE_ENV).join(' ')}\nexport GH_TOKEN=proxy-injected GITHUB_TOKEN=proxy-injected NIYAM_AGENT=ExampleBot\n`);
       assert.equal(sys.files.get(RECORD), '{"agent":"ExampleBot"}\n');
       assert.equal(sys.requests.at(-1)?.token, PROXY_TOKEN, 'the proxy placeholder, never the lock');
     });
@@ -188,14 +156,16 @@ describe('sessionStart', () => {
     it("leaves the client's own pre-push hook, saying when it does not run niyam", async () => {
       const hook = `${ROOT}/.git/hooks/pre-push`;
       const ours = cloud(AGENT);
-      ours.files.set(hook, '#!/bin/sh\npnpm lint\nprocess-rules pre-push "$@"\n');
+      ours.files.set(hook, '#!/bin/sh\npnpm lint\nniyam pre-push "$@"\n');
       assert.deepEqual((await start(ours)).out, ['niyam: this cloud session works as ExampleBot on GitHub.']);
-      const own = cloud(AGENT);
-      own.files.set(hook, '#!/bin/sh\npnpm lint\n');
-      assert.deepEqual((await start(own)).out, [
-        "niyam: this cloud session works as ExampleBot on GitHub. Its pre-push hook .git/hooks/pre-push does not run niyam, so only the pull request's checks hold the work rules.",
-      ]);
-      assert.equal(own.files.get(hook), '#!/bin/sh\npnpm lint\n');
+      for (const text of ['#!/bin/sh\npnpm lint\n', '#!/bin/sh\npnpm lint\nprocess-rules pre-push "$@"\n']) {
+        const own = cloud(AGENT);
+        own.files.set(hook, text);
+        assert.deepEqual((await start(own)).out, [
+          "niyam: this cloud session works as ExampleBot on GitHub. Its pre-push hook .git/hooks/pre-push does not run niyam, so only the pull request's checks hold the work rules.",
+        ], 'the command before niyam runs nothing since P-54');
+        assert.equal(own.files.get(hook), text, 'left as it is');
+      }
     });
 
     it('leaves a pre-push hook outside the repository unchecked, and says so', async () => {
@@ -225,7 +195,7 @@ describe('sessionStart', () => {
       /** A cloud session in a repo whose workflow pins `pin` and whose cloud setup file, when given, installs `file`. */
       const repoAt = (pin: string, file?: string, login: string | null = AGENT): FakeSys => {
         const sys = cloud(login);
-        sys.files.set(`${ROOT}/.github/workflows/process-rules.yml`, workflow('main', pin, false));
+        sys.files.set(`${ROOT}/${WORKFLOW_PATH}`, workflow('main', pin, false));
         if (file) sys.files.set(CLOUD_FILE, cloudRepoScript(file, 'ab'.repeat(32)));
         sys.execOverride = installed;
         return sys;
@@ -253,26 +223,18 @@ describe('sessionStart', () => {
         assert.equal(sys.files.get(RECORD), '{"agent":"ExampleBot"}\n', 'it never blocks');
       });
 
-      it('installs from the cloud setup file under its old name in a repo onboard has not moved, the old mark counting as the Setup run (P-56)', async () => {
+      it('installs nothing from the cloud setup file under its name before P-56, whose mark counts for nothing (P-57)', async () => {
         const sys = repoAt('0.0.1');
-        const old = `${ROOT}/.github/process-rules/cloud-setup.sh`;
-        sys.files.set(old, cloudRepoScript('0.0.1', 'ab'.repeat(32)));
-        sys.files.set(OLD_FROM_SETUP, '');
-        assert.deepEqual((await start(sys)).out.slice(1), [
-          `niyam: this cloud session's environment held niyam ${v}; installed 0.0.1 from .github/process-rules/cloud-setup.sh, as the repo pins, for this session. The environment catches up when Claude builds it again.`,
-        ]);
-        assert.deepEqual(installs(sys).map((call) => call.args), [[old]]);
-        const both = repoAt('0.0.1', '0.0.1');
-        both.files.set(old, cloudRepoScript('0.0.2', 'ab'.repeat(32)));
-        both.files.set(FROM_SETUP, '');
-        await start(both);
-        assert.deepEqual(installs(both).map((call) => call.args), [[CLOUD_FILE]], 'the new one where both are');
+        sys.files.set(`${ROOT}/.github/process-rules/cloud-setup.sh`, cloudRepoScript('0.0.1', 'ab'.repeat(32)));
+        sys.files.set('/opt/process-rules/from-setup', '');
+        assert.match((await start(sys)).out[1] ?? '', /and the repo has no \.github\/niyam\/cloud-setup\.sh to install it from/);
+        assert.deepEqual(installs(sys), []);
       });
 
       it('names the one paste when the Setup script installs a release of its own', async () => {
         const sys = repoAt('0.0.1', '0.0.1');
         assert.deepEqual((await start(sys)).out.slice(1), [
-          `niyam: this cloud session's environment held niyam ${v}; installed 0.0.1 from ${CLOUD_SETUP_PATH}, as the repo pins, for this session. The environment catches up when Claude builds it again. The cloud environment's Setup script installs a release of its own: paste what niyam cloud-setup prints over its process-rules part, once, and new releases then need no paste.`,
+          `niyam: this cloud session's environment held niyam ${v}; installed 0.0.1 from ${CLOUD_SETUP_PATH}, as the repo pins, for this session. The environment catches up when Claude builds it again. The cloud environment's Setup script installs a release of its own: paste what niyam cloud-setup prints over its own part, once, and new releases then need no paste.`,
         ]);
       });
 
@@ -292,11 +254,11 @@ describe('sessionStart', () => {
       it('says to run onboard again, not to paste, when the cloud setup file is missing or not at the pin', async () => {
         const missing = repoAt('0.0.1');
         assert.deepEqual((await start(missing)).out.slice(1), [
-          `niyam: this cloud session runs niyam ${v}, but .github/workflows/process-rules.yml pins v0.0.1, and the repo has no ${CLOUD_SETUP_PATH} to install it from. Run niyam onboard again, which writes it; then paste what niyam cloud-setup prints over the process-rules part of the cloud environment's Setup script, once.`,
+          `niyam: this cloud session runs niyam ${v}, but ${WORKFLOW_PATH} pins v0.0.1, and the repo has no ${CLOUD_SETUP_PATH} to install it from. Run niyam onboard again, which writes it; then paste what niyam cloud-setup prints into the cloud environment's Setup script, once.`,
         ]);
         const behind = repoAt('0.0.2', '0.0.1');
         assert.deepEqual((await start(behind)).out.slice(1), [
-          `niyam: ${CLOUD_SETUP_PATH} installs niyam 0.0.1, but .github/workflows/process-rules.yml pins v0.0.2. Run niyam onboard again, which writes the file at the pin.`,
+          `niyam: ${CLOUD_SETUP_PATH} installs niyam 0.0.1, but ${WORKFLOW_PATH} pins v0.0.2. Run niyam onboard again, which writes the file at the pin.`,
         ]);
         assert.deepEqual([...installs(missing), ...installs(behind)], [], 'nothing installed from a file that is not at the pin');
         const stopped = repoAt('0.0.1', undefined, OWNER_LOGIN);
@@ -319,21 +281,21 @@ describe('sessionStart', () => {
 
     it("says nothing of versions without the repo's workflow, or when it pins none or several", async () => {
       const unpinned = cloud(AGENT);
-      unpinned.files.set(`${ROOT}/.github/workflows/process-rules.yml`, 'name: process-rules\n');
+      unpinned.files.set(`${ROOT}/${WORKFLOW_PATH}`, 'name: niyam\n');
       assert.equal((await start(unpinned)).out.length, 1);
       const several = cloud(AGENT);
-      several.files.set(`${ROOT}/.github/workflows/process-rules.yml`, workflow('main', '0.0.1', false).replace('niyam-ref: v0.0.1', 'niyam-ref: v0.0.2'));
+      several.files.set(`${ROOT}/${WORKFLOW_PATH}`, workflow('main', '0.0.1', false).replace('niyam-ref: v0.0.1', 'niyam-ref: v0.0.2'));
       assert.equal((await start(several)).out.length, 1);
       const unreadable = cloud(AGENT);
-      unreadable.files.set(`${ROOT}/.github/workflows/process-rules.yml`, workflow('main', '0.0.1', false));
+      unreadable.files.set(`${ROOT}/${WORKFLOW_PATH}`, workflow('main', '0.0.1', false));
       const read = unreadable.read.bind(unreadable);
       unreadable.read = (path) => {
-        if (path.endsWith('process-rules.yml')) throw new Error('unreadable');
+        if (path.endsWith('niyam.yml')) throw new Error('unreadable');
         return read(path);
       };
       assert.equal((await start(unreadable)).out.length, 1);
       const outside = cloud(AGENT);
-      outside.files.set(`${ROOT}/.github/workflows/process-rules.yml`, workflow('main', '0.0.1', false));
+      outside.files.set(`${ROOT}/${WORKFLOW_PATH}`, workflow('main', '0.0.1', false));
       outside.execOverride = (call) => (call.args[0] === 'rev-parse' && call.args[1] === '--show-toplevel' ? { code: 128, stdout: '', stderr: 'not a repo' } : undefined);
       assert.equal((await start(outside)).out.length, 1);
     });
@@ -505,7 +467,7 @@ describe('sessionStart', () => {
       assert.equal(env, `\n${lockScript(HOME)}`);
       assert.deepEqual(out, [
         locked(
-          '.github/niyam.json names the agents OtherBot or ExampleBot, and niyam machine has set up OtherBot and ExampleBot on this machine, so which one this session works as cannot be told; remove the others\' folders under ~/.config/niyam and ~/.config/process-rules',
+          '.github/niyam.json names the agents OtherBot or ExampleBot, and niyam machine has set up OtherBot and ExampleBot on this machine, so which one this session works as cannot be told; remove the others\' folders under ~/.config/niyam',
         ),
       ]);
     });
@@ -550,12 +512,12 @@ describe('sessionNames', () => {
   it("reads the agent and id from machine's file", async () => {
     assert.deepEqual(sessionNames(SCRIPT), { agent: AGENT, id: AGENT_ID });
     assert.equal(sessionNames('export PROCESS_RULES_AGENT=\'x\'\n'), undefined);
-    assert.deepEqual(sessionNames(SESSION_069), { agent: AGENT, id: AGENT_ID }, "0.6.9's, by PROCESS_RULES_AGENT alone");
+    assert.equal(sessionNames(SESSION_069), undefined, "0.6.9's, by PROCESS_RULES_AGENT alone (P-57)");
   });
 });
 
 describe('lockScript, sourced by a real shell', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'process-rules-lock-'));
+  const dir = mkdtempSync(join(tmpdir(), 'niyam-lock-'));
   after(() => rmSync(dir, { recursive: true, force: true }));
   const env = join(dir, 'env.sh');
   writeFileSync(env, lockScript(dir));

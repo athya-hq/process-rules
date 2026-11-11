@@ -21,20 +21,33 @@ export interface TokenStore {
   readCommand(agent: string): string;
   /** The commands older releases wrote in the session file, which still read the token. */
   olderReadCommands?(agent: string): string[];
-  /** Whether the token is held only under an older name, so `machine` copies it to the current one. */
-  onlyOlder?(sys: Sys, agent: string): boolean;
+  /**
+   * The item an older release kept the token in, for messages; with
+   * `leftover`, the token still in it, or undefined when there is none, and
+   * `dropLeftover`, which deletes it: undefined once the store says it is
+   * gone, else why it may not be. Only
+   * `machine` deletes it and only `doctor` reports it; nothing reads a token
+   * from it.
+   */
+  leftoverItem?(agent: string): string;
+  leftover?(sys: Sys, agent: string): string | undefined;
+  dropLeftover?(sys: Sys, agent: string): string | undefined;
+  /** The shell command that deletes the leftover item by hand. */
+  dropLeftoverCommand?(agent: string): string;
 }
 
 /**
  * The keychain item holding the agent account's token: service, account =
  * login. Releases before niyam stored it under the service `process-rules`,
- * which is still read and never deleted, so an older CLI on the Mac keeps
- * working (P-50). While that entry is there, a new token is stored under
- * both, so an older CLI never reads one `machine` replaced.
+ * which no release reads since P-57: `machine` deletes that entry once the
+ * `niyam` one holds the same token, and `doctor` reports one still there.
  */
 export const KEYCHAIN_SERVICE = 'niyam';
-export const OLD_KEYCHAIN_SERVICE = 'process-rules';
+/** The service before niyam (P-50), named only to delete it. */
+export const LEFTOVER_SERVICE = 'process-rules';
 const SECURITY = '/usr/bin/security';
+/** The exit code `security` gives when the keychain has no such item: the one answer that says it is gone. */
+const NOT_FOUND = 44;
 
 function find(service: string, agent: string): string {
   return `${SECURITY} find-generic-password -s ${service} -a ${agent} -w 2>/dev/null`;
@@ -50,20 +63,28 @@ function readFrom(sys: Sys, service: string, agent: string): string | undefined 
 export const KEYCHAIN: TokenStore = {
   where: "this Mac's keychain",
   item: (agent) => `service ${KEYCHAIN_SERVICE}, account ${agent}`,
-  read: (sys, agent) => readFrom(sys, KEYCHAIN_SERVICE, agent) ?? readFrom(sys, OLD_KEYCHAIN_SERVICE, agent),
+  read: (sys, agent) => readFrom(sys, KEYCHAIN_SERVICE, agent),
   store(sys, agent, token) {
     // Only characters the `security -i` prompt reads as one word.
     if (!/^[A-Za-z0-9_]+$/.test(token)) return false;
-    // While the old entry is there, a new token goes under both names, so an older CLI never reads a replaced one.
-    const services = readFrom(sys, OLD_KEYCHAIN_SERVICE, agent) === undefined ? [KEYCHAIN_SERVICE] : [KEYCHAIN_SERVICE, OLD_KEYCHAIN_SERVICE];
-    const result = sys.exec(SECURITY, ['-i'], {
-      input: services.map((service) => `add-generic-password -U -s ${service} -a ${agent} -w ${token}\n`).join(''),
-    });
-    return result.code === 0 && services.every((service) => readFrom(sys, service, agent) === token);
+    const result = sys.exec(SECURITY, ['-i'], { input: `add-generic-password -U -s ${KEYCHAIN_SERVICE} -a ${agent} -w ${token}\n` });
+    return result.code === 0 && readFrom(sys, KEYCHAIN_SERVICE, agent) === token;
   },
-  readCommand: (agent) => `${find(KEYCHAIN_SERVICE, agent)} || ${find(OLD_KEYCHAIN_SERVICE, agent)}`,
-  olderReadCommands: (agent) => [find(OLD_KEYCHAIN_SERVICE, agent)],
-  onlyOlder: (sys, agent) => readFrom(sys, KEYCHAIN_SERVICE, agent) === undefined && readFrom(sys, OLD_KEYCHAIN_SERVICE, agent) !== undefined,
+  readCommand: (agent) => find(KEYCHAIN_SERVICE, agent),
+  // 0.6.10's session file, which fell back to the entry before niyam: data compared against, not a read of it.
+  olderReadCommands: (agent) => [`${find(KEYCHAIN_SERVICE, agent)} || ${find(LEFTOVER_SERVICE, agent)}`],
+  leftoverItem: (agent) => `service ${LEFTOVER_SERVICE}, account ${agent}`,
+  leftover: (sys, agent) => readFrom(sys, LEFTOVER_SERVICE, agent),
+  dropLeftover(sys, agent) {
+    const deleted = sys.exec(SECURITY, ['delete-generic-password', '-s', LEFTOVER_SERVICE, '-a', agent]);
+    const found = sys.exec(SECURITY, ['find-generic-password', '-s', LEFTOVER_SERVICE, '-a', agent]);
+    if (found.code === NOT_FOUND) return undefined;
+    const said = (result: { code: number; stderr: string }): string => result.stderr.trim() || `exit ${result.code}`;
+    return found.code === 0
+      ? `the keychain still holds it after the delete (${said(deleted)})`
+      : `the keychain could not say whether it is gone (${said(found)})`;
+  },
+  dropLeftoverCommand: (agent) => `${SECURITY} delete-generic-password -s ${LEFTOVER_SERVICE} -a ${agent}`,
 };
 
 /** Each platform's store, by Node's name for the platform. */

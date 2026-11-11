@@ -83,13 +83,6 @@ describe('features', () => {
     assert.equal(offLine('pr-design', 'figma'), 'pr-design: figma is off in .github/niyam.json; nothing to check');
   });
 
-  it('reads a feature from .github/process-rules.json in a repo onboarded before niyam (P-50)', () => {
-    const sys = new FakeSys();
-    sys.files.delete(SETTINGS);
-    sys.files.set(`${ROOT}/.github/process-rules.json`, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity', 'board'] }));
-    assert.equal(isOn(sys, ROOT, 'board'), true);
-    assert.equal(isOn(sys, ROOT, 'figma'), false);
-  });
 });
 
 describe('pull request checks on a base not adopted yet', () => {
@@ -110,14 +103,14 @@ describe('pull request checks on a base not adopted yet', () => {
     });
   }
 
-  it('says nothing once the base has settings, under either name', () => {
+  it('says nothing once the base has settings, and counts no file before niyam as them (P-57)', () => {
     const sys = new FakeSys();
     sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT }));
     assert.equal(notAdoptedLine(sys, ROOT, 'pr-identity'), undefined);
     const older = new FakeSys();
     older.files.delete(SETTINGS);
     older.files.set(`${ROOT}/.github/process-rules.json`, JSON.stringify({ owner: 'example-owner', agent: AGENT }));
-    assert.equal(notAdoptedLine(older, ROOT, 'pr-identity'), undefined);
+    assert.match(notAdoptedLine(older, ROOT, 'pr-identity') ?? '', /has no \.github\/niyam\.json/);
   });
 });
 
@@ -133,7 +126,7 @@ describe('checks of features that are off', () => {
       GITHUB_REPOSITORY: 'example-org/example-app',
       GH_TOKEN: 'ghs_run',
       FIGMA_TOKEN: 'figd',
-      PROCESS_RULES_AGENT: AGENT,
+      NIYAM_AGENT: AGENT,
     };
     return sys;
   }
@@ -211,7 +204,7 @@ describe('checks on a personal repository', () => {
       GH_TOKEN: 'ghs_run',
       FIGMA_TOKEN: 'figd',
       FIGMA_LIBRARY: 'abc',
-      PROCESS_RULES_AGENT: AGENT,
+      NIYAM_AGENT: AGENT,
     };
     return sys;
   }

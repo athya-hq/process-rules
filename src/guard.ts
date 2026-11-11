@@ -1,4 +1,4 @@
-import { sessionRecordIn } from './agent.ts';
+import { sessionRecord } from './agent.ts';
 import { askRefusal, commentProblem } from './asks.ts';
 import type { Output, Sys } from './types.ts';
 
@@ -77,12 +77,11 @@ export function guard(sys: Sys, io: Output, stdin: string): number {
 /**
  * The agent session-start recorded this session as working as, or why it
  * names none: no record for the id, one it did not write, or the problem it
- * recorded instead. A session started before P-55 has its record in the old
- * folder, read where the config folder has none (`sessionRecordIn`).
+ * recorded instead.
  * `as-agent` reads the same record.
  */
 export function recordedAgent(sys: Sys, sessionId: unknown): { agent: string } | { problem: string } {
-  const path = typeof sessionId === 'string' ? sessionRecordIn(sys, sessionId) : undefined;
+  const path = typeof sessionId === 'string' ? sessionRecord(sys.home, sessionId) : undefined;
   if (!path || !sys.exists(path)) {
     return { problem: 'session-start did not run for this session, so it was not given the agent identity' };
   }

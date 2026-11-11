@@ -17,13 +17,40 @@ import {
 } from './agent.ts';
 import { type Finding, type Item, closing, findingLines, heading, painter, planLines, runStep, spinning, tilde } from './layout.ts';
 import { exposure, keyFindings, recordMove, removeGitPassword, signOut } from './lockout.ts';
-import { tokenStore, unsupported } from './token-store.ts';
+import { type TokenStore, tokenStore, unsupported } from './token-store.ts';
 import type { Output, Sys } from './types.ts';
 import { GITHUB_HOST, GITHUB_WEB } from './host.ts';
 
 /** GitHub's classic-token page, with the note and scopes filled in. */
 export const TOKEN_PAGE = `${GITHUB_WEB}/settings/tokens/new?description=${CLI}%20agent&scopes=${TOKEN_SCOPES.join(',')}`;
 const KEY_PAGE = `${GITHUB_WEB}/settings/ssh/new`;
+
+/**
+ * The folder this Mac's files were in before P-55, under the home folder,
+ * with the launcher hooks before 0.6.10 ran: no release reads it since P-57,
+ * so `machine` removes it, whole, once it has written the new folder, and
+ * `doctor` reports one still there.
+ */
+export const LEFTOVER_DIR = '.config/process-rules';
+
+/** The leftover folder's path on this Mac, when it is there. */
+export function leftoverDir(sys: Sys): string | undefined {
+  const dir = `${sys.home}/${LEFTOVER_DIR}`;
+  return sys.exists(dir) || sys.list(dir).length > 0 ? dir : undefined;
+}
+
+/**
+ * Whether the token store's leftover item, from before niyam, holds the
+ * same token as the current one, so `machine` may delete it; or why not.
+ * Undefined when there is no leftover item.
+ */
+export function leftoverToken(sys: Sys, store: TokenStore, agent: string): { same: true } | { same: false; why: string } | undefined {
+  const left = store.leftover?.(sys, agent);
+  if (left === undefined) return undefined;
+  const current = store.read(sys, agent);
+  if (current === undefined) return { same: false, why: `${store.item(agent)} holds no token to check it against` };
+  return current === left ? { same: true } : { same: false, why: `it holds another token than ${store.item(agent)}` };
+}
 
 /**
  * What to do on the token page, in short lines: the first heads the step,
@@ -61,9 +88,10 @@ export function machineArgs(args: readonly string[]): { named?: string; yes?: tr
  * agent sessions source, the launcher the hooks run, and the owner's `gh`
  * logins and saved git password locked away. Needs no client repository;
  * whether the agent can push to one is `onboard`'s check. The session file
- * and the launcher go under ~/.config/niyam only (the signing key stays in
- * ~/.ssh), and the ones a release before P-55 wrote under
- * ~/.config/process-rules stay, since older hooks still run that launcher.
+ * and the launcher go under ~/.config/niyam (the signing key stays in
+ * ~/.ssh). Once they are written, what is left from before niyam goes: the
+ * folder before P-55, whole, and the keychain's entry before niyam, only
+ * where it holds the same token as the current one (P-57).
  *
  * It first works out what it would change, changing nothing, shows that as
  * one plan and asks once (`--yes` skips the question, `--dry-run` stops at
@@ -124,9 +152,11 @@ export async function machine(sys: Sys, io: Output, args: readonly string[] = []
   } else {
     mac.push({ label: 'token', detail: `classic, in ${store.where.replace(/^this Mac's /, 'the ')} (new)` });
   }
-  // A token that stays but sits only under the old keychain name is copied to the new one; the old entry stays for older CLIs.
-  const copyToken = token !== undefined && store.onlyOlder?.(sys, agent) === true;
-  if (copyToken) mac.push({ label: 'token', detail: `copied to ${store.item(agent)}` });
+  // The keychain's entry from before niyam goes, but only where the current one holds the same token, read again before the delete.
+  const leftover = leftoverToken(sys, store, agent);
+  const replacing = token === undefined;
+  const dropLeftover = !replacing && leftover?.same === true;
+  if (dropLeftover) mac.push({ label: 'keychain', detail: `delete ${store.leftoverItem?.(agent) ?? 'the old entry'}: ${store.item(agent)} holds the same token` });
 
   // The key on GitHub: a new key is registered; an existing one unless GitHub lists it.
   const listedNow = async (): Promise<boolean> => {
@@ -152,6 +182,16 @@ export async function machine(sys: Sys, io: Output, args: readonly string[] = []
   for (const login of found.ghLogins) mac.push({ label: 'gh', detail: `sign out ${login}` });
   if (found.gitPassword) mac.push({ label: 'git password', detail: 'remove from the keychain' });
   const fixes: Finding[] = keyFindings(found, sys.home);
+  // The folder before P-55, removed whole once the new one is written: its launcher, and any session file or record still in it.
+  const oldDir = leftoverDir(sys);
+  if (oldDir) mac.push({ label: 'old folder', detail: `remove ${home(oldDir)}, its launcher and all in it` });
+  const keptLeftover = (why: string): Finding => ({
+    mark: '▲',
+    text: `${store.leftoverItem?.(agent) ?? 'the old keychain entry'} stays: ${why}`,
+    fix: `once nothing needs it, ${store.dropLeftoverCommand?.(agent) ?? 'delete it'}`,
+  });
+  // With a token that stays, a leftover holding another one stays, said now; with a new token, once it is stored.
+  if (leftover !== undefined && !replacing && !leftover.same) fixes.push(keptLeftover(leftover.why));
 
   const end = (): number => {
     for (const line of findingLines(paint, 'Worth fixing', fixes)) io.out(line);
@@ -226,14 +266,6 @@ export async function machine(sys: Sys, io: Output, args: readonly string[] = []
     });
     if (!stored.ok) return 1;
     token = entered;
-  } else if (copyToken) {
-    const kept = token;
-    const copied = await runStep(sys, io, paint, `token copied to ${store.item(agent)}`, async (out) => {
-      if (store.store(sys, agent, kept)) return true;
-      out.err(`machine: ${store.where} did not take the token under ${store.item(agent)}; the old entry still works`);
-      return false;
-    });
-    if (!copied.ok) return 1;
   }
 
   if (register) {
@@ -275,6 +307,24 @@ export async function machine(sys: Sys, io: Output, args: readonly string[] = []
       sys.write(launcher, wanted, 0o755);
       return true;
     });
+  }
+  // Read again: the delete goes ahead only while both entries still hold the same token, and only as the plan said.
+  const now = leftover === undefined ? undefined : leftoverToken(sys, store, agent);
+  if (now !== undefined && !now.same) {
+    if (dropLeftover || replacing) fixes.push(keptLeftover(now.why));
+  } else if (now !== undefined && dropLeftover) {
+    let why: string | undefined;
+    await runStep(sys, io, paint, `${store.leftoverItem?.(agent) ?? 'old keychain entry'} deleted`, async () => (why = store.dropLeftover?.(sys, agent)) === undefined);
+    if (why !== undefined) fixes.push(keptLeftover(why));
+  } else if (now !== undefined) {
+    fixes.push({ mark: '▲', text: `${store.leftoverItem?.(agent) ?? 'the old keychain entry'} holds the token just stored, and this run's plan did not delete it`, fix: 'niyam machine' });
+  }
+  if (oldDir) {
+    const { ok } = await runStep(sys, io, paint, `${home(oldDir)} removed`, async () => {
+      sys.remove(oldDir);
+      return leftoverDir(sys) === undefined;
+    });
+    if (!ok) fixes.push({ mark: '▲', text: `${home(oldDir)}, niyam's folder before P-55, is still here`, fix: `rm -r ${home(oldDir)}` });
   }
 
   // Locking the owner away is hardening: what fails is worth fixing, and stops nothing.

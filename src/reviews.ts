@@ -43,7 +43,7 @@ const DATE = /^\d{4}-\d{2}-\d{2}$/;
 /** Labels that mean a decision waits on the owner: the routine leaves it alone. */
 const WAITING = ['veto', 'needs-owner'];
 /** The mark in the weekly job's comment naming the decision text it vetted, by its SHA-256. */
-/** The vetted mark, niyam's or, on decisions vetted before the rename, process-rules'. */
+/** The vetted mark, niyam's or, on decisions vetted before the rename, process-rules': data, which P-57 keeps reading, as dropping it would un-vet them. */
 const VETTED = /<!-- (?:niyam|process-rules) vetted sha256:([0-9a-f]{64}) -->/;
 
 /** The SHA-256 of a decision's body, as GitHub returns it, in hex. */

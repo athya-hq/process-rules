@@ -2,7 +2,7 @@ import { API, type Settings, anyLogin, either, isNoToken, loadSettings, repoAt }
 import { PERSONAL_REPO, isOn, isPersonal, notAdoptedLine, offLine, readRepo } from './features.ts';
 import { agentSession, pushIdentityProblem } from './push-identity.ts';
 import { cloudToken } from './cloud.ts';
-import { MOVED_FILES, OLD_ONBOARD_BRANCH, ONBOARD_BRANCH, ONBOARD_FILES } from './onboard-pull.ts';
+import { MOVED_FILES, ONBOARD_BRANCH, ONBOARD_FILES } from './onboard-pull.ts';
 import type { Output, Sys } from './types.ts';
 import { GITHUB_HOST_RE, GITHUB_WEB } from './host.ts';
 import { boardStarted } from './board.ts';
@@ -394,10 +394,11 @@ function report(io: Output, where: string, problems: string[]): number {
  * pull requests pass; an agent's must name exactly one slice, as a line
  * `Slice: #N`, that may be built, and name with lines `State: #N` only States
  * under it, at least one open one when the slice is closed already (a fix);
- * but for onboard's own: from ONBOARD_BRANCH (or the one before P-56)
- * in this repository, changing only the files onboard writes and deleting
- * none but the two it moves, each only where its new file is written or is
- * on the base branch, which the owner confirmed at the terminal and merges.
+ * but for onboard's own: from ONBOARD_BRANCH alone in this repository,
+ * changing only the files onboard writes and deleting none but the cloud
+ * setup file under its name before P-56 (MOVED_FILES), only where the new
+ * one is written or is on the base branch, which the owner confirmed at the
+ * terminal and merges.
  */
 export async function prWorkRules(sys: Sys, io: Output): Promise<number> {
   const { GITHUB_EVENT_PATH: eventPath, GITHUB_REPOSITORY: slug, GH_TOKEN: token } = sys.env;
@@ -430,11 +431,11 @@ export async function prWorkRules(sys: Sys, io: Output): Promise<number> {
     io.out(`pr-work-rules: #${pull.number} is by ${pull.user.login}, not an agent; the work rules bind agent pull requests`);
     return 0;
   }
-  if ((pull.head.ref === ONBOARD_BRANCH || pull.head.ref === OLD_ONBOARD_BRANCH) && pull.head.repo?.full_name.toLowerCase() === slug.toLowerCase()) {
+  if (pull.head.ref === ONBOARD_BRANCH && pull.head.repo?.full_name.toLowerCase() === slug.toLowerCase()) {
     const files = await every<{ filename: string; status?: string; previous_filename?: string }>(sys, token, pull.number, `${API}/repos/${slug}/pulls/${pull.number}/files`);
     const names = files.flatMap((file) => [file.filename, ...(file.previous_filename ? [file.previous_filename] : [])]);
-    // onboard writes its files and deletes none but its two moved since P-56, each only into its own new name, written
-    // here or already on the base: any other deleted workflow or settings file would switch the checks off.
+    // onboard writes its files and deletes none but the cloud setup file under its name before P-56, only into its
+    // new name, written here or already on the base: any other deleted workflow or settings file would switch the checks off.
     const kept = (path: string): boolean => files.some((file) => file.filename === path && file.status !== 'removed') || sys.exists(`${sys.cwd}/${path}`);
     const moved = files.every((file) =>
       file.status === 'removed'

@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 
 import { pathsFor, readToken, sessionFileIs, sessionScript } from './agent.ts';
 import { AGENT, AGENT_ID, FakeSys, HOME, TOKEN } from './fake.test.ts';
+import { SESSION_0610 } from './older-texts.test.ts';
 import { KEYCHAIN, tokenStore, unsupported } from './token-store.ts';
 
 describe('the macOS keychain', () => {
@@ -40,17 +41,15 @@ describe('the macOS keychain', () => {
     assert.ok(sys.calls.some((c) => c.args[0] === 'find-generic-password'));
   });
 
-  it('gives the session file a command that reads niyam, then the old process-rules entry', () => {
+  it('gives the session file a command that reads niyam alone', () => {
     const niyam = '/usr/bin/security find-generic-password -s niyam -a ExampleBot -w 2>/dev/null';
-    const old = '/usr/bin/security find-generic-password -s process-rules -a ExampleBot -w 2>/dev/null';
-    assert.equal(KEYCHAIN.readCommand(AGENT), `${niyam} || ${old}`);
-    assert.deepEqual(KEYCHAIN.olderReadCommands?.(AGENT), [old], 'what releases before niyam wrote');
+    assert.equal(KEYCHAIN.readCommand(AGENT), niyam);
     assert.equal(KEYCHAIN.item(AGENT), 'service niyam, account ExampleBot');
-    assert.ok(sessionScript(AGENT, AGENT_ID, pathsFor(HOME, AGENT)).split('\n').includes(`export GH_TOKEN="$(${niyam} || ${old})"`));
+    assert.ok(sessionScript(AGENT, AGENT_ID, pathsFor(HOME, AGENT)).split('\n').includes(`export GH_TOKEN="$(${niyam})"`));
   });
 });
 
-describe('the keychain before niyam (P-50)', () => {
+describe('the keychain entry before niyam, which nothing reads (P-57)', () => {
   const withEntries = (entries: Record<string, string>): FakeSys => {
     const sys = new FakeSys();
     sys.keychain.clear();
@@ -58,55 +57,56 @@ describe('the keychain before niyam (P-50)', () => {
     return sys;
   };
 
-  it('reads a token held only under the old process-rules service, and says it is only there', () => {
+  it('reads no token held only under the old process-rules service', () => {
     const sys = withEntries({ 'process-rules': 'ghp_old' });
-    assert.equal(KEYCHAIN.read(sys, AGENT), 'ghp_old');
-    assert.equal(KEYCHAIN.onlyOlder?.(sys, AGENT), true);
-  });
-
-  it('reads the niyam entry first when both are there', () => {
-    const sys = withEntries({ niyam: 'ghp_new', 'process-rules': 'ghp_old' });
-    assert.equal(KEYCHAIN.read(sys, AGENT), 'ghp_new');
-    assert.equal(KEYCHAIN.onlyOlder?.(sys, AGENT), false);
-  });
-
-  it('finds nothing when neither is there', () => {
-    const sys = withEntries({});
     assert.equal(KEYCHAIN.read(sys, AGENT), undefined);
-    assert.equal(KEYCHAIN.onlyOlder?.(sys, AGENT), false);
+    assert.ok(sys.calls.every((call) => !call.args.includes('process-rules')), 'not even asked');
   });
 
-  it('stores under niyam alone when there is no old entry', () => {
-    const sys = withEntries({});
+  it('stores under niyam alone, the old entry there or not', () => {
+    const sys = withEntries({ 'process-rules': 'ghp_old' });
     assert.equal(KEYCHAIN.store(sys, AGENT, 'ghp_new'), true);
+    assert.deepEqual(Object.fromEntries(sys.keychain), { 'process-rules/ExampleBot': 'ghp_old', 'niyam/ExampleBot': 'ghp_new' });
+  });
+
+  it('names the leftover entry, gives its token, and deletes it, true once it is gone', () => {
+    const sys = withEntries({ niyam: 'ghp_new', 'process-rules': 'ghp_old' });
+    assert.equal(KEYCHAIN.leftoverItem?.(AGENT), 'service process-rules, account ExampleBot');
+    assert.equal(KEYCHAIN.leftover?.(sys, AGENT), 'ghp_old');
+    assert.equal(KEYCHAIN.dropLeftoverCommand?.(AGENT), '/usr/bin/security delete-generic-password -s process-rules -a ExampleBot');
+    assert.equal(KEYCHAIN.dropLeftover?.(sys, AGENT), undefined);
     assert.deepEqual(Object.fromEntries(sys.keychain), { 'niyam/ExampleBot': 'ghp_new' });
+    assert.equal(KEYCHAIN.leftover?.(sys, AGENT), undefined);
   });
 
-  it('keeps an old entry in step, so an older CLI never reads a token machine replaced', () => {
+  it('says false when the keychain keeps the leftover entry', () => {
     const sys = withEntries({ 'process-rules': 'ghp_old' });
-    assert.equal(KEYCHAIN.store(sys, AGENT, 'ghp_new'), true);
-    assert.deepEqual(Object.fromEntries(sys.keychain), { 'process-rules/ExampleBot': 'ghp_new', 'niyam/ExampleBot': 'ghp_new' });
+    sys.undeletable.add(`process-rules/${AGENT}`);
+    assert.equal(KEYCHAIN.dropLeftover?.(sys, AGENT), 'the keychain still holds it after the delete (not deleted)');
+    assert.equal(KEYCHAIN.leftover?.(sys, AGENT), 'ghp_old');
   });
 
-  it('reports a keychain that took the new name but not the old one', () => {
+  it('takes only "item not found" (exit 44) as gone: any other failure of the check is a problem, not a delete', () => {
     const sys = withEntries({ 'process-rules': 'ghp_old' });
-    sys.execOverride = (call) => {
-      if (call.args[0] !== '-i') return undefined;
-      sys.keychain.set(`niyam/${AGENT}`, 'ghp_new');
-      return { code: 0, stdout: '', stderr: '' };
-    };
-    assert.equal(KEYCHAIN.store(sys, AGENT, 'ghp_new'), false);
+    sys.execOverride = (call) => (call.args[0] === 'find-generic-password' ? { code: 51, stdout: '', stderr: 'User interaction is not allowed.' } : undefined);
+    assert.equal(KEYCHAIN.dropLeftover?.(sys, AGENT), 'the keychain could not say whether it is gone (User interaction is not allowed.)');
+    const silent = withEntries({ 'process-rules': 'ghp_old' });
+    silent.undeletable.add(`process-rules/${AGENT}`);
+    silent.execOverride = (call) => (call.args[0] === 'delete-generic-password' ? { code: 1, stdout: '', stderr: '' } : undefined);
+    assert.equal(KEYCHAIN.dropLeftover?.(silent, AGENT), 'the keychain still holds it after the delete (exit 1)');
   });
 
-  it("takes a session file an older release wrote, one that reads the old entry, as an older one, not a stranger's", () => {
+  it("takes 0.6.10's session file, whose read falls back to the old entry, as an older one, not a stranger's", () => {
     const paths = pathsFor(HOME, AGENT);
     const { olderReadCommands: _older, ...bare } = KEYCHAIN;
-    const older = sessionScript(AGENT, AGENT_ID, paths, KEYCHAIN, '/usr/bin/security find-generic-password -s process-rules -a ExampleBot -w 2>/dev/null');
+    assert.deepEqual(KEYCHAIN.olderReadCommands?.(AGENT), [
+      '/usr/bin/security find-generic-password -s niyam -a ExampleBot -w 2>/dev/null || /usr/bin/security find-generic-password -s process-rules -a ExampleBot -w 2>/dev/null',
+    ]);
     assert.equal(sessionFileIs(sessionScript(AGENT, AGENT_ID, paths), AGENT, AGENT_ID, paths), 'current');
-    assert.equal(sessionFileIs(older, AGENT, AGENT_ID, paths), 'older');
-    assert.equal(sessionFileIs(older.replace('process-rules -a', 'other -a'), AGENT, AGENT_ID, paths), undefined);
+    assert.equal(sessionFileIs(SESSION_0610, AGENT, AGENT_ID, paths), 'older');
+    assert.equal(sessionFileIs(SESSION_0610.replace('process-rules -a', 'other -a'), AGENT, AGENT_ID, paths), undefined);
     assert.equal(sessionFileIs(sessionScript(AGENT, AGENT_ID, paths), AGENT, AGENT_ID, paths, bare), 'current');
-    assert.equal(sessionFileIs(older, AGENT, AGENT_ID, paths, bare), undefined, 'a store with no older names takes no older file');
+    assert.equal(sessionFileIs(SESSION_0610, AGENT, AGENT_ID, paths, bare), undefined, 'a store with no older names takes no older file');
   });
 });
 

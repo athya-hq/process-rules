@@ -1,4 +1,4 @@
-import { releaseAsset } from './cloud.ts';
+import { tarballName } from './names.ts';
 import { createHash } from 'node:crypto';
 
 import { launcherPath, launcherScript } from './agent.ts';
@@ -56,6 +56,8 @@ export class FakeSys implements Sys {
   files = new Map<string, string>([[`${ROOT}/.github/niyam.json`, SETTINGS]]);
   /** Keychain items by "service/account". */
   keychain = new Map<string, string>();
+  /** Keychain items, as service/account, that delete-generic-password leaves in place. */
+  undeletable = new Set<string>();
   modes = new Map<string, number>();
   inRepo = true;
   origin = 'https://github.com/example-org/example-app.git';
@@ -159,8 +161,8 @@ export class FakeSys implements Sys {
     if (override) return override;
     const ok = (stdout = ''): ExecResult => ({ code: 0, stdout, stderr: '' });
     const fail = (stderr = 'failed'): ExecResult => ({ code: 1, stdout: '', stderr });
-    // Either launcher: the one machine writes, or the one it wrote before P-55.
-    if (command === launcherPath(HOME) || command === launcherPath(HOME, true)) return this.files.has(command) ? ok('0.0.0\n') : fail('not found');
+    // The launcher machine writes.
+    if (command === launcherPath(HOME)) return this.files.has(command) ? ok('0.0.0\n') : fail('not found');
     // The temporary repository onboard commits its changes in.
     if (command === 'git' && args.slice(0, 3).join(' ') === 'rev-parse --verify -q') {
       const path = (args[3] ?? '').replace(/^FETCH_HEAD:/, '');
@@ -253,7 +255,14 @@ export class FakeSys implements Sys {
     }
     if (command === '/usr/bin/security' && args[0] === 'find-generic-password') {
       const token = this.keychain.get(`${args[args.indexOf('-s') + 1] ?? ''}/${args[args.indexOf('-a') + 1] ?? ''}`);
-      return token ? ok(`${token}\n`) : fail('not found');
+      // security's own exit code for an item the keychain does not have.
+      return token ? ok(`${token}\n`) : { code: 44, stdout: '', stderr: 'security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.' };
+    }
+    if (command === '/usr/bin/security' && args[0] === 'delete-generic-password') {
+      const item = `${args[args.indexOf('-s') + 1] ?? ''}/${args[args.indexOf('-a') + 1] ?? ''}`;
+      if (this.undeletable.has(item) || !this.keychain.has(item)) return fail('not deleted');
+      this.keychain.delete(item);
+      return ok();
     }
     if (command === '/usr/bin/security' && args[0] === '-i') {
       // One add-generic-password per line, as `security -i` reads them.
@@ -349,9 +358,9 @@ export class FakeSys implements Sys {
     // The newest release is the one this checkout builds, unless a test routes it.
     if (url === 'https://api.github.com/repos/veda-hq/niyam/releases/latest') {
       const version = packageVersion();
-      return { status: 200, json: { tag_name: `v${version}`, assets: [{ name: releaseAsset(version) }] } };
+      return { status: 200, json: { tag_name: `v${version}`, assets: [{ name: tarballName(version) }] } };
     }
-    if (release) return { status: 200, json: { assets: [{ name: releaseAsset(release[1] as string), digest: `sha256:${RELEASE_SHA256}` }] } };
+    if (release) return { status: 200, json: { assets: [{ name: tarballName(release[1] as string), digest: `sha256:${RELEASE_SHA256}` }] } };
     if (url === 'https://api.github.com/repos/example-org/example-app') return { status: 200, json: { owner: { login: 'example-org', type: this.ownerType } } };
     if (url === 'https://api.github.com/users/example-org') return { status: 200, json: { login: 'example-org', type: this.ownerType } };
     // The organisation has this repository alone, and no open issue with no type, unless a test routes them.

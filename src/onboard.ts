@@ -1,8 +1,7 @@
-import { AGENT_VAR, CLI, CONFIG_DIR, OLD_AGENT_VAR, OLD_CLI, OLD_CONFIG_DIR, OLD_PRODUCT, PRODUCT } from './names.ts';
+import { AGENT_VAR, CLI, CONFIG_DIR, PRODUCT } from './names.ts';
 import {
   API,
   BASE_ENV,
-  OLD_SETTINGS_PATH,
   SETTINGS_PATH,
   account,
   agentHere,
@@ -31,9 +30,7 @@ import {
   type Change,
   CLOUD_SETUP_PATH,
   HOOKS_PATH,
-  OLD_CLOUD_SETUP_PATH,
-  OLD_ONBOARD_BRANCH,
-  OLD_WORKFLOW_PATH,
+  LEFTOVER_CLOUD_SETUP_PATH,
   ONBOARD_BRANCH,
   WORKFLOW_PATH,
   autoMerge,
@@ -55,9 +52,8 @@ export const SETUP_FIRST = "If the repo has its own Setup script, put this first
 /** This product's repository: clients call its shared workflow. */
 export { PRODUCT } from './names.ts';
 export { HOOKS_PATH, WORKFLOW_PATH } from './onboard-pull.ts';
-/** The launcher `machine` writes, and the one it wrote before P-55, as a hook's shell spells them. */
+/** The launcher `machine` writes, as a hook's shell spells it. */
 const HOOK_LAUNCHER = `$HOME/${CONFIG_DIR}/bin/${CLI}`;
-const OLD_HOOK_LAUNCHER = `$HOME/${OLD_CONFIG_DIR}/bin/${OLD_CLI}`;
 
 /**
  * The pre-push git hook: before a local agent session pushes, that it
@@ -69,9 +65,8 @@ export const PRE_PUSH_HOOK = [
   '#!/bin/sh',
   '# Written by niyam onboard: before an agent session pushes, that it pushes as the agent, then the work rules.',
   '# Anyone else\'s push goes ahead. Without the CLI nothing can check an agent session\'s push, so it is refused.',
-  `[ -z "$${AGENT_VAR}" ] && [ -z "$${OLD_AGENT_VAR}" ] && [ "$CLAUDECODE" != 1 ] && exit 0`,
+  `[ -z "$${AGENT_VAR}" ] && [ "$CLAUDECODE" != 1 ] && exit 0`,
   `cli="${HOOK_LAUNCHER}"`,
-  `[ -x "$cli" ] || cli="${OLD_HOOK_LAUNCHER}"`,
   `[ -x "$cli" ] || cli=${CLI}`,
   'if ! command -v "$cli" >/dev/null 2>&1; then',
   '  echo "niyam: the CLI is not installed, so this agent push cannot be checked" >&2',
@@ -83,6 +78,22 @@ export const PRE_PUSH_HOOK = [
 
 /** The pre-push hooks older releases wrote, which onboard replaces with this release's. */
 export const OLDER_PRE_PUSH_HOOKS = [
+  // 0.6.10's, before P-57: the agent by either variable, the launcher in the new folder, else the old one.
+  [
+    '#!/bin/sh',
+    '# Written by niyam onboard: before an agent session pushes, that it pushes as the agent, then the work rules.',
+    '# Anyone else\'s push goes ahead. Without the CLI nothing can check an agent session\'s push, so it is refused.',
+    '[ -z "$NIYAM_AGENT" ] && [ -z "$PROCESS_RULES_AGENT" ] && [ "$CLAUDECODE" != 1 ] && exit 0',
+    'cli="$HOME/.config/niyam/bin/niyam"',
+    '[ -x "$cli" ] || cli="$HOME/.config/process-rules/bin/process-rules"',
+    '[ -x "$cli" ] || cli=niyam',
+    'if ! command -v "$cli" >/dev/null 2>&1; then',
+    '  echo "niyam: the CLI is not installed, so this agent push cannot be checked" >&2',
+    '  exit 1',
+    'fi',
+    'exec "$cli" pre-push "$@"',
+    '',
+  ].join('\n'),
   // 0.6.8 and 0.6.9's, before P-55: the agent by its old variable alone, the launcher in the old folder alone.
   [
     '#!/bin/sh',
@@ -155,15 +166,13 @@ export function prePushHook(sys: Sys, root: string): { path: string; file: strin
   if (!sys.exists(file)) return { path, file, state: 'missing' };
   const text = sys.read(file);
   if (OLDER_PRE_PUSH_HOOKS.includes(text)) return { path, file, state: 'older' };
-  return { path, file, state: /^\s*(?:exec\s+)?(?:"\$cli"|process-rules|niyam)\s+pre-push\b/m.test(text) ? 'ours' : 'own' };
+  return { path, file, state: /^\s*(?:exec\s+)?(?:"\$cli"|niyam)\s+pre-push\b/m.test(text) ? 'ours' : 'own' };
 }
 
-/**
- * How a hook finds the CLI: the launcher `machine` writes, else the one it
- * wrote before P-55, which a Mac not set up again since has alone, else
- * niyam on PATH.
- */
-const FIND_CLI = `cli="${HOOK_LAUNCHER}"; [ -x "$cli" ] || cli="${OLD_HOOK_LAUNCHER}"; [ -x "$cli" ] || cli=${CLI}; `;
+/** How a hook finds the CLI: the launcher `machine` writes, else niyam on PATH. */
+const FIND_CLI = `cli="${HOOK_LAUNCHER}"; [ -x "$cli" ] || cli=${CLI}; `;
+/** How hooks from P-55 to P-57 (0.6.10) found it: the launcher, else the one in the folder before P-55, else niyam on PATH. */
+const P55_FIND_CLI = 'cli="$HOME/.config/niyam/bin/niyam"; [ -x "$cli" ] || cli="$HOME/.config/process-rules/bin/process-rules"; [ -x "$cli" ] || cli=niyam; ';
 /** How hooks from P-53 to P-55 found it: the launcher in the old folder, else niyam on PATH. */
 const P53_FIND_CLI = 'cli="$HOME/.config/process-rules/bin/process-rules"; [ -x "$cli" ] || cli=niyam; ';
 /** How hooks before P-53 found it: the launcher, else process-rules on PATH. */
@@ -234,6 +243,8 @@ export function missingAutoFixRules(settings: unknown): string[] {
 
 /** The hook commands older releases wrote, which onboard replaces with this release's. */
 export const OLDER_HOOK_COMMANDS = [
+  // 0.6.10's, before P-57.
+  P55_FIND_CLI + HOOK_RUN,
   // 0.6.8 and 0.6.9's, before P-55: the launcher in the old folder alone.
   P53_FIND_CLI + HOOK_RUN,
   OLD_FIND_CLI +
@@ -252,6 +263,8 @@ export const OLDER_HOOK_COMMANDS = [
 
 /** The guard commands older releases wrote, which onboard replaces with this release's. */
 export const OLDER_GUARD_COMMANDS = [
+  // 0.6.10's, before P-57.
+  GUARD_SKIP + P55_FIND_CLI + GUARD_RUN,
   // 0.6.8 and 0.6.9's, before P-55.
   GUARD_SKIP + P53_FIND_CLI + GUARD_RUN,
   'input=$(cat); ' +
@@ -417,14 +430,12 @@ function addAsksJob(before: string, version: string, figma: boolean): string | u
   return `${text.replace(/\n*$/, '\n')}\n${asksJob(version, figma ? FIGMA_SECRETS : []).join('\n')}`;
 }
 
-/** The workflow's first line, naming the release it pins: `name` is niyam, or process-rules in what releases before P-53 wrote. */
-const headerLine = (name: string, version: string): string => `# Written by ${name} onboard: the shared ${name} checks at v${version}.`;
+/** The workflow's first line, naming the release it pins. */
+const headerLine = (version: string): string => `# Written by ${CLI} onboard: the shared ${CLI} checks at v${version}.`;
 
 /**
  * Each job's `name:`, which GitHub puts before the shared checks' own in a
- * check's name, as in `niyam / Work rules`; before P-53 the job ids alone
- * named them, `process-rules / Work rules`. Since P-56 the ids say niyam
- * too, and the names stay, so no check's name changes.
+ * check's name, as in `niyam / Work rules`; the ids say niyam too (P-56).
  */
 export const JOB_NAMES: Record<string, string> = {
   [CLI]: CLI,
@@ -434,30 +445,15 @@ export const JOB_NAMES: Record<string, string> = {
 };
 const jobName = (id: string): string => `    name: ${JOB_NAMES[id]}`;
 
-/** The input naming the release each job pins, and its name before P-56, which the shared checks still take. */
+/** The input naming the release each job pins. */
 export const REF_INPUT = `${CLI}-ref`;
-export const OLD_REF_INPUT = `${OLD_CLI}-ref`;
-/** A job id onboard wrote before P-56: `process-rules`, or one of its three split-out jobs. */
-const OLD_JOB_ID = new RegExp(String.raw`^( {2})${OLD_CLI}(-weekly|-merged|-asks)?(:[ \t]*)$`, 'gm');
-/** A job's input naming the release, under its name before P-56. */
-const OLD_REF_LINE = new RegExp(String.raw`^( +)${OLD_REF_INPUT}(:)`, 'gm');
-
-/**
- * A workflow as releases before P-56 wrote it, with niyam's ids: each job id
- * onboard wrote, the input naming the release, and the custom schedule's
- * comment, which names the settings file onboard moves to `settings`.
- */
-function withNewIds(text: string, settings: string): string {
-  const out = text.replace(OLD_JOB_ID, `$1${CLI}$2$3`).replace(OLD_REF_LINE, `$1${REF_INPUT}$2`);
-  return settings === OLD_SETTINGS_PATH ? out : out.replace(`UTC, as "schedule" in ${OLD_SETTINGS_PATH} sets it.`, `UTC, as "schedule" in ${settings} sets it.`);
-}
 
 /** The workflow's head, down to its jobs, which every template shares; `asks` adds the needs-owner job's triggers. */
-function workflowHead(branch: string, version: string, comments: string[], schedule = DEFAULT_SCHEDULE, types = TRIGGER_TYPES, asks = true, settings: string = SETTINGS_PATH, name = CLI): string[] {
+function workflowHead(branch: string, version: string, comments: string[], schedule = DEFAULT_SCHEDULE, types = TRIGGER_TYPES, asks = true, settings: string = SETTINGS_PATH): string[] {
   return [
-    headerLine(name, version),
+    headerLine(version),
     ...comments,
-    `name: ${name}`,
+    `name: ${CLI}`,
     '',
     'on:',
     '  pull_request:',
@@ -485,11 +481,11 @@ const FIGMA_SECRETS = ['    secrets:', '      FIGMA_TOKEN: ${{ secrets.FIGMA_TOK
 /** The secrets every job passed before P-23, whether figma was on or not. */
 const OLDER_SECRETS = ['    secrets:', '      FIGMA_TOKEN: ${{ secrets.FIGMA_TOKEN }}'];
 /**
- * A job's `niyam-ref` line (`process-rules-ref` before P-56) and the block of
- * Figma secrets after it, as either list writes it, or the line alone when no
- * secrets follow: a block with secrets of the client's own is left as it is.
+ * A job's `niyam-ref` line and the block of Figma secrets after it, as
+ * either list writes it, or the line alone when no secrets follow: a block
+ * with secrets of the client's own is left as it is.
  */
-const SECRETS_AFTER_REF = /^( {6}(?:niyam|process-rules)-ref:[^\n]*\n)(?: {4}secrets:\n(?: {6}FIGMA_(?:TOKEN|LIBRARY): \$\{\{ secrets\.FIGMA_(?:TOKEN|LIBRARY) \}\}\n)+(?! {6})|(?! {4}secrets:))/gm;
+const SECRETS_AFTER_REF = /^( {6}niyam-ref:[^\n]*\n)(?: {4}secrets:\n(?: {6}FIGMA_(?:TOKEN|LIBRARY): \$\{\{ secrets\.FIGMA_(?:TOKEN|LIBRARY) \}\}\n)+(?! {6})|(?! {4}secrets:))/gm;
 
 /**
  * The jobs of a workflow that call the shared checks without passing them
@@ -503,12 +499,12 @@ export function jobsWithoutLibrary(text: string): string[] {
   );
 }
 
-/** One job's call of the shared checks at `version`, passing `secrets`; `input` names the release, as its old name did before P-56. */
-function callChecks(version: string, secrets: string[], input = REF_INPUT): string[] {
+/** One job's call of the shared checks at `version`, passing `secrets`. */
+function callChecks(version: string, secrets: string[]): string[] {
   return [
     `    uses: ${PRODUCT}/.github/workflows/checks.yml@v${version}`,
     '    with:',
-    `      ${input}: v${version}`,
+    `      ${REF_INPUT}: v${version}`,
     ...secrets,
   ];
 }
@@ -557,46 +553,13 @@ export function workflow(branch: string, version: string, figma: boolean, schedu
   ].join('\n');
 }
 
-/**
- * The workflows older releases wrote, at `version`, which onboard replaces
- * with this release's: one job that wrote to issues on every run.
- */
-export function olderWorkflows(branch: string, version: string): string[] {
-  return [
-    [
-      ...workflowHead(branch, version, ['# To upgrade, change the version on both lines that name it.'], DEFAULT_SCHEDULE, OLDER_TRIGGER_TYPES, false, SETTINGS_PATH, OLD_CLI),
-      '  process-rules:',
-      '    # Write to issues for this job only: the weekly run comments and opens undo issues.',
-      '    permissions:',
-      '      contents: read',
-      '      issues: write',
-      '      pull-requests: read',
-      ...callChecks(version, OLDER_SECRETS, OLD_REF_INPUT),
-      '',
-    ].join('\n'),
-  ];
-}
-
 const escape = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-/** A call of the shared workflow, at this repository or the one it moved from (GitHub forwards it), and its version. */
-const CHECKS_PIN = new RegExp(`((?:${escape(PRODUCT)}|${escape(OLD_PRODUCT)})/\\.github/workflows/checks\\.yml@v)([^\\s'"#]+)`, 'g');
-const REF_PIN = /^(\s+(?:niyam|process-rules)-ref:\s*['"]?v)([^\s'"#]+)/gm;
-const HEADER_PIN = /^(# Written by (?:niyam|process-rules) onboard: the shared (?:niyam|process-rules) checks at v)(\S+?)(\.?)$/m;
+/** A call of the shared workflow, and its version. */
+const CHECKS_PIN = new RegExp(`(${escape(PRODUCT)}/\\.github/workflows/checks\\.yml@v)([^\\s'"#]+)`, 'g');
+const REF_PIN = /^(\s+niyam-ref:\s*['"]?v)([^\s'"#]+)/gm;
+const HEADER_PIN = /^(# Written by niyam onboard: the shared niyam checks at v)(\S+?)(\.?)$/m;
 
-/**
- * A workflow as releases before P-53 wrote it, with niyam's names: the
- * workflow's `name: process-rules` becomes niyam, and each job id onboard
- * writes gains the `name:` JOB_NAMES gives it, unless the client named it.
- */
-function withNames(text: string): string {
-  let out = text.replace(/^name: process-rules[ \t]*$/m, `name: ${CLI}`);
-  for (const id of Object.keys(JOB_NAMES)) {
-    out = out.replace(new RegExp(`^( {2}${escape(id)}:[ \\t]*\\n)(?! {4}name:)`, 'm'), (line: string) => `${line}${jobName(id)}\n`);
-  }
-  return out;
-}
-
-/** The versions a workflow pins: each `checks.yml@v…`, then each `niyam-ref: v…` (`process-rules-ref: v…` before P-56). */
+/** The versions a workflow pins: each `checks.yml@v…`, then each `niyam-ref: v…`. */
 export function workflowPins(text: string): string[] {
   return [...text.matchAll(CHECKS_PIN), ...text.matchAll(REF_PIN)].map((match) => match[2] as string);
 }
@@ -627,18 +590,16 @@ function flowScalar(value: string, quote: string): string {
 /** What `workflowUpdate` does with a workflow. */
 export type WorkflowUpdate =
   | { kind: 'same' }
-  | { kind: 'write' | 'replace-older' | 'replace'; text: string; from?: string }
-  | { kind: 'repin'; text: string; from?: string; branch?: string; schedule?: string; secrets?: true; merged?: true; asks?: true; authors?: true; types?: true; names?: true; ids?: true };
+  | { kind: 'write' | 'replace'; text: string; from?: string }
+  | { kind: 'repin'; text: string; from?: string; branch?: string; schedule?: string; secrets?: true; merged?: true; asks?: true; authors?: true; types?: true };
 
 /**
- * What onboard does with the client's workflow: write it, replace an older
- * release's template, or, in a workflow already split into a read-only
- * `niyam` job and a `niyam-weekly` job, move the version pins,
- * the one branch pushes run on when the default branch has changed, the one
- * cron the weekly job runs on when the settings' schedule has changed, and
- * each job's Figma secrets to what the figma feature needs, leaving the rest
- * as the client has it. A workflow written before P-56 has its job ids and
- * its `process-rules-ref` inputs renamed first (`ids`).
+ * What onboard does with the client's workflow: write it, or, in a workflow
+ * already split into a read-only `niyam` job and a `niyam-weekly` job, move
+ * the version pins, the one branch pushes run on when the default branch has
+ * changed, the one cron the weekly job runs on when the settings' schedule
+ * has changed, and each job's Figma secrets to what the figma feature needs,
+ * leaving the rest as the client has it; any other workflow is replaced.
  */
 export function workflowUpdate(
   before: string | undefined,
@@ -649,18 +610,10 @@ export function workflowUpdate(
   settings: string = SETTINGS_PATH,
 ): WorkflowUpdate {
   if (before === undefined) return { kind: 'write', text: workflow(branch, version, figma, schedule, settings) };
-  const from = workflowPins(before)[0];
-  const pushed = PUSH_BRANCH.exec(before)?.[3];
-  if (from !== undefined && pushed !== undefined && olderWorkflows(pushed, from).includes(before)) {
-    return { kind: 'replace-older', text: workflow(branch, version, figma, schedule, settings), from };
-  }
-  const current = withNewIds(before, settings);
-  const update = repinned(current, branch, version, figma, schedule, settings);
-  if (current === before || update.kind === 'replace' || update.kind === 'write') return update;
-  return { ...(update.kind === 'repin' ? update : { text: current }), kind: 'repin', ids: true };
+  return repinned(before, branch, version, figma, schedule, settings);
 }
 
-/** workflowUpdate on a workflow with niyam's job ids. */
+/** workflowUpdate on a workflow that is there. */
 function repinned(before: string, branch: string, version: string, figma: boolean, schedule: string, settings: string): WorkflowUpdate {
   const wanted = workflow(branch, version, figma, schedule, settings);
   if (before === wanted) return { kind: 'same' };
@@ -697,8 +650,7 @@ function repinned(before: string, branch: string, version: string, figma: boolea
           .replace(olderLabelIf, `\n${ASKS_LABEL_IF}\n${ASKS_TYPE_IF}\n`)
           .replace(`${ASKS_COMMENT}\n  ${CLI}-asks:`, `${ASKS_COMMENT}\n${ASKS_TYPE_COMMENT}\n  ${CLI}-asks:`)
       : before;
-    const named = withNames(typed);
-    const pinned = named
+    const pinned = typed
       .replace(OLDER_ASKS_COMMENT_IF.join('\n'), ASKS_COMMENT_IF.join('\n'))
       .replace(CHECKS_PIN, () => `${PRODUCT}/.github/workflows/checks.yml@v${version}`)
       .replace(REF_PIN, (_, head: string) => `${head}${version}`)
@@ -713,31 +665,9 @@ function repinned(before: string, branch: string, version: string, figma: boolea
     const text = pinned.replace(SECRETS_AFTER_REF, (_, ref: string) => `${ref}${secrets}`);
     if (text === before) return { kind: 'same' };
     const stale = pins.find((pin) => pin !== version);
-    return { kind: 'repin', text, ...(stale ? { from: stale } : {}), ...(moved ? { branch } : {}), ...(rescheduled ? { schedule } : {}), ...(text !== pinned ? { secrets: true as const } : {}), ...(authors ? { authors: true as const } : {}), ...(types ? { types: true as const } : {}), ...(named !== typed ? { names: true as const } : {}) };
+    return { kind: 'repin', text, ...(stale ? { from: stale } : {}), ...(moved ? { branch } : {}), ...(rescheduled ? { schedule } : {}), ...(text !== pinned ? { secrets: true as const } : {}), ...(authors ? { authors: true as const } : {}), ...(types ? { types: true as const } : {}) };
   }
   return { kind: 'replace', text: wanted };
-}
-
-/**
- * The names of the repository's rulesets that require a check under its
- * name before P-53, `process-rules / …`; none where GitHub will not say,
- * as for a private repository on a plan without rulesets.
- */
-async function oldNamedRulesets(sys: Sys, slug: string, token: string): Promise<string[]> {
-  const ask = async (path: string): Promise<unknown> => {
-    const answer = await sys.http(`${API}/repos/${slug}/${path}`, { token }).catch(() => undefined);
-    return answer?.status === 200 ? answer.json : undefined;
-  };
-  const listed = await ask('rulesets?includes_parents=false&per_page=100');
-  const names: string[] = [];
-  for (const one of Array.isArray(listed) ? (listed as { id?: unknown; name?: unknown }[]) : []) {
-    const rules = ((await ask(`rulesets/${String(one.id)}`)) as { rules?: unknown } | undefined)?.rules;
-    const old = (Array.isArray(rules) ? (rules as { type?: unknown; parameters?: { required_status_checks?: { context?: unknown }[] } }[]) : []).some(
-      (rule) => rule.type === 'required_status_checks' && (rule.parameters?.required_status_checks ?? []).some((check) => typeof check.context === 'string' && check.context.startsWith(`${OLD_CLI} / `)),
-    );
-    if (old && typeof one.name === 'string') names.push(/^[\w.-]+$/.test(one.name) ? one.name : `'${one.name.replaceAll("'", "'\\''")}'`);
-  }
-  return names;
 }
 
 /** A niyam release a repository pins, and where. */
@@ -759,10 +689,8 @@ function newest(pins: Pin[], version: string): Pin | undefined {
 function newerPinHere(fileAt: (path: string) => string | undefined, version: string): Pin | undefined {
   return newest(
     [
-      ...[WORKFLOW_PATH, OLD_WORKFLOW_PATH].flatMap((path) => workflowPins(fileAt(path) ?? '').map((pin) => ({ version: pin, where: `${path} in this checkout` }))),
-      ...[CLOUD_SETUP_PATH, OLD_CLOUD_SETUP_PATH].flatMap((path) =>
-        [cloudScriptVersion(fileAt(path) ?? '')].filter((pin) => pin !== undefined).map((pin) => ({ version: pin, where: `${path} in this checkout` })),
-      ),
+      ...workflowPins(fileAt(WORKFLOW_PATH) ?? '').map((pin) => ({ version: pin, where: `${WORKFLOW_PATH} in this checkout` })),
+      ...[cloudScriptVersion(fileAt(CLOUD_SETUP_PATH) ?? '')].filter((pin) => pin !== undefined).map((pin) => ({ version: pin, where: `${CLOUD_SETUP_PATH} in this checkout` })),
     ],
     version,
   );
@@ -770,30 +698,21 @@ function newerPinHere(fileAt: (path: string) => string | undefined, version: str
 
 /**
  * A release newer than `version` that the repository pins on GitHub: on the
- * default branch, which a checkout may be behind, or on the branch of an open
- * onboard pull request, which a newer release may have pushed and this run
- * would push over; that branch is `process-rules/onboard` before P-56. The
- * workflow is read under either name. A problem when GitHub does not say, so
- * a run never moves a pin back for want of an answer. Each onboard branch
- * with an open pull request is added to `open`.
+ * default branch, which a checkout may be behind, or on onboard's branch
+ * when its pull request is open, which a newer release may have pushed and
+ * this run would push over. A problem when GitHub does not say, so a run
+ * never moves a pin back for want of an answer.
  */
-async function newerPinOnGitHub(sys: Sys, slug: string, token: string, branch: string | undefined, version: string, open: string[] = []): Promise<Pin | { problem: string } | undefined> {
+async function newerPinOnGitHub(sys: Sys, slug: string, token: string, branch: string | undefined, version: string): Promise<Pin | { problem: string } | undefined> {
   const refs = branch === undefined ? [] : [branch];
-  for (const onboardBranch of [ONBOARD_BRANCH, OLD_ONBOARD_BRANCH]) {
-    const pulls = await sys.http(`${API}/repos/${slug}/pulls?state=open&head=${slug.split('/')[0]}:${onboardBranch}`, { token }).catch(() => ({ status: 0, json: undefined }));
-    if (pulls.status !== 200 || !Array.isArray(pulls.json)) return { problem: `GitHub did not say whether an onboard pull request is open (${pulls.status === 0 ? 'no answer' : `HTTP ${pulls.status}`})` };
-    if (pulls.json.length > 0) {
-      refs.push(onboardBranch);
-      open.push(onboardBranch);
-    }
-  }
+  const pulls = await sys.http(`${API}/repos/${slug}/pulls?state=open&head=${slug.split('/')[0]}:${ONBOARD_BRANCH}`, { token }).catch(() => ({ status: 0, json: undefined }));
+  if (pulls.status !== 200 || !Array.isArray(pulls.json)) return { problem: `GitHub did not say whether an onboard pull request is open (${pulls.status === 0 ? 'no answer' : `HTTP ${pulls.status}`})` };
+  if (pulls.json.length > 0) refs.push(ONBOARD_BRANCH);
   const pins: Pin[] = [];
   for (const ref of refs) {
-    for (const path of [WORKFLOW_PATH, OLD_WORKFLOW_PATH]) {
-      const read = await remoteFile(sys, slug, path, ref, token);
-      if ('problem' in read) return read;
-      pins.push(...workflowPins(read.text ?? '').map((pin) => ({ version: pin, where: `${path} on ${ref}` })));
-    }
+    const read = await remoteFile(sys, slug, WORKFLOW_PATH, ref, token);
+    if ('problem' in read) return read;
+    pins.push(...workflowPins(read.text ?? '').map((pin) => ({ version: pin, where: `${WORKFLOW_PATH} on ${ref}` })));
   }
   return newest(pins, version);
 }
@@ -988,7 +907,7 @@ interface Step {
 
 /** What a workflow update changes, in a few words for the plan. */
 function workflowDetail(update: Exclude<WorkflowUpdate, { kind: 'same' }>, version: string, figma: boolean): string {
-  if (update.kind !== 'repin') return { write: 'new', 'replace-older': 'older template replaced', replace: 'replaced' }[update.kind];
+  if (update.kind !== 'repin') return { write: 'new', replace: 'replaced' }[update.kind];
   return (
     [
       ...(update.from ? [`pins → v${version}`] : []),
@@ -999,8 +918,6 @@ function workflowDetail(update: Exclude<WorkflowUpdate, { kind: 'same' }>, versi
       ...(update.asks ? ['needs-owner job'] : []),
       ...(update.authors ? ['needs-owner job only for owners, members and collaborators'] : []),
       ...(update.types ? ['issue types for new issues'] : []),
-      ...(update.names ? ['niyam check names'] : []),
-      ...(update.ids ? ['niyam job ids'] : []),
     ].join(', ') || `header → v${version}`
   );
 }
@@ -1010,7 +927,6 @@ function workflowWhat(update: Exclude<WorkflowUpdate, { kind: 'same' }>, version
   if (update.kind !== 'repin') {
     return {
       write: `write ${WORKFLOW_PATH}, which runs the shared niyam checks`,
-      'replace-older': `replace the older ${file}, which lets every run write to issues, with this release's, which lets the weekly run alone`,
       replace: `replace ${file}, which runs the shared niyam checks`,
     }[update.kind];
   }
@@ -1023,8 +939,6 @@ function workflowWhat(update: Exclude<WorkflowUpdate, { kind: 'same' }>, version
     ...(update.asks ? ["add a job that labels an issue needs-owner where the agent asks the owner, and takes it off at the owner's approved label, Decision: comment or (hourly) 👍"] : []),
     ...(update.authors ? ['start the needs-owner job only on a comment by the owner, a member or a collaborator'] : []),
     ...(update.types ? ["start the needs-owner job when an issue is opened or reopened too, which gives one with no type the work model's"] : []),
-    ...(update.names ? [`name the workflow and its jobs niyam, so its checks read ${CLI} / Work rules, not ${OLD_CLI} / Work rules`] : []),
-    ...(update.ids ? [`rename its job ids ${OLD_CLI}… to ${CLI}… and its ${OLD_REF_INPUT} inputs to ${REF_INPUT}, leaving the check names as they are`] : []),
   ];
   return `in ${file}, ${parts.join(' and ') || `set the version in its header comment to v${version}`}, leaving the rest as it is`;
 }
@@ -1084,15 +998,12 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     const before = held ? held.before : fileAt(path);
     changes.set(path, { path, before, text, what: held ? `${held.what}; ${what}` : what });
   };
-  // A file under its name before P-56, deleted where the pull request leaves the new one.
+  // A file under its name before P-56, deleted where the pull request leaves the new one (MOVED_FILES).
   const remove = (path: string, what: string): void => {
     if (fileAt(path) === undefined) return;
     const held = changes.get(path);
     changes.set(path, { path, before: held ? held.before : fileAt(path), text: undefined, what });
   };
-  // The settings file is read from .github/niyam.json, else from .github/process-rules.json, which a repo onboarded
-  // before P-56 has: onboard moves that one to the new name as it is, deleting the old one (P-56).
-  const settingsFile = fileAt(SETTINGS_PATH) === undefined && fileAt(OLD_SETTINGS_PATH) !== undefined ? OLD_SETTINGS_PATH : SETTINGS_PATH;
   // The plan's one line for the settings file, each change a part of it.
   const settingsLabel = SETTINGS_PATH.slice('.github/'.length);
   const settingsItem = (detail: string): void => {
@@ -1109,16 +1020,6 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
   const mac: Item[] = [];
   const cloud: Item[] = [];
   const steps: Step[] = [];
-  if (settingsFile === OLD_SETTINGS_PATH) {
-    // Byte for byte, so the client's layout stays.
-    change(SETTINGS_PATH, fileAt(OLD_SETTINGS_PATH) as string, `move ${OLD_SETTINGS_PATH} here`);
-    settingsItem(`moved from ${OLD_SETTINGS_PATH.slice('.github/'.length)}`);
-  }
-  // Beside the new file, the old one goes too: nothing reads it there.
-  if (settingsFile === SETTINGS_PATH && fileAt(SETTINGS_PATH) !== undefined && fileAt(OLD_SETTINGS_PATH) !== undefined) {
-    settingsItem(`${OLD_SETTINGS_PATH.slice('.github/'.length)} deleted`);
-  }
-  if (fileAt(SETTINGS_PATH) !== undefined) remove(OLD_SETTINGS_PATH, `moved to ${SETTINGS_PATH}`);
   const warnings: string[] = [];
   const byHand: string[] = [];
   // For the pull request's description: what was done outside it, and why, and in full what is left to do by hand.
@@ -1152,16 +1053,16 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
   if (fileAt(SETTINGS_PATH) !== undefined) {
     const settings = loadSettings(sys, root);
     if (chosen) {
-      io.err(`onboard: ${settingsFile} already lists its features; turn one more on with --add <feature>`);
+      io.err(`onboard: ${SETTINGS_PATH} already lists its features; turn one more on with --add <feature>`);
       return 1;
     }
     const [namedOwner, namedAgent] = named;
     if ((namedOwner && !anyLogin(settings.owners, namedOwner)) || (namedAgent && !anyLogin(settings.agents, namedAgent))) {
-      io.err(`onboard: ${settingsFile} already names owner ${either(settings.owners)} and agent ${either(settings.agents)}; edit or delete it to change them`);
+      io.err(`onboard: ${SETTINGS_PATH} already names owner ${either(settings.owners)} and agent ${either(settings.agents)}; edit or delete it to change them`);
       return 1;
     }
     // With several agents, the one named, else the one set up here.
-    const here = namedAgent ? { agent: namedAgent } : agentHere(sys, settings.agents, settingsFile);
+    const here = namedAgent ? { agent: namedAgent } : agentHere(sys, settings.agents);
     if ('problem' in here) {
       io.err(`onboard: ${here.problem}; name the owner and the agent: niyam onboard <owner> <agent>`);
       return 1;
@@ -1174,7 +1075,7 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     let chosenOwner = namedOwner ?? (settings.owners.length === 1 ? settings.owners[0] : undefined);
     if (!chosenOwner) {
       if (dryRun) {
-        io.err(`onboard: ${settingsFile} names the owners ${either(settings.owners)}; name yours for a dry run, which signs in to nothing: niyam onboard <owner> --dry-run`);
+        io.err(`onboard: ${SETTINGS_PATH} names the owners ${either(settings.owners)}; name yours for a dry run, which signs in to nothing: niyam onboard <owner> --dry-run`);
         return 1;
       }
       const signed = await signIn(settings.owners);
@@ -1183,11 +1084,11 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
         return 1;
       }
       if (!anyLogin(settings.owners, signed.login)) {
-        io.err(`onboard: the browser signed in to GitHub as ${signed.login}, but ${settingsFile} names the owners ${either(settings.owners)}; sign in there as one of them and run it again`);
+        io.err(`onboard: the browser signed in to GitHub as ${signed.login}, but ${SETTINGS_PATH} names the owners ${either(settings.owners)}; sign in there as one of them and run it again`);
         return 1;
       }
       chosenOwner = signed.login;
-      notes.push(`- onboard signed in before showing its plan: ${settingsFile} names several owners, and only the sign-in tells which one ran it.`);
+      notes.push(`- onboard signed in before showing its plan: ${SETTINGS_PATH} names several owners, and only the sign-in tells which one ran it.`);
     }
     // GitHub's spelling, which the keychain, the session file and commits use.
     owner = (await account(sys, chosenOwner)).login;
@@ -1242,7 +1143,7 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     }
   } else {
     if (add) {
-      io.err(`onboard: there is no ${settingsFile} to add to; run niyam onboard <owner> <agent> first`);
+      io.err(`onboard: there is no ${SETTINGS_PATH} to add to; run niyam onboard <owner> <agent> first`);
       return 1;
     }
     features = chosen ?? [...FEATURES];
@@ -1306,15 +1207,13 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
   const { id } = await account(sys, agent);
 
   let reach = await access(sys, slug, token);
-  // The onboard branches with a pull request open: one a release before P-56 opened is updated, not left beside a new one.
-  const openOnboard: string[] = [];
   if (reach.kind === 'refused') {
     io.err(`onboard: ${reach.reason}`);
     return 1;
   }
   // An agent that cannot see the repository has no pull request open on it, and the checkout was checked above.
   if (reach.kind !== 'none') {
-    const ahead = await newerPinOnGitHub(sys, slug, token, reach.branch, version, openOnboard);
+    const ahead = await newerPinOnGitHub(sys, slug, token, reach.branch, version);
     if (ahead !== undefined && 'problem' in ahead) {
       io.err(`onboard: ${ahead.problem}; run it again`);
       return 1;
@@ -1367,39 +1266,16 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     });
   }
 
-  // The shared checks run only for features that need them. The workflow is read from its name before P-56 where
-  // the new one is missing, and moved: the old one is deleted wherever the new one is left, or both would run.
-  const workflowSource = fileAt(WORKFLOW_PATH) === undefined && fileAt(OLD_WORKFLOW_PATH) !== undefined ? OLD_WORKFLOW_PATH : WORKFLOW_PATH;
-  const workflowMoved = workflowSource === OLD_WORKFLOW_PATH;
-  const workflowFrom = workflowPins(fileAt(workflowSource) ?? '')[0];
+  // The shared checks run only for features that need them.
+  const workflowFrom = workflowPins(fileAt(WORKFLOW_PATH) ?? '')[0];
   const workflowFor = (branch: string): void => {
-    const before = fileAt(workflowSource);
-    const update = workflowUpdate(before, branch, version, on('figma'), schedule);
-    const move = workflowMoved ? `move ${OLD_WORKFLOW_PATH} here` : undefined;
-    if (update.kind !== 'same') change(WORKFLOW_PATH, update.text, [move, workflowWhat(update, version, on('figma'), SETTINGS_PATH, workflowSource)].filter(Boolean).join('; '));
-    else if (move) change(WORKFLOW_PATH, before as string, move);
-    if (fileAt(WORKFLOW_PATH) !== undefined) remove(OLD_WORKFLOW_PATH, `moved to ${WORKFLOW_PATH}`);
+    const update = workflowUpdate(fileAt(WORKFLOW_PATH), branch, version, on('figma'), schedule);
+    if (update.kind !== 'same') change(WORKFLOW_PATH, update.text, workflowWhat(update, version, on('figma'), SETTINGS_PATH));
   };
-  // With no feature that runs the shared checks, onboard writes no workflow, so one under the old name stays as it is.
-  if (!workflowNeeded && workflowMoved) warnings.push(`${OLD_WORKFLOW_PATH} left as it is: no feature on runs the shared checks; delete it, or turn one on`);
   if (workflowNeeded) {
-    const update = planned === undefined ? undefined : workflowUpdate(fileAt(workflowSource), planned, version, on('figma'), schedule);
-    const old = OLD_WORKFLOW_PATH.slice('.github/workflows/'.length);
-    const detail = [
-      ...(workflowMoved ? [`from ${old}`] : []),
-      ...(update === undefined ? [fileAt(workflowSource) === undefined ? 'new' : 'write or update'] : update.kind === 'same' ? [] : [workflowDetail(update, version, on('figma'))]),
-      // Beside a new one, the old one is deleted, or both would run.
-      ...(!workflowMoved && fileAt(OLD_WORKFLOW_PATH) !== undefined ? [`${old} deleted`] : []),
-    ];
-    if (detail.length > 0) pull.push({ label: 'workflow', detail: detail.join(', ') });
-    // Since P-53 the checks report as niyam / …: a ruleset still requiring process-rules / … holds this pull request
-    // and every one after it until the owner swaps the names, which only the owner's account can do.
-    for (const ruleset of await oldNamedRulesets(sys, slug, token)) {
-      byHand.push(`${CLI} owner-step required-checks ${slug} ${ruleset} → while the pull request is open`);
-      later.push(
-        `The ruleset ${ruleset} requires the checks as ${OLD_CLI} / …, which this pull request reports as ${CLI} / …: while it is open, run \`${CLI} owner-step required-checks ${slug} ${ruleset}\`, which requires them under the new names; it merges after. Pull requests opened before then report the old names until they merge the default branch.`,
-      );
-    }
+    const update = planned === undefined ? undefined : workflowUpdate(fileAt(WORKFLOW_PATH), planned, version, on('figma'), schedule);
+    const detail = update === undefined ? (fileAt(WORKFLOW_PATH) === undefined ? 'new' : 'write or update') : update.kind === 'same' ? undefined : workflowDetail(update, version, on('figma'));
+    if (detail !== undefined) pull.push({ label: 'workflow', detail });
   }
 
   if (on('board')) {
@@ -1472,36 +1348,34 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
   }
   // Claude cloud sessions. Claude Code has no API for a cloud environment's Setup script, so the version lives in a
   // file the repo owns, written at the pin on every run, and the Setup script runs it: one paste, the first time.
-  // Since P-56 the file is under .github/niyam/, and the one before it is written alike: a Setup script pasted before
-  // runs the old one until the owner pastes the new snippet, which runs the new one, else the old.
   const cloudBefore = fileAt(CLOUD_SETUP_PATH);
-  const oldCloudBefore = fileAt(OLD_CLOUD_SETUP_PATH);
   const released = await releaseSha256(sys, version, token);
   if ('problem' in released) warnings.push(`${CLOUD_SETUP_PATH} left as it is: ${released.problem}`);
   else {
     const text = cloudRepoScript(version, released.sha256);
-    if (text !== cloudBefore || text !== oldCloudBefore) {
-      const was = cloudBefore ?? oldCloudBefore;
-      const from = was === undefined ? undefined : cloudScriptVersion(was);
-      pull.push({
-        label: 'cloud-setup.sh',
-        detail: was === undefined ? `new, installs v${version}` : from && from !== version ? `v${from} → v${version}` : cloudBefore === undefined ? `also under ${CLOUD_SETUP_PATH.slice('.github/'.length)}` : 'written again',
-      });
-      const what = `installs niyam ${version} in Claude cloud sessions, its download checked against its sha256`;
-      if (text !== cloudBefore) change(CLOUD_SETUP_PATH, text, what);
-      if (text !== oldCloudBefore) change(OLD_CLOUD_SETUP_PATH, text, `the same as ${CLOUD_SETUP_PATH}, for a Setup script pasted before it, which runs this one`);
+    if (text !== cloudBefore) {
+      const from = cloudBefore === undefined ? undefined : cloudScriptVersion(cloudBefore);
+      pull.push({ label: 'cloud-setup.sh', detail: cloudBefore === undefined ? `new, installs v${version}` : from && from !== version ? `v${from} → v${version}` : 'written again' });
+      change(CLOUD_SETUP_PATH, text, `installs niyam ${version} in Claude cloud sessions, its download checked against its sha256`);
     }
-    if (cloudBefore === undefined && oldCloudBefore === undefined) {
+    if (cloudBefore === undefined) {
       cloud.push({ label: 'Setup script', detail: 'niyam cloud-setup, first' }, { label: "claude.ai's GitHub", detail: `as ${agent}` });
       byHand.push(`cloud sessions, once: claude.ai's GitHub as ${agent}, Setup script from niyam cloud-setup, first`);
       later.push(
-        `Claude cloud sessions, once: connect claude.ai's GitHub as ${agent}, and paste what niyam cloud-setup prints into the cloud environment's Setup script, over any older niyam or process-rules part. It runs ${CLOUD_SETUP_PATH}, which onboard keeps at the pin, so a new release needs no new paste. ${SETUP_FIRST}`,
+        `Claude cloud sessions, once: connect claude.ai's GitHub as ${agent}, and paste what niyam cloud-setup prints into the cloud environment's Setup script, over any older niyam part. It runs ${CLOUD_SETUP_PATH}, which onboard keeps at the pin, so a new release needs no new paste. ${SETUP_FIRST}`,
       );
-    } else if (cloudBefore === undefined) {
-      cloud.push({ label: 'Setup script', detail: 'niyam cloud-setup again, once' });
-      byHand.push(`cloud sessions, once: Setup script from niyam cloud-setup again, over the process-rules part`);
+    }
+  }
+  // The file under its name before P-56, which no release writes or runs since P-57, goes where the new one is left.
+  if (fileAt(LEFTOVER_CLOUD_SETUP_PATH) !== undefined && fileAt(CLOUD_SETUP_PATH) !== undefined) {
+    remove(LEFTOVER_CLOUD_SETUP_PATH, `moved to ${CLOUD_SETUP_PATH}, which the Setup snippet since 0.6.10 runs`);
+    const item = pull.find((one) => one.label === 'cloud-setup.sh');
+    const deleted = `${LEFTOVER_CLOUD_SETUP_PATH.slice('.github/'.length)} deleted`;
+    if (item) item.detail = `${item.detail}, ${deleted}`;
+    else pull.push({ label: 'cloud-setup.sh', detail: deleted });
+    if (cloudBefore !== undefined) {
       later.push(
-        `Claude cloud sessions, once: paste what niyam cloud-setup prints into the cloud environment's Setup script again, over its process-rules part. The one pasted before runs ${OLD_CLOUD_SETUP_PATH}, which onboard keeps alike until a later release removes it; the new one runs ${CLOUD_SETUP_PATH}. ${SETUP_FIRST}`,
+        `Claude cloud sessions: a Setup script pasted before niyam 0.6.10 runs ${LEFTOVER_CLOUD_SETUP_PATH}, which this pull request deletes; if yours is one, paste what niyam cloud-setup prints over it, once. ${SETUP_FIRST}`,
       );
     }
   }
@@ -1530,8 +1404,7 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
         ...(notes.length > 0 ? ['Done at the terminal, outside this pull request:', '', ...notes, ''] : []),
         ...(later.length > 0 ? ['Left to do by hand:', '', ...later.map((line) => `- ${line}`)] : []),
       ];
-      const head = openOnboard.includes(OLD_ONBOARD_BRANCH) && !openOnboard.includes(ONBOARD_BRANCH) ? OLD_ONBOARD_BRANCH : ONBOARD_BRANCH;
-      const opened = await openPull(sys, out, { agent, id, token, slug, branch: reach.branch, version, head }, changed, described);
+      const opened = await openPull(sys, out, { agent, id, token, slug, branch: reach.branch, version }, changed, described);
       if (opened === 1) return false;
       pullUrl = opened.url;
       if (planned === undefined) queue = await mergeQueue(sys, slug, reach.branch, token);

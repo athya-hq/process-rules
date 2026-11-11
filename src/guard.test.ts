@@ -111,31 +111,11 @@ describe('guard', () => {
     assert.equal(check(sys, 'git push').code, 2);
   });
 
-  describe("with a record in the old folder, as session-start 0.6.9 wrote it (P-55)", () => {
-    const OLD_RECORD = sessionRecord(HOME, 'abc-123', true) as string;
-
-    it('lets GitHub commands through in a session started before the upgrade, whose record is in the old folder alone', () => {
-      const sys = new FakeSys();
-      sys.files.set(OLD_RECORD, '{"agent":"ExampleBot"}\n');
-      assert.equal(OLD_RECORD, `${HOME}/.config/process-rules/sessions/abc-123.json`);
-      assert.deepEqual(check(sys, 'git push'), { code: 0, err: [] });
-      assert.deepEqual(recordedAgent(sys, 'abc-123'), { agent: 'ExampleBot' });
-    });
-
-    it("refuses where the new folder's record says GitHub is locked out, whatever the old one says", () => {
-      const sys = new FakeSys();
-      sys.files.set(OLD_RECORD, '{"agent":"ExampleBot"}\n');
-      sys.files.set(RECORD, JSON.stringify({ problem: 'niyam: GitHub is locked out of this session: x is missing.' }));
-      assert.equal(check(sys, 'git push').code, 2);
-      sys.files.set(RECORD, '{}');
-      assert.equal(check(sys, 'git push').err[0], `${REFUSED} ${RECORD} names no agent. Do not work around it; tell the owner.`);
-    });
-
-    it("refuses where the old folder's record locked GitHub out and the new folder has none", () => {
-      const sys = new FakeSys();
-      sys.files.set(OLD_RECORD, JSON.stringify({ problem: 'process-rules: locked.' }));
-      assert.match(check(sys, 'git push').err[0] ?? '', /session-start said: process-rules: locked/);
-    });
+  it('reads no record session-start 0.6.9 left in the folder before P-55 (P-57)', () => {
+    const sys = new FakeSys();
+    sys.files.set(`${HOME}/.config/process-rules/sessions/abc-123.json`, '{"agent":"ExampleBot"}\n');
+    assert.equal(check(sys, 'git push').code, 2);
+    assert.ok('problem' in recordedAgent(sys, 'abc-123'));
   });
 });
 

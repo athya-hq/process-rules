@@ -5,12 +5,12 @@ import {
   loadSettings,
   sameLogin,
   sessionEnv,
+  pathsFor,
   sessionNames,
-  sessionPaths,
   sessionRecord,
   sessionFileIs,
 } from './agent.ts';
-import { AGENT_VAR, OLD_AGENT_VAR } from './names.ts';
+import { AGENT_VAR } from './names.ts';
 import { cloudToken } from './cloud.ts';
 import { recordedAgent, reachesGitHub, refusal } from './guard.ts';
 import { GUARD_COMMAND, HOOK_COMMAND, OLDER_GUARD_COMMANDS, OLDER_HOOK_COMMANDS } from './onboard.ts';
@@ -74,9 +74,15 @@ export function asAgent(sys: Sys, io: Output, parsed: ReturnType<typeof asAgentA
 
 type Env = { env: Record<string, string> } | { problem: string };
 
-/** The hook's environment without the lock the settings' `env` gave it. */
+/**
+ * The agent's variable before P-55, which an older release's shell may still
+ * pass down: named only so the command never gets it (P-57).
+ */
+const LEFTOVER_AGENT_VAR = 'PROCESS_RULES_AGENT';
+
+/** The hook's environment without the lock the settings' `env` gave it, or the agent's variable before P-55. */
 function unlocked(sys: Sys): Record<string, string | undefined> {
-  return Object.fromEntries(Object.entries(sys.env).filter(([name]) => !Object.hasOwn(BASE_ENV, name)));
+  return Object.fromEntries(Object.entries(sys.env).filter(([name]) => !Object.hasOwn(BASE_ENV, name) && name !== LEFTOVER_AGENT_VAR));
 }
 
 function defined(env: Record<string, string | undefined>): Record<string, string> {
@@ -90,8 +96,7 @@ function defined(env: Record<string, string | undefined>): Record<string, string
 function macEnv(sys: Sys, agent: string): Env {
   const store = tokenStore(sys);
   if (!store) return { problem: unsupported(sys) };
-  // As session-start finds it: the config folder's, else the one machine wrote before P-55.
-  const paths = sessionPaths(sys, agent);
+  const paths = pathsFor(sys.home, agent);
   let script: string;
   try {
     script = sys.read(paths.session);
@@ -114,7 +119,7 @@ function macEnv(sys: Sys, agent: string): Env {
  */
 function cloudEnv(sys: Sys, agent: string): Env {
   const token = cloudToken(sys);
-  return { env: defined({ ...unlocked(sys), GH_TOKEN: token, GITHUB_TOKEN: token, [AGENT_VAR]: agent, [OLD_AGENT_VAR]: agent }) };
+  return { env: defined({ ...unlocked(sys), GH_TOKEN: token, GITHUB_TOKEN: token, [AGENT_VAR]: agent }) };
 }
 
 /** The settings files a client's hooks live in. */

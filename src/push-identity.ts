@@ -9,9 +9,9 @@ const HTTPS_GITHUB = new RegExp(`^https://(?:[^@/\\s]+@)?${GITHUB_HOST_RE}(?::\\
 
 /**
  * Whether this shell is an agent session's, on a Mac or in a Claude cloud
- * session: one session-start gave the agent identity, by NIYAM_AGENT or the
- * PROCESS_RULES_AGENT an older release set, or any shell Claude Code runs (it
- * sets CLAUDECODE), so a session whose hooks never ran is one too.
+ * session: one session-start gave the agent identity, by NIYAM_AGENT, or any
+ * shell Claude Code runs (it sets CLAUDECODE), so a session whose hooks never
+ * ran is one too.
  */
 export function agentSession(sys: Sys): boolean {
   return agentIn(sys.env) !== undefined || sys.env.CLAUDECODE === '1';
