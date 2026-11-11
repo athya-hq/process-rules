@@ -1317,3 +1317,50 @@
   launcher runs that command until `niyam upgrade` moves it. Rejected:
   dropping the bridge's bin too (that Mac's hooks would lock out on the
   upgrade); dropping the bridge (0.6.x's `upgrade` would find no release).
+- **2026-11-11 — Record: the lock and this Mac's files say niyam (P-55).**
+  P-53 and P-54 left the names P-17's lock and P-18 read. The owner said in
+  chat on 2026-11-11, "I want to fix everything", so these are a slice of
+  their own, as P-50 was: the release writes the new names and still reads
+  the old ones.
+  - This Mac's files are under `~/.config/niyam`: the agent folders and
+    their session files, the session records, the locked `gh` folder, and
+    the launcher `~/.config/niyam/bin/niyam`. `machine` and session-start
+    write only there. `machine` leaves `~/.config/process-rules` and its
+    launcher in place, since older hooks and CLIs still use them. Every
+    reader takes the new place, then the old: `agentsSetUp` (both folders,
+    each agent once), session-start, as-agent and doctor for the session
+    file, the guard and as-agent for the session record, the lockout's
+    agent keys and records, doctor's launcher check, and `upgrade`, which
+    points both launchers at `niyam`. A record is taken from the new
+    folder whenever it is there, whatever it says, so an old record never
+    unlocks a session the new session-start locked.
+  - The hooks find the new launcher, then the old one, then `niyam` on
+    PATH. `onboard` replaces 0.6.8 and 0.6.9's hooks and pre-push hook in
+    place, and as-agent counts them as its own until then.
+  - Agent sessions get `NIYAM_AGENT`, and `PROCESS_RULES_AGENT` is still
+    set beside it, by the session file, as-agent and a cloud session's
+    session-start: pre-push hooks, `owner-step` and adopters' scripts that
+    read only the old name would otherwise take an agent session for the
+    owner's. Every reader takes either (doctor, `onboard`'s and
+    `owner-step`'s refusals, the pre-push hook, `sessionNames`). Missing one
+    fails open, so each is tested with each name alone.
+  - The lock's placeholder token is `niyam-no-agent-token`, and its SSH
+    refusal says `niyam:`; `process-rules-no-agent-token` still counts as no
+    token. `onboard` updates a repo's `.claude/settings.json` `env`, and its
+    plan says "lock updated". The scripts `machine` and session-start write
+    say "Written by niyam …".
+  - A session file 0.6.9 wrote in the old folder (old header, placeholder,
+    SSH refusal, gh folder, and `PROCESS_RULES_AGENT` alone) still counts,
+    with either keychain read, as P-50's did. A session started under 0.6.9
+    keeps its record there and keeps working after the upgrade, with no
+    `machine` run. `doctor` marks ▲ a session file or launcher only in the
+    old folder, and ✗ an old launcher that is broken or runs
+    `process-rules`, naming `niyam upgrade` or `niyam machine`.
+  - Until P-57 the old folder, its launcher, `PROCESS_RULES_AGENT` and the
+    old placeholder are still read or set. P-57 removes them once every Mac
+    has run `niyam machine`. The workflow, its job ids, `process-rules-ref`,
+    the cloud setup path and the settings file are P-56's.
+  - Rejected: moving the old folder's files (a running session's record and
+    older hooks would lose them); setting `NIYAM_AGENT` alone (fail-open in
+    every old reader); reading a record from the old folder when the new
+    one names no agent (a stale record would unlock a locked session).

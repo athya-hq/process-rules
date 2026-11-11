@@ -69,9 +69,11 @@ classic-token page with the scopes filled in (`repo`, `workflow`, `read:org`,
 `project`, `write:ssh_signing_key`) and reads the token through a hidden prompt
 into the keychain (service `niyam`), refusing a fine-grained token,
 missing scopes or no expiry. It then registers the key as the agent's signing key, writes
-`~/.config/process-rules/<agent, lowercased>/session.sh`, and writes the
-launcher `~/.config/process-rules/bin/process-rules`, which the Claude Code
-hooks and the pre-push git hook run. The
+`~/.config/niyam/<agent, lowercased>/session.sh`, and writes the
+launcher `~/.config/niyam/bin/niyam`, which the Claude Code
+hooks and the pre-push git hook run. Releases before P-55 wrote both under
+`~/.config/process-rules/`, which `machine` leaves in place and every reader
+still takes where the new folder has none (see Renamed from process-rules). The
 launcher names the node that ran `machine` by its real path (not a version
 manager's per-shell one, which the Claude app's hooks may not have), so the
 hooks need no node on their `PATH`. Why a classic token: [docs/decisions.md](docs/decisions.md).
@@ -87,7 +89,7 @@ asks once:
 │    signing key   ~/.ssh/agent_signing (new)
 │    token         classic, in the keychain (new)
 │    session file  new
-│    launcher      ~/.config/process-rules/bin/process-rules
+│    launcher      ~/.config/niyam/bin/niyam
 │
 ◇  GitHub — as AGENT
 │    signing key  register
@@ -130,7 +132,7 @@ GitHub as nobody, never as the owner. In a Claude cloud session the
 SessionStart hook lifts it only once GitHub says the session is the agent
 (see Claude cloud sessions below).
 
-In Claude Code, the client's SessionStart hook runs `process-rules
+In Claude Code, the client's SessionStart hook runs `niyam
 session-start`. It appends a lock to `CLAUDE_ENV_FILE`: a token GitHub refuses,
 no credential helper, nothing inherited that could bring one back (`git -c`
 injection, `GIT_CONFIG`, askpass), GitHub's SSH remotes on HTTPS and every
@@ -157,7 +159,7 @@ In auto mode the classifier refuses those calls unless the repo's
 `permissions.allow`, and `doctor` warns under "This repo" (`▲`) about each
 one an onboarded repo's file lacks. They reach the app only, not GitHub.
 
-Before each Bash command, the client's PreToolUse hook runs `process-rules
+Before each Bash command, the client's PreToolUse hook runs `niyam
 guard`: a command running `gh` or a git command that reaches a remote (push,
 fetch, pull, clone, ls-remote, submodule, and `remote` update, prune, show (not `-n`),
 `add -f`/`--fetch` (unless a later `--no-fetch`) and `set-head -a`/`--auto`;
@@ -166,7 +168,9 @@ with the reason,
 unless session-start gave this session the agent identity. Hooks cannot see
 the variables session-start gives the session's shells, so session-start
 records how it left each session in
-`~/.config/process-rules/sessions/<session id>.json` and the guard reads that.
+`~/.config/niyam/sessions/<session id>.json` and the guard reads that (for a
+session started before P-55, the record in `~/.config/process-rules/sessions/`
+where the new folder has none).
 A command not naming `gh` or `git` as a word goes ahead without starting the CLI;
 when the CLI cannot run, every command naming either is refused.
 
@@ -212,7 +216,8 @@ asking (a key in the SSH agent or the keychain), as fine.
 
 Releases before 0.5.21 asked about each lockout step on its own, and recorded
 what was declined in
-`~/.config/process-rules/<agent, lowercased>/lockout-declined.json`.
+`~/.config/process-rules/<agent, lowercased>/lockout-declined.json`, which is
+still read (`~/.config/niyam/…` first).
 `doctor` reports a login or password in that record as your choice instead of
 warning, and an account signed in later is still a warning. Once a `machine`
 run locks them away, the record goes.
@@ -224,7 +229,8 @@ GitHub actions (Auto-fix, the PR bar) run as you, and Auto-fix refuses the
 agent's pull requests. And revoke the old token on GitHub (Settings →
 Applications → Authorized OAuth Apps → GitHub CLI): `gh auth logout` deletes
 it from the Mac but does not revoke it. `machine` records the move in
-`~/.config/process-rules/<agent, lowercased>/gh-moved.json`, and `doctor`
+`~/.config/niyam/<agent, lowercased>/gh-moved.json` (before P-55, under
+`~/.config/process-rules/`, still read), and `doctor`
 repeats both steps while the desktop app was started before it. `doctor`
 cannot see whether the token was revoked, so once the app has restarted it
 no longer reminds you to revoke it.
@@ -900,7 +906,7 @@ JSON input:
 ```sh
 input=$(cat)
 sid=$(printf '%s' "$input" | jq -r .session_id)
-cli="$HOME/.config/process-rules/bin/process-rules"; [ -x "$cli" ] || cli=niyam
+cli="$HOME/.config/niyam/bin/niyam"; [ -x "$cli" ] || cli="$HOME/.config/process-rules/bin/process-rules"; [ -x "$cli" ] || cli=niyam
 printf '%s' "$input" | "$cli" as-agent --session "$sid" -- gh pr view --json state
 status=$?
 [ "$status" -eq 77 ] && exit 0  # locked: this session does not work as the agent
@@ -1067,7 +1073,7 @@ niyam owner-step required-checks <owner/repo> <ruleset id or name>
   and rule, removes none but those it renames, and shows the before and
   after.
 
-It refuses in an agent session (`PROCESS_RULES_AGENT` set, or `CLAUDECODE=1`)
+It refuses in an agent session (`NIYAM_AGENT` or `PROCESS_RULES_AGENT` set, or `CLAUDECODE=1`)
 and without a terminal. It makes a new folder in the user's temporary folder
 (`niyam-owner-step-…`; on macOS, `getconf DARWIN_USER_TEMP_DIR`) and runs gh
 with that folder as `GH_CONFIG_DIR`, `GH_PAGER=cat`, no `GH_TOKEN`, and
@@ -1183,7 +1189,7 @@ MIT
 ## Renamed from process-rules
 
 process-rules became niyam in the release after 0.6.3 (docs/decisions.md,
-P-49 and P-50). What changed, and what still reads or runs the old name:
+P-49, P-50, P-53, P-54 and P-55). What changed, and what still reads or runs the old name:
 
 | What | Now | The old name |
 | ---- | --- | ------------ |
@@ -1194,13 +1200,15 @@ P-49 and P-50). What changed, and what still reads or runs the old name:
 | Settings file | `.github/niyam.json` | `.github/process-rules.json`, read where the new one is missing; `onboard` keeps a repo's existing file |
 | Keychain item | service `niyam` | service `process-rules`, read where the new one is missing; `machine` copies it to `niyam`, and while it is there a new token goes under both |
 | Workflow pin | `veda-hq/niyam/.github/workflows/checks.yml@v…` | `athya-hq/process-rules/…`, which `onboard` moves |
+| This Mac's files (P-55) | `~/.config/niyam/`: the agent folders and their session files, the session records, the locked `gh` folder | `~/.config/process-rules/`, which `machine` leaves in place and every reader still takes where the new folder has none, until P-57; a session file 0.6.9 wrote there still counts, and `doctor` marks it ▲ |
+| Launcher (P-55) | `~/.config/niyam/bin/niyam` | `~/.config/process-rules/bin/process-rules`, left in place: the hooks `onboard` writes run the new one, else the old one, else `niyam` on PATH; older hooks run the old one, which `niyam upgrade` also points at `niyam`. `doctor` marks ▲ a Mac with only the old one |
+| Agent variable (P-55) | `NIYAM_AGENT` | `PROCESS_RULES_AGENT`, still set beside it, since older pre-push hooks and scripts read only it; every reader takes either |
+| Lock (P-55) | placeholder token `niyam-no-agent-token`, and the SSH refusal says `niyam:` | `process-rules-no-agent-token`, still taken as no token; `onboard` updates the lock in a repo's `.claude/settings.json` `env` |
 
-Unchanged, because adopters' committed files and hooks name them: the
-launcher's path (`~/.config/process-rules/bin/process-rules`), the lock in
-`.claude/settings.json`'s `env`, `PROCESS_RULES_AGENT`,
-`~/.config/process-rules/`, `.github/workflows/process-rules.yml` and its job
-ids (the checks take their names from the jobs' `name:`), `process-rules-ref`,
-and `.github/process-rules/cloud-setup.sh` (so the cloud Setup script needs no
+Unchanged, because adopters' committed files name them, until P-56:
+`.github/workflows/process-rules.yml` and its job ids (the checks take their
+names from the jobs' `name:`), `process-rules-ref`, and
+`.github/process-rules/cloud-setup.sh` (so the cloud Setup script needs no
 new paste).
 
 From a 0.6.x install, `process-rules upgrade` installs the old-name archive,
@@ -1210,5 +1218,11 @@ removes the old package, adds the new one, and puts the old one back if the add
 fails. pnpm keeps the `process-rules` command at the same path, so the
 launcher `machine` wrote keeps working until `niyam upgrade` points it at `niyam`; since P-54 the package installs no `process-rules`.
 `niyam upgrade` and `niyam machine` point the launcher at `niyam`. Run `niyam machine` once afterwards to
-copy the token to the `niyam` keychain service and rewrite the session file;
-until then both still work.
+copy the token to the `niyam` keychain service and write the session file and
+the launcher under `~/.config/niyam/`; until then the old ones still work, and
+a session started before the upgrade keeps its record and its identity. The
+old folder stays for hooks and CLIs that still read it.
+
+The old folder, launcher, `PROCESS_RULES_AGENT` and placeholder token of
+P-55's rows stay for one release: P-57 removes the folder and the launcher and
+stops reading the old names, once every Mac has run `niyam machine`.

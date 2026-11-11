@@ -146,7 +146,7 @@ export function prePushHook(sys: Sys, root: string): { path: string; file: strin
  * wrote before P-55, which a Mac not set up again since has alone, else
  * niyam on PATH.
  */
-export const FIND_CLI = 'cli="$HOME/.config/niyam/bin/niyam"; [ -x "$cli" ] || cli="$HOME/.config/process-rules/bin/process-rules"; [ -x "$cli" ] || cli=niyam; ';
+const FIND_CLI = 'cli="$HOME/.config/niyam/bin/niyam"; [ -x "$cli" ] || cli="$HOME/.config/process-rules/bin/process-rules"; [ -x "$cli" ] || cli=niyam; ';
 /** How hooks from P-53 to P-55 found it: the launcher in the old folder, else niyam on PATH. */
 const P53_FIND_CLI = 'cli="$HOME/.config/process-rules/bin/process-rules"; [ -x "$cli" ] || cli=niyam; ';
 /** How hooks before P-53 found it: the launcher, else process-rules on PATH. */
