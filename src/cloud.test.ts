@@ -5,9 +5,11 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, describe, it } from 'node:test';
 
-import { CLOUD_DIR, CLOUD_NODE, CLOUD_NODE_SHA256, INSTALL_FAILED as FAILED, PROXY_TOKEN, cloudRepoScript, cloudScriptVersion, cloudSetup, cloudSetupSnippet, cloudToken, releaseTarball } from './cloud.ts';
+import { CLOUD_DIR, CLOUD_NODE, CLOUD_NODE_SHA256, FROM_SETUP, INSTALL_FAILED as FAILED, OLD_FROM_SETUP, PROXY_TOKEN, cloudRepoScript, cloudScriptVersion, cloudSetup, cloudSetupSnippet, cloudToken, ranFromSetup, releaseTarball, repoReleases } from './cloud.ts';
+import { CLOUD_SETUP_068 } from './older-texts.test.ts';
+import { workflow } from './onboard.ts';
 import { FakeSys, capture } from './fake.test.ts';
-import { CLOUD_SETUP_PATH, WORKFLOW_PATH } from './onboard-pull.ts';
+import { CLOUD_SETUP_PATH, OLD_CLOUD_SETUP_PATH, OLD_WORKFLOW_PATH, WORKFLOW_PATH } from './onboard-pull.ts';
 
 const SHA = 'ab'.repeat(32);
 
@@ -18,6 +20,35 @@ describe('cloudToken', () => {
       sys.env = { GH_TOKEN: token };
       assert.equal(cloudToken(sys), used, String(token));
     }
+  });
+});
+
+describe('the cloud files under their names since P-56, and before', () => {
+  it('installs under /opt/niyam, and takes the Setup mark there or where a cloud setup file before P-56 leaves it', () => {
+    assert.equal(CLOUD_DIR, '/opt/niyam');
+    assert.equal(FROM_SETUP, '/opt/niyam/from-setup');
+    assert.equal(OLD_FROM_SETUP, '/opt/process-rules/from-setup');
+    for (const [marks, ran] of [[[], false], [[FROM_SETUP], true], [[OLD_FROM_SETUP], true], [[FROM_SETUP, OLD_FROM_SETUP], true]] as const) {
+      const sys = new FakeSys();
+      for (const mark of marks) sys.files.set(mark, '');
+      assert.equal(ranFromSetup(sys), ran, marks.join(', '));
+    }
+  });
+
+  it("reads the repo's workflow and cloud setup file under the new name, else the old one, and names the one it read", () => {
+    const root = '/repo';
+    const at = (files: Record<string, string>) => {
+      const sys = new FakeSys();
+      for (const [path, text] of Object.entries(files)) sys.files.set(`${root}/${path}`, text);
+      return repoReleases(sys, root);
+    };
+    assert.deepEqual(at({}), { pinned: undefined, scripted: undefined, workflow: WORKFLOW_PATH, script: CLOUD_SETUP_PATH });
+    assert.deepEqual(at({ [OLD_WORKFLOW_PATH]: workflow('main', '0.6.8', false), [OLD_CLOUD_SETUP_PATH]: CLOUD_SETUP_068 }), { pinned: '0.6.8', scripted: '0.6.8', workflow: OLD_WORKFLOW_PATH, script: OLD_CLOUD_SETUP_PATH });
+    assert.deepEqual(
+      at({ [WORKFLOW_PATH]: workflow('main', '0.7.0', false), [OLD_WORKFLOW_PATH]: workflow('main', '0.6.8', false), [CLOUD_SETUP_PATH]: cloudRepoScript('0.7.0', SHA), [OLD_CLOUD_SETUP_PATH]: CLOUD_SETUP_068 }),
+      { pinned: '0.7.0', scripted: '0.7.0', workflow: WORKFLOW_PATH, script: CLOUD_SETUP_PATH },
+      'the new ones when both are there',
+    );
   });
 });
 
@@ -119,10 +150,12 @@ describe('cloudRepoScript', () => {
       assert.match(other.fetched, /^https:\/\/nodejs\.org\//, 'another Node is fetched again');
     });
 
-    it('leaves a mark when the Setup snippet ran it', () => {
-      const { result, opt } = setup('marked', 0, { env: { PROCESS_RULES_SETUP: '1' } });
-      assert.equal(result.status, 0, result.stderr);
-      assert.equal(existsSync(join(opt, 'from-setup')), true);
+    it('leaves a mark when the Setup snippet ran it, the one pasted before P-56 too, which sets the old name alone', () => {
+      for (const env of [{ NIYAM_SETUP: '1', PROCESS_RULES_SETUP: '1' }, { NIYAM_SETUP: '1' }, { PROCESS_RULES_SETUP: '1' }]) {
+        const { result, opt } = setup(`marked-${Object.keys(env).join('-')}`, 0, { env });
+        assert.equal(result.status, 0, result.stderr);
+        assert.equal(existsSync(join(opt, 'from-setup')), true, JSON.stringify(env));
+      }
     });
 
     it('stops, unpacking nothing and writing no niyam, when a download does not match its sha256', () => {
@@ -156,9 +189,9 @@ describe('cloudSetupSnippet', () => {
 
   it('runs in a shell of its own, so it can go first in a Setup script', () => {
     const lines = snippet.trimEnd().split('\n');
-    assert.match(lines[2] ?? '', /^bash <<'PROCESS_RULES' \|\| echo ".*" >&2$/);
-    assert.equal(lines.at(-1), 'PROCESS_RULES');
-    assert.equal(lines.filter((line) => line === 'PROCESS_RULES').length, 1);
+    assert.match(lines[2] ?? '', /^bash <<'NIYAM' \|\| echo ".*" >&2$/);
+    assert.equal(lines.at(-1), 'NIYAM');
+    assert.equal(lines.filter((line) => line === 'NIYAM').length, 1);
     assert.equal(lines.slice(0, 3).some((line) => /^set /.test(line)), false, "the repo's own setup after it keeps its shell options");
   });
 
@@ -173,28 +206,44 @@ describe('cloudSetupSnippet', () => {
       return { status: result.status, stdout: result.stdout, stderr: result.stderr };
     }
 
-    /** A clone at `clone` whose cloud setup file says how it ran and exits `code`. */
-    function clone(at: string, code = 0): void {
-      mkdirSync(join(at, dirname(CLOUD_SETUP_PATH)), { recursive: true });
-      writeFileSync(join(at, CLOUD_SETUP_PATH), `echo "ran mark=$PROCESS_RULES_SETUP stdin=$(cat)"\nexit ${code}\n`);
+    /** A clone at `clone` whose cloud setup file, at `file`, says which it is, how it ran, and exits `code`. */
+    function clone(at: string, code = 0, file: string = CLOUD_SETUP_PATH): void {
+      mkdirSync(join(at, dirname(file)), { recursive: true });
+      writeFileSync(join(at, file), `echo "ran ${file} mark=$NIYAM_SETUP,$PROCESS_RULES_SETUP stdin=$(cat)"\nexit ${code}\n`);
     }
+    const RAN = `ran ${CLOUD_SETUP_PATH} mark=1,1 stdin=\nrepo setup ran\n`;
 
     it("runs the clone's cloud setup file from the folder that holds the clone, then the repo's own setup", () => {
       const home = join(dir, 'home');
       clone(join(home, 'example-app'));
-      assert.deepEqual(setup(home), { status: 0, stdout: 'ran mark=1 stdin=\nrepo setup ran\n', stderr: '' });
+      assert.deepEqual(setup(home), { status: 0, stdout: RAN, stderr: '' });
     });
 
     it('runs it from the clone itself', () => {
       const app = join(dir, 'app');
       clone(app);
-      assert.deepEqual(setup(app), { status: 0, stdout: 'ran mark=1 stdin=\nrepo setup ran\n', stderr: '' });
+      assert.deepEqual(setup(app), { status: 0, stdout: RAN, stderr: '' });
+    });
+
+    it('runs the file under its old name in a clone onboard has not moved, marking it under both names, and the new one where both are', () => {
+      const old = join(dir, 'old');
+      clone(join(old, 'example-app'), 0, OLD_CLOUD_SETUP_PATH);
+      assert.deepEqual(setup(old), { status: 0, stdout: `ran ${OLD_CLOUD_SETUP_PATH} mark=1,1 stdin=\nrepo setup ran\n`, stderr: '' });
+      const both = join(dir, 'both');
+      clone(join(both, 'example-app'), 0, OLD_CLOUD_SETUP_PATH);
+      clone(join(both, 'example-app'));
+      assert.deepEqual(setup(both), { status: 0, stdout: RAN, stderr: '' });
+      // A new file in any clone comes before an old one in another.
+      const mixed = join(dir, 'mixed');
+      clone(join(mixed, 'a-app'), 0, OLD_CLOUD_SETUP_PATH);
+      clone(join(mixed, 'b-app'));
+      assert.deepEqual(setup(mixed), { status: 0, stdout: RAN, stderr: '' });
     });
 
     it("says so when the install fails, and runs the repo's own setup", () => {
       const home = join(dir, 'failing');
       clone(join(home, 'example-app'), 1);
-      assert.deepEqual(setup(home), { status: 0, stdout: 'ran mark=1 stdin=\nrepo setup ran\n', stderr: `${FAILED}\n` });
+      assert.deepEqual(setup(home), { status: 0, stdout: RAN, stderr: `${FAILED}\n` });
     });
 
     it('names the missing file and its fix, and goes on', () => {
@@ -214,7 +263,7 @@ describe('cloudSetup', () => {
     const { io, out, err } = capture();
     assert.equal(cloudSetup(io), 0);
     assert.deepEqual(out, [cloudSetupSnippet().trimEnd()]);
-    assert.match(err[0] ?? '', /Setup script, once; it runs \.github\/process-rules\/cloud-setup\.sh, which niyam onboard writes, so a new release needs no new paste/);
+    assert.match(err[0] ?? '', /Setup script, once; it runs \.github\/niyam\/cloud-setup\.sh, which niyam onboard writes, so a new release needs no new paste/);
     assert.match(err[0] ?? '', /Connect claude\.ai's GitHub as the agent account/);
     assert.match(err[0] ?? '', /its own Setup script, put this first, then the repo's own: a repo's script may end with exit/);
   });

@@ -8,7 +8,7 @@ import { after, describe, it } from 'node:test';
 import { BASE_ENV, NO_TOKEN, lockScript, pathsFor, sessionNames, sessionRecord, sessionScript } from './agent.ts';
 import { KEYCHAIN } from './token-store.ts';
 import { AGENT, AGENT_ID, FakeSys, HOME, ROOT, capture } from './fake.test.ts';
-import { FROM_SETUP, PROXY_TOKEN, cloudRepoScript } from './cloud.ts';
+import { FROM_SETUP, OLD_FROM_SETUP, PROXY_TOKEN, cloudRepoScript } from './cloud.ts';
 import { CLOUD_SETUP_PATH } from './onboard-pull.ts';
 import { OLDER_PRE_PUSH_HOOKS, PRE_PUSH_HOOK, workflow } from './onboard.ts';
 import { packageVersion } from './version.ts';
@@ -253,6 +253,22 @@ describe('sessionStart', () => {
         assert.equal(sys.files.get(RECORD), '{"agent":"ExampleBot"}\n', 'it never blocks');
       });
 
+      it('installs from the cloud setup file under its old name in a repo onboard has not moved, the old mark counting as the Setup run (P-56)', async () => {
+        const sys = repoAt('0.0.1');
+        const old = `${ROOT}/.github/process-rules/cloud-setup.sh`;
+        sys.files.set(old, cloudRepoScript('0.0.1', 'ab'.repeat(32)));
+        sys.files.set(OLD_FROM_SETUP, '');
+        assert.deepEqual((await start(sys)).out.slice(1), [
+          `niyam: this cloud session's environment held niyam ${v}; installed 0.0.1 from .github/process-rules/cloud-setup.sh, as the repo pins, for this session. The environment catches up when Claude builds it again.`,
+        ]);
+        assert.deepEqual(installs(sys).map((call) => call.args), [[old]]);
+        const both = repoAt('0.0.1', '0.0.1');
+        both.files.set(old, cloudRepoScript('0.0.2', 'ab'.repeat(32)));
+        both.files.set(FROM_SETUP, '');
+        await start(both);
+        assert.deepEqual(installs(both).map((call) => call.args), [[CLOUD_FILE]], 'the new one where both are');
+      });
+
       it('names the one paste when the Setup script installs a release of its own', async () => {
         const sys = repoAt('0.0.1', '0.0.1');
         assert.deepEqual((await start(sys)).out.slice(1), [
@@ -306,7 +322,7 @@ describe('sessionStart', () => {
       unpinned.files.set(`${ROOT}/.github/workflows/process-rules.yml`, 'name: process-rules\n');
       assert.equal((await start(unpinned)).out.length, 1);
       const several = cloud(AGENT);
-      several.files.set(`${ROOT}/.github/workflows/process-rules.yml`, workflow('main', '0.0.1', false).replace('process-rules-ref: v0.0.1', 'process-rules-ref: v0.0.2'));
+      several.files.set(`${ROOT}/.github/workflows/process-rules.yml`, workflow('main', '0.0.1', false).replace('niyam-ref: v0.0.1', 'niyam-ref: v0.0.2'));
       assert.equal((await start(several)).out.length, 1);
       const unreadable = cloud(AGENT);
       unreadable.files.set(`${ROOT}/.github/workflows/process-rules.yml`, workflow('main', '0.0.1', false));

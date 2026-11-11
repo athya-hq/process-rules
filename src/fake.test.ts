@@ -74,6 +74,8 @@ export class FakeSys implements Sys {
   tip: Map<string, string> | undefined;
   /** The files git's index was given in a temporary repository, by path, as onboard commits them. */
   committed = new Map<string, string>();
+  /** The files onboard's commit deletes, by path. */
+  deleted = new Set<string>();
   private objects = new Map<string, string>();
   /** The temporary folders made, and those removed. */
   temps: string[] = [];
@@ -98,7 +100,8 @@ export class FakeSys implements Sys {
     this.route('GET', '/users/ExampleBot/ssh_signing_keys', { status: 200, json: [] });
     this.route('GET', '/user/ssh_signing_keys', { status: 200, json: [] });
     this.route('POST', '/repos/example-org/example-app/pulls', { status: 201, json: { number: 7, html_url: PULL_URL, node_id: 'PR_7' } });
-    // No onboard pull request is open yet.
+    // No onboard pull request is open yet, from its branch or the one before P-56.
+    this.route('GET', '/repos/example-org/example-app/pulls?state=open&head=example-org:niyam/onboard', { status: 200, json: [] });
     this.route('GET', '/repos/example-org/example-app/pulls?state=open&head=example-org:process-rules/onboard', { status: 200, json: [] });
     // The organisation's issue types are the work model's alone, unless a test routes them.
     this.route('GET', '/orgs/example-org/issue-types?per_page=100&page=1', {
@@ -168,6 +171,10 @@ export class FakeSys implements Sys {
       const name = blobName(options.input ?? '');
       if (args.includes('-w')) this.objects.set(name, options.input ?? '');
       return ok(`${name}\n`);
+    }
+    if (command === 'git' && args[0] === 'update-index' && args[1] === '--force-remove') {
+      this.deleted.add(args[2] ?? '');
+      return ok();
     }
     if (command === 'git' && args[0] === 'update-index') {
       const [, name = '', path = ''] = (args.at(-1) ?? '').split(',');
@@ -291,7 +298,7 @@ export class FakeSys implements Sys {
     this.dirs.push(path);
   }
 
-  tempDir(prefix = '/tmp/process-rules-'): string {
+  tempDir(prefix = '/tmp/niyam-'): string {
     const dir = `${prefix}${this.temps.length + 1}`;
     this.temps.push(dir);
     this.dirs.push(dir);

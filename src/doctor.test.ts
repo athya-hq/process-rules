@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { NO_TOKEN, OLD_NO_TOKEN, launcherPath, launcherScript, pathsFor, sessionScript } from './agent.ts';
-import { FROM_SETUP, PROXY_TOKEN, cloudRepoScript } from './cloud.ts';
+import { FROM_SETUP, OLD_FROM_SETUP, PROXY_TOKEN, cloudRepoScript } from './cloud.ts';
 import { doctor } from './doctor.ts';
 import { KEYCHAIN } from './token-store.ts';
 import { ISSUE_TYPES, RERUN } from './issue-types.ts';
@@ -553,7 +553,7 @@ describe('doctor in a Claude cloud session', () => {
   });
 
   it('warns when the workflow pins no one version, and still passes', async () => {
-    for (const pins of [undefined, workflow('main', v, false).replace(`process-rules-ref: v${v}`, 'process-rules-ref: v0.0.2')]) {
+    for (const pins of [undefined, workflow('main', v, false).replace(`niyam-ref: v${v}`, 'niyam-ref: v0.0.2')]) {
       const sys = cloud();
       if (pins === undefined) sys.files.delete(WORKFLOW);
       else sys.files.set(WORKFLOW, pins);
@@ -591,6 +591,20 @@ describe('doctor in a Claude cloud session', () => {
     assert.equal(code, 0);
     assert.deepEqual(marked(out, '▲'), [`▲  ${FROM_SETUP} missing, so the cloud environment's Setup script does not run ${CLOUD_SETUP_PATH} → ${PASTE}`]);
     assert.equal((await check(sys)).out.at(-1), '└  1 to fix');
+  });
+
+  it('reads the workflow, cloud setup file and Setup mark under their names before P-56, naming the files it read (P-56)', async () => {
+    const sys = cloud();
+    sys.files.delete(WORKFLOW);
+    sys.files.delete(CLOUD_FILE);
+    sys.files.delete(FROM_SETUP);
+    sys.files.set(`${ROOT}/.github/workflows/process-rules.yml`, workflow('main', v, false));
+    sys.files.set(`${ROOT}/.github/process-rules/cloud-setup.sh`, cloudRepoScript(v, 'ab'.repeat(32)));
+    sys.files.set(OLD_FROM_SETUP, '');
+    const { code, out } = await check(sys);
+    assert.equal(code, 0, out.join('\n'));
+    assert.ok(out.includes(`✓  .github/process-rules/cloud-setup.sh installs ${v}, as .github/workflows/process-rules.yml pins`), out.join('\n'));
+    assert.ok(out.includes('✓  the Setup script runs .github/process-rules/cloud-setup.sh'), out.join('\n'));
   });
 
   it('refuses a proxy that acts as an account not among the agents', async () => {

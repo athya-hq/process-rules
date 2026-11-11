@@ -31,7 +31,7 @@ describe('setUpBoard', () => {
       '✓ disabled the issue types Task, Bug in example-org, outside the work model, once no issue held them; not deleted, so they can be enabled again',
       '✓ issue types in example-org: Work item, Slice, State, Decision, Brief',
       '✓ labels: approved, needs-owner, mechanical, veto, expiring, cannot-run-here',
-      '- the process-rules template could not be copied (GitHub shows no Project 4 in athya-hq); building the Project instead',
+      '- the niyam template could not be copied (GitHub shows no Project 4 in athya-hq); building the Project instead',
       `✓ Project "example-app work": ${URL}`,
       '✓ fields: Step, Decision, Review date',
       '✓ views: Needs you, Board, Work items, Decisions, Reviews due',
@@ -154,7 +154,7 @@ describe('setUpBoard', () => {
     assert.deepEqual(board.titles, ['example-app work']);
     assert.ok(board.project?.linked);
     assert.deepEqual(sys.slept, [3000, 3000], 'waits for the fields GitHub adds after the copy');
-    assert.deepEqual(sys.asked.slice(2), ['Create the Project "example-app work" for example-org from the process-rules template, linked to example-org/example-app?']);
+    assert.deepEqual(sys.asked.slice(2), ['Create the Project "example-app work" for example-org from the niyam template, linked to example-org/example-app?']);
     assert.deepEqual(out.slice(3), [
       `✓ Project "example-app work": ${COPY_URL}`,
       '✓ fields: Step, Decision, Review date',
@@ -188,7 +188,7 @@ describe('setUpBoard', () => {
     board.template = 'refused';
     const { url, out } = await setUp(sys);
     assert.equal(url, URL);
-    assert.ok(out.includes("- the process-rules template could not be copied (GitHub's GraphQL API refused: Resource not accessible by integration); building the Project instead"));
+    assert.ok(out.includes("- the niyam template could not be copied (GitHub's GraphQL API refused: Resource not accessible by integration); building the Project instead"));
     assert.deepEqual(out.slice(-viewsChecklist(URL).length), viewsChecklist(URL));
     assert.ok(board.operations.includes('createProjectV2('));
   });
@@ -216,7 +216,7 @@ describe('setUpBoard', () => {
     assert.deepEqual(err, []);
     assert.equal(url, COPY_URL);
     assert.deepEqual(sys.asked, [
-      '"example-app work" lacks what only the process-rules template sets (the views\' grouping, the workflows). Replace it with a copy of the template, moving its 4 open items with their Status, Step, Decision and Review date (not Estimate, Notes, which the template lacks), and close it as "example-app work (old)"?',
+      '"example-app work" lacks what only the niyam template sets (the views\' grouping, the workflows). Replace it with a copy of the template, moving its 4 open items with their Status, Step, Decision and Review date (not Estimate, Notes, which the template lacks), and close it as "example-app work (old)"?',
     ]);
     assert.deepEqual(board.project?.items, [
       { content: 'ISSUE_a', values: { Status: 'In progress', Step: 'Build', 'Review date': '2026-11-01' } },
@@ -274,7 +274,7 @@ describe('setUpBoard', () => {
     const { url, out } = await setUp(sys, ['y']);
     assert.equal(url, URL);
     assert.deepEqual({ title: board.project?.title, closed: board.project?.closed }, { title: 'example-app work', closed: undefined }, 'renamed back, its closed state untouched');
-    assert.ok(out.includes("- the process-rules template could not be copied (GitHub's GraphQL API refused: Resource not accessible by integration); keeping the Project as it is"));
+    assert.ok(out.includes("- the niyam template could not be copied (GitHub's GraphQL API refused: Resource not accessible by integration); keeping the Project as it is"));
     assert.deepEqual(out.slice(-viewsChecklist(URL).length), viewsChecklist(URL));
   });
 
