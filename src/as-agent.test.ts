@@ -75,7 +75,11 @@ describe('as-agent', () => {
     const inherited = hookSys();
     inherited.env = { ...inherited.env, PROCESS_RULES_AGENT: 'OtherBot' };
     inherited.execOverride = (call) => (call.interactive ? { code: 0, stdout: '', stderr: '' } : undefined);
-    assert.equal('PROCESS_RULES_AGENT' in ((asAgentIn(inherited).ran[0] as Call).env ?? {}), false, 'an inherited one is not passed on');
+    const inheritedRan = asAgentIn(inherited).ran;
+    assert.equal(inheritedRan.length, 1, 'the command ran');
+    const [inheritedCall] = inheritedRan as [Call];
+    assert.ok(inheritedCall.env, 'with an environment of its own');
+    assert.equal('PROCESS_RULES_AGENT' in inheritedCall.env, false, 'an inherited one is not passed on');
     assert.equal(env.GH_CONFIG_DIR, pathsFor(HOME, AGENT).gh);
     assert.equal(env.GIT_AUTHOR_EMAIL, noreplyEmail(AGENT_ID, AGENT));
     assert.equal(env.PATH, '/usr/bin:/bin');
