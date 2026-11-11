@@ -4,16 +4,23 @@ name: niyam checks
 # Later slices add their checks here as jobs.
 # Each job runs the CLI from this workflow's own commit, job.workflow_sha, so
 # the checks and the CLI are always one release. Settings fails a caller whose
-# process-rules-ref names another release: Dependabot and Renovate move a
-# job's `uses:` line alone. GitHub Enterprise Server has no job.workflow_*, so
-# there the CLI comes from process-rules-ref, as before.
+# niyam-ref names another release: Dependabot and Renovate move a job's
+# `uses:` line alone. GitHub Enterprise Server has no job.workflow_*, so there
+# the CLI comes from niyam-ref, as before.
+# A caller onboarded before P-56 passes process-rules-ref instead, so both are
+# declared (an undeclared input makes the caller invalid, and none of its
+# checks run), and each job takes niyam-ref, else process-rules-ref, else main.
 on:
   workflow_call:
     inputs:
-      process-rules-ref:
+      niyam-ref:
         description: The niyam release the caller pins, which must be the one its uses line names
         type: string
-        default: main
+        default: ''
+      process-rules-ref:
+        description: niyam-ref's name before P-56, for a caller onboard has not moved yet
+        type: string
+        default: ''
     secrets:
       FIGMA_TOKEN:
         description: A Figma token that reads the design library and the frames states link
@@ -61,42 +68,44 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ job.workflow_repository || 'veda-hq/niyam' }}
-          ref: ${{ job.workflow_sha || inputs.process-rules-ref }}
-          path: .process-rules
+          ref: ${{ job.workflow_sha || inputs.niyam-ref || inputs.process-rules-ref || 'main' }}
+          path: .niyam
           sparse-checkout: package.json
           sparse-checkout-cone-mode: false
           persist-credentials: false
-      - name: Check process-rules-ref names the release that runs
+      - name: Check niyam-ref names the release that runs
         env:
-          REF: ${{ inputs.process-rules-ref }}
+          REF: ${{ inputs.niyam-ref || inputs.process-rules-ref || 'main' }}
+          # The input the caller set, which the messages name.
+          INPUT: ${{ inputs.niyam-ref == '' && inputs.process-rules-ref != '' && 'process-rules-ref' || 'niyam-ref' }}
           CALLER: ${{ github.workflow_ref }}
           OWN_SHA: ${{ job.workflow_sha }}
           SERVER: ${{ github.server_url }}
         run: |
           set -euo pipefail
-          # Without job.workflow_sha the CLI came from process-rules-ref itself, so the two always agree here.
+          # Without job.workflow_sha the CLI came from the ref itself, so the two always agree here.
           if [ -z "$OWN_SHA" ] && [ "$SERVER" = https://github.com ]; then
-            echo "::warning::GitHub gave no job.workflow_sha, so the checks run the CLI at process-rules-ref $REF, which may not be their own release."
+            echo "::warning::GitHub gave no job.workflow_sha, so the checks run the CLI at $INPUT $REF, which may not be their own release."
           fi
           # The caller's workflow file: owner/repo/<path>@<ref>.
           file=${CALLER#*/*/}
           file=${file%%@*}
-          version=$(jq -r .version .process-rules/package.json)
-          sha=$(git -C .process-rules rev-parse HEAD)
+          version=$(jq -r .version .niyam/package.json)
+          sha=$(git -C .niyam rev-parse HEAD)
           # A release tag is vX.Y.Z and a commit its full sha, as uses: lines take them; anything else is a branch.
           if [[ $REF =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             [ "${REF#v}" = "$version" ] && same=1 || same=
           elif [[ $REF =~ ^[0-9a-f]{40}$ ]]; then
             [ "$REF" = "$sha" ] && same=1 || same=
           else
-            echo "niyam: process-rules-ref is the branch $REF; these checks run v$version ($sha)."
+            echo "niyam: $INPUT is the branch $REF; these checks run v$version ($sha)."
             exit 0
           fi
           if [ -z "$same" ]; then
-            echo "::error file=$file::process-rules-ref is $REF, but this workflow runs the shared checks at v$version. Dependabot and Renovate move only a job's uses: line. Run niyam onboard with v$version, which moves every pin, or set process-rules-ref: v$version on every job."
+            echo "::error file=$file::$INPUT is $REF, but this workflow runs the shared checks at v$version. Dependabot and Renovate move only a job's uses: line. Run niyam onboard with v$version, which moves every pin, or set $INPUT: v$version on every job."
             exit 1
           fi
-          echo "niyam: process-rules-ref $REF is the release that runs, v$version ($sha)."
+          echo "niyam: $INPUT $REF is the release that runs, v$version ($sha)."
 
   identity:
     name: PR identity
@@ -117,14 +126,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ job.workflow_repository || 'veda-hq/niyam' }}
-          ref: ${{ job.workflow_sha || inputs.process-rules-ref }}
-          path: .process-rules
+          ref: ${{ job.workflow_sha || inputs.niyam-ref || inputs.process-rules-ref || 'main' }}
+          path: .niyam
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
       # Agent commits must be Verified as the agent and pushed by it.
-      - run: node .process-rules/src/cli.ts pr-identity
+      - run: node .niyam/src/cli.ts pr-identity
         env:
           GH_TOKEN: ${{ github.token }}
 
@@ -146,14 +155,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ job.workflow_repository || 'veda-hq/niyam' }}
-          ref: ${{ job.workflow_sha || inputs.process-rules-ref }}
-          path: .process-rules
+          ref: ${{ job.workflow_sha || inputs.niyam-ref || inputs.process-rules-ref || 'main' }}
+          path: .niyam
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
       # An agent pull request builds exactly one slice that may be built.
-      - run: node .process-rules/src/cli.ts pr-work-rules
+      - run: node .niyam/src/cli.ts pr-work-rules
         env:
           GH_TOKEN: ${{ github.token }}
 
@@ -175,14 +184,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ job.workflow_repository || 'veda-hq/niyam' }}
-          ref: ${{ job.workflow_sha || inputs.process-rules-ref }}
-          path: .process-rules
+          ref: ${{ job.workflow_sha || inputs.niyam-ref || inputs.process-rules-ref || 'main' }}
+          path: .niyam
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
       # Off unless figma is on and FIGMA_LIBRARY and FIGMA_TOKEN are set.
-      - run: node .process-rules/src/cli.ts pr-design
+      - run: node .niyam/src/cli.ts pr-design
         env:
           GH_TOKEN: ${{ github.token }}
           FIGMA_TOKEN: ${{ secrets.FIGMA_TOKEN }}
@@ -207,24 +216,24 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ job.workflow_repository || 'veda-hq/niyam' }}
-          ref: ${{ job.workflow_sha || inputs.process-rules-ref }}
-          path: .process-rules
+          ref: ${{ job.workflow_sha || inputs.niyam-ref || inputs.process-rules-ref || 'main' }}
+          path: .niyam
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
       # The slice the pull request names is closed, which moves it to Done on the board, and so is each State of it the pull request names.
-      - run: node .process-rules/src/cli.ts pr-merged
+      - run: node .niyam/src/cli.ts pr-merged
         env:
           GH_TOKEN: ${{ github.token }}
 
   decisions:
     name: Decisions, weekly
-    # Not on the hourly needs-owner sweep's cron, which the client's process-rules-asks job calls these checks on.
+    # Not on the hourly needs-owner sweep's cron, which the client's niyam-asks job calls these checks on.
     if: (github.event_name == 'schedule' && github.event.schedule != '41 * * * *') || github.event_name == 'workflow_dispatch'
     # One run at a time, so two cannot both open an undo issue for one decision.
     concurrency:
-      group: process-rules-decisions-${{ github.repository }}
+      group: niyam-decisions-${{ github.repository }}
       cancel-in-progress: false
     runs-on: ubuntu-latest
     # Checks stop starting after 45 minutes; the rest wait for next week.
@@ -237,14 +246,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ job.workflow_repository || 'veda-hq/niyam' }}
-          ref: ${{ job.workflow_sha || inputs.process-rules-ref }}
-          path: .process-rules
+          ref: ${{ job.workflow_sha || inputs.niyam-ref || inputs.process-rules-ref || 'main' }}
+          path: .niyam
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
       # Each open Decision issue's check; undo issues and labels on GitHub.
-      - run: node .process-rules/src/cli.ts decisions-weekly
+      - run: node .niyam/src/cli.ts decisions-weekly
         env:
           GH_TOKEN: ${{ github.token }}
 
@@ -258,7 +267,7 @@ jobs:
       (github.event_name == 'schedule' && github.event.schedule == '41 * * * *')
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # The caller's permissions: the client's process-rules-asks job grants issues and pull-requests write, its weekly job issues write.
+    # The caller's permissions: the client's niyam-asks job grants issues and pull-requests write, its weekly job issues write.
     steps:
       # The settings come from the default branch: a comment cannot rename the owner it is judged against.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -267,13 +276,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ job.workflow_repository || 'veda-hq/niyam' }}
-          ref: ${{ job.workflow_sha || inputs.process-rules-ref }}
-          path: .process-rules
+          ref: ${{ job.workflow_sha || inputs.niyam-ref || inputs.process-rules-ref || 'main' }}
+          path: .niyam
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
-      - run: node .process-rules/src/cli.ts needs-owner
+      - run: node .niyam/src/cli.ts needs-owner
         env:
           GH_TOKEN: ${{ github.token }}
 
@@ -286,7 +295,7 @@ jobs:
       (github.event_name == 'schedule' && github.event.schedule == '41 * * * *')
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    # The caller's permissions: the client's process-rules-asks job grants issues: write, which sets an issue's type,
+    # The caller's permissions: the client's niyam-asks job grants issues: write, which sets an issue's type,
     # on these events and the hourly cron alike.
     steps:
       # The settings come from the default branch: an issue cannot rename the Approvals issue it is judged against.
@@ -296,12 +305,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ job.workflow_repository || 'veda-hq/niyam' }}
-          ref: ${{ job.workflow_sha || inputs.process-rules-ref }}
-          path: .process-rules
+          ref: ${{ job.workflow_sha || inputs.niyam-ref || inputs.process-rules-ref || 'main' }}
+          path: .niyam
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
-      - run: node .process-rules/src/cli.ts issue-type
+      - run: node .niyam/src/cli.ts issue-type
         env:
           GH_TOKEN: ${{ github.token }}

@@ -2,7 +2,7 @@ import { API, isNoToken } from './agent.ts';
 import { SETUP_FIRST, workflowPins } from './onboard.ts';
 import { OLD_PACKAGE, PRODUCT, tarballName } from './names.ts';
 import type { Output, Sys } from './types.ts';
-import { CLOUD_SETUP_PATH, WORKFLOW_PATH } from './onboard-pull.ts';
+import { CLOUD_SETUP_PATH, OLD_CLOUD_SETUP_PATH, OLD_WORKFLOW_PATH, WORKFLOW_PATH } from './onboard-pull.ts';
 import { GITHUB_WEB } from './host.ts';
 import { isNewer } from './version.ts';
 
@@ -41,14 +41,27 @@ export const CLOUD_NODE_SHA256 = {
 /** What the Setup snippet says when the install fails: the commands after it in the Setup script still run. */
 export const INSTALL_FAILED = 'niyam: the install failed, so sessions start without niyam; the rest of the Setup script still runs.';
 
-/** Where the install puts Node and the CLI in a cloud session. */
-export const CLOUD_DIR = '/opt/process-rules';
+/** Where the install puts Node and the CLI in a cloud session, and where it did before P-56. */
+export const CLOUD_DIR = '/opt/niyam';
+export const OLD_CLOUD_DIR = '/opt/process-rules';
 /**
  * The file the install leaves in CLOUD_DIR when the Setup snippet ran it,
  * so a session can tell a Setup script that runs the repo's file from one
- * that installs a release of its own.
+ * that installs a release of its own; and where a cloud setup file written
+ * before P-56 leaves it, which the new snippet may still run.
  */
 export const FROM_SETUP = `${CLOUD_DIR}/from-setup`;
+export const OLD_FROM_SETUP = `${OLD_CLOUD_DIR}/from-setup`;
+
+/** Whether the Setup snippet ran the repo's cloud setup file in this environment: its mark, or the one before P-56. */
+export function ranFromSetup(sys: Sys): boolean {
+  return sys.exists(FROM_SETUP) || sys.exists(OLD_FROM_SETUP);
+}
+
+/** The repo's file under its name since P-56, else under its old one, which onboard wrote before; the new name when neither is there. */
+function newOrOldFile(sys: Sys, root: string, path: string, old: string): string {
+  return !sys.exists(`${root}/${path}`) && sys.exists(`${root}/${old}`) ? old : path;
+}
 
 /** The release `cloudRepoScript` installs, from its first comment; undefined when `text` is not one. */
 export function cloudScriptVersion(text: string): string | undefined {
@@ -59,24 +72,28 @@ export function cloudScriptVersion(text: string): string | undefined {
  * The releases a clone at `root` says a cloud session should run: the one
  * version its workflow pins, and the one its cloud setup file installs; each
  * undefined when the file is missing or unreadable, the workflow pins none or
- * several, or the setup file is not one onboard writes.
+ * several, or the setup file is not one onboard writes. Each file is read
+ * under its name since P-56, else its old one, and named as `workflow` and
+ * `script`, as the repo has them.
  */
-export function repoReleases(sys: Sys, root: string): { pinned: string | undefined; scripted: string | undefined } {
+export function repoReleases(sys: Sys, root: string): { pinned: string | undefined; scripted: string | undefined; workflow: string; script: string } {
+  const workflow = newOrOldFile(sys, root, WORKFLOW_PATH, OLD_WORKFLOW_PATH);
+  const script = newOrOldFile(sys, root, CLOUD_SETUP_PATH, OLD_CLOUD_SETUP_PATH);
   let pinned: string | undefined;
   try {
-    const pins = new Set(workflowPins(sys.read(`${root}/${WORKFLOW_PATH}`)));
+    const pins = new Set(workflowPins(sys.read(`${root}/${workflow}`)));
     if (pins.size === 1) [pinned] = pins;
   } catch {
     pinned = undefined;
   }
-  const file = `${root}/${CLOUD_SETUP_PATH}`;
+  const file = `${root}/${script}`;
   let scripted: string | undefined;
   try {
     scripted = sys.exists(file) ? cloudScriptVersion(sys.read(file)) : undefined;
   } catch {
     scripted = undefined;
   }
-  return { pinned, scripted };
+  return { pinned, scripted, workflow, script };
 }
 
 /** The last release made under the old name: it attached only athya-hq-process-rules-<version>.tgz. */
@@ -113,7 +130,9 @@ export async function releaseSha256(sys: Sys, version: string, token: string): P
 
 /**
  * The repo's cloud setup file, CLOUD_SETUP_PATH, which onboard writes at
- * the version the workflow pins and rewrites on every run: Node and that
+ * the version the workflow pins and rewrites on every run, and writes alike
+ * at OLD_CLOUD_SETUP_PATH, which a Setup snippet pasted before P-56 runs
+ * with PROCESS_RULES_SETUP set, as the new one sets NIYAM_SETUP: Node and that
  * release of the CLI, unpacked under CLOUD_DIR as root, and a
  * `niyam` on PATH that runs one with the other (no `process-rules` since P-54), leaving the image's
  * own Node alone. Each download is checked against the sha256 pinned here
@@ -153,7 +172,8 @@ export function cloudRepoScript(version: string, sha256: string): string {
     'rm -f /usr/local/bin/niyam /usr/local/bin/process-rules',
     'printf \'#!/bin/sh\\nexec %s %s "$@"\\n\' "$bin" "$cli/package/dist/cli.js" > /usr/local/bin/niyam',
     'chmod 755 /usr/local/bin/niyam',
-    `if [ -n "\${PROCESS_RULES_SETUP:-}" ]; then : > ${FROM_SETUP}; fi`,
+    // The snippet pasted before P-56 sets the old name alone.
+    `if [ -n "\${NIYAM_SETUP:-}\${PROCESS_RULES_SETUP:-}" ]; then : > ${FROM_SETUP}; fi`,
     'niyam version </dev/null',
     '',
   ].join('\n');
@@ -162,7 +182,9 @@ export function cloudRepoScript(version: string, sha256: string): string {
 /**
  * The Setup snippet for a Claude cloud environment, pasted once: it names
  * no version, so a new release needs no new paste. It runs the clone's
- * CLOUD_SETUP_PATH, which onboard keeps at the workflow's pin. The Setup
+ * CLOUD_SETUP_PATH, which onboard keeps at the workflow's pin, else the
+ * OLD_CLOUD_SETUP_PATH a repo not onboarded since P-56 has, setting the
+ * mark's variable under both names, since that file reads the old one. The Setup
  * script runs as root after the clone, from the folder that holds it (the
  * VM's home, the clone one folder down), so it looks there and in each
  * home. The environment's Setup field holds one script, so it runs in a
@@ -170,17 +192,18 @@ export function cloudRepoScript(version: string, sha256: string): string {
  * follow it in the same field.
  */
 export function cloudSetupSnippet(): string {
-  const file = CLOUD_SETUP_PATH;
   return [
     '#!/bin/bash',
-    `# process-rules for Claude cloud sessions: runs the clone's ${file}, which niyam onboard keeps at the version the repo pins. Paste once; put the repo's own setup after it.`,
-    `bash <<'PROCESS_RULES' || echo "${INSTALL_FAILED}" >&2`,
-    `for script in "$PWD/${file}" "$PWD"/*/${file} /home/*/*/${file} /root/*/${file}; do`,
-    '  if [ -f "$script" ]; then PROCESS_RULES_SETUP=1 exec bash "$script" </dev/null; fi',
+    `# niyam for Claude cloud sessions: runs the clone's ${CLOUD_SETUP_PATH}, else its ${OLD_CLOUD_SETUP_PATH}, which niyam onboard keeps at the version the repo pins. Paste once; put the repo's own setup after it.`,
+    `bash <<'NIYAM' || echo "${INSTALL_FAILED}" >&2`,
+    `for file in ${CLOUD_SETUP_PATH} ${OLD_CLOUD_SETUP_PATH}; do`,
+    '  for script in "$PWD/$file" "$PWD"/*/"$file" /home/*/*/"$file" /root/*/"$file"; do',
+    '    if [ -f "$script" ]; then NIYAM_SETUP=1 PROCESS_RULES_SETUP=1 exec bash "$script" </dev/null; fi',
+    '  done',
     'done',
-    `echo "niyam: no ${file} in the clone under $PWD; run niyam onboard, which writes it" >&2`,
+    `echo "niyam: no ${CLOUD_SETUP_PATH} in the clone under $PWD; run niyam onboard, which writes it" >&2`,
     'exit 1',
-    'PROCESS_RULES',
+    'NIYAM',
     '',
   ].join('\n');
 }

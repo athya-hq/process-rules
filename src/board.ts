@@ -202,7 +202,7 @@ export async function setUpBoard(
     after = holder.projectsV2.pageInfo.endCursor;
   }
   if (!project) {
-    if (!(await confirm(`Create the Project "${title}" for ${repo.ownerLogin} from the process-rules template, linked to ${slug}?`, 'project'))) {
+    if (!(await confirm(`Create the Project "${title}" for ${repo.ownerLogin} from the niyam template, linked to ${slug}?`, 'project'))) {
       return stopped(io, 'project');
     }
     const copy = await copyTemplate(sys, io, token, holderId as string, title, 'building the Project instead');
@@ -223,7 +223,7 @@ export async function setUpBoard(
     const moving = await itemsOf(sys, token, old.id);
     const lost = moving.fields.filter((name) => !FIELDS.some((field) => field.name === name) && name !== 'Status');
     const question =
-      `"${title}" lacks what only the process-rules template sets (the views' grouping, the workflows). ` +
+      `"${title}" lacks what only the niyam template sets (the views' grouping, the workflows). ` +
       `Replace it with a copy of the template, moving its ${moving.items.length} open item${moving.items.length === 1 ? '' : 's'} with their Status, Step, Decision and Review date` +
       `${lost.length > 0 ? ` (not ${lost.join(', ')}, which the template lacks)` : ''}, and close it as "${title} (old)"?`;
     if (await confirm(question, 'replace')) {
@@ -371,7 +371,7 @@ async function copyTemplate(sys: Sys, io: Output, token: string, ownerId: string
     )) as { copyProjectV2: { projectV2: Copy } };
     copy = made.copyProjectV2.projectV2;
   } catch (error) {
-    io.out(`- the process-rules template could not be copied (${(error as Error).message}); ${instead}`);
+    io.out(`- the niyam template could not be copied (${(error as Error).message}); ${instead}`);
     return undefined;
   }
   for (let attempt = 1; ; attempt++) {

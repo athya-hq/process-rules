@@ -1,3 +1,4 @@
+import { CLI } from './names.ts';
 import { API, anyLogin, either, loadSettings } from './agent.ts';
 import { PERSONAL_REPO, isOn, isPersonal, offLine } from './features.ts';
 import { WORKFLOW_BOT, expireVetoes, watchReviews } from './reviews.ts';
@@ -10,7 +11,7 @@ const RUN_BUDGET_MS = 45 * 60_000;
 /** What GNU timeout exits with when the check ran out of time. */
 const TIMED_OUT = 124;
 /** The line the wrapper prints with the check's own exit status. */
-const STATUS_MARK = 'process-rules-check-exit=';
+const STATUS_MARK = 'niyam-check-exit=';
 const STATUS_WRAPPER = `sh -c "$1"; echo "${STATUS_MARK}$?"`;
 /** An Override is labeled `expiring` this many days before its expiry. */
 const EXPIRING_DAYS = 30;
@@ -145,7 +146,7 @@ export async function decisionsWeekly(sys: Sys, io: Output): Promise<number> {
     // GNU timeout ends the whole process group the check starts, not just its shell.
     // The inner shell prints the check's own exit status, so a check that exits 124
     // itself is told apart from one that ran out of time.
-    const raw = sys.exec('timeout', ['-k', '5', String(CHECK_TIMEOUT_S), 'sh', '-c', STATUS_WRAPPER, 'process-rules', decision.check], {
+    const raw = sys.exec('timeout', ['-k', '5', String(CHECK_TIMEOUT_S), 'sh', '-c', STATUS_WRAPPER, CLI, decision.check], {
       cwd: sys.cwd,
       env: { PATH: sys.env.PATH, HOME: sys.env.HOME },
       timeoutMs: (CHECK_TIMEOUT_S + 10) * 1000,

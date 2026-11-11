@@ -22,12 +22,12 @@ import {
   tokenInfo,
 } from './agent.ts';
 import { LOCKED, hooksHittingLock } from './as-agent.ts';
-import { FROM_SETUP, cloudLogin, repoReleases } from './cloud.ts';
+import { FROM_SETUP, cloudLogin, ranFromSetup, repoReleases } from './cloud.ts';
 import { featuresIn } from './features.ts';
 import { typesDrift } from './issue-types.ts';
 import { type Finding, closing, findingLines, heading, painter, tilde } from './layout.ts';
 import { exposure, exposureFindings, movedFindings, readDeclined, setAside } from './lockout.ts';
-import { CLOUD_SETUP_PATH, HOOKS_PATH, WORKFLOW_PATH } from './onboard-pull.ts';
+import { CLOUD_SETUP_PATH, HOOKS_PATH } from './onboard-pull.ts';
 import { missingAutoFixRules } from './onboard.ts';
 import { isOrganisation } from './owner-login.ts';
 import { leftBehind } from './owner-step.ts';
@@ -253,6 +253,8 @@ async function cloudDoctor(sys: Sys, io: Output, named?: string): Promise<number
   const session: Finding[] = [];
   const github: Finding[] = [];
   let root: string | undefined;
+  // The cloud setup file the repo has: under its old name, until onboard moves it.
+  let setupFile = CLOUD_SETUP_PATH;
   try {
     root = repoRoot(sys);
   } catch (error) {
@@ -260,32 +262,33 @@ async function cloudDoctor(sys: Sys, io: Output, named?: string): Promise<number
   }
 
   if (root !== undefined) {
-    const { pinned, scripted } = repoReleases(sys, root);
+    const { pinned, scripted, workflow, script } = repoReleases(sys, root);
+    setupFile = script;
     if (scripted === undefined) {
-      session.push({ mark: '✗', text: `${CLOUD_SETUP_PATH} missing, or not the file onboard writes, so the Setup script installs no niyam`, fix: ONBOARD });
+      session.push({ mark: '✗', text: `${script} missing, or not the file onboard writes, so the Setup script installs no niyam`, fix: ONBOARD });
     } else if (pinned === undefined) {
-      session.push({ mark: '▲', text: `${WORKFLOW_PATH} is missing or pins no one version, so ${CLOUD_SETUP_PATH} is not checked against it`, fix: ONBOARD });
+      session.push({ mark: '▲', text: `${workflow} is missing or pins no one version, so ${script} is not checked against it`, fix: ONBOARD });
     } else if (pinned !== scripted) {
-      session.push({ mark: '✗', text: `${CLOUD_SETUP_PATH} installs ${scripted}, but ${WORKFLOW_PATH} pins v${pinned}`, fix: ONBOARD });
+      session.push({ mark: '✗', text: `${script} installs ${scripted}, but ${workflow} pins v${pinned}`, fix: ONBOARD });
     } else {
-      session.push({ mark: '✓', text: `${CLOUD_SETUP_PATH} installs ${scripted}, as ${WORKFLOW_PATH} pins` });
+      session.push({ mark: '✓', text: `${script} installs ${scripted}, as ${workflow} pins` });
     }
     const installed = packageVersion();
     const wanted = scripted ?? pinned;
     if (wanted === installed) {
       session.push({ mark: '✓', text: `niyam ${installed} runs here` });
     } else if (scripted !== undefined) {
-      session.push({ mark: '▲', text: `this session runs niyam ${installed}, not the ${scripted} ${CLOUD_SETUP_PATH} installs`, fix: `bash ${CLOUD_SETUP_PATH}, or a new session` });
+      session.push({ mark: '▲', text: `this session runs niyam ${installed}, not the ${scripted} ${script} installs`, fix: `bash ${script}, or a new session` });
     } else if (pinned !== undefined) {
-      session.push({ mark: '▲', text: `this session runs niyam ${installed}, not the v${pinned} ${WORKFLOW_PATH} pins`, fix: `${ONBOARD}, then a new session` });
+      session.push({ mark: '▲', text: `this session runs niyam ${installed}, not the v${pinned} ${workflow} pins`, fix: `${ONBOARD}, then a new session` });
     }
   }
   session.push(
-    sys.exists(FROM_SETUP)
-      ? { mark: '✓', text: `the Setup script runs ${CLOUD_SETUP_PATH}` }
+    ranFromSetup(sys)
+      ? { mark: '✓', text: `the Setup script runs ${setupFile}` }
       : {
           mark: '▲',
-          text: `${FROM_SETUP} missing, so the cloud environment's Setup script does not run ${CLOUD_SETUP_PATH}`,
+          text: `${FROM_SETUP} missing, so the cloud environment's Setup script does not run ${setupFile}`,
           fix: "paste what niyam cloud-setup prints into the cloud environment's Setup script, once",
         },
   );

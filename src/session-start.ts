@@ -14,8 +14,8 @@ import {
   type Settings,
 } from './agent.ts';
 import { AGENT_VAR, OLD_AGENT_VAR } from './names.ts';
-import { FROM_SETUP, cloudLogin, cloudToken, repoReleases } from './cloud.ts';
-import { CLOUD_SETUP_PATH, WORKFLOW_PATH } from './onboard-pull.ts';
+import { cloudLogin, cloudToken, ranFromSetup, repoReleases } from './cloud.ts';
+import { CLOUD_SETUP_PATH } from './onboard-pull.ts';
 import { PRE_PUSH_HOOK, prePushHook } from './onboard.ts';
 import { packageVersion } from './version.ts';
 import { tokenStore, unsupported } from './token-store.ts';
@@ -72,26 +72,26 @@ function cloudDrift(sys: Sys): string | undefined {
   } catch {
     return undefined;
   }
-  const { pinned, scripted } = repoReleases(sys, root);
+  const { pinned, scripted, workflow, script } = repoReleases(sys, root);
   const installed = packageVersion();
-  const file = `${root}/${CLOUD_SETUP_PATH}`;
+  const file = `${root}/${script}`;
   if (scripted === undefined) {
     if (!pinned || pinned === installed) return undefined;
-    return `niyam: this cloud session runs niyam ${installed}, but ${WORKFLOW_PATH} pins v${pinned}, and the repo has no ${CLOUD_SETUP_PATH} to install it from. Run niyam onboard again, which writes it; then paste what niyam cloud-setup prints over the process-rules part of the cloud environment's Setup script, once.`;
+    return `niyam: this cloud session runs niyam ${installed}, but ${workflow} pins v${pinned}, and the repo has no ${CLOUD_SETUP_PATH} to install it from. Run niyam onboard again, which writes it; then paste what niyam cloud-setup prints over the process-rules part of the cloud environment's Setup script, once.`;
   }
   if (pinned && pinned !== scripted) {
-    return `niyam: ${CLOUD_SETUP_PATH} installs niyam ${scripted}, but ${WORKFLOW_PATH} pins v${pinned}. Run niyam onboard again, which writes the file at the pin.`;
+    return `niyam: ${script} installs niyam ${scripted}, but ${workflow} pins v${pinned}. Run niyam onboard again, which writes the file at the pin.`;
   }
   if (scripted === installed) return undefined;
   const ran = sys.exec('bash', [file], { input: '', timeoutMs: CLOUD_INSTALL_MS });
-  const paste = sys.exists(FROM_SETUP)
+  const paste = ranFromSetup(sys)
     ? ''
     : ` The cloud environment's Setup script installs a release of its own: paste what niyam cloud-setup prints over its process-rules part, once, and new releases then need no paste.`;
   if (ran.code !== 0) {
     const why = ran.stderr.trim().split('\n').at(-1) || `exit ${ran.code}`;
-    return `niyam: this cloud session runs niyam ${installed}, but ${CLOUD_SETUP_PATH} installs ${scripted}, and running it failed (${why}); the session works on with ${installed}.${paste}`;
+    return `niyam: this cloud session runs niyam ${installed}, but ${script} installs ${scripted}, and running it failed (${why}); the session works on with ${installed}.${paste}`;
   }
-  return `niyam: this cloud session's environment held niyam ${installed}; installed ${scripted} from ${CLOUD_SETUP_PATH}, as the repo pins, for this session. The environment catches up when Claude builds it again.${paste}`;
+  return `niyam: this cloud session's environment held niyam ${installed}; installed ${scripted} from ${script}, as the repo pins, for this session. The environment catches up when Claude builds it again.${paste}`;
 }
 
 /**

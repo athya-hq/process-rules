@@ -4,7 +4,7 @@ import { GITHUB_HOST, GITHUB_WEB } from './host.ts';
 import { ISSUE_TYPES } from './issue-types.ts';
 import type { Finding } from './layout.ts';
 import { CLI, OLD_CLI } from './names.ts';
-import { ONBOARD_BRANCH, WORKFLOW_PATH } from './onboard-pull.ts';
+import { OLD_ONBOARD_BRANCH, OLD_WORKFLOW_PATH, ONBOARD_BRANCH, WORKFLOW_PATH } from './onboard-pull.ts';
 import { signInLines } from './owner-login.ts';
 import { agentSession } from './push-identity.ts';
 import type { Output, Sys } from './types.ts';
@@ -325,42 +325,66 @@ function wantedChecks(gh: Gh, repo: string): { file: string; checks: string[] } 
   throw new Error(`${repo} has no ${SETTINGS_PATH} on its default branch, so its checks are not known; run ${CLI} onboard there first`);
 }
 
-/** The shared checks workflow a client's `process-rules` job calls: `owner/repo/.github/workflows/checks.yml@ref`, or `./` for the repository's own. */
+/**
+ * The repository's workflow on `ref`, its default branch when none, and its
+ * path: since P-56 `.github/workflows/niyam.yml`, else the old one a repo
+ * not onboarded since has.
+ */
+function workflowIn(gh: Gh, repo: string, ref?: string): { path: string; text?: string } {
+  for (const path of [WORKFLOW_PATH, OLD_WORKFLOW_PATH]) {
+    const text = fileIn(gh, repo, path, ref);
+    if (text !== undefined) return { path, text };
+  }
+  return { path: WORKFLOW_PATH };
+}
+
+/** The workflow's read-only job, by its id since P-56, `niyam`, or before, `process-rules`. */
+const READ_ONLY_JOB = String.raw`^ {2}(?:${CLI}|${OLD_CLI}):[ 	]*
+?
+`;
+
+/** The shared checks workflow a client's read-only job calls: `owner/repo/.github/workflows/checks.yml@ref`, or `./` for the repository's own. */
 const CALLS_CHECKS = /^\s+uses:\s*['"]?(?:([\w.-]+\/[\w.-]+)\/|\.\/)\.github\/workflows\/checks\.yml(?:@([^\s'"#]+))?/m;
 
 /**
- * The names of the jobs the repository's workflow runs as `process-rules`,
+ * The names of the jobs the repository's workflow runs as `niyam`,
  * on its default branch: those of the shared checks workflow its
- * `process-rules` job calls, at the version it pins; or why none can be
+ * read-only job calls, at the version it pins; or why none can be
  * known. A check whose job is not there would never report, and a ruleset
  * requiring it would hold every pull request.
  */
 function workflowJobs(gh: Gh, repo: string): Set<string> | { problem: string } {
-  const workflow = fileIn(gh, repo, WORKFLOW_PATH);
+  const { path, text: workflow } = workflowIn(gh, repo);
   if (workflow === undefined) return { problem: `${repo} has no ${WORKFLOW_PATH} on its default branch` };
-  const job = /^ {2}process-rules:[ \t]*\r?\n((?:(?: {3,}|[ \t]*#|[ \t]*\r?$).*\r?\n?)*)/m.exec(workflow)?.[1];
+  const job = new RegExp(String.raw`${READ_ONLY_JOB}((?:(?: {3,}|[ 	]*#|[ 	]*
+?$).*
+?
+?)*)`, 'm').exec(workflow)?.[1];
   const calls = job === undefined ? null : CALLS_CHECKS.exec(job);
-  if (!calls) return { problem: `${WORKFLOW_PATH} has no process-rules job calling the shared checks` };
+  if (!calls) return { problem: `${path} has no ${CLI} job calling the shared checks` };
   const [, from = repo, ref] = calls;
   const answer = gh.api(`repos/${from}/contents/.github/workflows/checks.yml${ref ? `?ref=${encodeURIComponent(ref)}` : ''}`);
   const content = (answer.json as { content?: unknown } | null)?.content;
-  if (!answer.ok || typeof content !== 'string') return { problem: `GitHub did not give the shared checks ${from}${ref ? `@${ref}` : ''} that ${WORKFLOW_PATH} calls (${answer.problem})` };
+  if (!answer.ok || typeof content !== 'string') return { problem: `GitHub did not give the shared checks ${from}${ref ? `@${ref}` : ''} that ${path} calls (${answer.problem})` };
   const text = Buffer.from(content, 'base64').toString('utf8');
   return new Set([...text.matchAll(/^ {4}name:\s*['"]?([^'"#\r\n]*?)['"]?\s*$/gm)].map((match) => match[1] as string));
 }
 
-/** A workflow whose read-only job carries onboard's `name: niyam`, so its checks report as `niyam / …`. */
-const NAMED_JOB = new RegExp(`^ {2}process-rules:[ \\t]*\\r?\\n {4}name:[ \\t]*['"]?${CLI}['"]?[ \\t]*\\r?$`, 'm');
+/** A workflow whose read-only job, by either id, carries onboard's `name: niyam`, so its checks report as `niyam / …`. */
+const NAMED_JOB = new RegExp(String.raw`${READ_ONLY_JOB} {4}name:[ 	]*['"]?${CLI}['"]?[ 	]*
+?$`, 'm');
 
 /**
  * Whether the repository's workflow reports its checks as `niyam / …`: on
  * its default branch, or on onboard's branch, whose pull request then
- * waits for the ruleset to require those names.
+ * waits for the ruleset to require those names; that branch is
+ * `process-rules/onboard` for an onboard before P-56.
  */
 function reportsNewNames(gh: Gh, repo: string): boolean {
-  if (NAMED_JOB.test(fileIn(gh, repo, WORKFLOW_PATH) ?? '')) return true;
-  const answer = gh.api(`repos/${repo}/branches/${encodeURIComponent(ONBOARD_BRANCH)}`);
-  return answer.ok && NAMED_JOB.test(fileIn(gh, repo, WORKFLOW_PATH, ONBOARD_BRANCH) ?? '');
+  if (NAMED_JOB.test(workflowIn(gh, repo).text ?? '')) return true;
+  return [ONBOARD_BRANCH, OLD_ONBOARD_BRANCH].some(
+    (branch) => gh.api(`repos/${repo}/branches/${encodeURIComponent(branch)}`).ok && NAMED_JOB.test(workflowIn(gh, repo, branch).text ?? ''),
+  );
 }
 
 /**
@@ -396,12 +420,14 @@ function requiredChecks(gh: Gh, { repo, ruleset }: Extract<Step, { step: 'requir
   const jobs = turnedOn.some((check) => !had.includes(check)) ? workflowJobs(gh, repo) : new Set<string>();
   const runs = (check: string): boolean => had.includes(check) || (reports && jobs instanceof Set && jobs.has(check.slice(CHECK_PREFIX.length)));
   const checks = turnedOn.filter(runs);
+  // The workflow under the name the repository has it, read again only to say why a check is skipped.
+  const path = (): string => workflowIn(gh, repo).path;
   const why = (check: string): string =>
     'problem' in jobs
       ? jobs.problem
       : !reports
-        ? `${WORKFLOW_PATH} reports its checks as ${OLD_CHECK_PREFIX}…, on the default branch and with no ${ONBOARD_BRANCH} branch naming them niyam`
-        : `the shared checks ${WORKFLOW_PATH} calls run no ${check.slice(CHECK_PREFIX.length)} job`;
+        ? `${path()} reports its checks as ${OLD_CHECK_PREFIX}…, on the default branch and with no ${ONBOARD_BRANCH} or ${OLD_ONBOARD_BRANCH} branch naming them niyam`
+        : `the shared checks ${path()} calls run no ${check.slice(CHECK_PREFIX.length)} job`;
   const skipped = turnedOn
     .filter((check) => !runs(check))
     .map((check): Finding => ({
