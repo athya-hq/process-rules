@@ -204,7 +204,7 @@ describe('machine', () => {
         '◇  This Mac',
         '│    keychain      delete service process-rules, account ExampleBot: service niyam, account ExampleBot holds the same token',
         '│    session file  updated',
-        '│    old folder    remove ~/.config/process-rules, its launcher and all in it',
+        '│    old folder    move its session and lockout records to ~/.config/niyam, then remove ~/.config/process-rules, its launcher and all in it',
       ]);
       assert.equal(oldFiles(sys).length, 3, 'a dry run changes nothing');
       assert.equal(sys.keychain.get(OLD_ITEM), TOKEN);
@@ -225,6 +225,28 @@ describe('machine', () => {
       assert.ok(out.some((line) => line.includes('~/.config/process-rules removed')), out.join('\n'));
       assert.ok(out.some((line) => line.includes('service process-rules, account ExampleBot deleted')), out.join('\n'));
       assert.equal((await setUp(sys)).out.at(-1), `└  ${AGENT} is ready on this Mac`, 'then nothing more to do');
+    });
+
+    it('moves the session and lockout records into the new folder before removing the old one, keeping a newer record', async () => {
+      const sys = before();
+      sys.files.set(`${OLD_DIR}/sessions/s2.json`, '{"agent":"Old"}\n');
+      sys.files.set(`${HOME}/.config/niyam/sessions/s2.json`, '{"agent":"New"}\n');
+      sys.files.set(`${OLD_DIR}/examplebot/lockout-declined.json`, '{"keys":[]}\n');
+      sys.files.set(`${OLD_DIR}/examplebot/gh-moved.json`, '{"logins":["owner"]}\n');
+      sys.files.set(`${OLD_DIR}/bin/session.sh`, '# the agent "bin"');
+      sys.files.set(`${OLD_DIR}/bin/gh-moved.json`, '{"logins":["binowner"]}\n');
+      sys.files.set(`${OLD_DIR}/locked/gh-moved.json`, '{"logins":["nobody"]}\n');
+      sys.files.set(`${OLD_DIR}/sessions/notes.txt`, 'not a record');
+      const { code, out } = await setUp(sys, '--yes');
+      assert.equal(code, 0, out.join('\n'));
+      assert.equal(sys.files.get(`${HOME}/.config/niyam/sessions/s1.json`), '{"agent":"ExampleBot"}\n', 'a session started before 0.6.10 keeps its record');
+      assert.equal(sys.files.get(`${HOME}/.config/niyam/sessions/s2.json`), '{"agent":"New"}\n', "the new folder's own record wins");
+      assert.equal(sys.files.get(`${HOME}/.config/niyam/examplebot/lockout-declined.json`), '{"keys":[]}\n');
+      assert.equal(sys.files.get(`${HOME}/.config/niyam/examplebot/gh-moved.json`), '{"logins":["owner"]}\n');
+      assert.equal(sys.files.get(`${HOME}/.config/niyam/bin/gh-moved.json`), '{"logins":["binowner"]}\n', 'an agent named like a reserved folder keeps its records');
+      assert.equal(sys.files.has(`${HOME}/.config/niyam/locked/gh-moved.json`), false, 'a reserved folder with no session file holds no agent');
+      assert.equal(sys.files.has(`${HOME}/.config/niyam/sessions/notes.txt`), false);
+      assert.deepEqual(oldFiles(sys), []);
     });
 
     it('leaves the old entry, saying why and how to delete it by hand, when it holds another token', async () => {
