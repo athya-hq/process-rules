@@ -370,7 +370,8 @@ Claude cloud sessions below).
    `process-rules-weekly`, … and the input `process-rules-ref`, moves to the
    new name with niyam's ids and `niyam-ref`, keeping the client's own
    edits, and the old file is deleted in the same pull request; the check
-   names stay, so no ruleset changes (P-56). It writes
+   names stay, so no ruleset changes (P-56). With identity alone `onboard`
+   writes no workflow, and leaves an old one as it is, saying so in the plan. It writes
    `.github/niyam/cloud-setup.sh`, which installs the CLI in Claude
    cloud sessions at the version the workflow pins, and the same file as
    `.github/process-rules/cloud-setup.sh`, which a Setup script pasted
@@ -1047,7 +1048,9 @@ the workflow's pin (`✗`, fixed by running `onboard` again; a workflow that pin
 release (`▲`: `session-start` installs it, or `bash
 .github/niyam/cloud-setup.sh` does), and that the Setup script
 runs the repo's file (`▲` without `/opt/niyam/from-setup`, or the
-`/opt/process-rules/from-setup` a cloud setup file before P-56 leaves). Each
+`/opt/process-rules/from-setup` a cloud setup file before P-56 leaves),
+naming the file it ran: the mark holds its path, and the old mark means the
+old file. Each
 file is read under its new name, else its old one, and named as the repo
 has it. GitHub
 checks that the account the proxy acts as is one of the settings' agents,
@@ -1230,7 +1233,8 @@ P-49, P-50, P-53, P-54, P-55 and P-56). What changed, and what still reads or ru
 | Workflow (P-56) | `.github/workflows/niyam.yml`, its jobs `niyam`, `niyam-weekly`, `niyam-merged`, `niyam-asks`, each with the same `name:`, so the check names stay | `.github/workflows/process-rules.yml` and its `process-rules…` ids, which `onboard` moves, keeping the client's edits, and deletes; `onboard`, `owner-step`, `doctor` and session-start still read it, until P-57 |
 | Workflow input (P-56) | `niyam-ref` | `process-rules-ref`, which `checks.yml` still declares and takes, until P-57 |
 | Cloud setup file (P-56) | `.github/niyam/cloud-setup.sh`, installing under `/opt/niyam`, with the Setup mark `/opt/niyam/from-setup`; the Setup snippet runs it, else the old file, setting `NIYAM_SETUP` and `PROCESS_RULES_SETUP` | `.github/process-rules/cloud-setup.sh`, which `onboard` still writes alike, since the snippet pasted before runs it until the new one is pasted once; it honours `PROCESS_RULES_SETUP`, and `/opt/process-rules/from-setup` still counts |
-| Onboard branch (P-56) | `niyam/onboard` | `process-rules/onboard`, which `owner-step required-checks`, `onboard`'s check for a newer release's pull request and the work rules still take |
+| Onboard branch (P-56) | `niyam/onboard` | `process-rules/onboard`, which `owner-step required-checks`, `onboard`'s check for a newer release's pull request and the work rules still take; a pull request still open from it is updated there, not left beside a new one |
+| Decisions concurrency key | unchanged, `process-rules-decisions-<repo>` | kept, so runs at older releases and this one never run at once; P-57 renames it once no repo pins a release before P-56's |
 | Board template (P-56) | the Project titled "niyam template" (athya-hq #4) | "process-rules template"; `onboard` finds it by number, so the title changed nothing it reads |
 | Internal names (P-56) | the decisions check's mark `niyam-check-exit=`, temporary folders `niyam-…`, the test commit's branch `niyam/verify-…`, a new token's description `niyam agent` and signing key's title `niyam signing` | none read; tokens and keys made before keep their titles |
 
@@ -1239,7 +1243,8 @@ Still read, and P-57 stops: `~/.config/process-rules/` and its launcher,
 `process-rules`, `.github/process-rules.json`, `.github/workflows/process-rules.yml`
 with its ids, `process-rules-ref`, `.github/process-rules/cloud-setup.sh`,
 which `onboard` writes until then, `/opt/process-rules/from-setup`,
-`PROCESS_RULES_SETUP` and `process-rules/onboard`; and the bridge archive for
+`PROCESS_RULES_SETUP` and `process-rules/onboard`; the decisions job's
+concurrency key `process-rules-decisions-…`, which P-57 renames; and the bridge archive for
 0.6.x's `upgrade`. Unchanged for good: the `process-rules vetted` marks on
 decisions vetted before the rename, which the reviews still read; GitHub's
 redirect from athya-hq/process-rules; the titles of tokens and signing keys

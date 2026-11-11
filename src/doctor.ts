@@ -22,7 +22,7 @@ import {
   tokenInfo,
 } from './agent.ts';
 import { LOCKED, hooksHittingLock } from './as-agent.ts';
-import { FROM_SETUP, cloudLogin, ranFromSetup, repoReleases } from './cloud.ts';
+import { FROM_SETUP, cloudLogin, fileFromSetup, ranFromSetup, repoReleases } from './cloud.ts';
 import { featuresIn } from './features.ts';
 import { typesDrift } from './issue-types.ts';
 import { type Finding, closing, findingLines, heading, painter, tilde } from './layout.ts';
@@ -285,7 +285,7 @@ async function cloudDoctor(sys: Sys, io: Output, named?: string): Promise<number
   }
   session.push(
     ranFromSetup(sys)
-      ? { mark: '✓', text: `the Setup script runs ${setupFile}` }
+      ? { mark: '✓', text: `the Setup script runs ${fileFromSetup(sys) ?? "the repo's cloud setup file"}` }
       : {
           mark: '▲',
           text: `${FROM_SETUP} missing, so the cloud environment's Setup script does not run ${setupFile}`,

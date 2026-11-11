@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, describe, it } from 'node:test';
 
-import { CLOUD_DIR, CLOUD_NODE, CLOUD_NODE_SHA256, FROM_SETUP, INSTALL_FAILED as FAILED, OLD_FROM_SETUP, PROXY_TOKEN, cloudRepoScript, cloudScriptVersion, cloudSetup, cloudSetupSnippet, cloudToken, ranFromSetup, releaseTarball, repoReleases } from './cloud.ts';
+import { CLOUD_DIR, CLOUD_NODE, CLOUD_NODE_SHA256, FROM_SETUP, INSTALL_FAILED as FAILED, OLD_FROM_SETUP, PROXY_TOKEN, cloudRepoScript, cloudScriptVersion, cloudSetup, cloudSetupSnippet, cloudToken, fileFromSetup, ranFromSetup, releaseTarball, repoReleases } from './cloud.ts';
 import { CLOUD_SETUP_068 } from './older-texts.test.ts';
 import { workflow } from './onboard.ts';
 import { FakeSys, capture } from './fake.test.ts';
@@ -32,6 +32,20 @@ describe('the cloud files under their names since P-56, and before', () => {
       const sys = new FakeSys();
       for (const mark of marks) sys.files.set(mark, '');
       assert.equal(ranFromSetup(sys), ran, marks.join(', '));
+    }
+  });
+
+  it('names the file the Setup snippet ran, from the path its mark holds, the old one by the old mark', () => {
+    for (const [marks, file] of [
+      [{}, undefined],
+      [{ [FROM_SETUP]: `/home/u/example-app/${CLOUD_SETUP_PATH}\n` }, CLOUD_SETUP_PATH],
+      [{ [FROM_SETUP]: `/home/u/example-app/${OLD_CLOUD_SETUP_PATH}\n` }, OLD_CLOUD_SETUP_PATH],
+      [{ [OLD_FROM_SETUP]: '' }, OLD_CLOUD_SETUP_PATH],
+      [{ [FROM_SETUP]: '' , [OLD_FROM_SETUP]: '' }, undefined],
+    ] as const) {
+      const sys = new FakeSys();
+      for (const [path, text] of Object.entries(marks)) sys.files.set(path, text);
+      assert.equal(fileFromSetup(sys), file, JSON.stringify(marks));
     }
   });
 
@@ -86,7 +100,7 @@ describe('cloudRepoScript', () => {
      * Runs the script in a folder of its own, with curl, tar, uname and sha256sum stood in: sha256sum exits
      * `checked`, and `node`, when given, is a Node already unpacked that answers its version so.
      */
-    function setup(name: string, checked: number, options: { node?: string; env?: Record<string, string>; before?: (local: string) => void } = {}) {
+    function setup(name: string, checked: number, options: { node?: string; env?: Record<string, string>; before?: (local: string) => void; file?: string } = {}) {
       const root = join(dir, name);
       const bin = join(root, 'bin');
       const local = join(root, 'local');
@@ -110,7 +124,15 @@ describe('cloudRepoScript', () => {
         .replaceAll('/usr/local/bin/process-rules', join(local, 'process-rules'))
         .replaceAll('/usr/local/bin/niyam', join(local, 'niyam'))
         .replace('niyam version', 'true');
-      const result = spawnSync('bash', ['-c', runnable], { encoding: 'utf8', env: { PATH: `${bin}:/usr/bin:/bin`, ...options.env } });
+      // Run as the snippet runs it, from the repo's file, when one is named.
+      let args = ['-c', runnable];
+      if (options.file) {
+        const file = join(root, 'example-app', options.file);
+        mkdirSync(dirname(file), { recursive: true });
+        writeFileSync(file, runnable);
+        args = [file];
+      }
+      const result = spawnSync('bash', args, { encoding: 'utf8', env: { PATH: `${bin}:/usr/bin:/bin`, ...options.env } });
       const read = (path: string): string => (existsSync(path) ? readFileSync(path, 'utf8') : '');
       return { result, opt, local, fetched: read(log), checked: read(join(root, 'checked')) };
     }
@@ -150,11 +172,16 @@ describe('cloudRepoScript', () => {
       assert.match(other.fetched, /^https:\/\/nodejs\.org\//, 'another Node is fetched again');
     });
 
-    it('leaves a mark when the Setup snippet ran it, the one pasted before P-56 too, which sets the old name alone', () => {
-      for (const env of [{ NIYAM_SETUP: '1', PROCESS_RULES_SETUP: '1' }, { NIYAM_SETUP: '1' }, { PROCESS_RULES_SETUP: '1' }]) {
-        const { result, opt } = setup(`marked-${Object.keys(env).join('-')}`, 0, { env });
+    it('leaves a mark naming the file it ran from when the Setup snippet ran it, the one pasted before P-56 too, which sets the old name alone', () => {
+      for (const [env, file] of [
+        [{ NIYAM_SETUP: '1', PROCESS_RULES_SETUP: '1' }, CLOUD_SETUP_PATH],
+        [{ NIYAM_SETUP: '1' }, CLOUD_SETUP_PATH],
+        [{ PROCESS_RULES_SETUP: '1' }, OLD_CLOUD_SETUP_PATH],
+      ] as const) {
+        const name = `marked-${Object.keys(env).join('-')}`;
+        const { result, opt } = setup(name, 0, { env, file });
         assert.equal(result.status, 0, result.stderr);
-        assert.equal(existsSync(join(opt, 'from-setup')), true, JSON.stringify(env));
+        assert.equal(readFileSync(join(opt, 'from-setup'), 'utf8'), `${join(dir, name, 'example-app', file)}\n`, JSON.stringify(env));
       }
     });
 

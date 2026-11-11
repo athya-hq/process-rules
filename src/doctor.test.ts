@@ -501,7 +501,8 @@ describe('doctor in a Claude cloud session', () => {
     sys.env = { CLAUDE_CODE_REMOTE: 'true', GH_TOKEN: PROXY_TOKEN, PROCESS_RULES_AGENT: AGENT };
     sys.files.set(WORKFLOW, workflow('main', v, false));
     sys.files.set(CLOUD_FILE, cloudRepoScript(v, 'ab'.repeat(32)));
-    sys.files.set(FROM_SETUP, '');
+    // The mark the install leaves, naming the file the Setup snippet ran.
+    sys.files.set(FROM_SETUP, `/home/user/example-app/${CLOUD_SETUP_PATH}\n`);
     if (login) sys.acceptToken(PROXY_TOKEN, login);
     return sys;
   }
@@ -605,6 +606,30 @@ describe('doctor in a Claude cloud session', () => {
     assert.equal(code, 0, out.join('\n'));
     assert.ok(out.includes(`✓  .github/process-rules/cloud-setup.sh installs ${v}, as .github/workflows/process-rules.yml pins`), out.join('\n'));
     assert.ok(out.includes('✓  the Setup script runs .github/process-rules/cloud-setup.sh'), out.join('\n'));
+  });
+
+  it('names the cloud setup file the Setup snippet ran, as its mark records it, or none where the mark names neither (P-56)', async () => {
+    for (const [marks, said] of [
+      [{ [FROM_SETUP]: '/home/user/example-app/.github/process-rules/cloud-setup.sh\n' }, '.github/process-rules/cloud-setup.sh'],
+      [{ [FROM_SETUP]: '/root/example-app/.github/niyam/cloud-setup.sh\n' }, '.github/niyam/cloud-setup.sh'],
+      [{ [OLD_FROM_SETUP]: '' }, '.github/process-rules/cloud-setup.sh'],
+      [{ [FROM_SETUP]: '' }, "the repo's cloud setup file"],
+      [{ [FROM_SETUP]: 'bash\n', [OLD_FROM_SETUP]: '' }, "the repo's cloud setup file"],
+    ] as const) {
+      const sys = cloud();
+      sys.files.delete(FROM_SETUP);
+      for (const [path, text] of Object.entries(marks)) sys.files.set(path, text);
+      const { out } = await check(sys);
+      assert.ok(out.includes(`✓  the Setup script runs ${said}`), `${JSON.stringify(marks)}\n${out.join('\n')}`);
+    }
+    // A mark that cannot be read names no file either.
+    const unreadable = cloud();
+    const read = unreadable.read.bind(unreadable);
+    unreadable.read = (path) => {
+      if (path === FROM_SETUP) throw new Error('unreadable');
+      return read(path);
+    };
+    assert.ok((await check(unreadable)).out.includes("✓  the Setup script runs the repo's cloud setup file"));
   });
 
   it('refuses a proxy that acts as an account not among the agents', async () => {

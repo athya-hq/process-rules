@@ -774,14 +774,18 @@ function newerPinHere(fileAt: (path: string) => string | undefined, version: str
  * onboard pull request, which a newer release may have pushed and this run
  * would push over; that branch is `process-rules/onboard` before P-56. The
  * workflow is read under either name. A problem when GitHub does not say, so
- * a run never moves a pin back for want of an answer.
+ * a run never moves a pin back for want of an answer. Each onboard branch
+ * with an open pull request is added to `open`.
  */
-async function newerPinOnGitHub(sys: Sys, slug: string, token: string, branch: string | undefined, version: string): Promise<Pin | { problem: string } | undefined> {
+async function newerPinOnGitHub(sys: Sys, slug: string, token: string, branch: string | undefined, version: string, open: string[] = []): Promise<Pin | { problem: string } | undefined> {
   const refs = branch === undefined ? [] : [branch];
   for (const onboardBranch of [ONBOARD_BRANCH, OLD_ONBOARD_BRANCH]) {
     const pulls = await sys.http(`${API}/repos/${slug}/pulls?state=open&head=${slug.split('/')[0]}:${onboardBranch}`, { token }).catch(() => ({ status: 0, json: undefined }));
     if (pulls.status !== 200 || !Array.isArray(pulls.json)) return { problem: `GitHub did not say whether an onboard pull request is open (${pulls.status === 0 ? 'no answer' : `HTTP ${pulls.status}`})` };
-    if (pulls.json.length > 0) refs.push(onboardBranch);
+    if (pulls.json.length > 0) {
+      refs.push(onboardBranch);
+      open.push(onboardBranch);
+    }
   }
   const pins: Pin[] = [];
   for (const ref of refs) {
@@ -1302,13 +1306,15 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
   const { id } = await account(sys, agent);
 
   let reach = await access(sys, slug, token);
+  // The onboard branches with a pull request open: one a release before P-56 opened is updated, not left beside a new one.
+  const openOnboard: string[] = [];
   if (reach.kind === 'refused') {
     io.err(`onboard: ${reach.reason}`);
     return 1;
   }
   // An agent that cannot see the repository has no pull request open on it, and the checkout was checked above.
   if (reach.kind !== 'none') {
-    const ahead = await newerPinOnGitHub(sys, slug, token, reach.branch, version);
+    const ahead = await newerPinOnGitHub(sys, slug, token, reach.branch, version, openOnboard);
     if (ahead !== undefined && 'problem' in ahead) {
       io.err(`onboard: ${ahead.problem}; run it again`);
       return 1;
@@ -1374,6 +1380,8 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
     else if (move) change(WORKFLOW_PATH, before as string, move);
     if (fileAt(WORKFLOW_PATH) !== undefined) remove(OLD_WORKFLOW_PATH, `moved to ${WORKFLOW_PATH}`);
   };
+  // With no feature that runs the shared checks, onboard writes no workflow, so one under the old name stays as it is.
+  if (!workflowNeeded && workflowMoved) warnings.push(`${OLD_WORKFLOW_PATH} left as it is: no feature on runs the shared checks; delete it, or turn one on`);
   if (workflowNeeded) {
     const update = planned === undefined ? undefined : workflowUpdate(fileAt(workflowSource), planned, version, on('figma'), schedule);
     const old = OLD_WORKFLOW_PATH.slice('.github/workflows/'.length);
@@ -1522,7 +1530,8 @@ export async function onboard(sys: Sys, io: Output, args: readonly string[] = []
         ...(notes.length > 0 ? ['Done at the terminal, outside this pull request:', '', ...notes, ''] : []),
         ...(later.length > 0 ? ['Left to do by hand:', '', ...later.map((line) => `- ${line}`)] : []),
       ];
-      const opened = await openPull(sys, out, { agent, id, token, slug, branch: reach.branch, version }, changed, described);
+      const head = openOnboard.includes(OLD_ONBOARD_BRANCH) && !openOnboard.includes(ONBOARD_BRANCH) ? OLD_ONBOARD_BRANCH : ONBOARD_BRANCH;
+      const opened = await openPull(sys, out, { agent, id, token, slug, branch: reach.branch, version, head }, changed, described);
       if (opened === 1) return false;
       pullUrl = opened.url;
       if (planned === undefined) queue = await mergeQueue(sys, slug, reach.branch, token);

@@ -47,8 +47,9 @@ export const OLD_CLOUD_DIR = '/opt/process-rules';
 /**
  * The file the install leaves in CLOUD_DIR when the Setup snippet ran it,
  * so a session can tell a Setup script that runs the repo's file from one
- * that installs a release of its own; and where a cloud setup file written
- * before P-56 leaves it, which the new snippet may still run.
+ * that installs a release of its own; it holds the path of the file that
+ * ran. And where a cloud setup file written before P-56 leaves it, empty,
+ * which either snippet may still run.
  */
 export const FROM_SETUP = `${CLOUD_DIR}/from-setup`;
 export const OLD_FROM_SETUP = `${OLD_CLOUD_DIR}/from-setup`;
@@ -56,6 +57,25 @@ export const OLD_FROM_SETUP = `${OLD_CLOUD_DIR}/from-setup`;
 /** Whether the Setup snippet ran the repo's cloud setup file in this environment: its mark, or the one before P-56. */
 export function ranFromSetup(sys: Sys): boolean {
   return sys.exists(FROM_SETUP) || sys.exists(OLD_FROM_SETUP);
+}
+
+/**
+ * The repo's cloud setup file the Setup snippet ran in this environment, as
+ * the repo names it: the one the mark records, or the old one where only a
+ * file written before P-56 left its mark; undefined when the mark names
+ * neither, or none is there.
+ */
+export function fileFromSetup(sys: Sys): string | undefined {
+  if (sys.exists(FROM_SETUP)) {
+    let ran = '';
+    try {
+      ran = sys.read(FROM_SETUP).trim();
+    } catch {
+      return undefined;
+    }
+    return [CLOUD_SETUP_PATH, OLD_CLOUD_SETUP_PATH].find((path) => ran.endsWith(`/${path}`));
+  }
+  return sys.exists(OLD_FROM_SETUP) ? OLD_CLOUD_SETUP_PATH : undefined;
 }
 
 /** The repo's file under its name since P-56, else under its old one, which onboard wrote before; the new name when neither is there. */
@@ -173,7 +193,8 @@ export function cloudRepoScript(version: string, sha256: string): string {
     'printf \'#!/bin/sh\\nexec %s %s "$@"\\n\' "$bin" "$cli/package/dist/cli.js" > /usr/local/bin/niyam',
     'chmod 755 /usr/local/bin/niyam',
     // The snippet pasted before P-56 sets the old name alone.
-    `if [ -n "\${NIYAM_SETUP:-}\${PROCESS_RULES_SETUP:-}" ]; then : > ${FROM_SETUP}; fi`,
+    // The path it ran from, which tells the file under the new name from the one under the old.
+    `if [ -n "\${NIYAM_SETUP:-}\${PROCESS_RULES_SETUP:-}" ]; then printf '%s\\n' "$0" > ${FROM_SETUP}; fi`,
     'niyam version </dev/null',
     '',
   ].join('\n');

@@ -333,7 +333,8 @@ function wantedChecks(gh: Gh, repo: string): { file: string; checks: string[] } 
 function workflowIn(gh: Gh, repo: string, ref?: string): { path: string; text?: string } {
   for (const path of [WORKFLOW_PATH, OLD_WORKFLOW_PATH]) {
     const text = fileIn(gh, repo, path, ref);
-    if (text !== undefined) return { path, text };
+    // Line endings as LF, which the job patterns read, whatever the client's checkout committed.
+    if (text !== undefined) return { path, text: text.replaceAll('\r\n', '\n') };
   }
   return { path: WORKFLOW_PATH };
 }

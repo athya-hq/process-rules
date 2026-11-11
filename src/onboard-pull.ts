@@ -134,6 +134,12 @@ export interface PullTarget {
   /** The default branch, which the pull request is opened against. */
   branch: string;
   version: string;
+  /**
+   * The branch to push to: ONBOARD_BRANCH, unless an onboard pull request
+   * from OLD_ONBOARD_BRANCH is open, which a run again then updates rather
+   * than opening a second beside it.
+   */
+  head?: string;
 }
 
 /**
@@ -148,7 +154,7 @@ export interface PullTarget {
  * description. Returns the pull request's link, or 1 having said why not.
  */
 export async function openPull(sys: Sys, io: Output, target: PullTarget, changes: readonly Change[], notes: readonly string[] = []): Promise<Pull | 1> {
-  const { agent, id, token, slug, branch, version } = target;
+  const { agent, id, token, slug, branch, version, head = ONBOARD_BRANCH } = target;
   const dir = sys.tempDir();
   const env = sessionEnv(sys.env, agent, id, token, pathsFor(sys.home, agent));
   const git = (args: string[], input?: string) => sys.exec('git', args, { cwd: dir, env, ...(input === undefined ? {} : { input }) });
@@ -192,7 +198,7 @@ export async function openPull(sys: Sys, io: Output, target: PullTarget, changes
     const sha = made.stdout.trim();
     if (made.code !== 0 || !sha) return failed('signing the commit', made.stderr);
     // Forced: a run again replaces what an earlier run pushed there.
-    const push = git(['push', '-q', url, `+${sha}:refs/heads/${ONBOARD_BRANCH}`]);
+    const push = git(['push', '-q', url, `+${sha}:refs/heads/${head}`]);
     if (push.code !== 0) return failed(`pushing as ${agent}`, push.stderr);
 
     const body = [
@@ -204,17 +210,17 @@ export async function openPull(sys: Sys, io: Output, target: PullTarget, changes
       `Merge it to finish onboarding; agent sessions then work as ${agent}. Running onboard again updates this pull request.`,
     ].join('\n');
     const pulls = `${API}/repos/${slug}/pulls`;
-    const opened = await sys.http(pulls, { method: 'POST', token, body: { title, head: ONBOARD_BRANCH, base: branch, body } });
+    const opened = await sys.http(pulls, { method: 'POST', token, body: { title, head, base: branch, body } });
     if (opened.status === 201) {
       const made = opened.json as { html_url: string; node_id?: unknown };
       return { url: made.html_url, id: typeof made.node_id === 'string' ? made.node_id : undefined };
     }
     // 422: the branch has a pull request open already, which the push has just updated.
-    const open = opened.status === 422 ? await sys.http(`${pulls}?state=open&head=${slug.split('/')[0]}:${ONBOARD_BRANCH}`, { token }) : undefined;
+    const open = opened.status === 422 ? await sys.http(`${pulls}?state=open&head=${slug.split('/')[0]}:${head}`, { token }) : undefined;
     const pull = Array.isArray(open?.json) ? (open.json[0] as { number: number; html_url: string; node_id?: unknown } | undefined) : undefined;
     if (!pull) {
       const why = (opened.json as { message?: unknown } | null)?.message;
-      io.err(`onboard: GitHub did not open the pull request (HTTP ${opened.status}${typeof why === 'string' ? `: ${why}` : ''}); the changes are on ${ONBOARD_BRANCH}`);
+      io.err(`onboard: GitHub did not open the pull request (HTTP ${opened.status}${typeof why === 'string' ? `: ${why}` : ''}); the changes are on ${head}`);
       return 1;
     }
     const edited = await sys.http(`${pulls}/${pull.number}`, { method: 'PATCH', token, body: { title, body } });

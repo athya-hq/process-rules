@@ -41,7 +41,8 @@ describe('checks.yml', () => {
     const env = jobs.settings?.steps.find((step) => step.name === 'Check niyam-ref names the release that runs') as Step & { env?: Record<string, string> };
     assert.equal(env.env?.REF, `\${{ ${REF} }}`);
     assert.equal(env.env?.INPUT, "${{ inputs.niyam-ref == '' && inputs.process-rules-ref != '' && 'process-rules-ref' || 'niyam-ref' }}");
-    assert.match(CHECKS, /^ {6}group: niyam-decisions-\$\{\{ github\.repository \}\}$/m);
+    // The decisions job's key stays the old one, which runs at older releases share, so they never run at once.
+    assert.match(CHECKS, /^ {6}group: process-rules-decisions-\$\{\{ github\.repository \}\}$/m);
   });
 
   // actionlint resolves a local reusable workflow's inputs, so callers passing each input lint clean and one

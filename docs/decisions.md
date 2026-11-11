@@ -1382,20 +1382,32 @@
     `niyam-weekly`, `niyam-merged` and `niyam-asks`, and the shared checks'
     input is `niyam-ref`. Each job keeps its `name:`, so the check names
     (`niyam / Work rules`, …) and every ruleset stay as they are.
-    `workflowUpdate` renames the old ids and the input first, then
-    recognises every older template as before. The 0.6.8 and 0.6.9
-    workflow, copied from athya_mono, niyam and niyam-sandbox, moves with
-    the client's own edits kept. `onboard` deletes
-    `.github/workflows/process-rules.yml` in the same pull request, or where
-    a new one is already there, since both would run every check twice.
+    `workflowUpdate` first recognises an older single-job template and
+    replaces it whole, as before. Any other workflow has its old ids and
+    input renamed, and then goes through the same steps as before: adding
+    the merged and needs-owner jobs, and moving pins, branch, schedule and
+    secrets. The 0.6.8 and 0.6.9 workflow, copied from athya_mono, niyam and
+    niyam-sandbox, moves with the client's own edits kept. Wherever
+    `onboard` writes the workflow (a feature on runs the shared checks), it
+    deletes `.github/workflows/process-rules.yml` in the same pull request,
+    also where a new one is already there, since both would run every check
+    twice. With identity alone it writes no workflow and leaves an old one
+    in place, saying so in the plan: deleting it with no new one would turn
+    its checks off.
   - `checks.yml` declares `niyam-ref` and `process-rules-ref` and takes
     whichever is set, then `main`. GitHub refuses a caller that passes an
     undeclared input, which would leave every pull request of a repo not yet
     moved without checks. Settings names the input the caller set when a
-    ref is not the release that runs. The CLI is checked out under `.niyam`,
-    and the decisions job's concurrency group is `niyam-decisions-…`.
+    ref is not the release that runs. The CLI is checked out under `.niyam`.
+    The decisions job's concurrency group keeps its old key,
+    `process-rules-decisions-…`. A repo's runs at an older release use that
+    key, and only one shared key serializes them, so two cannot both open an
+    undo issue. P-57 renames it once no repo pins a release before this one.
   - The cloud setup file is `.github/niyam/cloud-setup.sh`, installing under
-    `/opt/niyam` and leaving its mark there. `onboard` writes the same file
+    `/opt/niyam` and leaving its mark there, holding the path it ran from,
+    so `doctor` names the file the Setup script ran: a mark under
+    `/opt/process-rules` is a file before P-56, and one that names neither
+    path names none. `onboard` writes the same file
     at `.github/process-rules/cloud-setup.sh`, in a new repo too, since a
     cloud environment's Setup script serves every repo its sessions clone,
     and the snippet already pasted runs the old path with
@@ -1414,7 +1426,10 @@
   - onboard's branch is `niyam/onboard`. Its check for an onboard pull
     request a newer release opened reads both branches and both workflow
     names, as `owner-step required-checks` does, and the work rules take
-    both branches. `owner-step` finds the read-only job by either id.
+    both branches. Where only `process-rules/onboard` has an open pull
+    request, a run again pushes there and updates it, so no second one
+    opens beside it. `owner-step` finds the read-only job by either id,
+    with a workflow's CRLF line endings read as LF.
   - The decisions check's status mark is `niyam-check-exit=`, temporary
     folders start `niyam-`, the test commit's branch is `niyam/verify-…`,
     and a token or signing key `machine` makes from now on is titled

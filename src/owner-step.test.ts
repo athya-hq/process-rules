@@ -605,6 +605,21 @@ describe('owner-step required-checks', () => {
     assert.deepEqual(made.now(), [checks('niyam / PR identity', 'niyam / Work rules')]);
   });
 
+  it('reads a workflow committed with CRLF line endings as the same workflow', async () => {
+    for (const [path, text] of [
+      ['niyam.yml', NEW_WORKFLOW],
+      ['process-rules.yml', WORKFLOW],
+    ] as const) {
+      const made = rulesWorld([checks('process-rules / PR identity')], {
+        'GET repos/veda-hq/niyam/contents/.github/workflows/process-rules.yml': NOT_FOUND,
+        [`GET repos/veda-hq/niyam/contents/.github/workflows/${path}`]: encoded(text.replaceAll('\n', '\r\n')),
+      });
+      const { io, out } = capture();
+      assert.equal(await ownerStep(made.sys, io, ['required-checks', 'veda-hq/niyam', 'main']), 0, out.join('\n'));
+      assert.deepEqual(made.now(), [checks('niyam / PR identity', 'niyam / Work rules')], path);
+    }
+  });
+
   it('takes the new names as reported when the default branch has the workflow under its new name and the niyam job id', async () => {
     const made = rulesWorld([checks('process-rules / PR identity')], {
       'GET repos/veda-hq/niyam/contents/.github/workflows/niyam.yml': encoded(NEW_WORKFLOW),

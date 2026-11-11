@@ -1625,6 +1625,20 @@ describe('staged adoption', () => {
     assert.deepEqual(sys.chosen, ['Go ahead?']);
   });
 
+  it('leaves a workflow under its old name as it is with identity alone, saying so in the plan (P-56)', async () => {
+    const sys = fresh();
+    sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity'] }));
+    sys.files.set(OLD_WORKFLOW, oldIds(workflow('main', '0.6.8', false)));
+    const { code, out } = await run(sys, []);
+    assert.equal(code, 0);
+    assert.ok(out.includes('│  ! .github/workflows/process-rules.yml left as it is: no feature on runs the shared checks; delete it, or turn one on'), out.join('\n'));
+    assert.equal(repo(sys).has(WORKFLOW), false);
+    assert.deepEqual([...sys.deleted], [], 'deleting it with no new one would turn its checks off');
+    const none = fresh();
+    none.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity'] }));
+    assert.ok(!(await run(none, [])).out.some((line) => line.includes('left as it is')));
+  });
+
   it('turns one more feature on, keeping the other settings', async () => {
     const sys = fresh();
     sys.files.set(SETTINGS, JSON.stringify({ owner: 'example-owner', agent: AGENT, features: ['identity'], project: 'Example work', note: 'kept' }));
@@ -2141,6 +2155,27 @@ describe("onboard's pull request", () => {
     assert.equal((patched?.body as { title: string }).title, `chore(niyam): onboard at v${packageVersion()}`, 'an older title is made conventional');
     assert.ok(out.includes('└  Merge https://github.com/example-org/example-app/pull/5'), 'no id from the open list: the owner merges it');
     assert.ok(byHand(out).includes('auto-merge: GitHub refused (GitHub gave no id for the pull request); merge it yourself'), out.join('\n'));
+  });
+
+  it('updates an onboard pull request a release before P-56 opened from process-rules/onboard, opening no second one', async () => {
+    const sys = fresh();
+    const old = { status: 200, json: [{ number: 9, html_url: 'https://github.com/example-org/example-app/pull/9', node_id: 'PR_9' }] };
+    sys.route('GET', `${REPO}/pulls?state=open&head=example-org:process-rules/onboard`, old);
+    sys.route('POST', `${REPO}/pulls`, { status: 422, json: { message: 'Validation Failed' } });
+    sys.route('PATCH', `${REPO}/pulls/9`, { status: 200, json: {} });
+    const { code, out, err } = await run(sys);
+    assert.deepEqual([code, err], [0, []]);
+    const push = sys.calls.filter((c) => c.command === 'git' && c.args[0] === 'push').at(-1);
+    assert.deepEqual(push?.args, ['push', '-q', 'https://github.com/example-org/example-app.git', '+abc123:refs/heads/process-rules/onboard']);
+    assert.equal((opened(sys) as { head?: string } | undefined)?.head, 'process-rules/onboard');
+    assert.ok(sys.requests.some((r) => r.method === 'PATCH' && r.url.endsWith(`${REPO}/pulls/9`)), 'the open one is updated');
+    assert.ok(out.some((line) => line.includes('https://github.com/example-org/example-app/pull/9')), out.join('\n'));
+    // With one open from each branch, the new one is updated.
+    const both = fresh();
+    both.route('GET', `${REPO}/pulls?state=open&head=example-org:process-rules/onboard`, old);
+    both.route('GET', `${REPO}/pulls?state=open&head=example-org:niyam/onboard`, { status: 200, json: [{ number: 5, html_url: 'https://github.com/example-org/example-app/pull/5' }] });
+    assert.equal((await run(both)).code, 0);
+    assert.equal((opened(both) as { head?: string } | undefined)?.head, 'niyam/onboard');
   });
 
   it('says so when the description of the open pull request cannot be updated, and goes on', async () => {
