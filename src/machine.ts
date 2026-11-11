@@ -47,7 +47,8 @@ export const LEFTOVER_DIR = '.config/process-rules';
 export function moveLeftoverRecords(sys: Sys, oldDir: string): number {
   const newDir = configDir(sys.home);
   const files: [string, string][] = sys.list(`${oldDir}/sessions`).filter((name) => name.endsWith('.json')).map((name) => [`sessions/${name}`, name]);
-  for (const agent of sys.list(oldDir).filter((name) => !NOT_AGENTS.includes(name))) {
+  // Reserved names hold no agent unless an agent of that very login has its session file there.
+  for (const agent of sys.list(oldDir).filter((name) => !NOT_AGENTS.includes(name) || sys.exists(`${oldDir}/${name}/session.sh`))) {
     for (const name of ['lockout-declined.json', 'gh-moved.json']) if (sys.exists(`${oldDir}/${agent}/${name}`)) files.push([`${agent}/${name}`, name]);
   }
   let copied = 0;
