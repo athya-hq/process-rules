@@ -1226,5 +1226,5 @@ What still says process-rules, and why:
 | `.github/process-rules/cloud-setup.sh` | `onboard` deletes it wherever it leaves `.github/niyam/cloud-setup.sh` |
 | `/usr/local/bin/process-rules` in a cloud environment, a launcher that runs `process-rules`, a required `process-rules / …` check | named only to remove them: the cloud setup file removes the first, `doctor` marks the second ✗ (fixed by `niyam machine`), `owner-step required-checks` takes the third out |
 | GitHub's redirect from athya-hq/process-rules | GitHub's, not niyam's |
-| The titles of tokens and signing keys made before P-56, and the Project titled "process-rules work" | on GitHub already; nothing reads them |
+| The titles of tokens and signing keys made before P-56 | on GitHub already; nothing reads them (the closed Projects once titled "process-rules work" are now "niyam work (old)") |
 | The history in docs/decisions.md and docs/roadmap.md | a record of what was decided then |
