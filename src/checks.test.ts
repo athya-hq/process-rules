@@ -40,9 +40,8 @@ describe('checks.yml', () => {
     for (const input of Object.values(inputs)) assert.deepEqual([input.type, input.default], ['string', ''], 'unset is empty, so main is taken');
     const env = jobs.settings?.steps.find((step) => step.name === 'Check niyam-ref names the release that runs') as Step & { env?: Record<string, string> };
     assert.equal(env.env?.REF, `\${{ ${REF} }}`);
-    // A dispatch can run the job from a branch at an older release, which uses this key, so it stays one more release.
-    assert.match(CHECKS, /^ {6}group: process-rules-decisions-\$\{\{ github\.repository \}\}$/m);
-    assert.deepEqual(CHECKS.match(/process-rules|PROCESS_RULES/g), ['process-rules'], 'the key alone');
+    assert.match(CHECKS, /^ {6}group: niyam-decisions-\$\{\{ github\.repository \}\}$/m);
+    assert.equal(CHECKS.match(/process-rules|PROCESS_RULES/g), null, 'no old name left');
   });
 
   // actionlint resolves a local reusable workflow's inputs, so callers passing each input lint clean and one

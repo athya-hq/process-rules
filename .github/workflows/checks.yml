@@ -220,11 +220,9 @@ jobs:
     name: Decisions, weekly
     # Not on the hourly needs-owner sweep's cron, which the client's niyam-asks job calls these checks on.
     if: (github.event_name == 'schedule' && github.event.schedule != '41 * * * *') || github.event_name == 'workflow_dispatch'
-    # One run at a time, so two cannot both open an undo issue for one decision. The key keeps its name from
-    # before niyam for one more release: a workflow_dispatch may run this job from any branch, and a branch that
-    # pins a release before P-57 uses that key, so only the one shared key serializes them all (P-57).
+    # One run at a time, so two cannot both open an undo issue for one decision.
     concurrency:
-      group: process-rules-decisions-${{ github.repository }}
+      group: niyam-decisions-${{ github.repository }}
       cancel-in-progress: false
     runs-on: ubuntu-latest
     # Checks stop starting after 45 minutes; the rest wait for next week.
