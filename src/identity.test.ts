@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { AGENT, FakeSys, ROOT, capture } from './fake.test.ts';
+import { AGENT, AGENT_ID, FakeSys, ROOT, capture } from './fake.test.ts';
 import { prIdentity } from './identity.ts';
 
 const EVENT = '/tmp/event.json';
@@ -66,6 +66,22 @@ describe('prIdentity', () => {
     assert.deepEqual(await check(sys), { code: 0, out: ['✓ pr-identity: 2 commits by ExampleBot, each Verified and pushed by ExampleBot'], err: [] });
     assert.ok(sys.requests.filter((r) => r.url.includes(REPO)).every((r) => r.token === 'ghs_run'));
     assert.equal(sys.cwd, ROOT);
+  });
+
+  it("looks the agent up with the run's token, and asks again when GitHub refuses", async () => {
+    const sys = actions('opened', AGENT, [commit('a1', 'agent')], [created(AGENT, ['a1'])]);
+    const answers = [{ status: 403, json: { message: 'secondary rate limit' } }];
+    sys.route('GET', `/users/${AGENT}`, () => answers.shift() ?? { status: 200, json: { id: AGENT_ID, login: AGENT } });
+    assert.equal((await check(sys)).code, 0);
+    const lookups = sys.requests.filter((r) => r.url.endsWith(`/users/${AGENT}`));
+    assert.equal(lookups.length, 2);
+    assert.ok(lookups.every((r) => r.token === 'ghs_run'));
+  });
+
+  it('says GitHub did not answer, not that the agent is missing, when it keeps refusing', async () => {
+    const sys = actions('opened', AGENT, [commit('a1', 'agent')], [created(AGENT, ['a1'])]);
+    sys.route('GET', `/users/${AGENT}`, { status: 403, json: { message: 'secondary rate limit' } });
+    await assert.rejects(check(sys), /^Error: GitHub did not answer who account "ExampleBot" is \(HTTP 403\)$/);
   });
 
   it("passes the owner's own commits", async () => {
