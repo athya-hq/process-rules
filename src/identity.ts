@@ -70,7 +70,8 @@ export async function prIdentity(sys: Sys, io: Output): Promise<number> {
   }
   // GitHub's spelling of each agent, and the no-reply address its commits carry.
   const accounts = await Promise.all(agents.map(async (agent) => {
-    const { id, login } = await account(sys, agent);
+    // With the run's token: without one, GitHub limits the runner's shared address and refuses with a 403.
+    const { id, login } = await account(sys, agent, token);
     return { login, email: noreplyEmail(id, login).toLowerCase() };
   }));
   const logins = accounts.map((one) => one.login);

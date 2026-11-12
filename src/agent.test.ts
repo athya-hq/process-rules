@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { after, describe, it } from 'node:test';
 
 import {
+  ACCOUNT_WAITS_MS,
   BASE_ENV,
   NO_SSH,
   NO_TOKEN,
@@ -424,6 +425,34 @@ describe('GitHub reads', () => {
   it("finds an account's id and GitHub's spelling of its login, or says it is missing", async () => {
     assert.deepEqual(await account(new FakeSys(), 'examplebot'), { id: AGENT_ID, login: AGENT });
     await assert.rejects(account(new FakeSys(), 'Nobody'), /no account "Nobody" \(HTTP 404\)/);
+  });
+
+  it('asks again when GitHub refuses or fails the account lookup, and says GitHub did not answer when it keeps on', async () => {
+    for (const refusal of [403, 429, 502]) {
+      const answers = [{ status: refusal, json: { message: 'slow down' } }, { status: 200, json: { id: AGENT_ID, login: AGENT } }];
+      const sys = new FakeSys().route('GET', '/users/ExampleBot', () => answers.shift() ?? { status: 500, json: null });
+      assert.deepEqual(await account(sys, 'ExampleBot', TOKEN), { id: AGENT_ID, login: AGENT }, `HTTP ${refusal}`);
+      assert.deepEqual(sys.slept, [ACCOUNT_WAITS_MS[0]]);
+      assert.ok(sys.requests.every((r) => r.token === TOKEN), 'each ask carries the token');
+    }
+    const refusing = new FakeSys().route('GET', '/users/ExampleBot', { status: 403, json: { message: 'rate limit' } });
+    await assert.rejects(account(refusing, 'ExampleBot'), /^Error: GitHub did not answer who account "ExampleBot" is \(HTTP 403\)$/);
+    assert.deepEqual(refusing.slept, ACCOUNT_WAITS_MS);
+    assert.equal(refusing.requests.length, ACCOUNT_WAITS_MS.length + 1);
+    assert.equal(refusing.requests[0]?.token, undefined, 'no token unless one is given');
+  });
+
+  it('asks only once when GitHub says the account is missing or the ask is wrong', async () => {
+    const missing = new FakeSys().route('GET', '/users/Nobody', { status: 404, json: { message: 'Not Found' } });
+    await assert.rejects(account(missing, 'Nobody'), /^Error: GitHub has no account "Nobody" \(HTTP 404\)$/);
+    const refused = new FakeSys().route('GET', '/users/ExampleBot', { status: 401, json: { message: 'Bad credentials' } });
+    await assert.rejects(account(refused, 'ExampleBot', 'bad'), /did not answer who account "ExampleBot" is \(HTTP 401\)/);
+    const garbled = new FakeSys().route('GET', '/users/ExampleBot', { status: 200, json: { login: AGENT } });
+    await assert.rejects(account(garbled, 'ExampleBot'), /did not answer who account "ExampleBot" is \(HTTP 200\)/);
+    for (const sys of [missing, refused, garbled]) {
+      assert.equal(sys.requests.length, 1);
+      assert.deepEqual(sys.slept, []);
+    }
   });
 
   it("reads a token's login, scopes and end", async () => {

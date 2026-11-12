@@ -407,15 +407,28 @@ export function readToken(sys: Sys, agent: string): string | undefined {
  * An account's numeric id and its login as GitHub spells it, from the public
  * API. Logins are case-insensitive; the stored token's item, the session file and
  * commits all use GitHub's spelling, whatever case the login was typed in.
+ * A refusal or a passing failure (403, 429, 5xx) is asked again after each of
+ * ACCOUNT_WAITS_MS; only a 404 says the account does not exist.
  */
-export async function account(sys: Sys, login: string): Promise<{ id: number; login: string }> {
-  const { status, json } = await sys.http(`${API}/users/${login}`);
-  const found = json as { id?: unknown; login?: unknown } | null;
-  if (status !== 200 || typeof found?.id !== 'number' || typeof found.login !== 'string') {
-    throw new Error(`GitHub has no account "${login}" (HTTP ${status})`);
+export async function account(sys: Sys, login: string, token?: string): Promise<{ id: number; login: string }> {
+  for (let tries = 0; ; tries++) {
+    const { status, json } = await sys.http(`${API}/users/${login}`, token ? { token } : {});
+    if (status === 404) throw new Error(`GitHub has no account "${login}" (HTTP 404)`);
+    const wait = ACCOUNT_WAITS_MS[tries];
+    if ((status === 403 || status === 429 || status >= 500) && wait !== undefined) {
+      await sys.sleep(wait);
+      continue;
+    }
+    const found = json as { id?: unknown; login?: unknown } | null;
+    if (status !== 200 || typeof found?.id !== 'number' || typeof found.login !== 'string') {
+      throw new Error(`GitHub did not answer who account "${login}" is (HTTP ${status})`);
+    }
+    return { id: found.id, login: found.login };
   }
-  return { id: found.id, login: found.login };
 }
+
+/** How long account() waits before each new ask when GitHub refuses or fails one. */
+export const ACCOUNT_WAITS_MS = [1000, 2000, 4000];
 
 export interface TokenInfo {
   login: string;
