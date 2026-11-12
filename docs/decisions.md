@@ -1537,3 +1537,11 @@
     lockout records into the new one before removing it, as of P-55
     `machine` writes them in the new folder alone, so at worst `doctor`
     warns again of a login the owner once chose to keep.
+- **2026-11-12 — Record: the decisions job's concurrency key says niyam
+  (State #276 of P-57).** P-57 kept `process-rules-decisions-<repo>` for one
+  release, since a `workflow_dispatch` from a branch pinning an older
+  release would use that key, and two keys would let two runs both open an
+  undo issue. veda-hq/niyam, niyam-sandbox and athya-hq/athya_mono now pin
+  0.6.12, so the key is `niyam-decisions-<repo>`. A dispatch from a branch
+  still pinning a release before this one runs under the old key; the worst
+  it can do is open an undo issue twice, which the next weekly run reports.
