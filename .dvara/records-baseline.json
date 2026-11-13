@@ -1,0 +1,10 @@
+{
+  "files": {
+    ".github/workflows/ci.yml": {
+      "EVIDENCE-02": 1
+    },
+    "docs/decisions.md": {
+      "EVIDENCE-02": 1
+    }
+  }
+}

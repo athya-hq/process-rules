@@ -79,3 +79,14 @@ jobs:
           tar -xzf "$DIR/$TH" -C "$DIR" trufflehog
           "$DIR/gitleaks" git --no-banner --redact --config=.gitleaks.toml .
           "$DIR/trufflehog" git "file://$PWD" --no-update --fail --results=verified,unknown
+
+  # veda's shared checks, from a pinned commit: dvara's records and frozen
+  # gates at the version package.json pins (.dvara.json), and actionlint with
+  # ShellCheck behind it for every workflow's run scripts. `require`
+  # fails, rather than skips, a check whose inputs go missing.
+  veda-checks:
+    permissions:
+      contents: read
+    uses: veda-hq/veda/.github/workflows/checks.yml@7c6fa9e56bb08afe56581c0e166d9700768d1a0b
+    with:
+      require: dvara,actionlint

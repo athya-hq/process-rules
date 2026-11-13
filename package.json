@@ -19,12 +19,16 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json",
     "test": "node --test --experimental-test-coverage --test-coverage-lines=95 --test-coverage-functions=95 --test-coverage-branches=90 --test-coverage-exclude=src/**/*.test.ts src/**/*.test.ts",
+    "test:scripts": "node --test --experimental-test-coverage --test-coverage-lines=95 --test-coverage-functions=95 --test-coverage-branches=90 '--test-coverage-include=scripts/*.mjs' '--test-coverage-exclude=scripts/*.test.mjs' scripts/*.test.mjs",
     "smoke": "node dist/cli.js --version",
     "scan:secrets": "gitleaks dir --no-banner --redact --config=.gitleaks.toml . && trufflehog filesystem . --no-update --fail --results=verified,unknown --exclude-paths=.trufflehog-exclude",
-    "check": "pnpm typecheck && pnpm test && pnpm build && pnpm smoke"
+    "check": "pnpm typecheck && pnpm test && pnpm test:scripts && pnpm pins && pnpm build && pnpm smoke",
+    "prepare": "node scripts/hooks-path.mjs",
+    "pins": "node scripts/released-pins.mjs"
   },
   "devDependencies": {
     "@types/node": "24.19.2",
+    "@veda-hq/dvara": "0.5.16",
     "typescript": "7.0.2"
   },
   "dependencies": {

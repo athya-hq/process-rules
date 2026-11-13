@@ -1,6 +1,9 @@
 node_modules/
 dist/
 coverage/
+# dvara's run history and logs (.dvara.json's historyDir); its records baseline is tracked.
+.dvara/*
+!.dvara/records-baseline.json
 .DS_Store
 
 # Agent scratch files, and the per-machine .local link (or folder) worktrees make.

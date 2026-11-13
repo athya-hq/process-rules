@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# niyam's pre-push, under the released dvara package.json pins
+# (.dvara.json): the records and frozen gates on what the branch changes,
+# that every @veda-hq/* pin is a registry release, then niyam's own check
+# that an agent session pushes as the agent and keeps the work rules.
+# Dormant until the main checkout's install points core.hooksPath here.
+root="$(git rev-parse --show-toplevel)" || exit 1
+dvara="$root/node_modules/@veda-hq/dvara"
+if [ "${DVARA_MEASURED_HOOK:-}" != "pre-push" ]; then
+  node "$root/scripts/released-pins.mjs" --root "$root" @veda-hq/dvara || exit 1
+  exec node "$dvara/dist/cli.js" run "$0" "$@"
+fi
+# shellcheck source=/dev/null
+source "$dvara/shell/stages.sh"
+refs="$(cat)"
+dvara_record_refs "$refs"
+
+base=origin/main
+git rev-parse --verify --quiet "$base^{commit}" > /dev/null || base=HEAD
+
+dvara_stage records
+node "$dvara/dist/cli.js" records --base "$base" || exit 1
+
+dvara_stage frozen
+node "$dvara/dist/cli.js" frozen --base "$base" || exit 1
+
+dvara_stage pins
+node "$root/scripts/released-pins.mjs" --root "$root" || exit 1
+
+# niyam's own hook, as `niyam onboard` writes it: anyone else's push goes
+# ahead; an agent session's push is refused without the CLI. onboard reads
+# the "$cli" pre-push line as its own and leaves this file alone.
+dvara_stage niyam
+[ -z "${NIYAM_AGENT:-}" ] && [ "${CLAUDECODE:-}" != 1 ] && exit 0
+cli="$HOME/.config/niyam/bin/niyam"
+[ -x "$cli" ] || cli=niyam
+if ! command -v "$cli" > /dev/null 2>&1; then
+  echo "niyam: the CLI is not installed, so this agent push cannot be checked" >&2
+  exit 1
+fi
+exec "$cli" pre-push "$@" <<< "$refs"
