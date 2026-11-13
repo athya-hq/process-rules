@@ -18,7 +18,8 @@ order: the Slice issues under
 [niyam roadmap v1](https://github.com/veda-hq/niyam/issues/22),
 on the Project [process-rules work](https://github.com/orgs/athya-hq/projects/2) (its title from before the rename);
 [docs/roadmap.md](docs/roadmap.md) keeps version v1 as approved. Decisions:
-[docs/decisions.md](docs/decisions.md).
+[docs/decisions.md](docs/decisions.md). Traps learned while building it:
+[docs/lessons.md](docs/lessons.md).
 
 GitHub means github.com: it is the only supported host. GitHub Enterprise
 Server and GitHub Enterprise Cloud with data residency (GHE.com) are not
