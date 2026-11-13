@@ -21,10 +21,12 @@
     "test": "node --test --experimental-test-coverage --test-coverage-lines=95 --test-coverage-functions=95 --test-coverage-branches=90 --test-coverage-exclude=src/**/*.test.ts src/**/*.test.ts",
     "smoke": "node dist/cli.js --version",
     "scan:secrets": "gitleaks dir --no-banner --redact --config=.gitleaks.toml . && trufflehog filesystem . --no-update --fail --results=verified,unknown --exclude-paths=.trufflehog-exclude",
-    "check": "pnpm typecheck && pnpm test && pnpm build && pnpm smoke"
+    "check": "pnpm typecheck && pnpm test && pnpm pariksha && pnpm build && pnpm smoke",
+    "pariksha": "node_modules/.bin/pariksha absolute-paths && node_modules/.bin/pariksha aggregate-gate-needs && node_modules/.bin/pariksha masked-exit-codes && node_modules/.bin/pariksha pnpm-settings && node_modules/.bin/pariksha shell-gates --all"
   },
   "devDependencies": {
     "@types/node": "24.19.2",
+    "@veda-hq/pariksha": "0.5.20",
     "typescript": "7.0.2"
   },
   "dependencies": {
