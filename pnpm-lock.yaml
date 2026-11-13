@@ -182,6 +182,9 @@ importers:
       '@veda-hq/dvara':
         specifier: 0.5.16
         version: 0.5.16
+      '@veda-hq/pariksha':
+        specifier: 0.5.20
+        version: 0.5.20(typescript@7.0.2)
       typescript:
         specifier: 7.0.2
         version: 7.0.2
@@ -336,6 +339,22 @@ packages:
     engines: {node: '>=24.15'}
     hasBin: true
 
+  '@veda-hq/pariksha@0.5.20':
+    resolution: {integrity: sha512-QyHkXK9YJv/Ur+O9yLtljb1NcqXxZCQCXSu2wjhoM26+1ZIRNz/XOyDo/VJyddBVXl9cnMlx2H4OO7Cyly/x1w==}
+    engines: {node: '>=24.15'}
+    hasBin: true
+    peerDependencies:
+      eslint: '>=9.24 <10'
+      typescript: '>=5.4 <6'
+    peerDependenciesMeta:
+      eslint:
+        optional: true
+      typescript:
+        optional: true
+
+  argparse@2.0.1:
+    resolution: {integrity: sha512-8+9WqebbFzpX9OR+Wa6O29asIogeRMzcGtAINdpMHHyAg10f05aSFVBbcEqGf/PXw1EjAZ+q2/bEBg3DvurK3Q==}
+
   character-entities@2.0.2:
     resolution: {integrity: sha512-shx7oQ0Awen/BRIdkjkvz54PnEEI/EjwXDSIZp86/KKdbafHh1Df/RYGBhn4hbe2+uKC9FnT5UCEdyPz3ai9hQ==}
 
@@ -366,6 +385,10 @@ packages:
 
   fast-wrap-ansi@0.2.2:
     resolution: {integrity: sha512-7F2Fl+TjRSenLqlU3UjSH0iyqopqoZIu7eZVpEirP2g1GtWa2G/ecEmBdgz31+Mxr+ELclgg6sokpSFIQiZ02Q==}
+
+  js-yaml@4.3.2:
+    resolution: {integrity: sha512-SFNOvSJ+Dgf/9An904Yx+CgSlIPCkIpao4qo51lpee25TIRejdH3rhR4EZMGoNx3/TP3O+wzWuiTFl4sqbltzA==}
+    hasBin: true
 
   libsodium-wrappers@0.8.4:
     resolution: {integrity: sha512-mu8aAWucZjTB5O/BtGXtW4e1agy7uHxNYG7zPthmmD1jU43LCDmSWZLN4JhflbdPXj3yDO4lxM1O9hLDgIOXDw==}
@@ -563,6 +586,14 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+  '@veda-hq/pariksha@0.5.20(typescript@7.0.2)':
+    dependencies:
+      js-yaml: 4.3.2
+    optionalDependencies:
+      typescript: 7.0.2
+
+  argparse@2.0.1: {}
+
   character-entities@2.0.2: {}
 
   debug@4.4.3:
@@ -588,6 +619,10 @@ snapshots:
   fast-wrap-ansi@0.2.2:
     dependencies:
       fast-string-width: 3.0.2
+
+  js-yaml@4.3.2:
+    dependencies:
+      argparse: 2.0.1
 
   libsodium-wrappers@0.8.4:
     dependencies:
