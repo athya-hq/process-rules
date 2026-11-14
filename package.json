@@ -1,6 +1,6 @@
 {
   "name": "@veda-hq/niyam",
-  "version": "0.6.15",
+  "version": "0.6.16",
   "description": "Work rules for repos that track work in GitHub Issues: setup, agent identity, push and PR checks.",
   "license": "MIT",
   "repository": {
