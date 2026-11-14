@@ -188,6 +188,7 @@ describe('excerpt and failureType', () => {
   it('keeps the error lines of a log, 40 at most', () => {
     assert.equal(excerpt('ok\nerror TS2322: no\nall good\n✗ failed test'), 'error TS2322: no\n✗ failed test');
     assert.equal(excerpt(Array.from({ length: 50 }, (_, i) => `error ${i}`).join('\n')).split('\n').length, 40);
+    assert.equal(excerpt('2026-11-14T17:05:17.9145970Z ✗ #32 names no slice\n2026-11-14T17:05:17Z fine'), '✗ #32 names no slice');
   });
 
   it('names the kind of failure', () => {
@@ -447,6 +448,26 @@ describe('ciSignals', () => {
       { source: 'ci-failure', check: 'deploy', file: null, line: null, body: 'deploy: error\nbuild failed', failureType: 'build' },
     ]);
     assert.equal(sys.requests.find((r) => r.url.endsWith('/jobs/11/logs'))?.token, 't');
+  });
+
+  it("counts a check run twice on one commit once, by its latest run, apart from another app's of the same name", async () => {
+    const sys = session();
+    sys.route('GET', `${REPO}/commits/${HEAD}/check-runs?per_page=100&page=1`, {
+      status: 200,
+      json: {
+        check_runs: [
+          { id: 22, name: 'Work rules', conclusion: 'success', app: { slug: 'github-actions' } },
+          { id: 21, name: 'Work rules', conclusion: 'failure', app: { slug: 'github-actions' } },
+          { id: 23, name: 'Work rules', conclusion: 'failure', app: { slug: 'other-app' } },
+          { id: 31, name: 'Test', conclusion: 'failure', app: { slug: 'other-app' } },
+          { id: 30, name: 'Test', conclusion: 'success', app: { slug: 'other-app' } },
+        ],
+      },
+    });
+    assert.deepEqual(
+      (await ciSignals(sys, 't', 'example-org/example-app', HEAD)).map((s) => s.body),
+      ['Work rules: failure', 'Test: failure'],
+    );
   });
 
   it('keeps the name when a log has no error lines, and refuses a check it cannot read', async () => {
