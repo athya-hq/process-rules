@@ -1587,3 +1587,38 @@
     environment to `main`. The token is long-lived until trusted publishing
     replaces it, after the first publish.
   - The first publish is 0.6.16: 0.6.15 was cut first, for #314.
+- **2026-11-14 — Record: `pr-signals`, and `review-thread` from a file and
+  in the cloud (W-56.1, Work item #320, slice #321).** athya_mono kept its
+  own pull request helpers (`collect-signals`, `sync-pr`, `pr-rest`,
+  `graphql-paginate`), about 8,000 lines with their tests. They move here so
+  every client gets them, and athya_mono deletes its copies.
+  - `pr-signals <pr>` prints threads, failing checks and local findings as
+    one list. The client's review bots and findings file come from
+    `.github/niyam.json`'s `"signals"`, so the code names no client.
+  - `review-thread` takes `--body-file`, which resolves unless
+    `--no-resolve`, and `--reaction` with `--comment-id`. Its `--reply` and
+    `--resolve` work as before, except that a `--reply` whose text starts
+    with `--` is refused: it is far likelier a missing reply than one. A
+    reply already on the thread is not posted again. The file must be in
+    the repository: the allow rule `onboard` writes runs the command without
+    a prompt, so it must not post a file from elsewhere.
+  - In a Claude cloud session it uses the proxy's REST routes, the only ones
+    the proxy answers, and is no longer refused there. The session is the
+    agent when the proxy's `/user` is, the rule `pre-push` already holds a
+    cloud push to.
+  - Kept from athya_mono: a page that says more follow with no cursor
+    stops the run; a merged or closed pull request is refused before any
+    read and again before printing; a failed local review never reads as
+    clean; an id in the other transport's form is refused before any
+    request.
+  - Changed: CI excerpts come from the failing check run's own job log (a
+    GitHub Actions check run's id is its job's), not from matching run
+    names to check names. Every failing run is kept, even beside a passing
+    one of the same name, since two workflows can name a job alike; one
+    failure reported twice has the same lines and is folded. A pull request
+    whose state cannot be read stops the run instead of being read as open.
+    The cloud is `CLAUDE_CODE_REMOTE`, as everywhere in niyam; athya_mono
+    also checked the session's entrypoint. On a machine that sets it by
+    mistake, the proxy's routes do not exist and the run fails loudly.
+  - Left out: `sync-pr`'s five-file pipeline mode, whose skill athya_mono
+    no longer has, and the `rocket` reaction.

@@ -168,9 +168,17 @@ describe('run', () => {
     assert.deepEqual(await capture(['review-thread', 'PRRT_x']), {
       code: 2,
       out: [],
-      err: ['niyam: review-thread needs --reply <text>, --resolve, or both', USAGE],
+      err: ['niyam: review-thread needs --reply <text>, --body-file <path>, --resolve, or --reaction', USAGE],
     });
     assert.equal((await capture(['review-thread', 'PRRT_x', '--resolve', 'more'])).code, 2);
+  });
+
+  it('runs pr-signals, whose arguments are checked first', async () => {
+    const refused = await capture(['pr-signals', '7'], () => new FakeSys());
+    assert.deepEqual(refused, { code: 1, out: [], err: ['✗ this session has no token; run niyam doctor'] });
+    assert.deepEqual(await capture(['pr-signals']), { code: 2, out: [], err: ['niyam: pr-signals needs a pull request number', USAGE] });
+    assert.deepEqual(await capture(['pr-signals', '7', '--all']), { code: 2, out: [], err: ['niyam: unexpected argument "--all"', USAGE] });
+    assert.equal((await capture(['pr-signals', '7', '--ci-only', 'more'])).code, 2);
   });
 
   it('runs guard, refusing when the check itself fails', async () => {

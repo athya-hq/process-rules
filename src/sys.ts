@@ -98,7 +98,9 @@ export function realSys(): Sys {
       const { response, text } = got;
       return {
         status: response.status,
-        json: text ? JSON.parse(text) : null,
+        // A text read, such as a job's log, is not JSON.
+        json: options.text || !text ? null : JSON.parse(text),
+        ...(options.text ? { text } : {}),
         headers: Object.fromEntries(response.headers),
       };
     },

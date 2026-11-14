@@ -636,9 +636,55 @@ opened in the repository here. `onboard` allows exactly this command in
 review findings on its own pull requests needs no prompt, even in Claude
 Code's auto mode, where an allow rule settles a command without the
 classifier. It allows the command, not `gh api`: a rule cannot hold `gh
-api`'s arguments to one endpoint, since its `*` matches anything after it. It
-uses GitHub's GraphQL API, the only one that resolves a thread, so it does not
-work in a Claude cloud session, whose proxy refuses GraphQL.
+api`'s arguments to one endpoint, since its `*` matches anything after it.
+
+The reply can come from a file, `--body-file <path>`, since replies hold
+backticks and braces that a shell guard may refuse in an argument. The file
+must be in the repository, such as under `.tmp/`, since the allow rule runs
+the command without a prompt. A reply from a file resolves the thread unless
+`--no-resolve` is given. `--reaction
++1` or `-1` with `--comment-id <id>` reacts on one of the thread's comments;
+a reaction that fails is a warning, and the thread is still resolved. A
+reply already on the thread, compared without surrounding space, is not
+posted again, so a rerun is safe.
+
+On a machine it uses GitHub's GraphQL API, and a thread is named by its node
+id (`PRRT_…`). In a Claude cloud session, whose proxy refuses GraphQL, it uses
+the proxy's own REST routes (`pulls/{n}/ccr/review_threads` and
+`pulls/{n}/ccr/comments/{id}/resolve`), and a thread is named by its first
+comment's number, the one in its `#discussion_r` link. The proxy appends a
+Claude Code footer to what it posts, so a reply there is compared without it.
+An id in the other form is refused before any request.
+
+**Reading a pull request's signals.** `niyam pr-signals <pr> [--ci-only]`
+prints one JSON object: the pull request's open review threads, its failing
+checks and the local review's findings, as one list of signals with
+duplicates folded together, and its resolved threads, to tell a new finding
+from one already answered. Each thread's signal carries the ids
+`review-thread` takes there (`thread`, and `comment` for a reaction). A
+failing check run from GitHub Actions brings the error lines of its job's
+log, 40 at most; another check brings its name, conclusion and summary.
+Every page of every list is read to its end, and a page that says more follow
+without a cursor stops the run: a short list never reads as the whole one. A
+pull request that is merged or closed is refused (exit 3 or 4, and
+`"ok": false` on standard output) before anything is read, and again before
+printing, as one can merge while its signals are read. `--ci-only` reads the
+checks alone.
+
+A repository with a local review, one that runs before a push and writes its
+findings to a file, names it in `.github/niyam.json`, with the logins of its
+review bots:
+
+```json
+{ "signals": { "bots": ["review-bot"], "findings": ".tmp/review/findings.json" } }
+```
+
+The file holds `{"issues": [{"title", "description", "file", "line",
+"priority"}], "metadata": {"status"}}`. A finding citing a file the pull
+request does not change is dropped, as another branch's. A file whose
+`metadata.status` is `failed` is reported as a failed review, never a clean
+one. A bot's thread and the local finding at the same file and line are one
+signal: the same review, posted twice.
 
 **Design frames** is the `figma` feature, an optional extension for clients
 that design in Figma: with it on and two Actions secrets, `FIGMA_LIBRARY`

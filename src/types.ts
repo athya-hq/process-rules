@@ -13,6 +13,8 @@ export interface ExecResult {
 export interface HttpResult {
   status: number;
   json: unknown;
+  /** The body as text, when the request asked for text (`text: true`); json is then null. */
+  text?: string;
   /** Response headers, names lowercased. */
   headers?: Record<string, string>;
 }
@@ -60,7 +62,7 @@ export interface Sys {
    */
   http(
     url: string,
-    options?: { method?: string; token?: string; body?: unknown; headers?: Record<string, string>; timeoutMs?: number },
+    options?: { method?: string; token?: string; body?: unknown; headers?: Record<string, string>; timeoutMs?: number; text?: boolean },
   ): Promise<HttpResult>;
   /** Everything on standard input, as a git hook receives it. */
   readStdin(): string;
