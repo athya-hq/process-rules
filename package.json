@@ -23,7 +23,9 @@
     "provenance": "node scripts/own-provenance.mjs",
     "smoke": "node dist/cli.js --version",
     "scan:secrets": "gitleaks dir --no-banner --redact --config=.gitleaks.toml . && trufflehog filesystem . --no-update --fail --results=verified,unknown --exclude-paths=.trufflehog-exclude",
-    "check": "pnpm provenance && pnpm typecheck && pnpm test && pnpm test:scripts && pnpm pariksha && pnpm build && pnpm smoke",
+    "check": "pnpm provenance && pnpm typecheck && pnpm test && pnpm test:scripts && pnpm pins && pnpm pariksha && pnpm build && pnpm smoke",
+    "prepare": "node scripts/hooks-path.mjs",
+    "pins": "node scripts/released-pins.mjs",
     "pariksha": "node_modules/.bin/pariksha absolute-paths && node_modules/.bin/pariksha aggregate-gate-needs && node_modules/.bin/pariksha masked-exit-codes && node_modules/.bin/pariksha pnpm-settings --config pariksha-pnpm-settings.json && node_modules/.bin/pariksha shell-gates --all"
   },
   "devDependencies": {
@@ -31,6 +33,7 @@
     "@sigstore/protobuf-specs": "0.5.2",
     "@sigstore/verify": "4.1.3",
     "@types/node": "24.19.2",
+    "@veda-hq/dvara": "0.5.16",
     "@veda-hq/pariksha": "0.5.20",
     "typescript": "7.0.2"
   },
