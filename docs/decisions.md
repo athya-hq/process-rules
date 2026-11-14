@@ -1571,6 +1571,22 @@
     rejected: a check that passed on the default branch's head commit, which
     a check run only on `push` does, and which never reports on a pull
     request.
+- **2026-11-14 — Record: a release also publishes the CLI package to npm
+  (P-59, Work item #306, slice #307).** Alok chose npm so veda can pin
+  `@veda-hq/niyam` as an exact registry version (veda-hq/veda#47): veda's
+  `released-pins.mjs` and `sarathi.sh` accept only `x.y.z` registry pins.
+  - The Release workflow publishes the tarball it attaches to the GitHub
+    release, with provenance, before making the release. A version already on
+    npm is skipped, so a rerun is safe. `niyam upgrade`, the README's
+    `pnpm add -g` line and the cloud setup still take the GitHub release.
+  - The job runs in the `npm` environment, which only `v*` tags may deploy
+    to, and reads `NPM_TOKEN` from it. A repository secret, as veda has,
+    could be read by a workflow pushed on any branch.
+  - Cost: a `v*` tag on a commit off `main` still deploys to the environment
+    with that commit's own workflow; #308 closes it by limiting the
+    environment to `main`. The token is long-lived until trusted publishing
+    replaces it, after the first publish.
+  - The first publish is 0.6.16: 0.6.15 was cut first, for #314.
 - **2026-11-14 — Record: `pr-signals`, and `review-thread` from a file and
   in the cloud (W-56.1, Work item #320, slice #321).** athya_mono kept its
   own pull request helpers (`collect-signals`, `sync-pr`, `pr-rest`,
@@ -1599,10 +1615,10 @@
     GitHub Actions check run's id is its job's), not from matching run
     names to check names. Every failing run is kept, even beside a passing
     one of the same name, since two workflows can name a job alike; one
-    failure reported twice has the same lines and is folded. A pull request whose state cannot be read stops
-    the run instead of being read as open. The cloud is
-    `CLAUDE_CODE_REMOTE`, as everywhere in niyam; athya_mono also checked
-    the session's entrypoint. On a machine that sets it by mistake, the
-    proxy's routes do not exist and the run fails loudly.
+    failure reported twice has the same lines and is folded. A pull request
+    whose state cannot be read stops the run instead of being read as open.
+    The cloud is `CLAUDE_CODE_REMOTE`, as everywhere in niyam; athya_mono
+    also checked the session's entrypoint. On a machine that sets it by
+    mistake, the proxy's routes do not exist and the run fails loudly.
   - Left out: `sync-pr`'s five-file pipeline mode, whose skill athya_mono
     no longer has, and the `rocket` reaction.
