@@ -468,6 +468,43 @@ export function capture(): { out: string[]; err: string[]; io: { out(line: strin
   return { out, err, io: { out: (line) => out.push(line), err: (line) => err.push(line) } };
 }
 
+/** A hand-off brief draft, its fields replaced or added from `fields` (an empty one left out), and `extra` after its sections. */
+export function draft(fields: Record<string, string> = {}, extra = ''): string {
+  const all: Record<string, string> = {
+    slug: 'flaky-lint',
+    title: 'The lint stage fails on a file this branch never touched',
+    'discovered-on': 'feature/a',
+    blocking: 'no',
+    status: 'open',
+    'blamed-paths': '\n  - tools/lint.sh',
+    ...fields,
+  };
+  const front = Object.entries(all)
+    .filter(([, value]) => value !== '')
+    .map(([key, value]) => `${key}:${value.startsWith('\n') ? '' : ' '}${value}`)
+    .join('\n');
+  return [
+    '---',
+    '# A comment the issue leaves out.',
+    front,
+    '---',
+    '## What happened',
+    '```',
+    '$ pnpm lint',
+    'tools/lint.sh: line 3: unbound variable',
+    '```',
+    '## Why this is not caused by the originating branch',
+    'The branch changes only src/a.ts.',
+    '## Hypothesis (UNVERIFIED)',
+    'The script reads an unset variable.',
+    '## What the receiving session must verify first',
+    'Run it on main.',
+    '## Sequencing',
+    'Before the next push.',
+    extra,
+  ].join('\n');
+}
+
 /** How `ps -o lstart` prints a start time, in local time. */
 function lstart(date: Date): string {
   const [day, month, dayOfMonth = '', year] = date.toDateString().split(' ');

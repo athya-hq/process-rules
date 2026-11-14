@@ -949,6 +949,22 @@ describe('prePush', () => {
     assert.equal(sys.requests[0]?.token, 'ghp_good');
   });
 
+  it('runs the hand-off gate where the repository names its plumbing, before the work rules', async () => {
+    const sys = session('Slice: #12');
+    sys.files.set(`${ROOT}/.github/niyam.json`, JSON.stringify({ owner: 'example-owner', agent: AGENT, handoff: { plumbing: ['.github/workflows/'] } }));
+    const answers: Record<string, string> = { 'rev-parse --abbrev-ref HEAD': 'work', 'rev-parse HEAD': LOCAL, 'rev-parse --symbolic-full-name origin/main': 'refs/remotes/origin/main', 'merge-base origin/main HEAD': REMOTE, 'diff --name-only origin/main...HEAD': '.github/workflows/ci.yml' };
+    sys.execOverride = (call) => {
+      const answer = answers[call.args.join(' ')];
+      return answer !== undefined ? { code: 0, stdout: `${answer}\n`, stderr: '' } : call.args[0] === 'log' ? { code: 0, stdout: 'Slice: #12', stderr: '' } : undefined;
+    };
+    const refused = await push(sys, `refs/heads/work ${LOCAL} refs/heads/work ${REMOTE}\n`);
+    assert.equal(refused.code, 1);
+    assert.match(refused.err[0] ?? '', /^✗ handoff: this branch changes 1 shared-plumbing file\(s\) \(\.github\/workflows\/ci.yml\)/);
+    assert.equal(sys.calls.some((call) => call.args[0] === 'log'), false, 'the work rules were not read');
+    answers['diff --name-only origin/main...HEAD'] = 'src/a.ts';
+    assert.deepEqual(await push(sys, `refs/heads/work ${LOCAL} refs/heads/work ${REMOTE}\n`), { code: 0, err: [] });
+  });
+
   it('reads only commits no remote has for a new branch', async () => {
     const sys = session('Slice: #12');
     await push(sys, `refs/heads/work ${LOCAL} refs/heads/work ${ZERO}\n`);

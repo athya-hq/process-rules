@@ -8,6 +8,7 @@ import { guard } from './guard.ts';
 import { issueType } from './issue-types.ts';
 import { prIdentity } from './identity.ts';
 import { machine, machineArgs } from './machine.ts';
+import { brief, briefArgs, handoff, handoffArgs } from './handoff.ts';
 import { prSignals, signalArgs } from './pr-signals.ts';
 import { reviewsDue } from './reviews.ts';
 import { reviewThread, threadArgs } from './review-thread.ts';
@@ -64,7 +65,14 @@ Commands:
   pr-signals <pr> [--ci-only]
                    A pull request's open review threads, failing checks (error lines only) and local
                    review findings, as one JSON list without duplicates; exit 3 merged, 4 closed
-  help             Show this text
+  handoff --detect | --record --disposition <own-work|handed-off|carrying|dismissed> --reason <text>
+          [--brief #N,...] [--open-brief <draft.md>] | --assert-fresh [--call-site <site>] [--base <ref>]
+                   The hand-off gate, where .github/niyam.json names "handoff": a push that edits shared
+                   plumbing, or keeps failing at one stage, needs a declaration first; --assert-fresh
+                   is the gate, run by the pre-push hook
+  brief [--lint] <draft.md>
+                   Open a hand-off brief draft as a Brief issue, or only check it
+  help            Show this text
   version          Print the installed version
 
 as-agent's command gets the session's agent identity, stdin, stdout and stderr, and its
@@ -104,17 +112,17 @@ export function proposeArgs(args: readonly string[]): { numbers: number[]; page?
 /** Runs one command and returns its exit code: 0 done, 1 failed, 2 bad usage. */
 export async function run(args: readonly string[], io: Output, sys: () => Sys | Promise<Sys>): Promise<number> {
   const [command, ...rest] = args;
-  const allowed = command === 'onboard' || command === 'machine' || command === 'review-thread' || command === 'as-agent' || command === 'propose' || command === 'owner-step' ? Infinity : command === 'pre-push' || command === 'pr-signals' ? 2 : command === 'doctor' ? 1 : 0;
+  const allowed = command === 'onboard' || command === 'machine' || command === 'review-thread' || command === 'as-agent' || command === 'propose' || command === 'owner-step' || command === 'handoff' || command === 'brief' ? Infinity : command === 'pre-push' || command === 'pr-signals' ? 2 : command === 'doctor' ? 1 : 0;
   const extra = rest[allowed];
   if (extra !== undefined) {
     io.err(`niyam: unexpected argument "${extra}"`);
     io.err(USAGE);
     return 2;
   }
-  if (command === 'onboard' || command === 'machine' || command === 'review-thread' || command === 'as-agent' || command === 'propose' || command === 'owner-step' || command === 'pr-signals') {
+  if (command === 'onboard' || command === 'machine' || command === 'review-thread' || command === 'as-agent' || command === 'propose' || command === 'owner-step' || command === 'pr-signals' || command === 'handoff' || command === 'brief') {
     // Their options are checked here, so a bad one is bad usage (exit 2).
     try {
-      (command === 'onboard' ? onboardArgs : command === 'machine' ? machineArgs : command === 'as-agent' ? asAgentArgs : command === 'propose' ? proposeArgs : command === 'owner-step' ? ownerStepArgs : command === 'pr-signals' ? signalArgs : threadArgs)(rest);
+      (command === 'onboard' ? onboardArgs : command === 'machine' ? machineArgs : command === 'as-agent' ? asAgentArgs : command === 'propose' ? proposeArgs : command === 'owner-step' ? ownerStepArgs : command === 'pr-signals' ? signalArgs : command === 'handoff' ? handoffArgs : command === 'brief' ? briefArgs : threadArgs)(rest);
     } catch (error) {
       io.err(`niyam: ${error instanceof Error ? error.message : String(error)}`);
       io.err(USAGE);
@@ -169,11 +177,15 @@ export async function run(args: readonly string[], io: Output, sys: () => Sys | 
     case 'propose':
     case 'review-thread':
     case 'pr-signals':
+    case 'handoff':
+    case 'brief':
     case 'upgrade':
     case 'owner-step':
       try {
         if (command === 'upgrade') return await upgrade(await sys(), io);
         if (command === 'pr-signals') return await prSignals(await sys(), io, rest);
+        if (command === 'handoff') return await handoff(await sys(), io, rest);
+        if (command === 'brief') return await brief(await sys(), io, rest);
         if (command === 'owner-step') return await ownerStep(await sys(), io, rest);
         if (command === 'review-thread') return await reviewThread(await sys(), io, rest);
         if (command === 'propose') {

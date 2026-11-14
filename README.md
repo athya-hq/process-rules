@@ -686,6 +686,66 @@ request does not change is dropped, as another branch's. A file whose
 one. A bot's thread and the local finding at the same file and line are one
 signal: the same review, posted twice.
 
+**The hand-off gate.** A session working on one thing that trips over
+another, not its fault, fixes the other thing worse than a session with no
+stake would: it wants its own work unblocked. No program can see that
+moment, so the gate prices two of its footprints. A push whose branch edits
+the repository's shared plumbing, or whose push history shows one stage
+failing three times across two working trees or more, needs a declaration
+first:
+
+```sh
+niyam handoff --detect                      # what fires, as JSON
+niyam handoff --record --disposition own-work --reason "the workflow change is this slice"
+niyam handoff --record --disposition handed-off --reason "..." --open-brief .tmp/brief.md
+```
+
+`own-work` is one sentence. `handed-off` names a Brief issue (`--brief #N`,
+or `--open-brief <draft.md>`, which lints the draft and opens it as one, on
+the board `.github/niyam.json`'s `project` names). `carrying` also owes
+`## What I verified` and `## Why I did not hand off`, and may blame a file
+the branch changed. `dismissed` cites where the owner decided (`#123`, a
+link, an id such as `ABC-123`, or a commit). `niyam pre-push` runs the gate
+for an agent session, right after the identity check; `niyam handoff
+--assert-fresh` runs it alone, for a hook of the client's own. It passes
+when nothing fires, and otherwise only when the session's newest
+declaration (`--call-site push-skill`, the default) covers this head, this
+base and every trigger that fired. A blocking
+brief handed off holds the push until a merged pull request saying
+`Fixes #N` closes it and this branch has its merge commit, or it is closed as
+not planned. Declarations and the gate's verdicts are JSON lines in
+`.tmp/push/handoff-log.jsonl`. `niyam brief [--lint] <draft.md>` opens a
+draft, or only checks it.
+
+A brief draft has YAML frontmatter (`slug`, `title`, `discovered-on`: this
+branch, `blocking: yes|no`, `status: open`, `blamed-paths`: a list of files,
+none in the branch's own diff) and five sections: `## What happened`, with
+the command and its output in a fence, `## Why this is not caused by the
+originating branch`, `## Hypothesis (UNVERIFIED)`, `## What the receiving
+session must verify first` and `## Sequencing`. The gate is on where the
+repository names its plumbing; a folder ends in `/`, anything else is one
+file by its whole path. The copy of the settings on the remote's default
+branch (or the `--base` asked for) decides when it names one, the settings
+file always counts as plumbing, and the base must be a remote-tracking
+branch, so a branch cannot turn the gate off in the push the gate judges:
+
+```json
+{
+  "handoff": {
+    "plumbing": [".github/workflows/", ".husky/", "package.json"],
+    "history": ".tmp/performance/history.jsonl",
+    "ignoreStages": ["checking-incidental-handoff-declarations"],
+    "template": "docs/templates/brief.md",
+    "base": "origin/main"
+  }
+}
+```
+
+`history` is the push history, one JSON line per hook run with its `kind`,
+`exitCode`, `branch`, tree `fingerprint` and `stages` (`name`, `status`);
+without one, only the plumbing trigger fires. A line that is not a whole run
+is skipped, never counted.
+
 **Design frames** is the `figma` feature, an optional extension for clients
 that design in Figma: with it on and two Actions secrets, `FIGMA_LIBRARY`
 (the design library's file key) and `FIGMA_TOKEN`, each State of the slice
