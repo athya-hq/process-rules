@@ -1114,8 +1114,10 @@ is a slice the owner approves.
 
 Each release is a tag `vX.Y.Z` on `main`, matching `package.json`; the
 Release workflow checks both, runs `pnpm check` and publishes the GitHub
-release, attaching the CLI package it built and tested. Install that package on
-each machine with pnpm, once; nothing is built on install:
+release, attaching the CLI package it built and tested. From 0.6.16 the same
+package is on npm as `@veda-hq/niyam`, with provenance, for a repository that
+pins it as an exact version. Install the attached package on each machine with
+pnpm, once; nothing is built on install:
 
 ```bash
 pnpm add -g https://github.com/veda-hq/niyam/releases/download/v0.6.15/veda-hq-niyam-0.6.15.tgz
