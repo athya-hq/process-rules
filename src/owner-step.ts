@@ -40,12 +40,12 @@ const SETTLE_MS = 20;
 export type Step =
   | { step: 'issue-types'; org: string }
   | { step: 'label'; repo: string; number: number; action: 'add' | 'remove'; label: string }
-  | { step: 'required-checks'; repo: string; ruleset: string };
+  | { step: 'required-checks'; repo: string; ruleset: string; checks: string[] };
 
 export const STEP_USAGE = [
   'issue-types <org>',
   `label <owner/repo> <number> <add|remove> <${OWNER_LABELS.join('|')}>`,
-  'required-checks <owner/repo> <ruleset id or name>',
+  'required-checks <owner/repo> <ruleset id or name> [--check <name>]…',
 ];
 
 const ACCOUNT = /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/;
@@ -80,10 +80,17 @@ export function ownerStepArgs(args: readonly string[]): Step {
       return { step, repo: repo(where), number: Number(number.replace('#', '')), action, label };
     }
     case 'required-checks': {
-      count(2);
-      const [where, ruleset] = rest as [string, string];
-      if (!ruleset.trim()) throw new Error('owner-step required-checks needs a ruleset id or name');
-      return { step, repo: repo(where), ruleset };
+      const [where, ruleset, ...flags] = rest;
+      if (where === undefined || ruleset === undefined || where.startsWith('--') || ruleset.startsWith('--')) count(2);
+      if (!(ruleset as string).trim()) throw new Error('owner-step required-checks needs a ruleset id or name');
+      const checks: string[] = [];
+      for (let at = 0; at < flags.length; at += 2) {
+        const [flag, name] = [flags[at], flags[at + 1]];
+        if (flag !== '--check') throw new Error(`owner-step required-checks takes only --check <name> after the ruleset, not "${flag}"`);
+        if (name === undefined || !name.trim() || name.startsWith('--')) throw new Error('owner-step required-checks needs a check name after --check');
+        if (!checks.includes(name)) checks.push(name);
+      }
+      return { step, repo: repo(where as string), ruleset: ruleset as string, checks };
     }
     default:
       throw new Error(step === undefined ? usage : `owner-step has no step "${step}"; ${usage}`);
@@ -362,12 +369,65 @@ function workflowJobs(gh: Gh, repo: string): Set<string> | { problem: string } {
   return new Set([...text.matchAll(/^ {4}name:\s*['"]?([^'"#\r\n]*?)['"]?\s*$/gm)].map((match) => match[1] as string));
 }
 
+/** How many recently updated pull requests are searched for the last one merged. */
+const RECENT_PULLS = 30;
+
+/** A named check's proof that it runs on pull requests and passes: the app that reported it there, or why there is none. */
+type Passed = { app: number; appName: string; pull: number } | { problem: string };
+
+/**
+ * Whether each named check reported `success` on the head commit of the
+ * last pull request merged into the default branch, and from which app.
+ * A check that does is one pull requests run, so a ruleset requiring it
+ * holds none; one that does not might never report on a pull request. Two
+ * apps reporting the same name is refused: the ruleset requires one app's.
+ */
+function passedOnPull(gh: Gh, repo: string, names: string[]): Map<string, Passed> {
+  const found = new Map<string, Passed>();
+  if (names.length === 0) return found;
+  const fail = (problem: string): Map<string, Passed> => new Map(names.map((name) => [name, { problem }]));
+  const branch = (must(gh.api(`repos/${repo}`), `reading ${repo}`) as { default_branch?: unknown } | null)?.default_branch;
+  if (typeof branch !== 'string' || !branch) return fail(`GitHub did not say ${repo}'s default branch`);
+  const listed = gh.api(`repos/${repo}/pulls?state=closed&base=${encodeURIComponent(branch)}&sort=updated&direction=desc&per_page=${RECENT_PULLS}`);
+  if (!listed.ok) return fail(`GitHub did not list ${repo}'s pull requests (${listed.problem})`);
+  const pulls = ((listed.json ?? []) as { number?: unknown; merged_at?: unknown; head?: { sha?: unknown } }[]).filter(
+    (pull): pull is { number: number; merged_at: string; head: { sha: string } } => typeof pull.number === 'number' && typeof pull.merged_at === 'string' && typeof pull.head?.sha === 'string',
+  );
+  const last = pulls.sort((a, b) => b.merged_at.localeCompare(a.merged_at))[0];
+  if (!last) return fail(`no pull request merged into ${branch} is among ${repo}'s ${RECENT_PULLS} most recently updated`);
+  const where = `${repo}#${last.number}, the last pull request merged into ${branch}`;
+  for (const name of names) {
+    const answer = gh.api(`repos/${repo}/commits/${last.head.sha}/check-runs?check_name=${encodeURIComponent(name)}&filter=latest&per_page=100`);
+    if (!answer.ok) {
+      found.set(name, { problem: `GitHub did not give the checks of ${where} (${answer.problem})` });
+      continue;
+    }
+    const runs = ((answer.json as { check_runs?: unknown } | null)?.check_runs ?? []) as { name?: unknown; conclusion?: unknown; app?: { id?: unknown; name?: unknown } }[];
+    const named = runs.filter((one) => one.name === name);
+    const passed = named.filter((one) => one.conclusion === 'success' && typeof one.app?.id === 'number');
+    const apps = [...new Set(passed.map((one) => one.app?.id as number))];
+    if (apps.length > 1) {
+      found.set(name, { problem: `more than one app reported ${name} on ${where}, and a ruleset requires one app's` });
+    } else if (apps.length === 1) {
+      const app = apps[0] as number;
+      const appName = passed.find((one) => one.app?.id === app)?.app?.name;
+      found.set(name, { app, appName: typeof appName === 'string' ? appName : `app ${app}`, pull: last.number });
+    } else if (named.length > 0) {
+      const how = [...new Set(named.map((one) => String(one.conclusion ?? 'not finished')))].join(', ');
+      found.set(name, { problem: `${name} did not pass on ${where} (${how})` });
+    } else {
+      found.set(name, { problem: `no check named ${name} ran on ${where}` });
+    }
+  }
+  return found;
+}
+
 /**
  * The ruleset's required checks, with the checks of the features the
  * repository's settings turn on added; every other check and rule stays as
  * it is, and none is taken away.
  */
-function requiredChecks(gh: Gh, { repo, ruleset }: Extract<Step, { step: 'required-checks' }>): Found {
+function requiredChecks(gh: Gh, { repo, ruleset, checks: named = [] }: Extract<Step, { step: 'required-checks' }>): Found {
   const listed = must(gh.api(`repos/${repo}/rulesets?includes_parents=false&per_page=100`), `listing ${repo}'s rulesets`) as { id?: unknown; name?: unknown }[] | null;
   const matches = (listed ?? []).filter((one) => String(one.id) === ruleset || (typeof one.name === 'string' && same(one.name, ruleset)));
   if (matches.length !== 1) {
@@ -395,6 +455,13 @@ function requiredChecks(gh: Gh, { repo, ruleset }: Extract<Step, { step: 'requir
   const swaps = [...new Set(required.filter(stale))].map((from) => ({ from, to: runs(renamed(from)) ? renamed(from) : undefined }));
   const target = (check: string): string | undefined => (stale(check) ? swaps.find((swap) => swap.from === check)?.to : check);
   const checks = turnedOn.filter(runs);
+  // Each check the owner named, unless required already or a feature's: added only with proof that pull requests run it.
+  const toProve = named.filter((check) => !had.includes(check) && !turnedOn.includes(check));
+  const proof = passedOnPull(gh, repo, toProve);
+  const proven = toProve.flatMap((context) => {
+    const passed = proof.get(context);
+    return passed && 'app' in passed ? [{ context, integration_id: passed.app }] : [];
+  });
   const why = (check: string): string => ('problem' in jobs ? jobs.problem : `the shared checks ${WORKFLOW_PATH} calls run no ${check.slice(CHECK_PREFIX.length)} job`);
   const skipped = turnedOn
     .filter((check) => !runs(check))
@@ -403,13 +470,27 @@ function requiredChecks(gh: Gh, { repo, ruleset }: Extract<Step, { step: 'requir
       text: `not adding ${check}: ${why(check)}, so it would never report and would hold every pull request`,
       fix: `${CLI} onboard there, then run this again`,
     }));
+  for (const check of toProve) {
+    const passed = proof.get(check);
+    if (passed && 'problem' in passed) {
+      skipped.push({ mark: '✗', text: `not adding ${check}: ${passed.problem}, so it is not known to report on every pull request; requiring it could hold them all`, fix: 'check its name, merge a pull request it passes on, then run this again' });
+    }
+  }
   const unique = (names: string[]): string[] => [...new Set(names)];
   const afterSwaps = unique(required.flatMap((check) => target(check) ?? []));
-  const missing = checks.filter((check) => !afterSwaps.includes(check));
+  const missing = [...checks, ...proven.map((check) => check.context)].filter((check) => !afterSwaps.includes(check));
   const after = [...afterSwaps, ...missing];
   const list = (names: string[]): string => (names.length === 0 ? 'none' : names.join(', '));
-  const notes = [`${file} turns on the checks ${list(turnedOn)}`, `before: ${list(required)}`, `after:  ${list(after)}`];
-  if (missing.length === 0 && swaps.length === 0) return { changes: [], notes, skipped, already: `the ruleset ${before.name} requires every check ${file} turns on` };
+  const notes = [`${file} turns on the checks ${list(turnedOn)}`];
+  for (const check of proven) {
+    const passed = proof.get(check.context) as Extract<Passed, { app: number }>;
+    notes.push(`${check.context} passed on ${repo}#${passed.pull}, reported by ${passed.appName}; a check that runs only for some paths would hold a pull request it skips`);
+  }
+  notes.push(`before: ${list(required)}`, `after:  ${list(after)}`);
+  const namedHad = named.filter((check) => had.includes(check) && !turnedOn.includes(check));
+  if (missing.length === 0 && swaps.length === 0) {
+    return { changes: [], notes, skipped, already: `the ruleset ${before.name} requires every check ${file} turns on${namedHad.length > 0 ? `, and ${list(namedHad)}` : ''}` };
+  }
   // Built on the ruleset as it is just before the write, so an edit made while the owner read the plan is kept.
   const withChecks = (current: Rule[]): Rule[] => {
     // Each check before P-53 in its place under its niyam name, its app kept, or gone; a second copy of a name goes.
@@ -421,7 +502,7 @@ function requiredChecks(gh: Gh, { repo, ruleset }: Extract<Step, { step: 'requir
         })
         .filter((check, at, all) => all.findIndex((one) => one.context === check.context) === at);
     const kept = moved(current.find((rule) => rule.type === 'required_status_checks')?.parameters?.required_status_checks ?? []).map((check) => check.context);
-    const added = checks.filter((check) => !kept.includes(check)).map((context) => ({ context, integration_id: ACTIONS_APP }));
+    const added = [...checks.map((context) => ({ context, integration_id: ACTIONS_APP })), ...proven].filter((check) => !kept.includes(check.context));
     return current.some((rule) => rule.type === 'required_status_checks')
       ? current.map((rule) =>
           rule.type === 'required_status_checks'
@@ -442,7 +523,7 @@ function requiredChecks(gh: Gh, { repo, ruleset }: Extract<Step, { step: 'requir
           await checkpoint();
           must(gh.api(`repos/${repo}/rulesets/${id}`, { method: 'PUT', body: { rules: withChecks(current.rules) } }), `updating the ruleset ${before.name}`);
           const now = read();
-          const lacking = unique([...checks, ...swaps.flatMap(({ to }) => to ?? [])]).filter((check) => !contexts(now.rules).includes(check));
+          const lacking = unique([...checks, ...proven.map((check) => check.context), ...swaps.flatMap(({ to }) => to ?? [])]).filter((check) => !contexts(now.rules).includes(check));
           if (lacking.length > 0) throw new Error(`GitHub shows the ruleset without ${lacking.join(', ')} afterwards`);
           const left = contexts(now.rules).filter(stale);
           if (left.length > 0) throw new Error(`GitHub shows the ruleset still requiring ${left.join(', ')} afterwards`);
@@ -461,7 +542,7 @@ function requiredChecks(gh: Gh, { repo, ruleset }: Extract<Step, { step: 'requir
 function about(step: Step): string {
   if (step.step === 'issue-types') return `the work model's issue types in ${step.org}`;
   if (step.step === 'label') return `${step.action} the label ${step.label} ${step.action === 'add' ? 'to' : 'off'} ${step.repo}#${step.number}`;
-  return `the required checks of ${step.repo}'s ruleset ${step.ruleset}`;
+  return `the required checks of ${step.repo}'s ruleset ${step.ruleset}${step.checks.length > 0 ? `, with ${step.checks.join(', ')}` : ''}`;
 }
 
 /**

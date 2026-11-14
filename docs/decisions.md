@@ -1545,3 +1545,29 @@
   0.6.12, so the key is `niyam-decisions-<repo>`. A dispatch from a branch
   still pinning a release before this one runs under the old key; the worst
   it can do is open an undo issue twice, which the next weekly run reports.
+- **2026-11-14 — Record: `owner-step required-checks` also requires a named
+  check (P-58, Work item #315, slice #314).** Alok asked why an agent sent
+  him to the ruleset page for `veda-checks / Checks` when niyam has owner
+  steps. `required-checks` added only the checks of niyam's features, so it
+  could not. AthyaBot is not an admin of veda-hq/niyam, and cannot change a
+  ruleset either.
+  - `--check <name>`, repeatable, adds a check the owner names. The proof
+    that a required check will not hold every pull request is that it
+    reported `success` on the head commit of the last pull request merged
+    into the default branch. It is required from the app that reported it
+    there. A check required already, or one a feature turns on, needs no
+    proof.
+  - Refused, as a `✗` that makes the run exit 1: a check that never ran
+    there, did not pass, or that more than one app reported. A ruleset
+    requires one app's check, and a second app's check of the same name
+    could stand in for it.
+  - Cost: one merged pull request is the evidence. A check whose workflow
+    runs only for some paths passes there and holds a later pull request
+    that skips those paths. The plan says so for each named check, and the
+    README does too.
+  - Rejected: reading the workflow's `on:` triggers and path filters,
+    because the check-run name a ruleset matches is not the workflow file's
+    job id, and a reusable workflow's jobs are named by its caller. Also
+    rejected: a check that passed on the default branch's head commit, which
+    a check run only on `push` does, and which never reports on a pull
+    request.

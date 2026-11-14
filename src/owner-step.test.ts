@@ -65,9 +65,15 @@ describe('owner-step arguments', () => {
   it('reads each step', () => {
     assert.deepEqual(ownerStepArgs(['issue-types', 'veda-hq']), { step: 'issue-types', org: 'veda-hq' });
     assert.deepEqual(ownerStepArgs(['label', 'veda-hq/niyam', '#240', 'add', 'approved']), { step: 'label', repo: 'veda-hq/niyam', number: 240, action: 'add', label: 'approved' });
-    assert.deepEqual(ownerStepArgs(['required-checks', 'veda-hq/niyam', 'main']), { step: 'required-checks', repo: 'veda-hq/niyam', ruleset: 'main' });
+    assert.deepEqual(ownerStepArgs(['required-checks', 'veda-hq/niyam', 'main']), { step: 'required-checks', repo: 'veda-hq/niyam', ruleset: 'main', checks: [] });
+    assert.deepEqual(ownerStepArgs(['required-checks', 'veda-hq/niyam', 'main', '--check', 'veda-checks / Checks', '--check', 'Guard', '--check', 'Guard']), {
+      step: 'required-checks',
+      repo: 'veda-hq/niyam',
+      ruleset: 'main',
+      checks: ['veda-checks / Checks', 'Guard'],
+    });
     assert.deepEqual(stepScopes({ step: 'issue-types', org: 'x' }), ['admin:org']);
-    assert.deepEqual(stepScopes({ step: 'required-checks', repo: 'a/b', ruleset: 'main' }), ['repo']);
+    assert.deepEqual(stepScopes({ step: 'required-checks', repo: 'a/b', ruleset: 'main', checks: [] }), ['repo']);
   });
 
   it('refuses anything else as bad usage, before any sign-in', async () => {
@@ -82,6 +88,13 @@ describe('owner-step arguments', () => {
       [['label', 'veda-hq/niyam', '7', 'toggle', 'approved'], /add or remove/],
       [['label', 'veda-hq/niyam', '7', 'add', 'bug'], /approved and do-not-merge alone/],
       [['required-checks', 'veda-hq/niyam', ' '], /ruleset id or name/],
+      [['required-checks', 'veda-hq/niyam'], /takes 2 arguments: required-checks <owner\/repo> <ruleset id or name> \[--check <name>\]…/],
+      [['required-checks', 'veda-hq/niyam', '--check', 'Guard'], /takes 2 arguments/],
+      [['required-checks', 'veda-hq/niyam', 'main', '--check'], /needs a check name after --check/],
+      [['required-checks', 'veda-hq/niyam', 'main', '--check', ' '], /needs a check name after --check/],
+      [['required-checks', 'veda-hq/niyam', 'main', '--check', '--check'], /needs a check name after --check/],
+      [['required-checks', 'veda-hq/niyam', 'main', '--force'], /takes only --check <name> after the ruleset, not "--force"/],
+      [['required-checks', 'veda-hq/niyam', 'main', 'Guard'], /takes only --check <name> after the ruleset, not "Guard"/],
     ];
     for (const [args, why] of bad) {
       const { sys } = world();
@@ -411,7 +424,7 @@ describe('owner-step required-checks', () => {
   const rulesWorld = (rules: unknown[], extra: Record<string, Reply> = {}, put?: (body: { rules: unknown[] }) => unknown[]): ReturnType<typeof world> & { now: () => unknown[] } => {
     let now = rules;
     const made = world({
-      'GET repos/veda-hq/niyam': { status: 200, json: { owner: { login: 'veda-hq', type: 'Organization' } } },
+      'GET repos/veda-hq/niyam': { status: 200, json: { owner: { login: 'veda-hq', type: 'Organization' }, default_branch: 'main' } },
       'GET user/memberships/orgs/veda-hq': ADMIN,
       'GET repos/veda-hq/niyam/rulesets?includes_parents=false&per_page=100': { status: 200, json: [{ id: 5, name: 'main' }, { id: 6, name: 'release tags' }] },
       'GET repos/veda-hq/niyam/rulesets/5': () => ({ status: 200, json: { id: 5, name: 'main', rules: now } }),
@@ -643,5 +656,105 @@ describe('owner-step folders', () => {
       { mark: '▲', text: `an owner-step folder left behind: ${ROOT}/${FOLDER_PREFIX}cd`, fix: `with no owner-step running, rm -rf ${ROOT}/${FOLDER_PREFIX}cd` },
     ]);
     assert.ok(!JSON.stringify(found).includes(SECRET));
+  });
+});
+
+describe('owner-step required-checks --check', () => {
+  const settings = { status: 200, json: { content: Buffer.from(JSON.stringify({ owner: OWNER, agent: 'ExampleBot', features: ['pr-identity'] })).toString('base64') } };
+  const checks = (...list: (string | [string, number])[]): unknown => ({
+    type: 'required_status_checks',
+    parameters: { strict_required_status_checks_policy: false, required_status_checks: list.map((one) => (typeof one === 'string' ? { context: one, integration_id: 15368 } : { context: one[0], integration_id: one[1] })) },
+  });
+  const PULLS = 'GET repos/veda-hq/niyam/pulls?state=closed&base=main&sort=updated&direction=desc&per_page=30';
+  const runsAt = (sha: string, name: string): string => `GET repos/veda-hq/niyam/commits/${sha}/check-runs?check_name=${encodeURIComponent(name)}&filter=latest&per_page=100`;
+  /** Pull requests closed into main: #9 closed unmerged, the newest; #8 the last merged; #7 merged before it. */
+  const pulls = {
+    status: 200,
+    json: [
+      { number: 9, merged_at: null, head: { sha: 'nine' } },
+      { number: 7, merged_at: '2026-11-13T10:00:00Z', head: { sha: 'seven' } },
+      { number: 8, merged_at: '2026-11-14T10:00:00Z', head: { sha: 'eight' } },
+    ],
+  };
+  const run = (name: string, conclusion: string | null, app = { id: 15368, name: 'GitHub Actions' }): unknown => ({ name, conclusion, app });
+  const ran = (...runs: unknown[]): { status: number; json: unknown } => ({ status: 200, json: { total_count: runs.length, check_runs: runs } });
+  const VEDA = 'veda-checks / Checks';
+  const setUp = (rules: unknown[], extra: Record<string, Reply> = {}): ReturnType<typeof world> & { now: () => unknown[] } => {
+    let now = rules;
+    const made = world(
+      {
+        'GET repos/veda-hq/niyam': { status: 200, json: { owner: { login: 'veda-hq', type: 'Organization' }, default_branch: 'main' } },
+        'GET user/memberships/orgs/veda-hq': ADMIN,
+        'GET repos/veda-hq/niyam/rulesets?includes_parents=false&per_page=100': { status: 200, json: [{ id: 5, name: 'main' }] },
+        'GET repos/veda-hq/niyam/rulesets/5': () => ({ status: 200, json: { id: 5, name: 'main', rules: now } }),
+        'PUT repos/veda-hq/niyam/rulesets/5': (body) => {
+          now = (body as { rules: unknown[] }).rules;
+          return { status: 200, json: {} };
+        },
+        'GET repos/veda-hq/niyam/contents/.github/niyam.json': settings,
+        'GET repos/veda-hq/niyam/contents/.github/workflows/niyam.yml': encoded(WORKFLOW),
+        'GET repos/veda-hq/niyam/contents/.github/workflows/checks.yml?ref=v0.6.6': encoded(SHARED),
+        [PULLS]: pulls,
+        ...extra,
+      },
+      'repo',
+    );
+    return { ...made, now: () => now };
+  };
+  const step = (...names: string[]): string[] => ['required-checks', 'veda-hq/niyam', 'main', ...names.flatMap((name) => ['--check', name])];
+
+  it('adds a named check that passed on the head of the last merged pull request, with the app that reported it, beside the feature checks', async () => {
+    const made = setUp([{ type: 'deletion' }, checks('Secret scans')], { [runsAt('eight', VEDA)]: ran(run(VEDA, 'success')), [runsAt('eight', 'Lint')]: ran(run('Lint', 'success', { id: 42, name: 'Example CI' })) });
+    const { io, out, err } = capture();
+    assert.equal(await ownerStep(made.sys, io, step(VEDA, 'Lint')), 0, out.join('\n'));
+    const text = out.join('\n');
+    assert.match(text, /owner-step required-checks: the required checks of veda-hq\/niyam's ruleset main, with veda-checks \/ Checks, Lint/);
+    assert.match(text, /veda-checks \/ Checks passed on veda-hq\/niyam#8, reported by GitHub Actions; a check that runs only for some paths would hold a pull request it skips/);
+    assert.match(text, /Lint passed on veda-hq\/niyam#8, reported by Example CI/);
+    assert.match(text, /after: {2}Secret scans, niyam \/ PR identity, veda-checks \/ Checks, Lint/);
+    assert.match(text, /make the ruleset main of veda-hq\/niyam also require niyam \/ PR identity, veda-checks \/ Checks, Lint/);
+    assert.deepEqual(made.now(), [{ type: 'deletion' }, checks('Secret scans', 'niyam / PR identity', VEDA, ['Lint', 42])]);
+    assert.ok(!made.api.some((call) => call.args[1]?.includes('/commits/seven/') || call.args[1]?.includes('/commits/nine/')), 'only the last merged pull request is read');
+    cleaned(made.sys, out);
+    noLeak(made.sys, out, err);
+  });
+
+  it('refuses, as ✗, a named check with no proof that pull requests run it and pass, adding none of them', async () => {
+    const cases: [Record<string, Reply>, RegExp][] = [
+      [{ [runsAt('eight', VEDA)]: ran() }, /no check named veda-checks \/ Checks ran on veda-hq\/niyam#8, the last pull request merged into main/],
+      [{ [runsAt('eight', VEDA)]: ran(run('veda-checks / Checks and more', 'success')) }, /no check named veda-checks \/ Checks ran on veda-hq\/niyam#8, the last pull request merged into main/],
+      [{ [runsAt('eight', VEDA)]: ran(run(VEDA, 'failure'), run(VEDA, null)) }, /veda-checks \/ Checks did not pass on veda-hq\/niyam#8, the last pull request merged into main \(failure, not finished\)/],
+      [{ [runsAt('eight', VEDA)]: ran(run(VEDA, 'success'), run(VEDA, 'success', { id: 99, name: 'Lookalike' })) }, /more than one app reported veda-checks \/ Checks on veda-hq\/niyam#8, the last pull request merged into main, and a ruleset requires one app's/],
+      [{ [runsAt('eight', VEDA)]: { status: 502, json: { message: 'Bad Gateway' } } }, /GitHub did not give the checks of veda-hq\/niyam#8, the last pull request merged into main \(gh: Bad Gateway \(HTTP 502\)\)/],
+      [{ [PULLS]: { status: 200, json: [{ number: 9, merged_at: null, head: { sha: 'nine' } }] } }, /no pull request merged into main is among veda-hq\/niyam's 30 most recently updated/],
+      [{ [PULLS]: { status: 502, json: { message: 'Bad Gateway' } } }, /GitHub did not list veda-hq\/niyam's pull requests \(gh: Bad Gateway \(HTTP 502\)\)/],
+      [{ 'GET repos/veda-hq/niyam': { status: 200, json: { owner: { login: 'veda-hq', type: 'Organization' } } } }, /GitHub did not say veda-hq\/niyam's default branch/],
+    ];
+    for (const [extra, why] of cases) {
+      const made = setUp([checks('niyam / PR identity')], extra);
+      const { io, out } = capture();
+      assert.equal(await ownerStep(made.sys, io, step(VEDA)), 1, String(why));
+      const text = out.join('\n');
+      assert.match(text, new RegExp(`✗ not adding veda-checks / Checks: ${why.source}, so it is not known to report on every pull request; requiring it could hold them all → check its name, merge a pull request it passes on, then run this again`));
+      assert.ok(!made.api.some((call) => call.args.includes('PUT')), String(why));
+      assert.deepEqual(made.sys.chosen, []);
+      cleaned(made.sys, out);
+    }
+  });
+
+  it('adds the named checks that pass and refuses the others, exiting 1', async () => {
+    const made = setUp([checks('niyam / PR identity')], { [runsAt('eight', VEDA)]: ran(run(VEDA, 'success')), [runsAt('eight', 'Guard')]: ran() });
+    const { io, out } = capture();
+    assert.equal(await ownerStep(made.sys, io, step(VEDA, 'Guard')), 1);
+    assert.match(out.join('\n'), /✗ not adding Guard: no check named Guard ran on/);
+    assert.deepEqual(made.now(), [checks('niyam / PR identity', VEDA)]);
+  });
+
+  it('asks no proof for a named check required already, or one a feature turns on', async () => {
+    const made = setUp([checks('niyam / PR identity', VEDA)]);
+    const { io, out } = capture();
+    assert.equal(await ownerStep(made.sys, io, step(VEDA, 'niyam / PR identity')), 0, out.join('\n'));
+    assert.match(out.join('\n'), /✓ nothing to change: the ruleset main requires every check \.github\/niyam\.json turns on, and veda-checks \/ Checks/);
+    assert.ok(!made.api.some((call) => call.args[1]?.includes('/pulls') || call.args[1]?.includes('/check-runs')));
   });
 });
