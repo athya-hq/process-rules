@@ -1656,3 +1656,22 @@
     is read with `yaml`, already a dependency, loaded only when a brief is.
     A repository with no `project` opens its briefs on no board, where
     athya_mono warned: without the `board` feature there is none.
+- **2026-11-14 — Record: `cubic-dismiss` (W-56.3, Work item #320, slice
+  #325).** athya_mono's `scripts/cubic-dismiss.ts` moves here, about 1,500
+  lines with its tests, and athya_mono deletes its copy. What it refuses is
+  unchanged: no basis or two, evidence that does not resolve, a deferral on
+  evidence, an empty, comment-like, multi-line or already dismissed title,
+  a reason missing, and a dismiss file that already differs from HEAD; a
+  failed commit restores the file, one that landed is kept, and text it did
+  not write is never reported as recorded.
+  - What was athya_mono's is now settings, under `"cubicDismiss"`: the
+    dismiss file, the commit subject and the trailer's word for the owner's
+    decision (`alok` there, `owner` by default).
+  - Changed: `--from` must be a file in the repository, since its titles
+    are committed and pushed by a command an allow rule runs without a
+    prompt. A repository with no dismiss file yet gets one from the first
+    dismissal, and a failed first commit removes it again, since an empty
+    file left behind is untracked and would refuse every rerun.
+  - athya_mono's faults suite is a sweep here: each git call fails in turn,
+    the run never exits 0 without the commit, the file is as it was or as a
+    clean run leaves it, and a rerun converges on one commit.

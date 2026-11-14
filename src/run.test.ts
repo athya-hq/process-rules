@@ -194,6 +194,17 @@ describe('run', () => {
     assert.equal((await capture(['brief', 'b.md'], () => new FakeSys())).code, 1);
   });
 
+  it('runs cubic-dismiss, whose arguments are checked first', async () => {
+    assert.deepEqual(await capture(['cubic-dismiss', '--title']), { code: 2, out: [], err: ['niyam: --title needs a value', USAGE] });
+    assert.equal((await capture(['cubic-dismiss', '--title', 'T', '--reason', 'r'])).code, 2);
+    // Outside a repository git cannot say where the checkout is.
+    const outside = new FakeSys();
+    outside.inRepo = false;
+    const failed = await capture(['cubic-dismiss', '--decision', '#1', '--title', 'T', '--reason', 'r'], () => outside);
+    assert.equal(failed.code, 1);
+    assert.match(failed.err[0] ?? '', /^niyam cubic-dismiss: git rev-parse failed/);
+  });
+
   it('runs guard, refusing when the check itself fails', async () => {
     const sys = new FakeSys();
     sys.stdin = JSON.stringify({ session_id: 's', tool_input: { command: 'ls' } });
