@@ -6,6 +6,7 @@ import { MOVED_FILES, ONBOARD_BRANCH, ONBOARD_FILES } from './onboard-pull.ts';
 import type { Output, Sys } from './types.ts';
 import { GITHUB_HOST_RE, GITHUB_WEB } from './host.ts';
 import { boardStarted } from './board.ts';
+import { gate } from './handoff.ts';
 import { ownersAlone, whyNotCounted } from './edits.ts';
 import { batchAnswers } from './approvals.ts';
 import { PAGE_LINK, askProblem } from './asks.ts';
@@ -559,6 +560,8 @@ export async function prePush(sys: Sys, io: Output, refLines: string, url: strin
     io.err(`pre-push: refused; an agent session pushes to GitHub only as ${either(accounts.agents)}`);
     return 1;
   }
+  // The hand-off gate, where the repository names its plumbing: on its own setting, not a feature.
+  if ((await gate(sys, io, undefined)) !== 0) return 1;
   if (!isOn(sys, root, 'work-rules')) {
     io.err(offLine('pre-push', 'work-rules'));
     return 0;

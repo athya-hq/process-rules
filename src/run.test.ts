@@ -181,6 +181,19 @@ describe('run', () => {
     assert.equal((await capture(['pr-signals', '7', '--ci-only', 'more'])).code, 2);
   });
 
+  it('runs handoff and brief, whose arguments are checked first', async () => {
+    // A repository that names no "handoff" has the gate off: the pre-push hook's call passes.
+    assert.deepEqual(await capture(['handoff', '--assert-fresh'], () => new FakeSys()), { code: 0, out: [], err: [] });
+    assert.deepEqual(await capture(['handoff', '--detect'], () => new FakeSys()), {
+      code: 1,
+      out: [],
+      err: ['niyam handoff: .github/niyam.json names no "handoff": the gate is off in this repository'],
+    });
+    assert.deepEqual(await capture(['handoff']), { code: 2, out: [], err: ['niyam: handoff takes one of --detect, --record or --assert-fresh', USAGE] });
+    assert.equal((await capture(['brief', '--lint'])).code, 2);
+    assert.equal((await capture(['brief', 'b.md'], () => new FakeSys())).code, 1);
+  });
+
   it('runs guard, refusing when the check itself fails', async () => {
     const sys = new FakeSys();
     sys.stdin = JSON.stringify({ session_id: 's', tool_input: { command: 'ls' } });

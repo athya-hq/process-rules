@@ -1622,3 +1622,37 @@
     mistake, the proxy's routes do not exist and the run fails loudly.
   - Left out: `sync-pr`'s five-file pipeline mode, whose skill athya_mono
     no longer has, and the `rocket` reaction.
+- **2026-11-14 — Record: `handoff` and `brief`, the hand-off gate (W-56.2,
+  Work item #320, slice #323).** athya_mono's `incidental-handoff`,
+  `brief-issue` and `brief-contract` move here, about 7,300 lines with their
+  tests, and athya_mono deletes its copies.
+  - What the gate refuses is unchanged: no declaration, one the gate wrote,
+    a stale head or base, a trigger that fired after the declaration, own
+    work with no reason, an uncited dismissal, a hand-off with no Brief
+    issue, a brief that does not lint, one found on another branch, and a
+    blocking brief not yet landed.
+  - What was athya_mono's is now settings: the plumbing list, the push
+    history file, the stages it never counts, the template's path and the
+    base ref, under `.github/niyam.json`'s `"handoff"`. A repository that
+    names none has the gate off, and `--assert-fresh` passes there, so a
+    hook can call it everywhere. The copy on the remote's default branch
+    (or the `--base` asked for) decides when it names one, the file always
+    counts as plumbing, and a base that is no remote-tracking branch, such
+    as `HEAD`, is refused: athya_mono's list was its script under
+    `.claude/`, plumbing itself, so a branch could not shorten it unseen,
+    and neither can one here.
+  - `niyam pre-push` runs the gate for an agent session, after the identity
+    check and before the work rules, on its own setting rather than a
+    feature. `--assert-fresh` stays a command for a client hook of its own.
+  - Changed: briefs are read and opened over REST; athya_mono used `gh` and
+    GraphQL. A cloud session's proxy refuses GraphQL, so REST is what can
+    work there; it has not yet been run in a cloud session, which the
+    release's cloud proof does. REST names no closer (a pull request's
+    close leaves the `closed` event's `commit_id` null, seen on the
+    sandbox), so the fix is the newest merged pull request of this
+    repository, into its default branch, that the issue's timeline
+    cross-references and whose text says `Fixes #N`; its merge commit must
+    be in the branch's history, as before. The frontmatter
+    is read with `yaml`, already a dependency, loaded only when a brief is.
+    A repository with no `project` opens its briefs on no board, where
+    athya_mono warned: without the `board` feature there is none.
