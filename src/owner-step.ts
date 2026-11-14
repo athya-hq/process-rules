@@ -81,7 +81,9 @@ export function ownerStepArgs(args: readonly string[]): Step {
     }
     case 'required-checks': {
       const [where, ruleset, ...flags] = rest;
-      if (where === undefined || ruleset === undefined || where.startsWith('--') || ruleset.startsWith('--')) count(2);
+      if (where === undefined || ruleset === undefined || where.startsWith('--') || ruleset.startsWith('--')) {
+        throw new Error(`owner-step required-checks takes a repository and a ruleset before any --check: ${STEP_USAGE[2]}`);
+      }
       if (!(ruleset as string).trim()) throw new Error('owner-step required-checks needs a ruleset id or name');
       const checks: string[] = [];
       for (let at = 0; at < flags.length; at += 2) {
@@ -404,13 +406,13 @@ function passedOnPull(gh: Gh, repo: string, names: string[]): Map<string, Passed
     }
     const runs = ((answer.json as { check_runs?: unknown } | null)?.check_runs ?? []) as { name?: unknown; conclusion?: unknown; app?: { id?: unknown; name?: unknown } }[];
     const named = runs.filter((one) => one.name === name);
-    const passed = named.filter((one) => one.conclusion === 'success' && typeof one.app?.id === 'number');
-    const apps = [...new Set(passed.map((one) => one.app?.id as number))];
+    // Every latest run of that name passed, all from one app.
+    const apps = [...new Set(named.map((one) => one.app?.id))];
+    const app = apps[0];
     if (apps.length > 1) {
       found.set(name, { problem: `more than one app reported ${name} on ${where}, and a ruleset requires one app's` });
-    } else if (apps.length === 1) {
-      const app = apps[0] as number;
-      const appName = passed.find((one) => one.app?.id === app)?.app?.name;
+    } else if (named.length > 0 && typeof app === 'number' && named.every((one) => one.conclusion === 'success')) {
+      const appName = named[0]?.app?.name;
       found.set(name, { app, appName: typeof appName === 'string' ? appName : `app ${app}`, pull: last.number });
     } else if (named.length > 0) {
       const how = [...new Set(named.map((one) => String(one.conclusion ?? 'not finished')))].join(', ');
