@@ -1571,3 +1571,30 @@
     rejected: a check that passed on the default branch's head commit, which
     a check run only on `push` does, and which never reports on a pull
     request.
+- **2026-11-14 — Record: `pr-signals`, and `review-thread` from a file and
+  in the cloud (W-56.1, Work item #320, slice #321).** athya_mono kept its
+  own pull request helpers (`collect-signals`, `sync-pr`, `pr-rest`,
+  `graphql-paginate`), about 8,000 lines with their tests. They move here so
+  every client gets them, and athya_mono deletes its copies.
+  - `pr-signals <pr>` prints threads, failing checks and local findings as
+    one list. The client's review bots and findings file come from
+    `.github/niyam.json`'s `"signals"`, so the code names no client.
+  - `review-thread` takes `--body-file`, which resolves unless
+    `--no-resolve`, and `--reaction` with `--comment-id`. Its `--reply` and
+    `--resolve` work as before. A reply already on the thread is not posted
+    again. In a Claude cloud session it uses the proxy's REST routes, the
+    only ones the proxy answers, and is no longer refused there.
+  - Kept from athya_mono: a page that says more follow with no cursor
+    stops the run; a merged or closed pull request is refused before any
+    read and again before printing; a failed local review never reads as
+    clean; an id in the other transport's form is refused before any
+    request.
+  - Changed: CI excerpts come from the failing check run's own job log (a
+    GitHub Actions check run's id is its job's), not from matching run
+    names to check names. A pull request whose state cannot be read stops
+    the run instead of being read as open. The cloud is
+    `CLAUDE_CODE_REMOTE`, as everywhere in niyam; athya_mono also checked
+    the session's entrypoint. On a machine that sets it by mistake, the
+    proxy's routes do not exist and the run fails loudly.
+  - Left out: `sync-pr`'s five-file pipeline mode, whose skill athya_mono
+    no longer has, and the `rocket` reaction.
