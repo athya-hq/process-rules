@@ -746,6 +746,27 @@ branch, so a branch cannot turn the gate off in the push the gate judges:
 without one, only the plumbing trigger fires. A line that is not a whole run
 is skipped, never counted.
 
+**Dismissing a Cubic finding.** A wrong finding is the agent's call; a true
+one left unfixed is the owner's. `niyam cubic-dismiss --evidence <proof>
+--title <exact title> --reason <why>` records one the agent proves wrong:
+the proof is a path at HEAD (a `#section` or `:line` may follow), a commit
+HEAD contains by its full 40-hex id, or a title already dismissed, and one
+that does not resolve is refused. `--decision <where the owner chose>`
+records the owner's call; a reason, evidence or context that says
+"pre-existing", "out of scope", "later" or "follow-up" is refused on
+evidence. `--title`/`--reason` pair up in order and repeat, and `--from
+<file.json>`, a file in the repository holding `[{"title", "reason"}]`,
+carries titles a shell cannot. It appends a dated comment and the title to
+the dismiss file, refuses one that already differs from HEAD, and commits
+that file alone (`git commit --only`, every hook run) with a
+`Dismissal-Basis: evidence` trailer, or the owner's word, so
+`git log --grep "Dismissal-Basis: evidence" -p -- .cubic-dismiss` lists every
+call the agent made alone. A failed commit restores the file. The settings:
+
+```json
+{ "cubicDismiss": { "file": ".cubic-dismiss", "subject": "chore(review): dismiss {count} Cubic finding{s}", "ownerBasis": "owner" } }
+```
+
 **Design frames** is the `figma` feature, an optional extension for clients
 that design in Figma: with it on and two Actions secrets, `FIGMA_LIBRARY`
 (the design library's file key) and `FIGMA_TOKEN`, each State of the slice
