@@ -450,24 +450,26 @@ describe('ciSignals', () => {
     assert.equal(sys.requests.find((r) => r.url.endsWith('/jobs/11/logs'))?.token, 't');
   });
 
-  it("counts a check run twice on one commit once, by its latest run, apart from another app's of the same name", async () => {
+  it('never lets a pass of the same name hide a failure, and folds one failure reported twice', async () => {
     const sys = session();
     sys.route('GET', `${REPO}/commits/${HEAD}/check-runs?per_page=100&page=1`, {
       status: 200,
       json: {
         check_runs: [
-          { id: 22, name: 'Work rules', conclusion: 'success', app: { slug: 'github-actions' } },
           { id: 21, name: 'Work rules', conclusion: 'failure', app: { slug: 'github-actions' } },
-          { id: 23, name: 'Work rules', conclusion: 'failure', app: { slug: 'other-app' } },
-          { id: 31, name: 'Test', conclusion: 'failure', app: { slug: 'other-app' } },
-          { id: 30, name: 'Test', conclusion: 'success', app: { slug: 'other-app' } },
+          { id: 22, name: 'Work rules', conclusion: 'failure', app: { slug: 'github-actions' } },
+          { id: 23, name: 'Work rules', conclusion: 'success', app: { slug: 'github-actions' } },
         ],
       },
     });
+    sys.route('GET', `${REPO}/actions/jobs/21/logs`, { status: 200, json: null, text: '2026-11-14T17:05:12.8364488Z ✗ #7 names no slice' });
+    sys.route('GET', `${REPO}/actions/jobs/22/logs`, { status: 200, json: null, text: '2026-11-14T17:05:17.9145970Z ✗ #7 names no slice' });
+    const failures = await ciSignals(sys, 't', 'example-org/example-app', HEAD);
     assert.deepEqual(
-      (await ciSignals(sys, 't', 'example-org/example-app', HEAD)).map((s) => s.body),
-      ['Work rules: failure', 'Test: failure'],
+      failures.map((s) => s.body),
+      ['✗ #7 names no slice', '✗ #7 names no slice'],
     );
+    assert.equal(dedupe(failures, []).length, 1);
   });
 
   it('keeps the name when a log has no error lines, and refuses a check it cannot read', async () => {

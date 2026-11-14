@@ -179,9 +179,19 @@ describe('reviewThread', () => {
     assert.deepEqual(await run(sys, [THREAD, '--body-file', 'reply.md']), { code: 0, out: [`✓ replied on ${THREAD} (#40)`, `✓ resolved ${THREAD} (#40)`], err: [] });
     assert.deepEqual(mutations(sys)[0]?.variables, { id: THREAD, body: 'Fixed in `abc123`: the {limit} is a constant now.' });
     const absolute = session();
-    absolute.files.set('/elsewhere/reply.md', 'Not changed: the reason.');
-    assert.equal((await run(absolute, [THREAD, '--body-file', '/elsewhere/reply.md', '--no-resolve'])).code, 0);
+    absolute.files.set(`${ROOT}/.tmp/reply.md`, 'Not changed: the reason.');
+    assert.equal((await run(absolute, [THREAD, '--body-file', `${ROOT}/.tmp/reply.md`, '--no-resolve'])).code, 0);
     assert.equal(mutations(absolute).length, 1);
+  });
+
+  it('refuses a reply file outside the repository, before any request', async () => {
+    for (const path of ['/elsewhere/reply.md', '../reply.md', '.tmp/../../reply.md', ROOT]) {
+      const sys = session();
+      sys.files.set('/elsewhere/reply.md', 'secret');
+      sys.files.set('/reply.md', 'secret');
+      assert.deepEqual((await run(sys, [THREAD, '--body-file', path])).err, [`✗ ${path} is outside the repository at ${ROOT}; write the reply in it, such as in .tmp/`, 'review-thread: refused'], path);
+      assert.equal(sys.requests.length, 0);
+    }
   });
 
   it('refuses a reply file that is missing or empty, before any request', async () => {

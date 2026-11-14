@@ -1,3 +1,5 @@
+import { resolve as resolvePath } from 'node:path';
+
 import { API, anyLogin, either, loadSettings, repoAt } from './agent.ts';
 import { connection, type Page } from './pages.ts';
 import { proxyThreads, restComments } from './pr-signals.ts';
@@ -217,7 +219,9 @@ export async function reviewThread(sys: Sys, io: Output, args: readonly string[]
   if (wrongId) return refused(wrongId);
   let body = reply;
   if (bodyFile !== undefined) {
-    const path = bodyFile.startsWith('/') ? bodyFile : `${sys.cwd}/${bodyFile}`;
+    // Only a file in the repository: an allow rule runs this without a prompt, so it must not post a file from elsewhere.
+    const path = resolvePath(sys.cwd, bodyFile);
+    if (!path.startsWith(`${root}/`)) return refused(`${bodyFile} is outside the repository at ${root}; write the reply in it, such as in .tmp/`);
     if (!sys.exists(path)) return refused(`${bodyFile} is not there`);
     body = sys.read(path).trim();
     if (!body) return refused(`${bodyFile} is empty: there is no reply in it`);

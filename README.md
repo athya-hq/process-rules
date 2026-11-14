@@ -639,8 +639,10 @@ classifier. It allows the command, not `gh api`: a rule cannot hold `gh
 api`'s arguments to one endpoint, since its `*` matches anything after it.
 
 The reply can come from a file, `--body-file <path>`, since replies hold
-backticks and braces that a shell guard may refuse in an argument; a reply
-from a file resolves the thread unless `--no-resolve` is given. `--reaction
+backticks and braces that a shell guard may refuse in an argument. The file
+must be in the repository, such as under `.tmp/`, since the allow rule runs
+the command without a prompt. A reply from a file resolves the thread unless
+`--no-resolve` is given. `--reaction
 +1` or `-1` with `--comment-id <id>` reacts on one of the thread's comments;
 a reaction that fails is a warning, and the thread is still resolved. A
 reply already on the thread, compared without surrounding space, is not

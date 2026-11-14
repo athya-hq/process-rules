@@ -403,17 +403,12 @@ export async function ciSignals(sys: Sys, token: string, slug: string, head: str
   const commit = `repos/${slug}/commits/${head}`;
   const runs = await restList(sys, token, `${commit}/check-runs`, 'check_runs');
   const statuses = await restList(sys, token, `${commit}/status`, 'statuses');
-  type Run = { id: number; name: string; conclusion?: unknown; app?: { slug?: unknown } | null; output?: { title?: unknown; summary?: unknown } | null };
-  // A check run again on one commit, as when two events start its workflow, counts once: its latest run.
-  const latest = new Map<string, Run>();
-  for (const raw of runs) {
-    const run = raw as Partial<Run> | null;
-    if (!isId(run?.id) || typeof run.name !== 'string') throw new Error(`${commit} lists a check run with no id or name`);
-    const key = `${String(run.app?.slug)}\n${run.name}`;
-    if ((latest.get(key)?.id ?? 0) < run.id) latest.set(key, run as Run);
-  }
+  // Every failing run is kept, even when a run of that name passed: two workflows can name a job alike, and a
+  // pass must never hide a failure. The same failure reported twice has the same lines, and dedupe folds it.
   const signals: RawSignal[] = [];
-  for (const run of latest.values()) {
+  for (const raw of runs) {
+    const run = raw as { id?: unknown; name?: unknown; conclusion?: unknown; app?: { slug?: unknown } | null; output?: { title?: unknown; summary?: unknown } | null };
+    if (!isId(run?.id) || typeof run.name !== 'string') throw new Error(`${commit} lists a check run with no id or name`);
     if (typeof run.conclusion !== 'string' || !FAILED.has(run.conclusion)) continue;
     let body = [`${run.name}: ${run.conclusion}`, run.output?.title, run.output?.summary].filter((part) => typeof part === 'string' && part).join('\n');
     if (run.app?.slug === 'github-actions') {

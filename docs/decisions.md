@@ -1581,9 +1581,15 @@
     `.github/niyam.json`'s `"signals"`, so the code names no client.
   - `review-thread` takes `--body-file`, which resolves unless
     `--no-resolve`, and `--reaction` with `--comment-id`. Its `--reply` and
-    `--resolve` work as before. A reply already on the thread is not posted
-    again. In a Claude cloud session it uses the proxy's REST routes, the
-    only ones the proxy answers, and is no longer refused there.
+    `--resolve` work as before, except that a `--reply` whose text starts
+    with `--` is refused: it is far likelier a missing reply than one. A
+    reply already on the thread is not posted again. The file must be in
+    the repository: the allow rule `onboard` writes runs the command without
+    a prompt, so it must not post a file from elsewhere.
+  - In a Claude cloud session it uses the proxy's REST routes, the only ones
+    the proxy answers, and is no longer refused there. The session is the
+    agent when the proxy's `/user` is, the rule `pre-push` already holds a
+    cloud push to.
   - Kept from athya_mono: a page that says more follow with no cursor
     stops the run; a merged or closed pull request is refused before any
     read and again before printing; a failed local review never reads as
@@ -1591,7 +1597,9 @@
     request.
   - Changed: CI excerpts come from the failing check run's own job log (a
     GitHub Actions check run's id is its job's), not from matching run
-    names to check names. A pull request whose state cannot be read stops
+    names to check names. Every failing run is kept, even beside a passing
+    one of the same name, since two workflows can name a job alike; one
+    failure reported twice has the same lines and is folded. A pull request whose state cannot be read stops
     the run instead of being read as open. The cloud is
     `CLAUDE_CODE_REMOTE`, as everywhere in niyam; athya_mono also checked
     the session's entrypoint. On a machine that sets it by mistake, the
