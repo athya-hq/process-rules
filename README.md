@@ -1051,7 +1051,7 @@ terminal, never a script or a settings page:
 ```bash
 niyam owner-step issue-types <org>
 niyam owner-step label <owner/repo> <number> <add|remove> <approved|do-not-merge>
-niyam owner-step required-checks <owner/repo> <ruleset id or name>
+niyam owner-step required-checks <owner/repo> <ruleset id or name> [--check <name>]…
 ```
 
 - `issue-types` adds the work model's issue types the organisation lacks and
@@ -1069,6 +1069,15 @@ niyam owner-step required-checks <owner/repo> <ruleset id or name>
   that never reports would hold every pull request, so any other check is a
   `✗` saying why. It keeps every other check and rule, removes none, and
   shows the before and after.
+- `required-checks --check <name>`, repeatable, also requires a check the
+  repository runs itself, such as a job of its own CI. It adds one only
+  when it reported `success` on the head commit of the last pull request
+  merged into the default branch, from one app alone, and requires it from
+  that app. That shows pull requests run it and it passes. One that never
+  ran there, did not pass, or that two apps reported is a `✗`. A check a
+  workflow runs only for some paths can pass there and then never report
+  on a pull request that skips them, holding it: name only checks that run
+  on every pull request.
 
 It refuses in an agent session (`NIYAM_AGENT` set, or `CLAUDECODE=1`)
 and without a terminal. It makes a new folder in the user's temporary folder

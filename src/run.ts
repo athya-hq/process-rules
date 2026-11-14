@@ -36,7 +36,7 @@ Commands:
                    In your own terminal: one GitHub step only the owner's account can do, through a
                    throwaway gh sign-in. Steps: issue-types <org>;
                    label <owner/repo> <number> <add|remove> <approved|do-not-merge>;
-                   required-checks <owner/repo> <ruleset id or name>
+                   required-checks <owner/repo> <ruleset id or name> [--check <name>]…
   cloud-setup      Print the Setup snippet for a Claude cloud environment, pasted once
   session-start    Run by a client's SessionStart hook: the agent identity, or GitHub locked out
   guard            Run by a client's PreToolUse hook: gh and git's remote commands only as the agent
