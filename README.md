@@ -1118,7 +1118,7 @@ release, attaching the CLI package it built and tested. Install that package on
 each machine with pnpm, once; nothing is built on install:
 
 ```bash
-pnpm add -g https://github.com/veda-hq/niyam/releases/download/v0.6.14/veda-hq-niyam-0.6.14.tgz
+pnpm add -g https://github.com/veda-hq/niyam/releases/download/v0.6.15/veda-hq-niyam-0.6.15.tgz
 ```
 
 The package puts one command on `PATH`, `niyam`. Since P-57 a release
