@@ -2,19 +2,27 @@ name: Release
 
 # A tag vX.Y.Z on main makes the release clients pin: their workflow calls
 # checks.yml at the tag, and machines install the CLI package attached to it,
-# built and tested here, so nothing is built on install.
+# built and tested here, so nothing is built on install. The same package goes
+# to npm as @veda-hq/niyam, signed with provenance from this workflow, so a
+# repository can pin it as an exact registry version (P-59).
+#
+# npm auth: NPM_TOKEN lives in the `npm` environment, which only v* tags may
+# deploy to, so a workflow pushed on a branch cannot read it. Trusted
+# publishing (OIDC) replaces it once the first version is on npm.
 on:
   push:
     tags: ['v*']
 
 permissions:
   contents: write
+  id-token: write
 
 jobs:
   release:
     name: Release
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    environment: npm
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -33,11 +41,25 @@ jobs:
         timeout-minutes: 3
         with:
           node-version-file: .nvmrc
+          registry-url: https://registry.npmjs.org
       - run: pnpm install --frozen-lockfile
       # pnpm check builds dist/ and tests it; the package attached below is that build.
       - run: pnpm check
       - name: Pack the CLI
         run: pnpm pack --pack-destination "$RUNNER_TEMP"
+      # A version on npm already is skipped, so a rerun is safe.
+      - name: Publish the CLI package to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          name=$(jq -r .name package.json)
+          version=$(jq -r .version package.json)
+          if npm view "$name@$version" version >/dev/null 2>&1; then
+            echo "$name@$version is on npm already: skipped"
+            exit 0
+          fi
+          npm publish "$RUNNER_TEMP/veda-hq-niyam-$version.tgz" --access public --provenance
       # Since P-57 the release attaches the CLI package alone: the bridge
       # archive under the name before niyam is gone (docs/decisions.md).
       - name: Publish the release, with the CLI package

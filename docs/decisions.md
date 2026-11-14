@@ -1571,3 +1571,19 @@
     rejected: a check that passed on the default branch's head commit, which
     a check run only on `push` does, and which never reports on a pull
     request.
+- **2026-11-14 — Record: a release also publishes the CLI package to npm
+  (P-59, Work item #306, slice #307).** Alok chose npm so veda can pin
+  `@veda-hq/niyam` as an exact registry version (veda-hq/veda#47): veda's
+  `released-pins.mjs` and `sarathi.sh` accept only `x.y.z` registry pins.
+  - The Release workflow publishes the tarball it attaches to the GitHub
+    release, with provenance, before making the release. A version already on
+    npm is skipped, so a rerun is safe. `niyam upgrade`, the README's
+    `pnpm add -g` line and the cloud setup still take the GitHub release.
+  - The job runs in the `npm` environment, which only `v*` tags may deploy
+    to, and reads `NPM_TOKEN` from it. A repository secret, as veda has,
+    could be read by a workflow pushed on any branch.
+  - Cost: a `v*` tag on a commit off `main` still deploys to the environment
+    with that commit's own workflow; #308 closes it by limiting the
+    environment to `main`. The token is long-lived until trusted publishing
+    replaces it, after the first publish.
+  - The first publish is 0.6.16: 0.6.15 was cut first, for #314.

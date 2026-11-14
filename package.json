@@ -1,9 +1,12 @@
 {
   "name": "@veda-hq/niyam",
   "version": "0.6.15",
-  "private": true,
   "description": "Work rules for repos that track work in GitHub Issues: setup, agent identity, push and PR checks.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/veda-hq/niyam.git"
+  },
   "type": "module",
   "packageManager": "pnpm@12.9.0",
   "engines": {
@@ -15,6 +18,10 @@
   "files": [
     "dist"
   ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json",
